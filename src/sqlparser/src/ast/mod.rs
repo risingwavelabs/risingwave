@@ -1096,6 +1096,8 @@ pub enum Statement {
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
+        /// `INCLUDE a AS b INCLUDE c`
+        include_column_options: Vec<(Ident, Option<Ident>)>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1554,6 +1556,7 @@ impl fmt::Display for Statement {
                 append_only,
                 query,
                 cdc_table_info,
+                include_column_options,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1578,6 +1581,9 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+                if !include_column_options.is_empty() {
+                    todo!()
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;

@@ -52,7 +52,7 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
-    DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
+    DebeziumAvroSchema, Encode, Format, Ident, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -288,6 +288,7 @@ pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
+    include_columns_options: Vec<(Ident, Option<Ident>)>,
     create_cdc_source_job: bool,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
@@ -317,7 +318,7 @@ pub(crate) async fn bind_columns_from_source(
         Ok(name_strategy)
     };
 
-    let res = match (&source_schema.format, &source_schema.row_encode) {
+    let mut res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) => (
             None,
             StreamSourceInfo {
@@ -862,6 +863,25 @@ pub(super) fn bind_source_watermark(
     Ok(watermark_descs)
 }
 
+static CONNECTOR_COMPATOBLE_ADDITIONAL_COLUMNS: LazyLock<
+    HashMap<
+        String,
+        Vec<(
+            &'static str,
+            Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>,
+        )>,
+    >,
+> = LazyLock::new(|| {
+    convert_args!(hashmap!(
+        KAFKA_CONNECTOR => vec![("key", Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+            ColumnCatalog {
+                column_desc: ColumnDesc::named(name, id, DataType::Bytea),
+                is_hidden: false,
+            }
+        }))],
+    ))
+});
+
 // TODO: Better design if we want to support ENCODE KEY where we will have 4 dimensional array
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
@@ -1117,6 +1137,7 @@ pub async fn handle_create_source(
         &session,
         &source_schema,
         &with_properties,
+        stmt.include_column_options,
         create_cdc_source_job,
     )
     .await?;

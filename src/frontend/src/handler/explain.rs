@@ -62,6 +62,7 @@ async fn do_handle_explain(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -78,6 +79,7 @@ async fn do_handle_explain(
                     constraints,
                     source_watermarks,
                     append_only,
+                    include_column_options,
                 )
                 .await?;
                 let context = plan.ctx();

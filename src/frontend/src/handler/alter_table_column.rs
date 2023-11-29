@@ -196,6 +196,7 @@ pub async fn handle_alter_table_column(
                     source_watermarks,
                     col_id_gen,
                     append_only,
+                    vec![],
                 )
                 .await?
             }

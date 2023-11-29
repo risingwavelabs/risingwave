@@ -40,7 +40,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
+    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, Ident,
     ObjectName, SourceWatermark, TableConstraint,
 };
 
@@ -452,6 +452,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -472,8 +473,14 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, mut source_info) =
-        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
+    let (columns_from_resolve_source, mut source_info) = bind_columns_from_source(
+        context.session_ctx(),
+        &source_schema,
+        &properties,
+        include_column_options,
+        false,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -939,8 +946,13 @@ pub(super) async fn handle_create_table_plan(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
-    let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+    let source_schema = check_create_table_with_source(
+        context.with_options(),
+        source_schema,
+        &include_column_options,
+    )?;
 
     let ((plan, source, table), job_type) =
         match (source_schema, cdc_table_info.as_ref()) {
@@ -954,6 +966,7 @@ pub(super) async fn handle_create_table_plan(
                     source_watermarks,
                     col_id_gen,
                     append_only,
+                    include_column_options,
                 )
                 .await?,
                 TableJobType::General,
@@ -1005,6 +1018,7 @@ pub async fn handle_create_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     cdc_table_info: Option<CdcTableInfo>,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1033,6 +1047,7 @@ pub async fn handle_create_table(
             constraints,
             source_watermarks,
             append_only,
+            include_column_options,
         )
         .await?;
 
@@ -1064,8 +1079,16 @@ pub async fn handle_create_table(
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
     source_schema: Option<ConnectorSchema>,
+    include_column_options: &[(Ident, Option<Ident>)],
 ) -> Result<Option<ConnectorSchema>> {
-    if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
+    let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
+    if !include_column_options.is_empty() && !defined_source {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "INCLUDE should be used with a connector".to_owned(),
+        )
+        .into());
+    }
+    if defined_source {
         source_schema.as_ref().ok_or_else(|| {
             ErrorCode::InvalidInputSyntax("Please specify a source schema using FORMAT".to_owned())
         })?;

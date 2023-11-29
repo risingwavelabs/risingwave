@@ -82,6 +82,7 @@ pub struct CreateSourceStatement {
     pub with_properties: WithProperties,
     pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
+    pub include_column_options: Vec<(Ident, Option<Ident>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -724,6 +725,7 @@ impl ParseTo for CreateSourceStatement {
 
         // parse columns
         let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
+        let include_options = p.parse_include_options()?;
 
         let with_options = p.parse_with_properties()?;
         let option = with_options
@@ -745,6 +747,7 @@ impl ParseTo for CreateSourceStatement {
             with_properties: WithProperties(with_options),
             source_schema,
             source_watermarks,
+            include_column_options: include_options,
         })
     }
 }
