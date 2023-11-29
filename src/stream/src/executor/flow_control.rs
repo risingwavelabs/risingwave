@@ -81,7 +81,7 @@ impl FlowControlExecutor {
                     if let Some(rate_limiter) = &rate_limiter {
                         let limit = NonZeroU32::new(self.rate_limit.unwrap()).unwrap();
                         if n <= limit {
-                            // `InsufficientCapacity` should never happen because we have did the check
+                            // `InsufficientCapacity` should never happen because we have done the check
                             rate_limiter.until_n_ready(n).await.unwrap();
                             yield Message::Chunk(chunk);
                         } else {
@@ -98,6 +98,9 @@ impl FlowControlExecutor {
                                     rows.clear();
                                 }
                             }
+                            let chunk = StreamChunk::from_rows(&rows, &data_types);
+                            rate_limiter.until_n_ready(limit).await.unwrap();
+                            yield Message::Chunk(chunk);
                         }
                     } else {
                         yield Message::Chunk(chunk);
