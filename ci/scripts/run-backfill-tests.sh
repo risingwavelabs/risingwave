@@ -150,7 +150,7 @@ test_backfill_tombstone() {
 }
 
 test_replication_with_column_pruning() {
-  echo "--- e2e, test_backfill_basic"
+  echo "--- e2e, test_replication_with_column_pruning"
   cargo make ci-start ci-backfill
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
   # Provide snapshot
@@ -167,12 +167,13 @@ test_replication_with_column_pruning() {
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
   echo "--- Kill cluster"
   cargo make kill
+  cargo make wait-processes-exit
 }
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
   test_replication_with_column_pruning
 }
 
