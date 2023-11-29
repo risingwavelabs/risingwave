@@ -123,7 +123,7 @@ impl BackfillState {
         let new_encoded_state = match new_state {
             BackfillProgressPerVnode::NotStarted => unreachable!(),
             BackfillProgressPerVnode::InProgress(current_pos) => {
-                let mut encoded_state = vec![None; current_pos.len() + 3];
+                let mut encoded_state = vec![None; current_pos.len() + METADATA_STATE_LEN];
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
                 encoded_state[current_pos.len() + 1] = Some(false.into());
@@ -131,7 +131,7 @@ impl BackfillState {
                 encoded_state
             }
             BackfillProgressPerVnode::Completed(current_pos) => {
-                let mut encoded_state = vec![None; current_pos.len() + 3];
+                let mut encoded_state = vec![None; current_pos.len() + METADATA_STATE_LEN];
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
                 encoded_state[current_pos.len() + 1] = Some(true.into());
@@ -143,7 +143,7 @@ impl BackfillState {
         let old_encoded_state = match old_state {
             BackfillProgressPerVnode::NotStarted => None,
             BackfillProgressPerVnode::InProgress(committed_pos) => {
-                let mut encoded_state = vec![None; committed_pos.len() + 3];
+                let mut encoded_state = vec![None; committed_pos.len() + METADATA_STATE_LEN];
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..committed_pos.len() + 1]
                     .clone_from_slice(committed_pos.as_inner());
@@ -152,7 +152,7 @@ impl BackfillState {
                 Some(encoded_state)
             }
             BackfillProgressPerVnode::Completed(committed_pos) => {
-                let mut encoded_state = vec![None; committed_pos.len() + 3];
+                let mut encoded_state = vec![None; committed_pos.len() + METADATA_STATE_LEN];
                 encoded_state[0] = Some(vnode.to_scalar().into());
                 encoded_state[1..committed_pos.len() + 1]
                     .clone_from_slice(committed_pos.as_inner());
