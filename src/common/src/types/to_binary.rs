@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
 use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
-use crate::error::TrackingIssue;
+use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
 #[derive(thiserror::Error, Debug)]
@@ -24,8 +24,8 @@ pub enum ToBinaryError {
     #[error(transparent)]
     ToSql(Box<dyn std::error::Error + Send + Sync>),
 
-    #[error("Feature is not yet implemented: {0}\n{1}")]
-    NotImplemented(String, TrackingIssue),
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
 }
 
 pub type Result<T> = std::result::Result<T, ToBinaryError>;
@@ -87,15 +87,10 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => {
-                Err(ToBinaryError::NotImplemented(
-                    format!(
-                        "the pgwire extended-mode encoding for {} is unsupported",
-                        ty
-                    ),
-                    Some(7949).into(),
-                ))
-            }
+            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => bail_not_implemented!(
+                issue = 7949,
+                "the pgwire extended-mode encoding for {ty} is unsupported"
+            ),
         }
     }
 }

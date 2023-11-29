@@ -32,6 +32,7 @@ pub enum JeprofError {
     },
 }
 
+/// Run `jeprof --collapsed` on the given profile.
 pub async fn run(profile_path: String, collapsed_path: String) -> Result<(), JeprofError> {
     let executable_path = env::current_exe()?;
 

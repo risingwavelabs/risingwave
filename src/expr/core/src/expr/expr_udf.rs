@@ -100,7 +100,7 @@ impl UdfExpression {
 
         let output = self
             .client
-            .call(&self.identifier, input)
+            .call_with_retry(&self.identifier, input)
             .instrument_await(self.span.clone())
             .await?;
         if output.num_rows() != vis.count_ones() {

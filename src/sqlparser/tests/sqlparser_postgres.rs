@@ -392,7 +392,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -402,7 +402,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(Value::SingleQuotedString("b".into())),
+            value: SetVariableValueSingle::Literal(Value::SingleQuotedString("b".into())).into(),
         }
     );
 
@@ -412,7 +412,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(number("0")),
+            value: SetVariableValueSingle::Literal(number("0")).into(),
         }
     );
 
@@ -432,7 +432,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: true,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -441,7 +441,7 @@ fn parse_set() {
     for (sql, err_msg) in [
         ("SET", "Expected identifier, found: EOF"),
         ("SET a b", "Expected equals sign or TO, found: b"),
-        ("SET a =", "Expected variable value, found: EOF"),
+        ("SET a =", "Expected parameter value, found: EOF"),
     ] {
         let res = parse_sql_statements(sql);
         assert!(format!("{}", res.unwrap_err()).contains(err_msg));

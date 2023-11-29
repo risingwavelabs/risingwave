@@ -22,6 +22,7 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
@@ -230,18 +231,10 @@ pub async fn handle(
             cdc_table_info,
         } => {
             if or_replace {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE OR REPLACE TABLE".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE OR REPLACE TABLE");
             }
             if temporary {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE TEMPORARY TABLE".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE TEMPORARY TABLE");
             }
             if let Some(query) = query {
                 return create_table_as::handle_create_as(
@@ -313,11 +306,7 @@ pub async fn handle(
                     | ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection => {
-                        return Err(ErrorCode::NotImplemented(
-                            "DROP CASCADE".to_string(),
-                            None.into(),
-                        )
-                        .into());
+                        bail_not_implemented!("DROP CASCADE");
                     }
                 };
             };
@@ -397,11 +386,7 @@ pub async fn handle(
             emit_mode,
         } => {
             if or_replace {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE OR REPLACE VIEW".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE OR REPLACE VIEW");
             }
             if materialized {
                 create_mv::handle_create_mv(
@@ -437,9 +422,7 @@ pub async fn handle(
             if_not_exists,
         } => {
             if unique {
-                return Err(
-                    ErrorCode::NotImplemented("create unique index".into(), None.into()).into(),
-                );
+                bail_not_implemented!("create unique index");
             }
 
             create_index::handle_create_index(
@@ -704,8 +687,6 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
-        _ => Err(
-            ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
-        ),
+        _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }
