@@ -52,14 +52,19 @@ impl SomeAllExpression {
     fn resolve_bools(&self, bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
         match self.expr_type {
             Type::Some => {
+                let mut any_none = false;
                 for b in bools {
                     match b {
                         Some(true) => return Some(true),
                         Some(false) => continue,
-                        None => return None,
+                        None => any_none = true,
                     }
                 }
-                Some(false)
+                if any_none {
+                    None
+                } else {
+                    Some(false)
+                }
             }
             Type::All => {
                 let mut all_true = true;
