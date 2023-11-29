@@ -23,6 +23,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::ExternalTableDesc;
+use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
@@ -69,19 +71,25 @@ impl CdcSourceType {
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
-    pub props: HashMap<String, String>,
+    pub properties: HashMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
+
+    /// Whether the properties is shared by multiple tables
+    pub is_multi_table_shared: bool,
 
     pub _phantom: PhantomData<T>,
 }
 
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
     fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+        let is_multi_table_shared = props.get(CDC_SHARING_MODE_KEY).is_some_and(|v| v == "true");
         Ok(CdcProperties {
-            props,
+            properties: props,
             table_schema: Default::default(),
+            // TODO(siyuan): use serde to deserialize input hashmap
+            is_multi_table_shared,
             _phantom: PhantomData,
         })
     }
@@ -121,6 +129,27 @@ where
             pk_indices,
         };
         self.table_schema = table_schema;
+        if let Some(info) = source.info.as_ref() {
+            self.is_multi_table_shared = info.cdc_source_job;
+        }
+    }
+
+    fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
+        let properties: HashMap<String, String> = table_desc
+            .connect_properties
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v))
+            .collect();
+
+        let table_schema = TableSchema {
+            columns: table_desc.columns.clone(),
+            pk_indices: table_desc.stream_key.clone(),
+        };
+
+        self.properties = properties;
+        self.table_schema = table_schema;
+        self.is_multi_table_shared = false;
     }
 }
 

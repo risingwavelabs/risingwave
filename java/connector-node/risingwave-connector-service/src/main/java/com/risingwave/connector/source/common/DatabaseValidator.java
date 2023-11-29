@@ -16,10 +16,12 @@ package com.risingwave.connector.source.common;
 
 public abstract class DatabaseValidator {
 
-    public void validateAll() {
+    public void validateAll(boolean isSharingMode) {
         validateDbConfig();
         validateUserPrivilege();
-        validateTable();
+        if (!isSharingMode) {
+            validateTable();
+        }
     }
 
     /** Validate the config of the upstream database */
