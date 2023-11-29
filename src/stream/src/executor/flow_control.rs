@@ -86,21 +86,12 @@ impl FlowControlExecutor {
                             yield Message::Chunk(chunk);
                         } else {
                             // Cut the chunk into smaller chunks
-                            let data_types = chunk.data_types();
-                            let mut rows = vec![];
-                            for row in chunk.rows() {
-                                rows.push(row);
-                                if rows.len() == limit.get() as usize {
-                                    let chunk = StreamChunk::from_rows(&rows, &data_types);
-                                    // `InsufficientCapacity` should never happen
-                                    rate_limiter.until_n_ready(limit).await.unwrap();
-                                    yield Message::Chunk(chunk);
-                                    rows.clear();
-                                }
+                            for chunk in chunk.split(limit.get() as usize) {
+                                // Ditto.
+                                let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                                rate_limiter.until_n_ready(n).await.unwrap();
+                                yield Message::Chunk(chunk);
                             }
-                            let chunk = StreamChunk::from_rows(&rows, &data_types);
-                            rate_limiter.until_n_ready(limit).await.unwrap();
-                            yield Message::Chunk(chunk);
                         }
                     } else {
                         yield Message::Chunk(chunk);
