@@ -739,7 +739,7 @@ impl DdlService for DdlServiceImpl {
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured".into(),
+                                "AWS client is not configured",
                             )));
                         }
                     }

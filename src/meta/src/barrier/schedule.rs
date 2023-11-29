@@ -86,7 +86,7 @@ impl ScheduledQueue {
 
     fn push_back(&mut self, scheduled: Scheduled) -> MetaResult<()> {
         if let QueueStatus::Blocked(reason) = &self.status {
-            return Err(MetaError::unavailable(reason.clone()));
+            return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);
         Ok(())

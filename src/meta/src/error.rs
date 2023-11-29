@@ -27,7 +27,7 @@ use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
-#[derive(thiserror::Error, Debug, thiserror_ext::Box)]
+#[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(type = MetaError, backtrace)]
 pub enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
@@ -69,6 +69,7 @@ pub enum MetaErrorInner {
 
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
+    #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
 
     #[error("table_fragment not exist: id={0}")]
@@ -115,29 +116,12 @@ pub enum MetaErrorInner {
 }
 
 impl MetaError {
-    /// Permission denied error.
-    pub fn permission_denied(s: String) -> Self {
-        MetaErrorInner::PermissionDenied(s).into()
-    }
-
-    pub fn invalid_worker(worker_id: WorkerId, msg: String) -> Self {
-        MetaErrorInner::InvalidWorker(worker_id, msg).into()
-    }
-
     pub fn is_invalid_worker(&self) -> bool {
         matches!(self.inner(), MetaErrorInner::InvalidWorker(..))
     }
 
-    pub fn invalid_parameter(s: impl Into<String>) -> Self {
-        MetaErrorInner::InvalidParameter(s.into()).into()
-    }
-
     pub fn catalog_id_not_found<T: ToString>(relation: &'static str, id: T) -> Self {
         MetaErrorInner::CatalogIdNotFound(relation, id.to_string()).into()
-    }
-
-    pub fn fragment_not_found<T: Into<u32>>(id: T) -> Self {
-        MetaErrorInner::FragmentNotFound(id.into()).into()
     }
 
     pub fn is_fragment_not_found(&self) -> bool {
@@ -146,18 +130,6 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
-    }
-
-    pub fn system_param<T: ToString>(s: T) -> Self {
-        MetaErrorInner::SystemParams(s.to_string()).into()
-    }
-
-    pub fn unavailable(s: String) -> Self {
-        MetaErrorInner::Unavailable(s).into()
-    }
-
-    pub fn cancelled(s: String) -> Self {
-        MetaErrorInner::Cancelled(s).into()
     }
 }
 

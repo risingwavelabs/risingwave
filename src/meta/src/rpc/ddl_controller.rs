@@ -215,7 +215,7 @@ impl DdlController {
     async fn check_barrier_manager_status(&self) -> MetaResult<()> {
         if !self.barrier_manager.is_running().await {
             return Err(MetaError::unavailable(
-                "The cluster is starting or recovering".into(),
+                "The cluster is starting or recovering",
             ));
         }
         Ok(())
@@ -642,7 +642,7 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         if cluster_info.parallel_units.is_empty() {
             return Err(MetaError::unavailable(
-                "No available parallel units to schedule".to_string(),
+                "No available parallel units to schedule",
             ));
         }
 
