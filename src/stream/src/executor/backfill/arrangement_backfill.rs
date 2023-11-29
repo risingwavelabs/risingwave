@@ -108,6 +108,7 @@ where
         // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let pk_indices = self.upstream_table.pk_indices().to_vec(); // We have full table.
+        #[cfg(debug_assertions)]
         let state_len = pk_indices.len() + METADATA_STATE_LEN;
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
