@@ -297,18 +297,18 @@ impl Catalog {
         let id = proto.id;
         let name = proto.name.clone();
 
-        let database = self.get_database_by_id(&id).unwrap();
-        let old_database_name = database.name().to_string();
-        let mut database = if old_database_name != name {
-            self.database_by_name.remove(&old_database_name).unwrap()
+        let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
+        if old_database_name != name {
+            let mut database = self.database_by_name.remove(&old_database_name).unwrap();
+            database.name = name.clone();
+            database.owner = proto.owner;
+            self.database_by_name.insert(name.clone(), database);
+            self.db_name_by_id.insert(id, name);
         } else {
-            database.clone()
-        };
-        database.name = name.clone();
-        database.owner = proto.owner;
-
-        self.database_by_name.insert(name.clone(), database);
-        self.db_name_by_id.insert(id, name);
+            let database = self.get_database_mut(id).unwrap();
+            database.name = name;
+            database.owner = proto.owner;
+        }
     }
 
     pub fn update_schema(&mut self, proto: &PbSchema) {
