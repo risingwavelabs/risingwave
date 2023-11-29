@@ -108,9 +108,9 @@ if __name__ == "__main__":
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.{fmt}'
     _gcs = lambda idx: f"{run_id}_data_{idx}.{fmt}"
-
+    credential_str = json.dumps(config["GOOGLE_APPLICATION_CREDENTIALS"])
     # put gcs files
-    op = opendal.Operator("gcs", root="/", bucket=config["GCS_BUCKET"], credential=config["GOOGLE_APPLICATION_CREDENTIALS"])
+    op = opendal.Operator("gcs", root="/", bucket=config["GCS_BUCKET"], credential=credential_str)
 
     print("upload file to gcs")
     for idx, file_str in enumerate(formatted_files):
