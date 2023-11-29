@@ -343,7 +343,6 @@ def run_bigquery_demo():
                 failed_cases.append(rel)
 
             drop_sql = "DROP TABLE IF EXISTS `{}`".format(rel)
-            print("delete test table [{}] in big query".format(rel))
             subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", drop_sql], cwd=demo_dir, check=True)
 
         if len(failed_cases) != 0:
