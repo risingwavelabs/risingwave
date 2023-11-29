@@ -229,7 +229,7 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
-    JSONB_CAT = 605;
+    JSONB_CONCAT = 605;
     JSONB_OBJECT = 606;
     JSONB_PRETTY = 607;
     // jsonb @> jsonb

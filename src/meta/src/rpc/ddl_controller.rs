@@ -747,6 +747,7 @@ impl DdlController {
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
+            ddl_type: stream_job.into(),
         };
 
         // 4. Mark creating tables, including internal tables and the table of the stream job.
