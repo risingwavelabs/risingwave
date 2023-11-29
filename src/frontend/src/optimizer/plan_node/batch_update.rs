@@ -24,7 +24,8 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -104,5 +105,11 @@ impl ExprRewritable for BatchUpdate {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.schema().clone()).into()
+    }
+}
+
+impl ExprVisitable for BatchUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

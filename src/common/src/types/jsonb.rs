@@ -130,7 +130,7 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> crate::error::Result<Option<bytes::Bytes>> {
+    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
         Ok(Some(self.value_serialize().into()))
     }
 }
@@ -466,6 +466,11 @@ impl<'a> JsonbRef<'a> {
             fields.push(datum);
         }
         Ok(StructValue::new(fields))
+    }
+
+    /// Returns the capacity of the underlying buffer.
+    pub fn capacity(self) -> usize {
+        self.0.capacity()
     }
 }
 

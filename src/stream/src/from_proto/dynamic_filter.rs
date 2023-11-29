@@ -69,11 +69,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             Ok(Box::new(DynamicFilterExecutor::new(
                 params.actor_context,
+                params.info,
                 source_l,
                 source_r,
                 key_l,
-                params.pk_indices,
-                params.executor_id,
                 comparator,
                 state_table_l,
                 state_table_r,
@@ -86,11 +85,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             Ok(Box::new(DynamicFilterExecutor::new(
                 params.actor_context,
+                params.info,
                 source_l,
                 source_r,
                 key_l,
-                params.pk_indices,
-                params.executor_id,
                 comparator,
                 state_table_l,
                 state_table_r,

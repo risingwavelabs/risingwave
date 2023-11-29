@@ -364,11 +364,13 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
-        if let Some(NodeBody::StreamScan(stream_scan)) = stream_node.node_body.as_ref() {
-            table_ids
-                .entry(TableId::new(stream_scan.table_id))
-                .or_default()
-                .add_assign(1);
+        let table_id = match stream_node.node_body.as_ref() {
+            Some(NodeBody::StreamScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            _ => None,
+        };
+        if let Some(table_id) = table_id {
+            table_ids.entry(table_id).or_default().add_assign(1);
         }
 
         for child in &stream_node.input {

@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::log::error;
 
-use super::local_hummock_storage::{HummockStorageIterator, LocalHummockStorage};
+use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader};
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
@@ -50,8 +50,8 @@ use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager,
-    SstableObjectIdManagerRef, SstableStoreRef,
+    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
+    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
@@ -156,6 +156,7 @@ impl HummockStorage {
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
+            options.max_version_pinning_duration_sec,
         ));
         let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             filter_key_extractor_manager.clone(),
@@ -201,6 +202,7 @@ impl HummockStorage {
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
                 state_store_metrics.clone(),
+                options.max_preload_io_retry_times,
             ),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,

@@ -100,7 +100,7 @@ impl UdfExpression {
 
         let output = self
             .client
-            .call(&self.identifier, input)
+            .call_with_retry(&self.identifier, input)
             .instrument_await(self.span.clone())
             .await?;
         if output.num_rows() != vis.count_ones() {
@@ -115,7 +115,7 @@ impl UdfExpression {
             DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
         let output = data_chunk.uncompact(vis.clone());
 
-        let Some(array) = output.columns().get(0) else {
+        let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
         };
         if !array.data_type().equals_datatype(&self.return_type) {

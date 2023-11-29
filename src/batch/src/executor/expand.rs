@@ -16,12 +16,12 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, I64Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::task::BatchTaskContext;
 
 pub struct ExpandExecutor {
@@ -47,7 +47,7 @@ impl Executor for ExpandExecutor {
 }
 
 impl ExpandExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);

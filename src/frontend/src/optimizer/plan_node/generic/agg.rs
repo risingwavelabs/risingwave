@@ -24,13 +24,13 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay, Literal};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
@@ -63,6 +63,12 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         });
     }
 
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.agg_calls.iter().for_each(|call| {
+            call.filter.visit_expr(v);
+        });
+    }
+
     pub(crate) fn output_len(&self) -> usize {
         self.group_key.len() + self.agg_calls.len()
     }
@@ -87,7 +93,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_forced(&self) -> bool {
-        self.ctx().session_ctx().config().get_force_two_phase_agg()
+        self.ctx().session_ctx().config().force_two_phase_agg()
     }
 
     pub fn two_phase_agg_enabled(&self) -> bool {
@@ -138,11 +144,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
-        let enable_two_phase = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_enable_two_phase_agg();
+        let enable_two_phase = input.ctx().session_ctx().config().enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,
@@ -248,6 +250,11 @@ impl AggCallState {
                                 .into_iter()
                                 .map(|x| x as _)
                                 .collect(),
+                            order_columns: s
+                                .order_columns
+                                .into_iter()
+                                .map(|x| x.to_protobuf())
+                                .collect(),
                         },
                     )
                 }
@@ -260,6 +267,7 @@ pub struct MaterializedInputState {
     pub table: TableCatalog,
     pub included_upstream_indices: Vec<usize>,
     pub table_value_indices: Vec<usize>,
+    pub order_columns: Vec<ColumnOrder>,
 }
 
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
@@ -355,32 +363,30 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 self.create_table_builder(me.ctx(), window_col_idx);
             let read_prefix_len_hint = table_builder.get_current_pk_len();
 
+            let mut order_columns = vec![];
             let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
             let mut add_column =
-                |upstream_idx, order_type, is_value, table_builder: &mut TableCatalogBuilder| {
+                |upstream_idx, order_type, table_builder: &mut TableCatalogBuilder| {
                     column_mapping.entry(upstream_idx).or_insert_with(|| {
                         let table_col_idx = table_builder.add_column(&in_fields[upstream_idx]);
                         if let Some(order_type) = order_type {
                             table_builder.add_order_column(table_col_idx, order_type);
+                            order_columns.push(ColumnOrder::new(upstream_idx, order_type));
                         }
                         included_upstream_indices.push(upstream_idx);
                         table_col_idx
                     });
-                    if is_value {
-                        // note that some indices may be added before as group keys which are not
-                        // value
-                        table_value_indices.insert(column_mapping[&upstream_idx]);
-                    }
+                    table_value_indices.insert(column_mapping[&upstream_idx]);
                 };
 
             for (order_type, idx) in sort_keys {
-                add_column(idx, Some(order_type), true, &mut table_builder);
+                add_column(idx, Some(order_type), &mut table_builder);
             }
             for idx in extra_keys {
-                add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+                add_column(idx, Some(OrderType::ascending()), &mut table_builder);
             }
             for idx in include_keys {
-                add_column(idx, None, true, &mut table_builder);
+                add_column(idx, None, &mut table_builder);
             }
 
             let mapping =
@@ -398,6 +404,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 table: table_builder.build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
                 included_upstream_indices,
                 table_value_indices,
+                order_columns,
             }
         };
 
@@ -514,7 +521,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
             let sig = FUNCTION_REGISTRY
-                .get_aggregate(
+                .get(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
@@ -522,15 +529,36 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         .map(|input| input.data_type.clone())
                         .collect_vec(),
                     &agg_call.return_type,
-                    in_append_only,
                 )
                 .expect("agg not found");
-            if !in_append_only && sig.append_only {
-                // we use materialized input state for non-retractable aggregate function.
-                // for backward compatibility, the state type is same as the return type.
-                // its values in the intermediate state table are always null.
-            } else if let Some(state_type) = &sig.state_type {
-                field.data_type = state_type.clone();
+            // in_append_only: whether the input is append-only
+            // sig.is_append_only(): whether the agg function has append-only version
+            match (in_append_only, sig.is_append_only()) {
+                (false, true) => {
+                    // we use materialized input state for non-retractable aggregate function.
+                    // for backward compatibility, the state type is same as the return type.
+                    // its values in the intermediate state table are always null.
+                }
+                (true, true) => {
+                    // use append-only version
+                    if let FuncBuilder::Aggregate {
+                        append_only_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
+                (_, false) => {
+                    // there is only retractable version, use it
+                    if let FuncBuilder::Aggregate {
+                        retractable_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

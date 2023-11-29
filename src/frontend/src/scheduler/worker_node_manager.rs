@@ -35,6 +35,8 @@ pub struct WorkerNodeManager {
 
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
+    /// A cache for parallel units to worker nodes. It should be consistent with `worker_nodes`.
+    pu_to_worker: HashMap<ParallelUnitId, WorkerNode>,
     /// fragment vnode mapping info for streaming
     streaming_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
     /// fragment vnode mapping info for serving
@@ -54,6 +56,7 @@ impl WorkerNodeManager {
         Self {
             inner: RwLock::new(WorkerNodeManagerInner {
                 worker_nodes: Default::default(),
+                pu_to_worker: Default::default(),
                 streaming_fragment_vnode_mapping: Default::default(),
                 serving_fragment_vnode_mapping: Default::default(),
             }),
@@ -64,6 +67,7 @@ impl WorkerNodeManager {
     /// Used in tests.
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
         let inner = RwLock::new(WorkerNodeManagerInner {
+            pu_to_worker: get_pu_to_worker_mapping(&worker_nodes),
             worker_nodes,
             streaming_fragment_vnode_mapping: HashMap::new(),
             serving_fragment_vnode_mapping: HashMap::new(),
@@ -110,11 +114,17 @@ impl WorkerNodeManager {
         }
         // insert
         write_guard.worker_nodes.push(node);
+
+        // Update `pu_to_worker`
+        write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes.retain(|x| x.id != node.id);
+
+        // Update `pu_to_worker`
+        write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
     }
 
     pub fn refresh(
@@ -134,6 +144,8 @@ impl WorkerNodeManager {
             serving_mapping.keys()
         );
         write_guard.worker_nodes = nodes;
+        // Update `pu_to_worker`
+        write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
         write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
@@ -148,11 +160,12 @@ impl WorkerNodeManager {
         if parallel_unit_ids.is_empty() {
             return Err(SchedulerError::EmptyWorkerNodes);
         }
-        let pu_to_worker = get_pu_to_worker_mapping(&self.inner.read().unwrap().worker_nodes);
+
+        let guard = self.inner.read().unwrap();
 
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());
         for parallel_unit_id in parallel_unit_ids {
-            match pu_to_worker.get(parallel_unit_id) {
+            match guard.pu_to_worker.get(parallel_unit_id) {
                 Some(worker) => workers.push(worker.clone()),
                 None => bail!(
                     "No worker node found for parallel unit id: {}",
@@ -413,6 +426,7 @@ mod tests {
                     is_streaming: true,
                 }),
                 transactional_id: Some(1),
+                ..Default::default()
             },
             WorkerNode {
                 id: 2,
@@ -426,6 +440,7 @@ mod tests {
                     is_streaming: false,
                 }),
                 transactional_id: Some(2),
+                ..Default::default()
             },
         ];
         worker_nodes

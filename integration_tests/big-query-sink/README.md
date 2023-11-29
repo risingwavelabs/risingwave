@@ -16,7 +16,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 CREATE table '${project_id}'.'${dataset_id}'.'${table_id}'(
     user_id int,
     target_id string,
-    event_timestamp datetime
+    event_timestamp timestamp
 );
 ```
 

@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::user::UserInfo;
 
 use super::database::DatabaseManager;
@@ -52,7 +53,13 @@ impl UserManager {
             .chain(database.sources.values().map(|source| source.owner))
             .chain(database.sinks.values().map(|sink| sink.owner))
             .chain(database.indexes.values().map(|index| index.owner))
-            .chain(database.tables.values().map(|table| table.owner))
+            .chain(
+                database
+                    .tables
+                    .values()
+                    .filter(|table| table.table_type() != TableType::Internal)
+                    .map(|table| table.owner),
+            )
             .chain(database.views.values().map(|view| view.owner))
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 

@@ -71,7 +71,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let mut properties = conn_props.props.clone();
 
         // For citus, we need to rewrite the `table.name` to capture sharding tables
-        if matches!(T::source_type(), CdcSourceType::Citus) && let Some(server_addr) = split.server_addr() {
+        if matches!(T::source_type(), CdcSourceType::Citus)
+            && let Some(server_addr) = split.server_addr()
+        {
             let host_addr = HostAddr::from_str(&server_addr)
                 .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
             properties.insert("hostname".to_string(), host_addr.host);

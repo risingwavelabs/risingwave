@@ -15,8 +15,8 @@
 use std::fmt::{Debug, Formatter};
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::exchange_source::ExchangeSource;
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 

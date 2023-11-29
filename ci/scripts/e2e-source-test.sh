@@ -60,20 +60,27 @@ echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
 
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
+
 echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
-# cdc share stream test cases
-export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
-sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
-
-
-# kill cluster and the connector node
+# kill cluster
 cargo make kill
 echo "cluster killed "
+
+# insert into mytest database (cdc.share_stream.slt)
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products
+       VALUES (default,'RisingWave','Next generation Streaming Database'),
+              (default,'Materialize','The Streaming Database You Already Know How to Use');
+       UPDATE products SET name = 'RW' WHERE id <= 103;
+       INSERT INTO orders VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);"
+
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
@@ -89,6 +96,9 @@ sleep 20
 echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
+
+# drop relations
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill

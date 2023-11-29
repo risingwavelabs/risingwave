@@ -66,6 +66,7 @@ message ExprNode {
     CAST_WITH_TIME_ZONE = 108;
     ADD_WITH_TIME_ZONE = 109;
     SUBTRACT_WITH_TIME_ZONE = 110;
+    MAKE_TIMESTAMPTZ = 112;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -176,6 +177,8 @@ message ExprNode {
     FORMAT = 319;
     PGWIRE_SEND = 320;
     PGWIRE_RECV = 321;
+    CONVERT_FROM = 322;
+    CONVERT_TO = 323;
 
     // Unary operators
     NEG = 401;
