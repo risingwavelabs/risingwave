@@ -117,7 +117,9 @@ def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], in
 
 ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB".split(
     ","
-)
+) + [
+    "STRUCT<INT,INT>"
+]
 
 
 @udf(
@@ -139,6 +141,7 @@ def return_all(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -155,6 +158,7 @@ def return_all(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
@@ -177,6 +181,7 @@ def return_all_arrays(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -193,6 +198,7 @@ def return_all_arrays(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
