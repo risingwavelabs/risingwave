@@ -99,10 +99,18 @@ impl DatabaseCatalog {
             .find(|schema| schema.get_table_by_id(table_id).is_some())
     }
 
-    pub fn update_self(&mut self, prost: &PbDatabase) {
-        self.id = prost.id;
-        self.name = prost.name.clone();
-        self.owner = prost.owner;
+    pub fn update_schema(&mut self, prost: &PbSchema) {
+        let id = prost.id;
+        let name = prost.name.clone();
+        let schema = prost.into();
+
+        let old_schema_name = self.get_schema_by_id(&id).unwrap().name();
+        if old_schema_name != name {
+            self.schema_by_name.remove(&old_schema_name);
+            self.schema_name_by_id.remove(&id);
+        }
+        self.schema_by_name.insert(name.clone(), schema);
+        self.schema_name_by_id.insert(id, name);
     }
 
     pub fn is_empty(&self) -> bool {

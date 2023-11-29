@@ -93,13 +93,6 @@ impl SchemaCatalog {
             .unwrap();
     }
 
-    pub fn update_self(&mut self, prost: &PbSchema) {
-        self.id = prost.id;
-        self.database_id = prost.database_id;
-        self.name = prost.name.clone();
-        self.owner = prost.owner;
-    }
-
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
         let id = prost.id.into();
