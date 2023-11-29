@@ -80,7 +80,7 @@ impl TaskService for BatchServiceImpl {
                 ),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
-                captured_execution_context.expect("no captured context found"),
+                captured_execution_context.expect("no captured execution context found"),
             )
             .await;
         match res {
@@ -129,7 +129,7 @@ impl TaskService for BatchServiceImpl {
         let epoch = epoch.expect("no epoch found");
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let captured_execution_context =
-            captured_execution_context.expect("no captured context found");
+            captured_execution_context.expect("no captured execution context found");
 
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(

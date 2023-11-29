@@ -20,7 +20,7 @@ define_context! {
     pub TIME_ZONE: String,
 }
 
-pub fn capture_context() -> ExprResult<CapturedExecutionContext> {
+pub fn capture_execution_context() -> ExprResult<CapturedExecutionContext> {
     let ctx = TIME_ZONE::try_with(|time_zone| CapturedExecutionContext {
         time_zone: time_zone.to_owned(),
     })?;
