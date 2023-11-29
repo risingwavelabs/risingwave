@@ -54,7 +54,7 @@ use crate::hummock::{
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 const FAST_COMPACT_MAX_COMPACT_SIZE: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-const FAST_COMPACT_MAX_DELETE_RATIO: u64 = 20; // 20%
+const FAST_COMPACT_MAX_DELETE_RATIO: u64 = 40; // 40%
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,

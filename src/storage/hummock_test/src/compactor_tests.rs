@@ -1417,7 +1417,7 @@ pub(crate) mod tests {
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
-            target_file_size: capacity as u64,
+            target_file_size: capacity,
             compression_algorithm: 1,
             gc_delete_keys: true,
             ..Default::default()
