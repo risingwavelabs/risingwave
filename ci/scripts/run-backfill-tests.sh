@@ -23,7 +23,7 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
-export RUST_LOG="risingwave_meta=debug"
+export RUST_LOG="info,risingwave_meta::barrier::progress=debug,risingwave_meta::rpc::ddl_controller=debug"
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
