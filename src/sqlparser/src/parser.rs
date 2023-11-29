@@ -3228,16 +3228,22 @@ impl Parser {
         loop {
             let token = self.peek_token();
             let value = match (self.parse_value(), token.token) {
-                (Ok(value), _) => SetVariableValue::Literal(value),
+                (Ok(value), _) => SetVariableValueSingle::Literal(value),
                 (Err(_), Token::Word(w)) => {
                     if w.keyword == Keyword::DEFAULT {
-                        SetVariableValue::Default
+                        if !values.is_empty() {
+                            self.expected(
+                                "parameter list value",
+                                Token::Word(w).with_location(token.location),
+                            )?
+                        }
+                        return Ok(SetVariableValue::Default);
                     } else {
-                        SetVariableValue::Ident(w.to_ident()?)
+                        SetVariableValueSingle::Ident(w.to_ident()?)
                     }
                 }
                 (Err(_), unexpected) => {
-                    self.expected("variable value", unexpected.with_location(token.location))?
+                    self.expected("parameter value", unexpected.with_location(token.location))?
                 }
             };
             values.push(value);
@@ -3246,7 +3252,7 @@ impl Parser {
             }
         }
         if values.len() == 1 {
-            Ok(values[0].clone())
+            Ok(SetVariableValue::Single(values[0].clone()))
         } else {
             Ok(SetVariableValue::List(values))
         }

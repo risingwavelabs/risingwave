@@ -39,7 +39,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
@@ -1814,7 +1814,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let user_core = &mut core.user;
 
-        let notify_info;
+        let relation_info;
         match object {
             alter_owner_request::Object::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
@@ -1898,7 +1898,7 @@ impl CatalogManager {
                     + to_update_source_id.map_or(0, |_| 1);
                 user_core.decrease_ref_count(old_owner_id, count);
                 user_core.increase_ref_count(owner_id, count);
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
             }
             alter_owner_request::Object::ViewId(view_id) => {
                 database_core.ensure_view_id(view_id)?;
@@ -1909,7 +1909,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 view.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::View(view.clone())),
                     }],
@@ -1927,7 +1927,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 source.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::Source(source.clone())),
                     }],
@@ -1965,7 +1965,7 @@ impl CatalogManager {
                     });
                 }
 
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
                 commit_meta!(self, sinks, tables)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
@@ -1979,10 +1979,35 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 database.owner = owner_id;
-                notify_info = Info::Database(database.clone());
-                commit_meta!(self, databases)?;
+                relation_info = Info::Database(database.clone());
+                let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+                let mut user = users.get_mut(owner_id).unwrap();
+                let new_grant_privilege = GrantPrivilege {
+                    object: Some(Object::DatabaseId(database_id)),
+                    action_with_opts: vec![{
+                        ActionWithGrantOption {
+                            action: Action::Connect as _,
+                            with_grant_option: false,
+                            granted_by: old_owner_id,
+                        }
+                    }],
+                };
+                if let Some(privilege) = user
+                    .grant_privileges
+                    .iter_mut()
+                    .find(|p| p.object == new_grant_privilege.object)
+                {
+                    Self::merge_privilege(privilege, &new_grant_privilege);
+                } else {
+                    user.grant_privileges.push(new_grant_privilege.clone());
+                }
+                let user_info = Info::User(user.clone());
+                commit_meta!(self, databases, users)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
+                self.notify_frontend(Operation::Update, user_info).await;
+                let version = self.notify_frontend(Operation::Update, relation_info).await;
+                return Ok(version);
             }
             alter_owner_request::Object::SchemaId(schema_id) => {
                 database_core.ensure_schema_id(schema_id)?;
@@ -1993,14 +2018,14 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 schema.owner = owner_id;
-                notify_info = Info::Schema(schema.clone());
+                relation_info = Info::Schema(schema.clone());
                 commit_meta!(self, schemas)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
         };
 
-        let version = self.notify_frontend(Operation::Update, notify_info).await;
+        let version = self.notify_frontend(Operation::Update, relation_info).await;
 
         Ok(version)
     }
