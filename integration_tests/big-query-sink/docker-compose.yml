@@ -42,7 +42,6 @@ services:
     command: tail -f /dev/null
     volumes:
       - "../../gcp-rwctest.json:/gcp-rwctest.json"
-      - "./bq_prepare.sh:/bq_prepare.sh"
 
 volumes:
   compute-node-0:
