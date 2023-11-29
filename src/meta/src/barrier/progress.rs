@@ -153,8 +153,6 @@ impl Progress {
 ///    On recovery, the stream manager will stop managing the job.
 /// 2. `Recovered`. This refers to the "Recovered" type of tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
-/// 3. `Immediate`. Immediate jobs will immediately return,
-///    but still register the lag between the job and its upstream.
 pub enum TrackingJob {
     New(TrackingCommand),
     Recovered(RecoveredTrackingJob),
