@@ -27,7 +27,7 @@ use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
-#[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
+#[derive(thiserror::Error, Debug, thiserror_ext::Arc, thiserror_ext::Construct)]
 #[thiserror_ext(type = MetaError, backtrace)]
 pub enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]

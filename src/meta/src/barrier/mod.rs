@@ -997,8 +997,6 @@ impl GlobalBarrierManager {
     ) {
         checkpoint_control.clear_changes();
 
-        let err = Arc::new(err);
-
         for node in fail_nodes {
             if let Some(timer) = node.timer {
                 timer.observe_duration();
