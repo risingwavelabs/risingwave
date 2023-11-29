@@ -62,11 +62,13 @@ import org.slf4j.LoggerFactory;
  */
 public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
-    private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
+    private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
     private final EsSinkConfig config;
-    private final BulkProcessor bulkProcessor;
+    private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
+    // To be shared with the listener thread, so it must be thread-safe
+    private final List<String> synchronizedErrorList;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
@@ -80,6 +82,8 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
+
+        this.synchronizedErrorList = Collections.synchronizedList(new ArrayList<>());
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         this.client =
@@ -154,11 +158,18 @@ public class EsSink extends SinkWriterBase {
 
     private BulkProcessor createBulkProcessor() {
         BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener());
+                applyBulkConfig(
+                        this.client, this.config, new BulkListener(this.synchronizedErrorList));
         return builder.build();
     }
 
     private class BulkListener implements BulkProcessor.Listener {
+        // To be shared with the main thread, so it must be thread-safe
+        private final List<String> synchronizedErrorList;
+
+        public BulkListener(List<String> synchronizedErrorList) {
+            this.synchronizedErrorList = synchronizedErrorList;
+        }
 
         /** This method is called just before bulk is executed. */
         @Override
@@ -170,10 +181,11 @@ public class EsSink extends SinkWriterBase {
         @Override
         public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
             if (response.hasFailures()) {
-                LOG.error(
-                        "Bulk of {} actions failed. Failure: {:?}",
-                        request.numberOfActions(),
-                        response.buildFailureMessage());
+                String errMessage =
+                        String.format(
+                                "Bulk of %d actions failed. Failure: %s",
+                                request.numberOfActions(), response.buildFailureMessage());
+                synchronizedErrorList.add(errMessage);
             } else {
                 LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
@@ -182,10 +194,11 @@ public class EsSink extends SinkWriterBase {
         /** This method is called when the bulk failed and raised a Throwable */
         @Override
         public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            LOG.error(
-                    "Bulk of {} actions failed. Failure: {}",
-                    request.numberOfActions(),
-                    failure.getMessage());
+            String errMessage =
+                    String.format(
+                            "Bulk of %d actions failed. Failure: %s",
+                            request.numberOfActions(), failure.getMessage());
+            synchronizedErrorList.add(errMessage);
         }
     }
 
@@ -311,6 +324,17 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
+    private void checkWriterError() {
+        StringBuilder stringBuilder = new StringBuilder();
+        for (int i = 0; i < this.synchronizedErrorList.size(); i++) {
+            stringBuilder.append(
+                    "The No." + i + " error is" + this.synchronizedErrorList.get(i) + "\n");
+        }
+        if (stringBuilder.length() > 0) {
+            throw new RuntimeException("Fail to WriterEsSink: " + stringBuilder.toString());
+        }
+    }
+
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
@@ -321,12 +345,15 @@ public class EsSink extends SinkWriterBase {
                 throw new RuntimeException(ex);
             }
         }
+        checkWriterError();
     }
 
     @Override
     public void sync() {
         try {
-            bulkProcessor.flush();
+            bulkProcessor.awaitClose(1, TimeUnit.SECONDS);
+            checkWriterError();
+            this.bulkProcessor = createBulkProcessor();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
