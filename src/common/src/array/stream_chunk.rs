@@ -179,19 +179,22 @@ impl StreamChunk {
     /// When the total cardinality of all the chunks is not evenly divided by the `size`,
     /// the last new chunk will be the remainder.
     ///
-    /// For `UpdateDelete` and `UpdateInsert`, they will be kept in once chunk. As a result,
-    /// some chunks may have `size + 1` rows.
+    /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
+    /// As a result, some chunks may have `size + 1` rows.
     pub fn split(&self, size: usize) -> Vec<Self> {
         let data_types = self.data_types();
-        let mut rows = vec![];
+        let mut rows = Vec::with_capacity(size + 1);
         let mut results = vec![];
 
         let mut iter = self.rows();
         while let Some(row) = iter.next() {
             rows.push(row);
             if rows.len() == size {
+                // If the last row is UpdateDelete, also include the UpdateInsert.
                 if rows.last().unwrap().0 == Op::UpdateDelete {
-                    let next_row = iter.next().unwrap();
+                    let next_row = iter
+                        .next()
+                        .expect("UpdateDelete should have UpdateInsert after");
                     assert_eq!(next_row.0, Op::UpdateInsert);
                     rows.push(next_row);
                 }
@@ -777,10 +780,10 @@ mod tests {
             U- 3 7
             U+ 4 .",
         );
-        let splitted = chunk.split(2);
-        assert_eq!(2, splitted.len());
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
         assert_eq!(
-            splitted[0].to_pretty().to_string(),
+            results[0].to_pretty().to_string(),
             "\
 +---+---+---+
 | + | 1 | 6 |
@@ -788,7 +791,7 @@ mod tests {
 +---+---+---+"
         );
         assert_eq!(
-            splitted[1].to_pretty().to_string(),
+            results[1].to_pretty().to_string(),
             "\
 +----+---+---+
 | U- | 3 | 7 |
@@ -806,10 +809,10 @@ mod tests {
             U+ 4 .
              - 2 .",
         );
-        let splitted = chunk.split(2);
-        assert_eq!(2, splitted.len());
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
         assert_eq!(
-            splitted[0].to_pretty().to_string(),
+            results[0].to_pretty().to_string(),
             "\
 +----+---+---+
 |  + | 1 | 6 |
@@ -818,7 +821,7 @@ mod tests {
 +----+---+---+"
         );
         assert_eq!(
-            splitted[1].to_pretty().to_string(),
+            results[1].to_pretty().to_string(),
             "\
 +---+---+---+
 | - | 2 |   |

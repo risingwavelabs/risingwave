@@ -87,8 +87,8 @@ impl FlowControlExecutor {
                         } else {
                             // Cut the chunk into smaller chunks
                             for chunk in chunk.split(limit.get() as usize) {
-                                // Ditto.
                                 let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                                // Ditto.
                                 rate_limiter.until_n_ready(n).await.unwrap();
                                 yield Message::Chunk(chunk);
                             }
