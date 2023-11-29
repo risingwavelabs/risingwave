@@ -24,7 +24,7 @@ use sea_orm::EntityTrait;
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
-use crate::manager::event_log::{start_event_log_manager, EventLogManger, EventLogMangerRef};
+use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -386,6 +386,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::manager::event_log::EventLogManger;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]

@@ -16,6 +16,43 @@ query II rowsort
 SELECT * FROM t0 WHERE (c1 > 1);
 ----
 
+
+query II rowsort
+SELECT * FROM t0 WHERE (c1 > 9223372036854775808) IS NULL;
+----
+1 NULL
+
+query II rowsort
+SELECT * FROM t0 WHERE (c1 < 9223372036854775808) IS NULL;
+----
+1 NULL
+
+query II rowsort
+SELECT * FROM t0 WHERE (c1 >= -9223372036854775808) IS NULL;
+----
+1 NULL
+
+query II rowsort
+SELECT * FROM t0 WHERE (c1 <= -9223372036854775808) IS NULL;
+----
+1 NULL
+
+query II rowsort
+SELECT * FROM t0 WHERE c1 > 9223372036854775808;
+----
+
+query II rowsort
+SELECT * FROM t0 WHERE c1 < 9223372036854775808;
+----
+
+query II rowsort
+SELECT * FROM t0 WHERE c1 >= -9223372036854775808;
+----
+
+query II rowsort
+SELECT * FROM t0 WHERE c1 <= -9223372036854775808;
+----
+
 statement ok
 create materialized view mv as select * from t0 order by c1 desc nulls last;
 
