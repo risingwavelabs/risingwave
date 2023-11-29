@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
@@ -23,7 +22,7 @@ use memcomparable::Error as MemComparableError;
 use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
-use thiserror_ext::Macro;
+use thiserror_ext::{Box, Macro};
 use tokio::task::JoinError;
 
 use crate::array::ArrayError;
@@ -80,7 +79,8 @@ pub struct NotImplemented {
     pub issue: TrackingIssue,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Box)]
+#[thiserror_ext(type = RwError, backtrace)]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
@@ -212,30 +212,15 @@ pub enum ErrorCode {
     ),
 }
 
-// TODO(error-handling): automatically generate this impl.
-impl From<NotImplemented> for RwError {
-    fn from(value: NotImplemented) -> Self {
-        ErrorCode::from(value).into()
-    }
-}
-
 pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
-}
-
-#[derive(Error)]
-#[error("{inner}")]
-pub struct RwError {
-    #[source]
-    inner: Box<ErrorCode>,
-    backtrace: Box<Backtrace>,
 }
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
         use tonic::Code;
 
-        let code = match &*err.inner {
+        let code = match err.inner() {
             ErrorCode::ExprError(_) => Code::InvalidArgument,
             ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
             ErrorCode::InternalError(_) => Code::Internal,
@@ -271,57 +256,15 @@ impl From<tonic::Status> for RwError {
     }
 }
 
-impl RwError {
-    pub fn inner(&self) -> &ErrorCode {
-        &self.inner
-    }
-}
-
-impl From<ErrorCode> for RwError {
-    fn from(code: ErrorCode) -> Self {
-        Self {
-            inner: Box::new(code),
-            backtrace: Box::new(Backtrace::capture()),
-        }
-    }
-}
-
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
-        Self {
-            inner: Box::new(ErrorCode::InternalError(join_error.to_string())),
-            backtrace: Box::new(Backtrace::capture()),
-        }
-    }
-}
-
-impl From<MemComparableError> for RwError {
-    fn from(mem_comparable_error: MemComparableError) -> Self {
-        ErrorCode::MemComparableError(mem_comparable_error).into()
-    }
-}
-
-impl From<ValueEncodingError> for RwError {
-    fn from(value_encoding_error: ValueEncodingError) -> Self {
-        ErrorCode::ValueEncodingError(value_encoding_error).into()
-    }
-}
-
-impl From<std::io::Error> for RwError {
-    fn from(io_err: IoError) -> Self {
-        ErrorCode::IoError(io_err).into()
+        anyhow::anyhow!(join_error).into()
     }
 }
 
 impl From<std::net::AddrParseError> for RwError {
     fn from(addr_parse_error: std::net::AddrParseError) -> Self {
         ErrorCode::InternalError(format!("failed to resolve address: {}", addr_parse_error)).into()
-    }
-}
-
-impl From<anyhow::Error> for RwError {
-    fn from(e: anyhow::Error) -> Self {
-        ErrorCode::InternalErrorAnyhow(e).into()
     }
 }
 
@@ -337,18 +280,6 @@ impl From<String> for RwError {
     }
 }
 
-impl Debug for RwError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\n{}",
-            self.inner,
-            // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            std::error::request_ref::<Backtrace>(&self.inner).unwrap_or(&*self.backtrace)
-        )
-    }
-}
-
 impl From<PbFieldNotFound> for RwError {
     fn from(err: PbFieldNotFound) -> Self {
         ErrorCode::InternalError(format!(
@@ -359,59 +290,13 @@ impl From<PbFieldNotFound> for RwError {
     }
 }
 
-impl From<SessionConfigError> for RwError {
-    fn from(value: SessionConfigError) -> Self {
-        ErrorCode::SessionConfig(value).into()
-    }
-}
-
 impl From<tonic::transport::Error> for RwError {
     fn from(err: tonic::transport::Error) -> Self {
         ErrorCode::RpcError(err.into()).into()
     }
 }
 
-/// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
-pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
-    err.into().into()
-}
-
 pub type Result<T> = std::result::Result<T, RwError>;
-
-/// A helper to convert a third-party error to string.
-pub trait ToErrorStr {
-    fn to_error_str(self) -> String;
-}
-
-pub trait ToRwResult<T, E> {
-    fn to_rw_result(self) -> Result<T>;
-
-    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T>;
-}
-
-impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
-    fn to_rw_result(self) -> Result<T> {
-        self.map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
-    }
-
-    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T> {
-        self.map_err(|e| {
-            ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
-        })
-    }
-}
-
-impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
-    fn to_error_str(self) -> String {
-        self.to_string()
-    }
-}
-
-impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
-    fn to_error_str(self) -> String {
-        self.to_string()
-    }
-}
 
 /// Util macro for generating error when condition check failed.
 ///
