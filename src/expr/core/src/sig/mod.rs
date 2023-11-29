@@ -49,7 +49,42 @@ pub struct FunctionRegistry(HashMap<FuncName, Vec<FuncSign>>);
 impl FunctionRegistry {
     /// Inserts a function signature.
     pub fn insert(&mut self, sig: FuncSign) {
-        self.0.entry(sig.name).or_default().push(sig)
+        let list = self.0.entry(sig.name).or_default();
+        if sig.is_aggregate() {
+            // merge retractable and append-only aggregate
+            if let Some(existing) = list
+                .iter_mut()
+                .find(|d| d.inputs_type == sig.inputs_type && d.ret_type == sig.ret_type)
+            {
+                let (
+                    FuncBuilder::Aggregate {
+                        retractable,
+                        append_only,
+                        retractable_state_type,
+                        append_only_state_type,
+                    },
+                    FuncBuilder::Aggregate {
+                        retractable: r1,
+                        append_only: a1,
+                        retractable_state_type: rs1,
+                        append_only_state_type: as1,
+                    },
+                ) = (&mut existing.build, sig.build)
+                else {
+                    panic!("expected aggregate function")
+                };
+                if let Some(f) = r1 {
+                    *retractable = Some(f);
+                    *retractable_state_type = rs1;
+                }
+                if let Some(f) = a1 {
+                    *append_only = Some(f);
+                    *append_only_state_type = as1;
+                }
+                return;
+            }
+        }
+        list.push(sig);
     }
 
     /// Returns a function signature with the same type, argument types and return type.
@@ -76,27 +111,8 @@ impl FunctionRegistry {
         }
     }
 
-    /// Returns a function signature with the given type, argument types, return type.
-    ///
-    /// The `prefer_append_only` flag only works when both append-only and retractable version exist.
-    /// Otherwise, return the signature of the only version.
-    pub fn get_aggregate(
-        &self,
-        ty: AggregateFunctionType,
-        args: &[DataType],
-        ret: &DataType,
-        prefer_append_only: bool,
-    ) -> Option<&FuncSign> {
-        let v = self.0.get(&ty.into())?;
-        let mut iter = v.iter().filter(|d| d.match_args_ret(args, ret));
-        if iter.clone().count() == 2 {
-            iter.find(|d| d.append_only == prefer_append_only)
-        } else {
-            iter.next()
-        }
-    }
-
     /// Returns the return type for the given function and arguments.
+    /// Deprecated functions are excluded.
     pub fn get_return_type(
         &self,
         name: impl Into<FuncName>,
@@ -109,7 +125,7 @@ impl FunctionRegistry {
             .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
         let sig = v
             .iter()
-            .find(|d| d.match_args(args))
+            .find(|d| d.match_args(args) && !d.deprecated)
             .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
         (sig.type_infer)(args)
     }
@@ -154,13 +170,6 @@ pub struct FuncSign {
     /// Whether the function is deprecated and should not be used in the frontend.
     /// For backward compatibility, it is still available in the backend.
     pub deprecated: bool,
-
-    /// The state type of the aggregate function.
-    /// `None` means equal to the return type.
-    pub state_type: Option<DataType>,
-
-    /// Whether the aggregate function is append-only.
-    pub append_only: bool,
 }
 
 impl fmt::Debug for FuncSign {
@@ -182,9 +191,6 @@ impl fmt::Debug for FuncSign {
             if self.name.is_table() { "setof " } else { "" },
             self.ret_type,
         )?;
-        if self.append_only {
-            write!(f, " [append-only]")?;
-        }
         if self.deprecated {
             write!(f, " [deprecated]")?;
         }
@@ -235,6 +241,28 @@ impl FuncSign {
         matches!(self.name, FuncName::Aggregate(_))
     }
 
+    /// Returns true if the aggregate function is append-only.
+    pub const fn is_append_only(&self) -> bool {
+        matches!(
+            self.build,
+            FuncBuilder::Aggregate {
+                retractable: None,
+                ..
+            }
+        )
+    }
+
+    /// Returns true if the aggregate function has a retractable version.
+    pub const fn is_retractable(&self) -> bool {
+        matches!(
+            self.build,
+            FuncBuilder::Aggregate {
+                retractable: Some(_),
+                ..
+            }
+        )
+    }
+
     /// Builds the scalar function.
     pub fn build_scalar(
         &self,
@@ -260,10 +288,15 @@ impl FuncSign {
         }
     }
 
-    /// Builds the aggregate function.
+    /// Builds the aggregate function. If both retractable and append-only versions exist, the
+    /// retractable version will be built.
     pub fn build_aggregate(&self, agg: &AggCall) -> Result<BoxedAggregateFunction> {
         match self.build {
-            FuncBuilder::Aggregate(f) => f(agg),
+            FuncBuilder::Aggregate {
+                retractable,
+                append_only,
+                ..
+            } => retractable.or(append_only).unwrap()(agg),
             _ => panic!("Expected an aggregate function"),
         }
     }
@@ -385,7 +418,7 @@ impl SigDataType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum FuncBuilder {
     Scalar(fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>),
     Table(
@@ -395,7 +428,17 @@ pub enum FuncBuilder {
             children: Vec<BoxedExpression>,
         ) -> Result<BoxedTableFunction>,
     ),
-    Aggregate(fn(agg: &AggCall) -> Result<BoxedAggregateFunction>),
+    // An aggregate function may contain both or either one of retractable and append-only versions.
+    Aggregate {
+        retractable: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+        append_only: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+        /// The state type of the retractable aggregate function.
+        /// `None` means equal to the return type.
+        retractable_state_type: Option<DataType>,
+        /// The state type of the append-only aggregate function.
+        /// `None` means equal to the return type.
+        append_only_state_type: Option<DataType>,
+    },
 }
 
 /// Register a function into global registry.
