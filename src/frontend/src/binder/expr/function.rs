@@ -888,6 +888,7 @@ impl Binder {
                 })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 ("jsonb_contains", raw_call(ExprType::JsonbContains)),
