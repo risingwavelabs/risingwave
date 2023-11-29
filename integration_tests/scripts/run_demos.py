@@ -14,7 +14,7 @@ def run_sql_file(f: str, dir: str):
     # ON_ERROR_STOP=1 will let psql return error code when the query fails.
     # https://stackoverflow.com/questions/37072245/check-return-status-of-psql-command-in-unix-shell-scripting
     proc = subprocess.run(["psql", "-h", "localhost", "-p", "4566",
-                           "-d", "dev", "-U", "root", "-f", f, "-v", "ON_ERROR_STOP=1", "-P", "pager=off"], check=True,
+                           "-d", "dev", "-U", "root", "-f", f, "-v", "ON_ERROR_STOP=1"], check=True,
                           cwd=dir)
     if proc.returncode != 0:
         sys.exit(1)
@@ -306,6 +306,45 @@ def run_redis_demo():
         if len(failed_cases) != 0:
             raise Exception("Data check failed for case {}".format(failed_cases))
 
+def run_bigquery_demo():
+    demo = "big-query-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "gcloud", "auth", "login", "--cred-file=/gcp-rwctest.json"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "gcloud", "config", "set", "project", "rwctest"], cwd=demo_dir, check=True)
+
+    bq_prepare_file = os.path.join(demo_dir, 'bq_prepare.sql')
+    bq_prepare_content = open(bq_prepare_file).read().strip()
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", bq_prepare_content], cwd=demo_dir, check=True)
+    sleep(30)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir, "append-only-sql/"+fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    sleep(30)
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            sql = "SELECT COUNT(*) AS count FROM `{}`".format(rel)
+            print("run sql {} on Bigquery".format(sql))
+            rows = subprocess.check_output(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", sql], cwd=demo_dir)
+            rows = json.loads(rows.decode("utf-8"))[0]['count']
+            if rows < 1:
+                failed_cases.append(rel)
+
+            drop_sql = "DROP TABLE IF EXISTS `{}`".format(rel)
+            print("delete test table [{}] in big query".format(rel))
+            subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", drop_sql], cwd=demo_dir, check=True)
+
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
                         metavar='format',
@@ -338,5 +377,7 @@ elif args.case == "elasticsearch-sink":
     run_elasticsearch_sink_demo()
 elif args.case == "redis-sink":
     run_redis_demo()
+elif args.case == "big-query-sink":
+    run_bigquery_demo()
 else:
     run_demo(args.case, args.format)
