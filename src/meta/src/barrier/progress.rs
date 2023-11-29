@@ -29,7 +29,7 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
     TableUpstreamMvCountMap,
 };
-use crate::manager::{FragmentManager, FragmentManagerRef};
+use crate::manager::{DdlType, FragmentManager, FragmentManagerRef};
 use crate::model::{ActorId, TableFragments};
 use crate::MetaResult;
 
@@ -153,6 +153,8 @@ impl Progress {
 ///    On recovery, the stream manager will stop managing the job.
 /// 2. `Recovered`. This refers to the "Recovered" type of tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
+/// 3. `Immediate`. Immediate jobs will immediately return,
+///    but still register the lag between the job and its upstream.
 pub enum TrackingJob {
     New(TrackingCommand),
     Recovered(RecoveredTrackingJob),
@@ -218,6 +220,13 @@ impl TrackingJob {
             TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
         }
     }
+
+    pub(crate) fn tracks_sink(&self) -> bool {
+        match self {
+            TrackingJob::New(command) => command.tracks_sink(),
+            TrackingJob::Recovered(_) => false,
+        }
+    }
 }
 
 pub struct RecoveredTrackingJob {
@@ -233,6 +242,15 @@ pub(super) struct TrackingCommand {
 
     /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
+}
+
+impl TrackingCommand {
+    pub fn tracks_sink(&self) -> bool {
+        match &self.context.command {
+            Command::CreateStreamingJob { ddl_type, .. } => *ddl_type == DdlType::Sink,
+            _ => false,
+        }
+    }
 }
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
@@ -368,12 +386,13 @@ impl CreateMviewProgressTracker {
             return Some(TrackingJob::New(command));
         }
 
-        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
+        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition, ddl_type) =
             if let Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
                 upstream_mview_actors,
                 definition,
+                ddl_type,
                 ..
             } = &command.context.command
             {
@@ -404,6 +423,7 @@ impl CreateMviewProgressTracker {
                     upstream_mv_count,
                     upstream_total_key_count,
                     definition.to_string(),
+                    ddl_type,
                 )
             } else {
                 unreachable!("Must be CreateStreamingJob.");
@@ -419,11 +439,34 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
-        let old = self
-            .progress_map
-            .insert(creating_mv_id, (progress, TrackingJob::New(command)));
-        assert!(old.is_none());
-        None
+        if *ddl_type == DdlType::Sink {
+            // First we duplicate a separate tracking job for sink.
+            // This does not need notifiers, it is solely used for
+            // tracking the backfill progress of sink.
+            // It will still be removed from progress map when
+            // backfill completes.
+            let tracking_job = TrackingJob::New(TrackingCommand {
+                context: command.context.clone(),
+                notifiers: vec![],
+            });
+            let old = self
+                .progress_map
+                .insert(creating_mv_id, (progress, tracking_job));
+            assert!(old.is_none());
+
+            // We return the original tracking job immediately.
+            // This is because sink can be decoupled with backfill progress.
+            // We don't need to wait for sink to finish backfill.
+            // This still contains the notifiers, so we can tell listeners
+            // that the sink job has been created.
+            Some(TrackingJob::New(command))
+        } else {
+            let old = self
+                .progress_map
+                .insert(creating_mv_id, (progress, TrackingJob::New(command)));
+            assert!(old.is_none());
+            None
+        }
     }
 
     /// Update the progress of `actor` according to the Pb struct.
