@@ -102,6 +102,8 @@ pub enum ErrorCode {
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
+    #[error("function {0} does not exist")]
+    NoFunction(String),
     #[error(transparent)]
     IoError(#[from] IoError),
     #[error("Storage error: {0}")]
