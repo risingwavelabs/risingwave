@@ -51,13 +51,10 @@ impl Expression for ArrayTransformExpression {
         let lambda_input = self.array.eval_row(input).await?;
         let lambda_input = lambda_input.map(ScalarImpl::into_list);
         if let Some(lambda_input) = lambda_input {
-            let mut new_vals = Vec::with_capacity(lambda_input.values().len());
-            for val in lambda_input.values() {
-                let row = OwnedRow::new(vec![val.clone()]);
-                let res = self.lambda.eval_row(&row).await?;
-                new_vals.push(res);
-            }
-            let new_list = ListValue::new(new_vals);
+            let len = lambda_input.len();
+            let chunk = DataChunk::new(vec![Arc::new(lambda_input.into_array())], len);
+            let new_vals = self.lambda.eval(&chunk).await?;
+            let new_list = ListValue::new(Arc::unwrap_or_clone(new_vals));
             Ok(Some(new_list.into()))
         } else {
             Ok(None)

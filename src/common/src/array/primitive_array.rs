@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::{EstimateSize, ZeroHeapSize};
 use crate::for_all_native_types;
 use crate::types::*;
 
@@ -32,7 +32,7 @@ where
     for<'a> Self: Sized
         + Default
         + PartialOrd
-        + EstimateSize
+        + ZeroHeapSize
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {
@@ -121,10 +121,10 @@ impl_primitive_for_others! {
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     bitmap: Bitmap,
-    data: Vec<T>,
+    data: Box<[T]>,
 }
 
 impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for PrimitiveArray<T> {
@@ -146,7 +146,7 @@ impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArr
 
 impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let data: Vec<T> = iter.into_iter().collect();
+        let data: Box<[T]> = iter.into_iter().collect();
         PrimitiveArray {
             bitmap: Bitmap::ones(data.len()),
             data,
@@ -183,9 +183,19 @@ impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     ///
     /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
     pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
-        let data: Vec<T> = iter.into_iter().collect();
+        let data: Box<[T]> = iter.into_iter().collect();
         assert_eq!(data.len(), bitmap.len());
         PrimitiveArray { bitmap, data }
+    }
+
+    /// Returns a slice containing the entire array.
+    pub fn as_slice(&self) -> &[T] {
+        &self.data
+    }
+
+    /// Returns a mutable slice containing the entire array.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.data
     }
 }
 
@@ -245,7 +255,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
     bitmap: BitmapBuilder,
     data: Vec<T>,
@@ -297,14 +307,8 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     fn finish(self) -> PrimitiveArray<T> {
         PrimitiveArray {
             bitmap: self.bitmap.finish(),
-            data: self.data,
+            data: self.data.into(),
         }
-    }
-}
-
-impl<T: PrimitiveArrayItemType> EstimateSize for PrimitiveArray<T> {
-    fn estimated_heap_size(&self) -> usize {
-        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<T>()
     }
 }
 
