@@ -31,7 +31,8 @@ CREATE TABLE rw_typed_data (
     boolean_column BOOLEAN,
     date_column DATE,
     time_column TIME,
-    timestamp_column TIMESTAMPTZ,
+    timestamp_column TIMESTAMP,
+    timestamptz_column TIMESTAMPTZ,
     jsonb_column JSONB,
     bytea_column BYTEA
 ) WITH (

@@ -32,6 +32,37 @@ pub enum StreamingJob {
     Source(PbSource),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DdlType {
+    MaterializedView,
+    Sink,
+    Table,
+    Index,
+    Source,
+}
+
+#[cfg(test)]
+#[allow(clippy::derivable_impls)]
+impl Default for DdlType {
+    fn default() -> Self {
+        // This should not be used by mock services,
+        // so we can just pick an arbitrary default variant.
+        DdlType::Table
+    }
+}
+
+impl From<&StreamingJob> for DdlType {
+    fn from(job: &StreamingJob) -> Self {
+        match job {
+            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
+            StreamingJob::Sink(_) => DdlType::Sink,
+            StreamingJob::Table(_, _, _) => DdlType::Table,
+            StreamingJob::Index(_, _) => DdlType::Index,
+            StreamingJob::Source(_) => DdlType::Source,
+        }
+    }
+}
+
 impl StreamingJob {
     pub fn mark_created(&mut self) {
         let created_at_epoch = Some(Epoch::now().0);

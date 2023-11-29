@@ -703,7 +703,7 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq)]
+#[derive(Debug, EnumAsInner, PartialEq, Clone)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),

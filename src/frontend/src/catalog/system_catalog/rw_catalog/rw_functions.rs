@@ -65,12 +65,8 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(function.owner as i32)),
                         Some(ScalarImpl::Utf8(function.kind.to_string().into())),
-                        Some(ScalarImpl::List(ListValue::new(
-                            function
-                                .arg_types
-                                .iter()
-                                .map(|t| Some(ScalarImpl::Int32(t.to_oid())))
-                                .collect_vec(),
+                        Some(ScalarImpl::List(ListValue::from_iter(
+                            function.arg_types.iter().map(|t| t.to_oid()),
                         ))),
                         Some(ScalarImpl::Int32(function.return_type.to_oid())),
                         Some(ScalarImpl::Utf8(function.language.clone().into())),

@@ -675,10 +675,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
         let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
@@ -697,10 +694,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
 
         let column_orders = (0..row1.len())
