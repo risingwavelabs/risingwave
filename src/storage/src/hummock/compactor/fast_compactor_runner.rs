@@ -37,9 +37,9 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
-    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    StreamingSstableWriterFactory, TableHolder,
+    BatchSstableWriterFactory, Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta,
+    BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult,
+    SstableBuilderOptions, StreamingSstableWriterFactory, TableHolder, UnifiedSstableWriterFactor,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -279,7 +279,7 @@ pub struct CompactorRunner {
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
-        RemoteBuilderFactory<StreamingSstableWriterFactory, BlockedXor16FilterBuilder>,
+        RemoteBuilderFactory<UnifiedSstableWriterFactor, BlockedXor16FilterBuilder>,
     >,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
@@ -313,7 +313,17 @@ impl CompactorRunner {
             split_weight_by_vnode: task.split_weight_by_vnode,
             use_block_based_filter: true,
         };
-        let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
+        let factory = match context.sstable_store.store().support_streaming_upload() {
+            true => {
+                let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
+                UnifiedSstableWriterFactor::StreamingSstableWriterFactory(factory)
+            }
+            false => {
+                let factory = BatchSstableWriterFactory::new(context.sstable_store.clone());
+                UnifiedSstableWriterFactor::BatchSstableWriterFactory(factory)
+            }
+        };
+
         let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
