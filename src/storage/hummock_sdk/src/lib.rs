@@ -26,7 +26,7 @@ mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
-use risingwave_common::util::epoch::{EPOCH_MASK, MAX_EPOCH};
+use risingwave_common::util::epoch::EPOCH_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -281,7 +281,7 @@ impl EpochWithGap {
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            debug_assert_eq!(epoch & EPOCH_MASK, 0);
+            debug_assert!(((epoch & EPOCH_MASK) == 0) || (epoch == HummockEpoch::MAX));
             let epoch_with_gap = epoch + spill_offset as u64;
             EpochWithGap(epoch_with_gap)
         }
@@ -300,7 +300,7 @@ impl EpochWithGap {
     }
 
     pub fn new_max_epoch() -> Self {
-        EpochWithGap(MAX_EPOCH)
+        EpochWithGap(HummockEpoch::MAX)
     }
 
     // return the epoch_with_gap(epoch + spill_offset)

@@ -19,14 +19,14 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, EpochWithGap};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
@@ -157,7 +157,7 @@ impl CompactorRunner {
             .context
             .storage_opts
             .compact_iter_recreate_timeout_ms;
-        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -657,7 +657,7 @@ where
         del_iter.seek(full_key.user_key).await?;
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() < MAX_EPOCH
+            && !is_max_epoch(del_iter.earliest_epoch())
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
@@ -680,7 +680,7 @@ where
 
     let mut last_key = FullKey::default();
     let mut watermark_can_see_last_key = false;
-    let mut user_key_last_delete_epoch = MAX_EPOCH;
+    let mut user_key_last_delete_epoch = HummockEpoch::MAX;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -716,7 +716,7 @@ where
             }
             last_key.set(iter_key);
             watermark_can_see_last_key = false;
-            user_key_last_delete_epoch = MAX_EPOCH;
+            user_key_last_delete_epoch = HummockEpoch::MAX;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -843,7 +843,7 @@ where
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key,
-                        new_epoch: MAX_EPOCH,
+                        new_epoch: HummockEpoch::MAX,
                     })
                     .await?;
                 break;
@@ -964,7 +964,7 @@ mod tests {
             .cloned()
             .collect_vec();
 
-        let mut iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
         iter.add_concat_iter(sstable_infos, sstable_store);
 
         let ret = CompactionDeleteRangeIterator::new(iter)

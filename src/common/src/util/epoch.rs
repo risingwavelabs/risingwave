@@ -118,6 +118,13 @@ pub const EPOCH_AVAILABLE_BITS: u64 = 16;
 pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
 pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
+
+pub fn is_max_epoch(epoch: u64) -> bool {
+    epoch >= MAX_EPOCH
+}
+pub fn is_compatibility_epoch(epoch: u64) -> bool {
+    epoch == MAX_EPOCH
+}
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Self(epoch)
