@@ -565,6 +565,19 @@ pub(crate) async fn bind_columns_from_source(
     };
 
     {
+        // add connector-spec additional columns
+        let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
+        let addition_col_list = CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS
+            .get(connector_name.as_str())
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "Connector {} accepts no additional column",
+                    connector_name
+                )))
+            })?;
+    }
+
+    {
         // fixme: remove this after correctly consuming the two options
         options.remove(SCHEMA_REGISTRY_USERNAME);
         options.remove(SCHEMA_REGISTRY_PASSWORD);
@@ -863,7 +876,7 @@ pub(super) fn bind_source_watermark(
     Ok(watermark_descs)
 }
 
-static CONNECTOR_COMPATOBLE_ADDITIONAL_COLUMNS: LazyLock<
+static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
     HashMap<
         String,
         Vec<(
