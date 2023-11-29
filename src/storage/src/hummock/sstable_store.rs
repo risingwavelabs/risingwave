@@ -922,14 +922,18 @@ impl StreamingSstableWriterFactory {
         StreamingSstableWriterFactory { sstable_store }
     }
 }
+pub struct UnifiedSstableWriterFactory {
+    sstable_store: SstableStoreRef,
+}
 
-pub enum UnifiedSstableWriterFactor {
-    StreamingSstableWriterFactory(StreamingSstableWriterFactory),
-    BatchSstableWriterFactory(BatchSstableWriterFactory),
+impl UnifiedSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        UnifiedSstableWriterFactory { sstable_store }
+    }
 }
 
 #[async_trait::async_trait]
-impl SstableWriterFactory for UnifiedSstableWriterFactor {
+impl SstableWriterFactory for UnifiedSstableWriterFactory {
     type Writer = UnifiedSstableWriter;
 
     async fn create_sst_writer(
@@ -937,44 +941,76 @@ impl SstableWriterFactory for UnifiedSstableWriterFactor {
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
-        match self {
-            UnifiedSstableWriterFactor::StreamingSstableWriterFactory(
-                streaming_uploader_writer_factory,
-            ) => {
-                let path = streaming_uploader_writer_factory
-                    .sstable_store
-                    .get_sst_data_path(object_id);
-                let uploader = streaming_uploader_writer_factory
-                    .sstable_store
-                    .store
-                    .streaming_upload(&path)
-                    .await?;
-                let streaming_uploader_writer = StreamingUploadWriter::new(
-                    object_id,
-                    streaming_uploader_writer_factory.sstable_store.clone(),
-                    uploader,
-                    options,
-                );
+        if self.sstable_store.store().support_streaming_upload() {
+            let path = self.sstable_store.get_sst_data_path(object_id);
+            let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+            let streaming_uploader_writer = StreamingUploadWriter::new(
+                object_id,
+                self.sstable_store.clone(),
+                uploader,
+                options,
+            );
 
-                Ok(UnifiedSstableWriter::StreamingSstableWriter(
-                    streaming_uploader_writer,
-                ))
-            }
-            UnifiedSstableWriterFactor::BatchSstableWriterFactory(
-                batch_uploader_writer_factory,
-            ) => {
-                let batch_uploader_writer = BatchUploadWriter::new(
-                    object_id,
-                    batch_uploader_writer_factory.sstable_store.clone(),
-                    options,
-                );
-                Ok(UnifiedSstableWriter::BatchSstableWriter(
-                    batch_uploader_writer,
-                ))
-            }
+            Ok(UnifiedSstableWriter::StreamingSstableWriter(
+                streaming_uploader_writer,
+            ))
+        } else {
+            let batch_uploader_writer =
+                BatchUploadWriter::new(object_id, self.sstable_store.clone(), options);
+            Ok(UnifiedSstableWriter::BatchSstableWriter(
+                batch_uploader_writer,
+            ))
         }
     }
 }
+
+// #[async_trait::async_trait]
+// impl SstableWriterFactory for UnifiedSstableWriterFactory {
+//     type Writer = UnifiedSstableWriter;
+
+//     async fn create_sst_writer(
+//         &mut self,
+//         object_id: HummockSstableObjectId,
+//         options: SstableWriterOptions,
+//     ) -> HummockResult<Self::Writer> {
+//         match self {
+//             UnifiedSstableWriterFactory::StreamingSstableWriterFactory(
+//                 streaming_uploader_writer_factory,
+//             ) => {
+//                 let path = streaming_uploader_writer_factory
+//                     .sstable_store
+//                     .get_sst_data_path(object_id);
+//                 let uploader = streaming_uploader_writer_factory
+//                     .sstable_store
+//                     .store
+//                     .streaming_upload(&path)
+//                     .await?;
+//                 let streaming_uploader_writer = StreamingUploadWriter::new(
+//                     object_id,
+//                     streaming_uploader_writer_factory.sstable_store.clone(),
+//                     uploader,
+//                     options,
+//                 );
+
+//                 Ok(UnifiedSstableWriter::StreamingSstableWriter(
+//                     streaming_uploader_writer,
+//                 ))
+//             }
+//             UnifiedSstableWriterFactory::BatchSstableWriterFactory(
+//                 batch_uploader_writer_factory,
+//             ) => {
+//                 let batch_uploader_writer = BatchUploadWriter::new(
+//                     object_id,
+//                     batch_uploader_writer_factory.sstable_store.clone(),
+//                     options,
+//                 );
+//                 Ok(UnifiedSstableWriter::BatchSstableWriter(
+//                     batch_uploader_writer,
+//                 ))
+//             }
+//         }
+//     }
+// }
 
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
