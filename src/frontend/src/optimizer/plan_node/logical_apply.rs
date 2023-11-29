@@ -26,7 +26,8 @@ use super::{
     ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, ExprRewritable, LogicalFilter, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
@@ -306,6 +307,12 @@ impl ExprRewritable for LogicalApply {
         new.on = new.on.rewrite_expr(r);
         new.base = new.base.clone_with_new_plan_id();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalApply {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v)
     }
 }
 

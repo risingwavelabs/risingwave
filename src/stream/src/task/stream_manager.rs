@@ -511,6 +511,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
                     | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)

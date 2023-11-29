@@ -22,12 +22,12 @@ ahash = { version = "0.8" }
 allocator-api2 = { version = "0.2", default-features = false, features = ["alloc", "nightly"] }
 anyhow = { version = "1", features = ["backtrace"] }
 async-std = { version = "1", features = ["attributes", "tokio1"] }
-aws-credential-types = { version = "0.57", default-features = false, features = ["hardcoded-credentials"] }
-aws-runtime = { version = "0.57", default-features = false, features = ["event-stream", "sigv4a"] }
-aws-sdk-s3 = { version = "0.35" }
-aws-sigv4 = { version = "0.57", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
-aws-smithy-runtime = { version = "0.57", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
-aws-smithy-types = { version = "0.57", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
+aws-credential-types = { version = "1", default-features = false, features = ["hardcoded-credentials"] }
+aws-runtime = { version = "1", default-features = false, features = ["event-stream", "sigv4a"] }
+aws-sdk-s3 = { version = "1" }
+aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
+aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
+aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 base64 = { version = "0.21", features = ["alloc"] }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
@@ -39,6 +39,7 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
+crypto-bigint = { version = "0.5", features = ["generic-array", "zeroize"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
@@ -59,7 +60,8 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hmac = { version = "0.12", default-features = false, features = ["reset"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["serde", "std"] }
-itertools = { version = "0.10" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
+itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -157,7 +159,8 @@ either = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
-itertools = { version = "0.10" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
+itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }

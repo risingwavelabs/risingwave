@@ -20,6 +20,7 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
@@ -55,7 +56,7 @@ use crate::handler::create_source::{
     check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
+use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
@@ -137,13 +138,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::GeneratedColumns(_) => {}
             ColumnOption::DefaultColumns(_) => {}
             ColumnOption::Unique { is_primary: true } => {}
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", option_def),
-                    None.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
     Ok(())
@@ -177,11 +172,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             //
             // But we don't support real collation, we simply ignore it here.
             if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
-                return Err(ErrorCode::NotImplemented(
-                    "Collate collation other than `C` or `POSIX` is not implemented".into(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!(
+                    "Collate collation other than `C` or `POSIX` is not implemented"
+                );
             }
 
             match data_type {
@@ -359,13 +352,7 @@ pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint])
                 columns: _,
                 is_primary: true,
             } => {}
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("table constraint \"{}\"", constraint),
-                    None.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!("table constraint \"{}\"", constraint),
         }
     }
     Ok(())
@@ -540,7 +527,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let cdc_table_type = CdcTableType::from_properties(&properties);
-    if cdc_table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+    if cdc_table_type.can_backfill() && context.session_ctx().config().cdc_backfill() {
         // debezium connector will only consume changelogs from latest offset on this mode
         properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
@@ -708,7 +695,9 @@ fn gen_table_plan_inner(
         row_id_index: row_id_index.map(|i| i as _),
         columns: {
             let mut source_columns = columns.clone();
-            if let Some(t) = cdc_table_type && t.can_backfill() {
+            if let Some(t) = cdc_table_type
+                && t.can_backfill()
+            {
                 // Append the offset column to be used in the cdc backfill
                 let offset_column = ColumnCatalog::offset_column();
                 source_columns.push(offset_column);
@@ -863,7 +852,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    let logical_scan = LogicalScan::create_for_cdc(
+    let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
@@ -1015,14 +1004,9 @@ pub async fn handle_create_table(
     source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    notice: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
 
     if append_only {
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
@@ -1053,10 +1037,13 @@ pub async fn handle_create_table(
         .await?;
 
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, source, table, job_type)
     };
 
@@ -1091,7 +1078,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        row_id_column_name, Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+        Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
     };
     use risingwave_common::types::DataType;
 
@@ -1156,9 +1143,8 @@ mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => DataType::new_struct(
                 vec![DataType::Int64,DataType::Float64,DataType::Float64],

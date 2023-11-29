@@ -29,13 +29,11 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{
-    Locations, ParallelUnitReschedule, RescheduleOptions, ScaleController, ScaleControllerRef,
-};
+use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -638,72 +636,17 @@ impl GlobalStreamManager {
                 Ok(_) => {
                     tracing::info!(?id, "cancelled recovered streaming job");
                     Some(id)
-                },
+                }
                 Err(_) => {
                     tracing::error!(?id, "failed to cancel recovered streaming job, does it correspond to any jobs in `SHOW JOBS`?");
                     None
-                },
+                }
             }
         });
         let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
 
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
-    }
-}
-
-impl GlobalStreamManager {
-    pub async fn reschedule_actors(
-        &self,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        options: RescheduleOptions,
-    ) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
-            .await
-        {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
-            }
-            return Err(e);
-        }
-
-        Ok(())
-    }
-
-    async fn reschedule_actors_impl(
-        &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        options: RescheduleOptions,
-    ) -> MetaResult<()> {
-        let (reschedule_fragment, applied_reschedules) = self
-            .scale_controller
-            .prepare_reschedule_command(reschedules, options)
-            .await?;
-
-        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
-
-        let command = Command::RescheduleFragment {
-            reschedules: reschedule_fragment,
-        };
-
-        let fragment_manager_ref = self.fragment_manager.clone();
-
-        revert_funcs.push(Box::pin(async move {
-            fragment_manager_ref
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-        }));
-
-        let _source_pause_guard = self.source_manager.paused.lock().await;
-
-        self.barrier_scheduler
-            .run_config_change_command_with_pause(command)
-            .await?;
-
-        Ok(())
     }
 }
 
@@ -899,6 +842,7 @@ mod tests {
                         is_serving: true,
                         is_unschedulable: false,
                     },
+                    Default::default(),
                 )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;

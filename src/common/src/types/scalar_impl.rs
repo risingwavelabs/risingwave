@@ -89,7 +89,7 @@ impl Scalar for ListValue {
     type ScalarRefType<'a> = ListRef<'a>;
 
     fn as_scalar_ref(&self) -> ListRef<'_> {
-        ListRef::ValueRef { val: self }
+        self.into()
     }
 }
 
@@ -310,11 +310,7 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
     type ScalarType = ListValue;
 
     fn to_owned_scalar(&self) -> ListValue {
-        let fields = self
-            .iter()
-            .map(|f| f.map(|s| s.into_scalar_impl()))
-            .collect();
-        ListValue::new(fields)
+        (*self).into()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
