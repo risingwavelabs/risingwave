@@ -34,7 +34,7 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, Mutation};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -156,7 +156,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer.init(epoch_pair).await?;
+        log_writer
+            .init(epoch_pair, barrier.is_pause_on_startup())
+            .await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
@@ -237,6 +239,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
                         }
+
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
@@ -278,6 +289,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
