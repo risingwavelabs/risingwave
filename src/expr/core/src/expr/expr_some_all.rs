@@ -49,22 +49,30 @@ impl SomeAllExpression {
         }
     }
 
-    fn resolve_bools(&self, mut bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
+    fn resolve_bools(&self, bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
         match self.expr_type {
             Type::Some => {
-                if bools.any(|b| b.unwrap_or(false)) {
-                    Some(true)
-                } else if bools.any(|b| b.is_none()) {
-                    None
-                } else {
-                    Some(false)
+                for b in bools {
+                    match b {
+                        Some(true) => return Some(true),
+                        Some(false) => continue,
+                        None => return None,
+                    }
                 }
+                Some(false)
             }
             Type::All => {
-                if bools.all(|b| b.unwrap_or(false)) {
+                let mut all_true = true;
+                for b in bools {
+                    if b == Some(false) {
+                        return Some(false);
+                    }
+                    if b != Some(true) {
+                        all_true = false;
+                    }
+                }
+                if all_true {
                     Some(true)
-                } else if bools.any(|b| !b.unwrap_or(true)) {
-                    Some(false)
                 } else {
                     None
                 }
@@ -163,26 +171,25 @@ impl Expression for SomeAllExpression {
     async fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
         let datum_left = self.left_expr.eval_row(row).await?;
         let datum_right = self.right_expr.eval_row(row).await?;
-        if let Some(array_right) = datum_right {
-            let array_right = array_right.into_list().into_array();
-            let len = array_right.len();
+        let Some(array_right) = datum_right else {
+            return Ok(None);
+        };
+        let array_right = array_right.into_list().into_array();
+        let len = array_right.len();
 
-            // expand left to array
-            let array_left = {
-                let mut builder = self.left_expr.return_type().create_array_builder(len);
-                builder.append_n(len, datum_left);
-                builder.finish().into_ref()
-            };
+        // expand left to array
+        let array_left = {
+            let mut builder = self.left_expr.return_type().create_array_builder(len);
+            builder.append_n(len, datum_left);
+            builder.finish().into_ref()
+        };
 
-            let chunk = DataChunk::new(vec![array_left, Arc::new(array_right)], len);
-            let bools = self.func.eval(&chunk).await?;
+        let chunk = DataChunk::new(vec![array_left, Arc::new(array_right)], len);
+        let bools = self.func.eval(&chunk).await?;
 
-            Ok(self
-                .resolve_bools(bools.as_bool().iter())
-                .map(|b| b.to_scalar_value()))
-        } else {
-            Ok(None)
-        }
+        Ok(self
+            .resolve_bools(bools.as_bool().iter())
+            .map(|b| b.to_scalar_value()))
     }
 }
 
