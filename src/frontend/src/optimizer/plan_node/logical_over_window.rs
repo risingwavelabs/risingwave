@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
@@ -303,23 +304,23 @@ impl<'a> OverWindowProjectBuilder<'a> {
                 FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()]).unwrap(),
             );
             self.builder.add_expr(&squared_input_expr).map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
+                not_implemented!("{err} inside args")
             })?;
         }
         for arg in &window_function.args {
-            self.builder.add_expr(arg).map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
-            })?;
+            self.builder
+                .add_expr(arg)
+                .map_err(|err| not_implemented!("{err} inside args"))?;
         }
         for partition_by in &window_function.partition_by {
-            self.builder.add_expr(partition_by).map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
-            })?;
+            self.builder
+                .add_expr(partition_by)
+                .map_err(|err| not_implemented!("{err} inside partition_by"))?;
         }
         for order_by in window_function.order_by.sort_exprs.iter().map(|e| &e.expr) {
-            self.builder.add_expr(order_by).map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into())
-            })?;
+            self.builder
+                .add_expr(order_by)
+                .map_err(|err| not_implemented!("{err} inside order_by"))?;
         }
         Ok(())
     }
@@ -355,9 +356,7 @@ impl LogicalOverWindow {
         for (idx, field) in input.schema().fields().iter().enumerate() {
             input_proj_builder
                 .add_expr(&InputRef::new(idx, field.data_type()).into())
-                .map_err(|err| {
-                    ErrorCode::NotImplemented(format!("{err} inside input"), None.into())
-                })?;
+                .map_err(|err| not_implemented!("{err} inside input"))?;
         }
         let mut build_input_proj_visitor = OverWindowProjectBuilder::new(&mut input_proj_builder);
         for expr in select_exprs {
@@ -453,11 +452,9 @@ impl LogicalOverWindow {
                     if const_offset.is_none() {
                         // should already be checked in `WindowFunction::infer_return_type`,
                         // but just in case
-                        return Err(ErrorCode::NotImplemented(
-                            "non-const `offset` of `lag`/`lead` is not supported yet".to_string(),
-                            None.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            "non-const `offset` of `lag`/`lead` is not supported yet"
+                        );
                     }
                     const_offset.unwrap()?.map(|v| *v.as_int64()).unwrap_or(1)
                 } else {
@@ -722,11 +719,7 @@ impl ToBatch for LogicalOverWindow {
             .map(|e| e.index())
             .collect_vec();
         if partition_key_indices.is_empty() {
-            return Err(ErrorCode::NotImplemented(
-                "Window function with empty PARTITION BY is not supported yet".to_string(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Window function with empty PARTITION BY is not supported yet");
         }
 
         let input = self.input().to_batch()?;
@@ -779,11 +772,9 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                return Err(ErrorCode::NotImplemented(
-                    "Window function with empty PARTITION BY is not supported yet".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!(
+                    "Window function with empty PARTITION BY is not supported yet"
+                );
             }
 
             let sort_input =
@@ -812,11 +803,9 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                return Err(ErrorCode::NotImplemented(
-                    "Window function with empty PARTITION BY is not supported yet".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!(
+                    "Window function with empty PARTITION BY is not supported yet"
+                );
             }
 
             let new_input =

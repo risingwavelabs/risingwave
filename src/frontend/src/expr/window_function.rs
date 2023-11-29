@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
-use super::{AggCall, Expr, ExprImpl, OrderBy, RwResult};
+use super::{Expr, ExprImpl, OrderBy, RwResult};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.
@@ -72,26 +74,22 @@ impl WindowFunction {
                     .into());
                 }
                 if !offset.is_const() {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("non-const `offset` of `{kind}` function is not supported yet"),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "non-const `offset` of `{kind}` function is not supported yet"
+                    );
                 }
                 Ok(value.return_type())
             }
             (Lag | Lead, [_value, _offset, _default]) => {
-                Err(RwError::from(ErrorCode::NotImplemented(
-                    format!(
-                        "`{kind}` window function with `default` argument is not supported yet"
-                    ),
-                    None.into(),
-                )))
+                bail_not_implemented!(
+                    "`{kind}` window function with `default` argument is not supported yet"
+                );
             }
 
             (Aggregate(agg_kind), args) => {
                 let arg_types = args.iter().map(ExprImpl::return_type).collect::<Vec<_>>();
-                AggCall::infer_return_type(agg_kind, &arg_types)
+                let return_type = FUNCTION_REGISTRY.get_return_type(agg_kind, &arg_types)?;
+                Ok(return_type)
             }
 
             _ => {
