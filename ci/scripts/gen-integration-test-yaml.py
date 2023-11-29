@@ -33,12 +33,12 @@ CASES_MAP = {
 
 def gen_pipeline_steps():
     pipeline_steps = ""
-    for key, values in CASES_MAP.items():
-        for value in values:
+    for test_case, test_formats in CASES_MAP.items():
+        for test_format in test_formats:
             pipeline_steps += f"""
- - label: Run Demos {key} {value}
-   key: {key}-{value}
-   command: ci/scripts/integration-tests.sh -c {key} -f {value}
+ - label: Run Demos {test_case} {test_format}
+   key: {test_case}-{test_format}
+   command: ci/scripts/integration-tests.sh -c {test_case} -f {test_format}
    timeout_in_minutes: 30
    retry: *auto-retry
    plugins:
