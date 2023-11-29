@@ -698,7 +698,7 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
-                watermarks: sync_data.watermarks.clone(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

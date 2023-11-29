@@ -57,6 +57,10 @@ impl VnodeWatermark {
             watermark: Bytes::from(pb.watermark.clone()),
         }
     }
+
+    pub fn vnode_bitmap(&self) -> &Bitmap {
+        &self.vnode_bitmap
+    }
 }
 
 #[derive(Clone, Debug)]

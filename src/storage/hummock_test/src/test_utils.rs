@@ -270,7 +270,7 @@ impl HummockTestEnv {
             .commit_epoch_with_watermark(
                 epoch,
                 res.uncommitted_ssts,
-                res.watermarks
+                res.table_watermarks
                     .into_iter()
                     .map(|(table_id, watermark)| {
                         (table_id.table_id as u64, watermark.to_protobuf())
