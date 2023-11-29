@@ -53,7 +53,7 @@ use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -473,14 +473,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, mut source_info) = bind_columns_from_source(
-        context.session_ctx(),
-        &source_schema,
-        &properties,
-        include_column_options,
-        false,
-    )
-    .await?;
+    let (columns_from_resolve_source, mut source_info) =
+        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -489,6 +483,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
         columns_from_sql,
         &column_defs,
     )?;
+
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&properties, include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
         &source_schema,
         &source_info,

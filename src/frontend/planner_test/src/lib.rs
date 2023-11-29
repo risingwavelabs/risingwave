@@ -424,6 +424,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -438,6 +439,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }

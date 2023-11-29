@@ -2506,9 +2506,9 @@ impl Parser {
             let add_column = self.parse_identifier()?;
             if self.parse_keyword(Keyword::AS) {
                 let column_alias = self.parse_identifier()?;
-                options.push((add_column, Some(column_alias)).into());
+                options.push((add_column, Some(column_alias)));
             } else {
-                options.push((add_column, None).into());
+                options.push((add_column, None));
             }
         }
         Ok(options)

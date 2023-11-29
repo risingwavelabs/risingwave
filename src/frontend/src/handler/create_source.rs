@@ -288,7 +288,6 @@ pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
-    include_columns_options: Vec<(Ident, Option<Ident>)>,
     create_cdc_source_job: bool,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
@@ -318,7 +317,7 @@ pub(crate) async fn bind_columns_from_source(
         Ok(name_strategy)
     };
 
-    let mut res = match (&source_schema.format, &source_schema.row_encode) {
+    let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) => (
             None,
             StreamSourceInfo {
@@ -565,19 +564,6 @@ pub(crate) async fn bind_columns_from_source(
     };
 
     {
-        // add connector-spec additional columns
-        let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
-        let addition_col_list = CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS
-            .get(connector_name.as_str())
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(format!(
-                    "Connector {} accepts no additional column",
-                    connector_name
-                )))
-            })?;
-    }
-
-    {
         // fixme: remove this after correctly consuming the two options
         options.remove(SCHEMA_REGISTRY_USERNAME);
         options.remove(SCHEMA_REGISTRY_PASSWORD);
@@ -598,6 +584,57 @@ pub(crate) async fn bind_columns_from_source(
     }
 
     Ok(res)
+}
+
+/// add connector-spec columns to the end of column catalog
+pub fn handle_addition_columns(
+    with_properties: &HashMap<String, String>,
+    mut include_columns_options: Vec<(Ident, Option<Ident>)>,
+    columns: &mut Vec<ColumnCatalog>,
+) -> Result<()> {
+    let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
+    let addition_col_list = CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS
+        .get(connector_name.as_str())
+        .ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "Connector {} accepts no additional column",
+                connector_name
+            )))
+        })?;
+    let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
+        format!("_rw_{}_{}", connector_name, addi_column_name)
+    };
+
+    let latest_col_id: ColumnId = columns
+        .iter()
+        .map(|col| col.column_desc.column_id)
+        .max()
+        .unwrap(); // there must be at least one column in the column catalog
+
+    for (col_name, gen_column_catalog_fn) in addition_col_list {
+        // always insert in spec order
+        if let Some(idx) = include_columns_options
+            .iter()
+            .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
+        {
+            let (_, alias) = include_columns_options.remove(idx);
+            columns.push(gen_column_catalog_fn(
+                latest_col_id.next(),
+                alias
+                    .map(|alias| alias.real_value())
+                    .unwrap_or_else(|| gen_default_column_name(connector_name.as_str(), col_name))
+                    .as_str(),
+            ))
+        }
+    }
+    if !include_columns_options.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "Unknown additional columns {:?}",
+            include_columns_options
+        ))));
+    }
+
+    Ok(())
 }
 
 /// Bind columns from both source and sql defined.
@@ -887,11 +924,101 @@ static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
 
     res.insert(
         KAFKA_CONNECTOR.to_string(),
+        vec![
+            (
+                "key",
+                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named(name, id, DataType::Bytea),
+                        is_hidden: false,
+                    }
+                }),
+            ),
+            (
+                "timestamp",
+                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named(name, id, DataType::Timestamptz),
+                        is_hidden: false,
+                    }
+                }),
+            ),
+            (
+                "partition",
+                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named(name, id, DataType::Int64),
+                        is_hidden: false,
+                    }
+                }),
+            ),
+            (
+                "offset",
+                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named(name, id, DataType::Int64),
+                        is_hidden: false,
+                    }
+                }),
+            ),
+            // Todo(tabVersion): add header column desc
+            // (
+            //     "header",
+            //     Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+            //         ColumnCatalog {
+            //             column_desc: ColumnDesc::named(name, id, DataType::List(
+            //
+            //             )),
+            //             is_hidden: false,
+            //         }
+            //     }),
+            // ),
+        ],
+    );
+    res.insert(
+        PULSAR_CONNECTOR.to_string(),
         vec![(
             "key",
             Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
                 ColumnCatalog {
                     column_desc: ColumnDesc::named(name, id, DataType::Bytea),
+                    is_hidden: false,
+                }
+            }),
+        )],
+    );
+    res.insert(
+        KINESIS_CONNECTOR.to_string(),
+        vec![(
+            "key",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
+                    is_hidden: false,
+                }
+            }),
+        )],
+    );
+    res.insert(
+        S3_CONNECTOR.to_string(),
+        vec![(
+            "file",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
+                    is_hidden: false,
+                }
+            }),
+        )],
+    );
+    res.insert(
+        // TODO(tabVersion): change to Opendal S3 and GCS
+        S3_V2_CONNECTOR.to_string(),
+        vec![(
+            "file",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
                     is_hidden: false,
                 }
             }),
@@ -1156,7 +1283,6 @@ pub async fn handle_create_source(
         &session,
         &source_schema,
         &with_properties,
-        stmt.include_column_options,
         create_cdc_source_job,
     )
     .await?;
@@ -1168,6 +1294,8 @@ pub async fn handle_create_source(
         columns_from_sql,
         &stmt.columns,
     )?;
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&with_properties, stmt.include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
         &source_schema,
         &source_info,
