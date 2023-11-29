@@ -8578,6 +8578,7 @@ dependencies = [
  "sync-point",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
  "tracing-futures",
