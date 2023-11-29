@@ -48,5 +48,7 @@ echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
+# RUSTSEC-2023-0052: https://github.com/risingwavelabs/risingwave/issues/11842
+# RUSTSEC-2023-0071 https://github.com/risingwavelabs/risingwave/issues/13703
 echo "--- Run audit check"
 cargo audit
