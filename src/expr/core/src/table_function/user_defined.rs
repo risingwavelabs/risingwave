@@ -18,7 +18,7 @@ use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
-use risingwave_common::array::{DataChunk, I32Array};
+use risingwave_common::array::{ArrayError, DataChunk, I32Array};
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
 
@@ -138,9 +138,9 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             .map::<Result<_>, _>(|t| {
                 Ok(Field::new(
                     "",
-                    DataType::from(t)
-                        .try_into()
-                        .map_err(risingwave_udf::Error::unsupported)?,
+                    DataType::from(t).try_into().map_err(|e: ArrayError| {
+                        risingwave_udf::Error::unsupported(e.to_string())
+                    })?,
                     true,
                 ))
             })
