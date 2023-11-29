@@ -364,9 +364,6 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void drop() {
         try {
-            // give processor enough time to finish unfinished work, otherwise we will get an error
-            // in afterbulk
-            bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
             client.close();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
