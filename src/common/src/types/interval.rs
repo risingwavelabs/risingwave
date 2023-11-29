@@ -31,7 +31,7 @@ use rust_decimal::prelude::Decimal;
 
 use super::to_binary::ToBinary;
 use super::*;
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 
 /// Every interval can be represented by a `Interval`.
 ///
@@ -42,12 +42,14 @@ use crate::estimate_size::EstimateSize;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default, EstimateSize)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
 }
+
+impl ZeroHeapSize for Interval {}
 
 const USECS_PER_SEC: i64 = 1_000_000;
 const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
