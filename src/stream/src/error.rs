@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
-
 use risingwave_common::array::ArrayError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -28,22 +26,9 @@ use crate::executor::StreamExecutorError;
 pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// The error type for streaming tasks.
-#[derive(thiserror::Error)]
-#[error("{inner}")]
-pub struct StreamError {
-    inner: Box<Inner>,
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{kind}")]
-struct Inner {
-    #[from]
-    kind: ErrorKind,
-    backtrace: Backtrace,
-}
-
-#[derive(thiserror::Error, Debug)]
-enum ErrorKind {
+#[derive(thiserror::Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(type = StreamError, backtrace)]
+pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
@@ -87,65 +72,6 @@ enum ErrorKind {
     ),
 }
 
-impl std::fmt::Debug for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.inner.kind)?;
-        writeln!(f)?;
-        if let Some(backtrace) =
-            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
-        {
-            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
-        } else {
-            write!(f, "  backtrace of `StreamError`:\n{}", self.inner.backtrace)?;
-        }
-        Ok(())
-    }
-}
-
-impl From<ErrorKind> for StreamError {
-    fn from(kind: ErrorKind) -> Self {
-        Self {
-            inner: Box::new(kind.into()),
-        }
-    }
-}
-
-// Storage transaction error; ...
-impl From<StorageError> for StreamError {
-    fn from(s: StorageError) -> Self {
-        ErrorKind::Storage(s).into()
-    }
-}
-
-// Build expression error; ...
-impl From<ExprError> for StreamError {
-    fn from(error: ExprError) -> Self {
-        ErrorKind::Expression(error).into()
-    }
-}
-
-// Chunk compaction error; ProtoBuf ser/de error; ...
-impl From<ArrayError> for StreamError {
-    fn from(error: ArrayError) -> Self {
-        ErrorKind::Array(error).into()
-    }
-}
-
-// Executor runtime error; ...
-impl From<StreamExecutorError> for StreamError {
-    fn from(error: StreamExecutorError) -> Self {
-        ErrorKind::Executor(error).into()
-    }
-}
-
-impl From<SinkError> for StreamError {
-    fn from(value: SinkError) -> Self {
-        ErrorKind::Sink(value).into()
-    }
-}
-
 impl From<PbFieldNotFound> for StreamError {
     fn from(err: PbFieldNotFound) -> Self {
         Self::from(anyhow::anyhow!(
@@ -158,13 +84,6 @@ impl From<PbFieldNotFound> for StreamError {
 impl From<ConnectorError> for StreamError {
     fn from(err: ConnectorError) -> Self {
         StreamExecutorError::from(err).into()
-    }
-}
-
-// Internal error.
-impl From<anyhow::Error> for StreamError {
-    fn from(a: anyhow::Error) -> Self {
-        ErrorKind::Internal(a).into()
     }
 }
 
