@@ -498,7 +498,13 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = utils::checked_into_u32(self.buf.len());
+            let offset = utils::checked_into_u32(self.buf.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert buf_len {} into u32 table {:?}",
+                    self.buf.len(),
+                    self.table_id,
+                )
+            });
 
             self.restart_points.push(offset);
 
@@ -577,8 +583,15 @@ impl BlockBuilder {
             self.buf.put_u32_le(*restart_point);
         }
 
-        self.buf
-            .put_u32_le(utils::checked_into_u32(self.restart_points.len()));
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_len {} into u32 table {:?}",
+                    self.restart_points.len(),
+                    self.table_id,
+                )
+            }),
+        );
         for RestartPoint {
             offset,
             key_len_type,
@@ -595,9 +608,15 @@ impl BlockBuilder {
             self.buf.put_u8(value);
         }
 
-        self.buf.put_u32_le(utils::checked_into_u32(
-            self.restart_points_type_index.len(),
-        ));
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points_type_index.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_type_index_len {} into u32 table {:?}",
+                    self.restart_points_type_index.len(),
+                    self.table_id,
+                )
+            }),
+        );
 
         self.buf.put_u32_le(self.table_id.unwrap());
         if self.compression_algorithm != CompressionAlgorithm::None {
@@ -687,6 +706,10 @@ impl BlockBuilder {
             debug_assert!(self.restart_points_type_index.is_empty());
             debug_assert!(self.last_key.is_empty());
         }
+    }
+
+    pub fn table_id(&self) -> Option<u32> {
+        self.table_id
     }
 }
 
