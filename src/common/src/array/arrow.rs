@@ -674,11 +674,14 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     type Error = ArrayError;
 
     fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
-        let iter: Vec<_> = array
-            .iter()
-            .map(|o| o.map(|a| ArrayImpl::try_from(&a)).transpose())
-            .try_collect()?;
-        Ok(ListArray::from_iter(iter, (&array.value_type()).into()))
+        Ok(ListArray {
+            value: Box::new(ArrayImpl::try_from(array.values())?),
+            bitmap: match array.nulls() {
+                Some(nulls) => nulls.iter().collect(),
+                None => Bitmap::ones(array.len()),
+            },
+            offsets: array.offsets().iter().map(|o| *o as u32).collect(),
+        })
     }
 }
 
@@ -904,15 +907,7 @@ mod tests {
 
     #[test]
     fn list() {
-        let array = ListArray::from_iter(
-            [
-                Some(I32Array::from_iter([None, Some(-7), Some(25)]).into()),
-                None,
-                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
-                Some(I32Array::from_iter([0; 0]).into()),
-            ],
-            DataType::Int32,
-        );
+        let array = ListArray::from_iter([None, Some(vec![0, -127, 127, 50]), Some(vec![0; 0])]);
         let arrow = arrow_array::ListArray::from(&array);
         assert_eq!(ListArray::try_from(&arrow).unwrap(), array);
     }

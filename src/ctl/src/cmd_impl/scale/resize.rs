@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Sub;
 use std::process::exit;
 
 use inquire::Confirm;
@@ -60,6 +61,7 @@ impl From<ScaleHorizonCommands> for ScaleCommandContext {
             yes,
             fragments,
             target_parallelism_per_worker: None,
+            exclusive_for_vertical: false,
         }
     }
 }
@@ -76,6 +78,7 @@ impl From<ScaleVerticalCommands> for ScaleCommandContext {
                     yes,
                     fragments,
                 },
+            exclusive,
         } = value;
 
         Self {
@@ -87,6 +90,7 @@ impl From<ScaleVerticalCommands> for ScaleCommandContext {
             yes,
             fragments,
             target_parallelism_per_worker,
+            exclusive_for_vertical: exclusive,
         }
     }
 }
@@ -100,6 +104,7 @@ pub struct ScaleCommandContext {
     yes: bool,
     fragments: Option<Vec<u32>>,
     target_parallelism_per_worker: Option<u32>,
+    exclusive_for_vertical: bool,
 }
 
 pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> anyhow::Result<()> {
@@ -191,10 +196,11 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
         output,
         yes,
         fragments,
+        exclusive_for_vertical,
     } = scale_ctx;
 
     let worker_changes = {
-        let exclude_worker_ids =
+        let mut exclude_worker_ids =
             worker_input_to_worker_ids(exclude_workers.unwrap_or_default(), false);
         let include_worker_ids =
             worker_input_to_worker_ids(include_workers.unwrap_or_default(), true);
@@ -229,6 +235,20 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
                     include_worker_id
                 );
             }
+        }
+
+        if exclusive_for_vertical {
+            let all_worker_ids: HashSet<_> =
+                streaming_workers_index_by_id.keys().cloned().collect();
+
+            let include_worker_id_set: HashSet<_> = include_worker_ids.iter().cloned().collect();
+            let generated_exclude_worker_ids = all_worker_ids.sub(&include_worker_id_set);
+
+            exclude_worker_ids = exclude_worker_ids
+                .into_iter()
+                .chain(generated_exclude_worker_ids)
+                .unique()
+                .collect();
         }
 
         WorkerChanges {
