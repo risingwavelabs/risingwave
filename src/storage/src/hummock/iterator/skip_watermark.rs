@@ -90,7 +90,22 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                                         // The current key has passed the watermark.
                                         // Advance the next watermark.
                                         self.remain_watermarks.pop_front();
-                                        continue;
+                                        // Since it is impossible for a (table_id, vnode) tuple to have multiple
+                                        // watermark, after the pop_front, the next (table_id, vnode) must have
+                                        // exceeded the current key, and we can directly return and mark that the
+                                        // current key is not filtered by the watermark at the front.
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            if let Some((next_table_id, next_vnode, _, _)) =
+                                                self.remain_watermarks.front()
+                                            {
+                                                assert!(
+                                                    (next_table_id, next_vnode)
+                                                        > (&key_table_id, &key_vnode)
+                                                );
+                                            }
+                                        }
+                                        return false;
                                     }
                                 }
                             }
