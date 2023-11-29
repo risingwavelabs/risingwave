@@ -631,7 +631,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     backfill_state: &mut BackfillState,
-    state_len: usize,
+    #[cfg(debug_assertions)] state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;

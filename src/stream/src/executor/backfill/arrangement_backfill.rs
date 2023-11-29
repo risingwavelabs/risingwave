@@ -434,6 +434,7 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     &mut backfill_state,
+                    #[cfg(debug_assertions)]
                     state_len,
                     vnodes.iter_vnodes(),
                 )
@@ -485,6 +486,7 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         &mut backfill_state,
+                        #[cfg(debug_assertions)]
                         state_len,
                         vnodes.iter_vnodes()
                     )
