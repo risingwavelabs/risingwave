@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use risingwave_common::util::epoch::{is_compatibility_epoch, is_max_epoch};
+use risingwave_common::util::epoch::{is_compatibility_max_epoch, is_max_epoch};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -211,7 +211,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if !is_max_epoch(event.new_epoch) {
             self.epoch_set.insert(event.new_epoch);
         }
-        if is_compatibility_epoch(event.new_epoch) {
+        if is_compatibility_max_epoch(event.new_epoch) {
             // It is dangerous to mix two different max value in data, so rewrite it to keep same format with main branch.
             event.new_epoch = HummockEpoch::MAX;
         }

@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::future::Future;
 
+#[cfg(test)]
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
