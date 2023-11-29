@@ -225,12 +225,12 @@ pub(super) fn generate_captured_function(
     })
 }
 
-pub(super) struct CapturedContextScopeInput {
+pub(super) struct CapturedExecutionContextScopeInput {
     pub context: Expr,
     pub closure: Expr,
 }
 
-impl Parse for CapturedContextScopeInput {
+impl Parse for CapturedExecutionContextScopeInput {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let context: Expr = input.parse()?;
         input.parse::<Token![,]>()?;

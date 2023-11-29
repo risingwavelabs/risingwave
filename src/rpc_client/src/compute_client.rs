@@ -31,7 +31,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
-use risingwave_pb::stream_plan::CapturedContext;
+use risingwave_pb::stream_plan::CapturedExecutionContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -159,7 +159,7 @@ impl ComputeClient {
         task_id: TaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
-        captured_context: CapturedContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -169,7 +169,7 @@ impl ComputeClient {
                 plan: Some(plan),
                 epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
-                captured_context: Some(captured_context),
+                captured_execution_context: Some(captured_execution_context),
             })
             .await?
             .into_inner())

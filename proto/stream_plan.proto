@@ -879,7 +879,7 @@ message StreamFragmentGraph {
   Parallelism parallelism = 6;
 }
 
-// Provide statement-local context, e.g. session info like time zone, for runtime execution.
-message CapturedContext {
+// Provide statement-local context, e.g. session info like time zone, for execution.
+message CapturedExecutionContext {
   string time_zone = 1;
 }

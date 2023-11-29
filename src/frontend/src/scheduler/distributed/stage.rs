@@ -36,14 +36,14 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
-use risingwave_expr::captured_context_scope;
+use risingwave_expr::captured_execution_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
     PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
-use risingwave_pb::stream_plan::CapturedContext;
+use risingwave_pb::stream_plan::CapturedExecutionContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
@@ -337,7 +337,7 @@ impl StageRunner {
     async fn schedule_tasks(
         &mut self,
         mut shutdown_rx: ShutdownToken,
-        captured_context: CapturedContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
@@ -367,7 +367,7 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), captured_context.clone()));
+                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), captured_execution_context.clone()));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -380,7 +380,7 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_context.clone()));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_execution_context.clone()));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -391,7 +391,7 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_context.clone()));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_execution_context.clone()));
             }
         }
 
@@ -554,7 +554,7 @@ impl StageRunner {
     async fn schedule_tasks_for_root(
         &mut self,
         mut shutdown_rx: ShutdownToken,
-        captured_context: CapturedContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
@@ -582,7 +582,7 @@ impl StageRunner {
 
         let shutdown_rx0 = shutdown_rx.clone();
 
-        captured_context_scope!(captured_context, async {
+        captured_execution_context_scope!(captured_execution_context, async {
             let executor = executor.build().await?;
             let chunk_stream = executor.execute();
             let cancelled = pin!(shutdown_rx.cancelled());
@@ -632,14 +632,15 @@ impl StageRunner {
     }
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
-        let captured_context = CapturedContext {
+        let captured_execution_context = CapturedExecutionContext {
             time_zone: self.ctx.session().config().timezone().to_owned(),
         };
         // If root, we execute it locally.
         if !self.is_root_stage() {
-            self.schedule_tasks(shutdown_rx, captured_context).await?;
+            self.schedule_tasks(shutdown_rx, captured_execution_context)
+                .await?;
         } else {
-            self.schedule_tasks_for_root(shutdown_rx, captured_context)
+            self.schedule_tasks_for_root(shutdown_rx, captured_execution_context)
                 .await?;
         }
         Ok(())
@@ -838,7 +839,7 @@ impl StageRunner {
         task_id: TaskIdPb,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
-        captured_context: CapturedContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
         let worker_node_addr = worker.host.take().unwrap();
@@ -852,7 +853,12 @@ impl StageRunner {
         let t_id = task_id.task_id;
 
         let stream_status: Fuse<Streaming<TaskInfoResponse>> = compute_client
-            .create_task(task_id, plan_fragment, self.epoch.clone(), captured_context)
+            .create_task(
+                task_id,
+                plan_fragment,
+                self.epoch.clone(),
+                captured_execution_context,
+            )
             .await
             .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?

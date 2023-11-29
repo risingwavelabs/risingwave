@@ -40,7 +40,7 @@ message CreateTaskRequest {
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
   map<string, string> tracing_context = 4;
-  stream_plan.CapturedContext captured_context = 5;
+  stream_plan.CapturedExecutionContext captured_execution_context = 5;
 }
 
 message CancelTaskRequest {
@@ -64,7 +64,7 @@ message ExecuteRequest {
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
   map<string, string> tracing_context = 4;
-  stream_plan.CapturedContext captured_context = 5;
+  stream_plan.CapturedExecutionContext captured_execution_context = 5;
 }
 
 service TaskService {

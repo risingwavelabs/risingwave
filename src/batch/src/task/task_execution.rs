@@ -27,10 +27,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_expr::captured_context_scope;
+use risingwave_expr::captured_execution_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::stream_plan::CapturedContext;
+use risingwave_pb::stream_plan::CapturedExecutionContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
@@ -427,7 +427,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
-        captured_context: CapturedContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -436,8 +436,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = captured_context_scope!(
-            captured_context.clone(),
+        let exec = captured_execution_context_scope!(
+            captured_execution_context.clone(),
             ExecutorBuilder::new(
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
@@ -478,8 +478,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                captured_context_scope!(
-                    captured_context,
+                captured_execution_context_scope!(
+                    captured_execution_context,
                     t_1.run(exec, sender, state_tx.as_mut()).instrument(span)
                 )
                 .await;

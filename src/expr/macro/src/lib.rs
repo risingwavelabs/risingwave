@@ -18,7 +18,8 @@
 use std::vec;
 
 use context::{
-    generate_captured_function, CaptureContextAttr, CapturedContextScopeInput, DefineContextAttr,
+    generate_captured_function, CaptureContextAttr, CapturedExecutionContextScopeInput,
+    DefineContextAttr,
 };
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -652,9 +653,9 @@ pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Add scope to provide the captured context variables for the closure.
 /// For now, we add this when building an Executor and when an Exetutor is run.
 #[proc_macro]
-pub fn captured_context_scope(input: TokenStream) -> TokenStream {
+pub fn captured_execution_context_scope(input: TokenStream) -> TokenStream {
     fn inner(input: TokenStream) -> Result<TokenStream2> {
-        let CapturedContextScopeInput { context, closure } = syn::parse(input)?;
+        let CapturedExecutionContextScopeInput { context, closure } = syn::parse(input)?;
 
         let ctx = quote! { let ctx = #context; };
         let mut body = quote! { #closure };
@@ -663,7 +664,7 @@ pub fn captured_context_scope(input: TokenStream) -> TokenStream {
             let local_key_name = format_ident!("{}", field.to_string().to_uppercase());
             body = quote! {
                 async {
-                    use risingwave_expr::captured_context::#local_key_name;
+                    use risingwave_expr::captured_execution_context::#local_key_name;
                     #local_key_name::scope(ctx.#field.to_owned(), #body).await
                 }
             };
