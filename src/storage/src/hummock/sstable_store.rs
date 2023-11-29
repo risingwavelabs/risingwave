@@ -964,54 +964,6 @@ impl SstableWriterFactory for UnifiedSstableWriterFactory {
     }
 }
 
-// #[async_trait::async_trait]
-// impl SstableWriterFactory for UnifiedSstableWriterFactory {
-//     type Writer = UnifiedSstableWriter;
-
-//     async fn create_sst_writer(
-//         &mut self,
-//         object_id: HummockSstableObjectId,
-//         options: SstableWriterOptions,
-//     ) -> HummockResult<Self::Writer> {
-//         match self {
-//             UnifiedSstableWriterFactory::StreamingSstableWriterFactory(
-//                 streaming_uploader_writer_factory,
-//             ) => {
-//                 let path = streaming_uploader_writer_factory
-//                     .sstable_store
-//                     .get_sst_data_path(object_id);
-//                 let uploader = streaming_uploader_writer_factory
-//                     .sstable_store
-//                     .store
-//                     .streaming_upload(&path)
-//                     .await?;
-//                 let streaming_uploader_writer = StreamingUploadWriter::new(
-//                     object_id,
-//                     streaming_uploader_writer_factory.sstable_store.clone(),
-//                     uploader,
-//                     options,
-//                 );
-
-//                 Ok(UnifiedSstableWriter::StreamingSstableWriter(
-//                     streaming_uploader_writer,
-//                 ))
-//             }
-//             UnifiedSstableWriterFactory::BatchSstableWriterFactory(
-//                 batch_uploader_writer_factory,
-//             ) => {
-//                 let batch_uploader_writer = BatchUploadWriter::new(
-//                     object_id,
-//                     batch_uploader_writer_factory.sstable_store.clone(),
-//                     options,
-//                 );
-//                 Ok(UnifiedSstableWriter::BatchSstableWriter(
-//                     batch_uploader_writer,
-//                 ))
-//             }
-//         }
-//     }
-// }
-
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
