@@ -294,7 +294,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ListValue};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
@@ -1124,17 +1124,7 @@ mod tests {
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
-            match res {
-                Some(ScalarImpl::List(res)) => {
-                    let res = res
-                        .values()
-                        .iter()
-                        .map(|v| v.as_ref().map(ScalarImpl::as_int32).cloned())
-                        .collect_vec();
-                    assert_eq!(res, vec![Some(2), Some(1)]);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 1]));
         }
 
         {
@@ -1151,17 +1141,7 @@ mod tests {
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
-            match res {
-                Some(ScalarImpl::List(res)) => {
-                    let res = res
-                        .values()
-                        .iter()
-                        .map(|v| v.as_ref().map(ScalarImpl::as_int32).cloned())
-                        .collect_vec();
-                    assert_eq!(res, vec![Some(2), Some(2), Some(0), Some(1)]);
-                }
-                _ => panic!("unexpected output"),
-            }
+            assert_eq!(res.unwrap().as_list(), &ListValue::from_iter([2, 2, 0, 1]));
         }
 
         Ok(())
