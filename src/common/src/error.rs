@@ -212,10 +212,6 @@ pub enum ErrorCode {
     ),
 }
 
-pub fn internal_error(msg: impl Into<String>) -> RwError {
-    ErrorCode::InternalError(msg.into()).into()
-}
-
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
         use tonic::Code;

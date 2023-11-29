@@ -1,6 +1,4 @@
 disallowed-methods = [
-    { path = "risingwave_common::error::internal_err", reason = "Please use per-crate error type instead." },
-    { path = "risingwave_common::error::internal_error", reason = "Please use per-crate error type instead." },
 ]
 
 disallowed-types = [
