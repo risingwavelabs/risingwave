@@ -63,16 +63,11 @@ impl AggregateState {
             direct_args: vec![],
         };
         let agg_func_sig = FUNCTION_REGISTRY
-            .get_aggregate(
-                agg_kind,
-                &arg_data_types,
-                &call.return_type,
-                false, // means prefer retractable version
-            )
+            .get(agg_kind, &arg_data_types, &call.return_type)
             .expect("the agg func must exist");
         let agg_func = agg_func_sig.build_aggregate(&agg_call)?;
         let (agg_impl, enable_delta) =
-            if !agg_func_sig.append_only && call.frame.exclusion.is_no_others() {
+            if agg_func_sig.is_retractable() && call.frame.exclusion.is_no_others() {
                 let init_state = agg_func.create_state();
                 (AggImpl::Incremental(init_state), true)
             } else {
