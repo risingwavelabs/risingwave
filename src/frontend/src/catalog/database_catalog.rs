@@ -102,13 +102,18 @@ impl DatabaseCatalog {
     pub fn update_schema(&mut self, prost: &PbSchema) {
         let id = prost.id;
         let name = prost.name.clone();
-        let schema = prost.into();
 
-        let old_schema_name = self.get_schema_by_id(&id).unwrap().name();
-        if old_schema_name != name {
-            self.schema_by_name.remove(&old_schema_name);
-            self.schema_name_by_id.remove(&id);
-        }
+        let schema = self.get_schema_by_id(&id).unwrap();
+        let old_schema_name = schema.name();
+        let mut schema = if old_schema_name != name {
+            self.schema_by_name.remove(&old_schema_name).unwrap()
+        } else {
+            schema.clone()
+        };
+        schema.name = name.clone();
+        schema.database_id = prost.database_id;
+        schema.owner = prost.owner;
+
         self.schema_by_name.insert(name.clone(), schema);
         self.schema_name_by_id.insert(id, name);
     }

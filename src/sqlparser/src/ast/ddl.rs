@@ -35,6 +35,7 @@ pub enum AlterDatabaseOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameSchema { schema_name: ObjectName },
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -146,6 +147,9 @@ impl fmt::Display for AlterSchemaOperation {
         match self {
             AlterSchemaOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSchemaOperation::RenameSchema { schema_name } => {
+                write!(f, "RENAME TO {}", schema_name)
             }
         }
     }

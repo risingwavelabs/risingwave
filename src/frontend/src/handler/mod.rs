@@ -450,6 +450,10 @@ pub async fn handle(
         }
         Statement::AlterSchema {
             name,
+            operation: AlterSchemaOperation::RenameSchema { schema_name },
+        } => alter_relation_rename::handle_rename_schema(handler_args, name, schema_name).await,
+        Statement::AlterSchema {
+            name,
             operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
         } => {
             alter_owner::handle_alter_owner(
