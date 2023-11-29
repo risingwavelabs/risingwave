@@ -37,6 +37,7 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
+#[derive(Debug, Clone)]
 pub enum TableFragmentsParallelism {
     Adaptive,
     Fixed(u32),
@@ -128,6 +129,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
+            assigned_parallelism: TableFragmentsParallelism::Adaptive,
         }
     }
 
@@ -175,6 +177,7 @@ impl TableFragments {
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
+            assigned_parallelism: TableFragmentsParallelism::Adaptive,
         }
     }
 

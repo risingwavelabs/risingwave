@@ -1679,7 +1679,8 @@ impl ScaleController {
 
                 fragment_map.insert(fragment_id, fragment);
 
-                fragment_parallelism.insert(fragment_id, table_fragments.assigned_parallelism);
+                fragment_parallelism
+                    .insert(fragment_id, table_fragments.assigned_parallelism.clone());
             }
 
             actor_status.extend(table_fragments.actor_status);
@@ -1828,36 +1829,40 @@ impl ScaleController {
                 target_parallel_unit_ids.extend(limited_worker_parallel_unit_ids.into_iter());
             }
 
-            // do sth
-
             match fragment_parallelism.get(&fragment_id) {
                 None => {}
                 Some(TableFragmentsParallelism::Fixed(target)) => {
+                    if no_shuffle_target_fragment_ids.contains(&fragment_id) {
+                        continue;
+                    }
+
                     match fragment.get_distribution_type().unwrap() {
                         FragmentDistributionType::Hash => {
-                            let mut target_parallel_unit_ids: BTreeSet<_> =
-                                fragment_parallel_unit_ids.clone();
-                            target_parallel_unit_ids
-                                .extend(include_worker_parallel_unit_ids.iter());
-                            target_parallel_unit_ids
-                                .retain(|id| !exclude_worker_parallel_unit_ids.contains(id));
+                            // we use all available parallell units
+                            let available_parallel_unit_ids: BTreeMap<_, BTreeSet<_>> =
+                                worker_parallel_units
+                                    .into_iter()
+                                    .filter(|&(id, _)| !unschedulable_worker_ids.contains(&id))
+                                    .filter(|&(id, _)| !exclude_worker_ids.contains(&id))
+                                    .map(|(id, units)| (id, units.into_iter().collect()))
+                                    .collect();
 
-                            if target_parallel_unit_ids.is_empty() {
-                                bail!(
-                                    "No schedulable ParallelUnits available for fragment {}",
-                                    fragment_id
-                                );
-                            }
+                            let result =
+                                rebalance_units(available_parallel_unit_ids, *target as usize)?;
 
-                            match (target_parallelism, target_parallelism_per_worker) {
-                                (Some(_), Some(_)) => {
-                                    bail!("Cannot specify both target parallelism and target parallelism per worker");
-                                }
-                            }
+                            let target_parallel_unit_ids = result.into_values().flatten().collect();
+
+                            let reschedule = Self::diff_parallel_unit_change(
+                                &fragment_parallel_unit_ids,
+                                &target_parallel_unit_ids,
+                            );
+
+                            target_plan.insert(fragment_id, reschedule);
                         }
 
                         _ => todo!(),
                     }
+                    todo!()
                 }
                 Some(TableFragmentsParallelism::Adaptive) => {
                     match fragment.get_distribution_type().unwrap() {
@@ -1954,23 +1959,12 @@ impl ScaleController {
                                 _ => {}
                             }
 
-                            let to_expand_parallel_units = target_parallel_unit_ids
-                                .difference(&fragment_parallel_unit_ids)
-                                .cloned()
-                                .collect();
-
-                            let to_shrink_parallel_units = fragment_parallel_unit_ids
-                                .difference(&target_parallel_unit_ids)
-                                .cloned()
-                                .collect();
-
-                            target_plan.insert(
-                                fragment_id,
-                                ParallelUnitReschedule {
-                                    added_parallel_units: to_expand_parallel_units,
-                                    removed_parallel_units: to_shrink_parallel_units,
-                                },
+                            let reschedule = Self::diff_parallel_unit_change(
+                                &fragment_parallel_unit_ids,
+                                &target_parallel_unit_ids,
                             );
+
+                            target_plan.insert(fragment_id, reschedule);
                         }
                     }
                 }
@@ -1982,6 +1976,26 @@ impl ScaleController {
         });
 
         Ok(target_plan)
+    }
+
+    fn diff_parallel_unit_change(
+        fragment_parallel_unit_ids: &BTreeSet<ParallelUnitId>,
+        target_parallel_unit_ids: &BTreeSet<ParallelUnitId>,
+    ) -> ParallelUnitReschedule {
+        let to_expand_parallel_units = target_parallel_unit_ids
+            .difference(fragment_parallel_unit_ids)
+            .cloned()
+            .collect();
+
+        let to_shrink_parallel_units = fragment_parallel_unit_ids
+            .difference(target_parallel_unit_ids)
+            .cloned()
+            .collect();
+
+        ParallelUnitReschedule {
+            added_parallel_units: to_expand_parallel_units,
+            removed_parallel_units: to_shrink_parallel_units,
+        }
     }
 
     pub async fn get_reschedule_plan(
@@ -2298,201 +2312,168 @@ impl GlobalStreamManager {
     }
 }
 
-pub(crate) fn rebalance_units<T, U>(
-    slots: HashMap<T, BTreeSet<U>>,
-    slots_to_remove: BTreeSet<T>,
-    slots_to_add: BTreeSet<T>,
-) -> MetaResult<HashMap<T, BTreeSet<U>>>
-where
-    T: Clone + Ord + PartialOrd + std::fmt::Debug + std::hash::Hash,
-    U: Ord + PartialOrd + std::fmt::Debug,
-{
-    if slots.len() < slots_to_remove.len() {
+fn rebalance_units(
+    slots: BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
+    total_unit_size: usize,
+) -> MetaResult<HashMap<WorkerId, BTreeSet<ParallelUnitId>>> {
+    let mut slots = slots;
+    let total_weights: usize = slots.values().map(|units| units.len()).sum();
+    if total_weights == 0 {
+        bail!("No parallel units available");
+    }
+
+    let available_slots = slots.values().map(|slot| slot.len()).sum::<usize>();
+    if available_slots < total_unit_size {
         bail!(
-            "slots len {} < slots to remove len {}",
-            slots.len(),
-            slots_to_remove.len()
+            "Insufficient parallel units: {} < {}",
+            available_slots,
+            total_unit_size
         );
     }
 
-    let target_slot_size = slots.len() - slots_to_remove.len() + slots_to_add.len();
-
-    struct Balance<T, U> {
-        key: T,
-        units: BTreeSet<U>,
-        balance: i32,
-    }
-
-    let target_unit_size = slots.values().map(|units| units.len()).sum::<usize>();
-
-    let (expected, mut remain) = target_unit_size.div_rem(&target_slot_size);
-
-    tracing::debug!(
-        "expected {}, remain {}, prev {}, target {}",
-        expected,
-        remain,
-        slots.len(),
-        target_slot_size,
-    );
-
-    let (prev_expected, _) = target_unit_size.div_rem(&slots.len());
-
-    let (mut removed, mut rest): (Vec<_>, Vec<_>) = slots
-        .into_iter()
-        .partition(|(key, _)| slots_to_remove.contains(key));
-
-    let prev_remain = removed
+    let target_weights: HashMap<_, _> = slots
         .iter()
-        .map(|(_, units)| {
-            assert!(units.len() >= prev_expected);
-            units.len() - prev_expected
-        })
-        .sum::<usize>();
-
-    let order_by_units_desc = |(_, a): &(T, BTreeSet<U>), (_, b): &(T, BTreeSet<U>)| -> Ordering {
-        a.len().cmp(&b.len()).reverse()
-    };
-
-    removed.sort_by(order_by_units_desc);
-    rest.sort_by(order_by_units_desc);
-
-    let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
-        key: actor_id,
-        balance: bitmap.len() as i32,
-        units: bitmap,
-    });
-
-    let mut rest_balances = rest
-        .into_iter()
-        .map(|(key, units)| Balance {
-            key,
-            balance: units.len() as i32 - expected as i32,
-            units,
-        })
-        .collect_vec();
-
-    let mut created_balances = slots_to_add
-        .iter()
-        .map(|key| Balance {
-            key: key.clone(),
-            balance: -(expected as i32),
-            units: BTreeSet::new(),
-        })
-        .collect_vec();
-
-    for balance in created_balances
-        .iter_mut()
-        .rev()
-        .take(prev_remain)
-        .chain(rest_balances.iter_mut())
-    {
-        if remain > 0 {
-            balance.balance -= 1;
-            remain -= 1;
-        }
-    }
-
-    // consume the rest `remain`
-    for balance in &mut created_balances {
-        if remain > 0 {
-            balance.balance -= 1;
-            remain -= 1;
-        }
-    }
-
-    if remain != 0 {
-        bail!("remain {} != 0", remain);
-    }
-
-    let mut v: VecDeque<_> = removed_balances
-        .chain(rest_balances)
-        .chain(created_balances)
+        .map(|(worker_id, units)| (*worker_id, (units.len() as f32 / total_weights as f32)))
         .collect();
 
-    // We will return the full bitmap here after rebalancing,
-    // if we want to return only the changed actors, filter balance = 0 here
-    let mut result = HashMap::with_capacity(target_slot_size);
-
-    for balance in &v {
-        tracing::debug!(
-            "key {:5?}\tbalance {:5}\tR[{:5}]\tC[{:5}]",
-            balance.key,
-            balance.balance,
-            slots_to_remove.contains(&balance.key),
-            slots_to_add.contains(&balance.key)
-        );
+    let mut allocated = HashMap::new();
+    let mut rest = vec![];
+    for (worker_id, target_weight) in &target_weights {
+        let mut iter = slots.remove(worker_id).unwrap_or_default().into_iter();
+        let target_unit_size = (*target_weight * total_unit_size as f32).floor() as usize;
+        allocated.insert(*worker_id, iter.by_ref().take(target_unit_size).collect());
+        rest.push((*worker_id, iter.collect::<VecDeque<_>>()));
     }
 
-    while !v.is_empty() {
-        if v.len() == 1 {
-            let single = v.pop_front().unwrap();
-            assert_eq!(single.balance, 0);
-            if !slots_to_remove.contains(&single.key) {
-                result.insert(single.key, single.units);
+    let mut remaining_units = total_unit_size
+        - allocated
+            .values()
+            .map(|units: &BTreeSet<_>| units.len())
+            .sum::<usize>();
+
+    rest.sort_by(|(id_a, units_a), (id_b, units_b)| {
+        units_a
+            .len()
+            .cmp(&units_b.len())
+            .reverse()
+            .then(id_a.cmp(id_b))
+    });
+
+    while remaining_units > 0 {
+        for (worker_id, rest_slots) in &mut rest {
+            let weight = target_weights.get(worker_id).unwrap();
+
+            let n = min(
+                std::cmp::max((remaining_units as f32 * *weight).floor() as usize, 1),
+                rest_slots.len(),
+            );
+
+            assert!(remaining_units >= n);
+
+            allocated
+                .entry(*worker_id)
+                .or_default()
+                .extend((0..n).flat_map(|_| rest_slots.pop_front()));
+
+            remaining_units -= n;
+
+            if remaining_units == 0 {
+                break;
             }
-
-            continue;
-        }
-
-        let mut src = v.pop_front().unwrap();
-        let mut dst = v.pop_back().unwrap();
-
-        let n = min(abs(src.balance), abs(dst.balance));
-
-        let moving_units = (0..n).flat_map(|_| src.units.pop_first());
-
-        dst.units.extend(moving_units);
-
-        src.balance -= n;
-        dst.balance += n;
-
-        if src.balance != 0 {
-            v.push_front(src);
-        } else if !slots_to_remove.contains(&src.key) {
-            result.insert(src.key, src.units);
-        }
-
-        if dst.balance != 0 {
-            v.push_back(dst);
-        } else {
-            result.insert(dst.key, dst.units);
         }
     }
 
-    Ok(result)
+    Ok(allocated)
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
+    use std::cmp::min;
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-    use maplit::{btreeset, hashmap};
+    use maplit::{btreeset};
+    use rand::random;
+    
 
-    use crate::stream::rebalance_units;
+    use crate::stream::scale::rebalance_units;
+
+    fn rand_slots(n: usize) -> BTreeMap<u32, BTreeSet<u32>> {
+        let mut slots = BTreeMap::new();
+        for i in 0..n as u32 {
+            let v = (i * 100..(i + 1) * 100).collect::<Vec<_>>();
+            slots.insert(
+                i,
+                v.into_iter()
+                    .take(random::<usize>() % 100)
+                    .collect::<BTreeSet<_>>(),
+            );
+        }
+        slots
+    }
 
     #[test]
-    fn test_rebalance_units() {
-        let slots = hashmap! {
-            1 => btreeset![1, 2, 3],
-            2 => btreeset![4, 5, 6],
-        };
+    fn test_rebalance_stability_with_complex_scenario() {
+        let slots = rand_slots(10);
+        let total_unit_size = min(256, slots.values().map(|v| v.len()).sum()); // 指定的目标分配单元大小
+        for _ in 1..total_unit_size {
+            let first_run_result =
+                rebalance_units(slots.clone(), total_unit_size).expect("First call failed");
+            let subsequent_run_result =
+                rebalance_units(slots.clone(), total_unit_size).expect("Subsequent call failed");
 
-        let result = rebalance_units(slots, btreeset![], btreeset![3]).unwrap();
-
-        for (_, vs) in result {
-            assert_eq!(vs.len(), 2);
+            assert_eq!(
+                first_run_result, subsequent_run_result,
+                "The rebalance results should be stable and identical across runs"
+            );
         }
     }
 
     #[test]
-    fn test_rebalance_units_single() {
-        let slots = hashmap! {
-            1 => btreeset![1],
-            2 => btreeset![],
-            3 => btreeset![],
-        };
+    fn test_rebalance_with_insufficient_units() {
+        let mut slots = BTreeMap::new();
+        slots.insert(1, btreeset![1, 2, 3]);
+        slots.insert(2, btreeset![4, 5, 6]);
+        let total_unit_size = 10;
+        assert!(rebalance_units(slots, total_unit_size).is_err());
+    }
 
-        let result = rebalance_units(slots, btreeset![2], btreeset![4]).unwrap();
+    #[test]
+    fn test_rebalance_with_remaining_units() {
+        let mut slots = BTreeMap::new();
+        slots.insert(1, btreeset![1, 2, 3]);
+        slots.insert(2, btreeset![4, 5, 6, 7, 8, 9]);
+        let total_unit_size = 6;
+        let allocations = rebalance_units(slots, total_unit_size).unwrap();
 
-        assert_eq!(result[&1], btreeset![1])
+        let expected_distribution =
+            HashMap::from([(1, btreeset![1, 2]), (2, btreeset![4, 5, 6, 7])]);
+
+        assert_eq!(allocations, expected_distribution);
+
+        let total_allocated_units: usize = allocations.values().map(|units| units.len()).sum();
+        assert_eq!(total_allocated_units, total_unit_size);
+    }
+
+    #[test]
+    fn test_rebalance_with_nonexistent_workers() {
+        let mut slots = BTreeMap::new();
+        slots.insert(1, btreeset![1, 2, 3, 4, 5]);
+        let total_unit_size = 5;
+        let allocations =
+            rebalance_units(slots, total_unit_size).expect("Should successfully rebalance");
+
+        assert!(allocations.get(&1).is_some());
+        assert!(!allocations.contains_key(&2));
+
+        let total_allocated_units: usize = allocations.values().map(|units| units.len()).sum();
+        assert_eq!(total_allocated_units, total_unit_size);
+    }
+
+    #[test]
+    fn test_rebalance_with_zero_unit_count() {
+        let slots = BTreeMap::new();
+        let total_unit_size = 0;
+        let allocation_result = rebalance_units(slots, total_unit_size);
+        assert!(allocation_result.is_err());
     }
 }
