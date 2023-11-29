@@ -348,6 +348,10 @@ pub struct ScaleVerticalCommands {
     /// The target parallelism per worker, requires `workers` to be set.
     #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
+
+    /// It will exclude all other workers to maintain the target parallelism only for the target workers.
+    #[clap(long, default_value_t = false)]
+    exclusive: bool,
 }
 
 #[derive(Subcommand, Debug)]
