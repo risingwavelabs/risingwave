@@ -13,12 +13,14 @@ cargo make sslt-build-all --profile ci-sim
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats
 
 echo "--- Build and archive deterministic simulation integration tests"
 NEXTEST_PROFILE=ci-sim cargo make sarchive-it-test --cargo-profile ci-sim
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats
 
 echo "--- Upload artifacts"
 mv target/sim/ci-sim/risingwave_simulation ./risingwave_simulation
