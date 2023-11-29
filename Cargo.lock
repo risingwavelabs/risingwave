@@ -8259,6 +8259,7 @@ dependencies = [
  "rustls",
  "spin 0.9.8",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
 ]
