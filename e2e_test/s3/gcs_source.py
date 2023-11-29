@@ -30,7 +30,7 @@ def format_json(data):
     ]
 
 
-def do_test(config, file_num, item_num_per_file, prefix, fmt):
+def do_test(config, file_num, item_num_per_file, prefix, fmt, credential):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -57,7 +57,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         connector = 'gcs',
         match_pattern = '{prefix}*.{fmt}',
         gcs.bucket_name = '{config['GCS_BUCKET']}',
-        gcs.credentials = '{config['GOOGLE_APPLICATION_CREDENTIALS']}',
+        gcs.credentials = '{credential}',
     ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
     # do test
     print("do test")
-    do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
+    do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt, credential_str)
 
     # clean up gcs files
     print("clean up gcs files")
