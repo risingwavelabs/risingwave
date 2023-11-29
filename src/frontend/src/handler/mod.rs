@@ -36,7 +36,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
-mod alter_relation_rename;
+mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
 mod alter_system;
@@ -439,7 +439,7 @@ pub async fn handle(
         Statement::AlterDatabase {
             name,
             operation: AlterDatabaseOperation::RenameDatabase { database_name },
-        } => alter_relation_rename::handle_rename_database(handler_args, name, database_name).await,
+        } => alter_rename::handle_rename_database(handler_args, name, database_name).await,
         Statement::AlterDatabase {
             name,
             operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
@@ -455,7 +455,7 @@ pub async fn handle(
         Statement::AlterSchema {
             name,
             operation: AlterSchemaOperation::RenameSchema { schema_name },
-        } => alter_relation_rename::handle_rename_schema(handler_args, name, schema_name).await,
+        } => alter_rename::handle_rename_schema(handler_args, name, schema_name).await,
         Statement::AlterSchema {
             name,
             operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
@@ -478,13 +478,8 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RenameTable { table_name },
         } => {
-            alter_relation_rename::handle_rename_table(
-                handler_args,
-                TableType::Table,
-                name,
-                table_name,
-            )
-            .await
+            alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
+                .await
         }
         Statement::AlterTable {
             name,
@@ -514,14 +509,14 @@ pub async fn handle(
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
-        } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
+        } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
         Statement::AlterView {
             materialized,
             name,
             operation: AlterViewOperation::RenameView { view_name },
         } => {
             if materialized {
-                alter_relation_rename::handle_rename_table(
+                alter_rename::handle_rename_table(
                     handler_args,
                     TableType::MaterializedView,
                     name,
@@ -529,7 +524,7 @@ pub async fn handle(
                 )
                 .await
             } else {
-                alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
+                alter_rename::handle_rename_view(handler_args, name, view_name).await
             }
         }
         Statement::AlterView {
@@ -583,7 +578,7 @@ pub async fn handle(
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
-        } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::ChangeOwner { new_owner_name },
@@ -612,7 +607,7 @@ pub async fn handle(
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
-        } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
+        } => alter_rename::handle_rename_source(handler_args, name, source_name).await,
         Statement::AlterSource {
             name,
             operation: operation @ AlterSourceOperation::AddColumn { .. },

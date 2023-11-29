@@ -1824,7 +1824,7 @@ impl CatalogManager {
         let mut database = database_core.databases.get(&database_id).unwrap().clone();
         database_core.check_database_duplicated(&database_name)?;
 
-        // 2. rename schema.
+        // 2. rename database.
         database.name = database_name;
 
         // 3. update, commit and notify.
