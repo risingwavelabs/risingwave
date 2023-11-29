@@ -17,7 +17,6 @@ use std::num::NonZeroU32;
 
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
-use risingwave_common::array::{Op, RowRef};
 use risingwave_common::catalog::Schema;
 
 use super::*;
@@ -89,10 +88,11 @@ impl FlowControlExecutor {
                             // Cut the chunk into smaller chunks
                             let data_types = chunk.data_types();
                             let mut rows = vec![];
-                            for chunked_rows in chunk.rows() {
-                                rows.push(chunked_rows.clone());
+                            for row in chunk.rows() {
+                                rows.push(row);
                                 if rows.len() == limit.get() as usize {
                                     let chunk = StreamChunk::from_rows(&rows, &data_types);
+                                    // `InsufficientCapacity` should never happen
                                     rate_limiter.until_n_ready(limit).await.unwrap();
                                     yield Message::Chunk(chunk);
                                     rows.clear();
