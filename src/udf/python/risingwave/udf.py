@@ -459,12 +459,23 @@ def _string_to_data_type(type_str: str):
     elif type_str in ("BYTEA"):
         return pa.binary()
     elif type_str.startswith("STRUCT"):
-        # extract 'STRUCT<INT, VARCHAR, ...>'
-        type_list = type_str[6:].strip("<>")
+        # extract 'STRUCT<INT, VARCHAR, STRUCT<INT>, ...>'
+        type_list = type_str[7:-1]  # strip "STRUCT<>"
         fields = []
-        for type_str in type_list.split(","):
-            type_str = type_str.strip()
-            fields.append(pa.field("", _string_to_data_type(type_str)))
+        elements = []
+        start = 0
+        depth = 0
+        for i, c in enumerate(type_list):
+            if c == "<":
+                depth += 1
+            elif c == ">":
+                depth -= 1
+            elif c == "," and depth == 0:
+                type_str = type_list[start:i].strip()
+                fields.append(pa.field("", _string_to_data_type(type_str)))
+                start = i + 1
+        type_str = type_list[start:].strip()
+        fields.append(pa.field("", _string_to_data_type(type_str)))
         return pa.struct(fields)
 
     raise ValueError(f"Unsupported type: {type_str}")
@@ -508,7 +519,7 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return (
             "STRUCT<"
             + ",".join(
-                f"field_{i} {_data_type_to_string(field.type)}"
+                f"f{i+1} {_data_type_to_string(field.type)}"
                 for i, field in enumerate(t)
             )
             + ">"

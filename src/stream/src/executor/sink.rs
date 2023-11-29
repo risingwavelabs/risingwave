@@ -254,6 +254,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 match msg? {
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(chunk) => {
+                        actor_context
+                            .streaming_metrics
+                            .sink_input_row_count
+                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
+                            .inc_by(chunk.capacity() as u64);
+
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         let chunk = merge_chunk_row(chunk, &stream_key);

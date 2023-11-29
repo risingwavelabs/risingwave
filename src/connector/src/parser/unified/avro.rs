@@ -231,31 +231,19 @@ impl<'a> AvroParseOptions<'a> {
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
             // ---- List -----
-            (Some(DataType::List(item_type)), Value::Array(arr)) => ListValue::new(
-                arr.iter()
-                    .map(|v| {
-                        let schema = self.extract_inner_schema(None);
-                        Self {
-                            schema,
-                            relax_numeric: self.relax_numeric,
-                        }
-                        .parse(v, Some(item_type))
-                    })
-                    .collect::<Result<Vec<_>, AccessError>>()?,
-            )
-            .into(),
-            (None, Value::Array(arr)) => ListValue::new(
-                arr.iter()
-                    .map(|v| {
-                        let schema = self.extract_inner_schema(None);
-                        Self {
-                            schema,
-                            relax_numeric: self.relax_numeric,
-                        }
-                        .parse(v, None)
-                    })
-                    .collect::<Result<Vec<_>, AccessError>>()?,
-            )
+            (Some(DataType::List(item_type)), Value::Array(array)) => ListValue::new({
+                let schema = self.extract_inner_schema(None);
+                let mut builder = item_type.create_array_builder(array.len());
+                for v in array {
+                    let value = Self {
+                        schema,
+                        relax_numeric: self.relax_numeric,
+                    }
+                    .parse(v, Some(item_type))?;
+                    builder.append(value);
+                }
+                builder.finish()
+            })
             .into(),
             // ---- Bytea -----
             (Some(DataType::Bytea) | None, Value::Bytes(value)) => {
