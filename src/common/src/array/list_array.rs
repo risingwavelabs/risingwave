@@ -31,7 +31,8 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
+    ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -343,6 +344,19 @@ impl ListValue {
 
     pub fn empty(datatype: &DataType) -> Self {
         Self::new(datatype.create_array_builder(0).finish())
+    }
+
+    /// Creates a new `ListValue` from an iterator of `Datum`.
+    pub fn from_datum_iter<T: ToDatumRef>(
+        datatype: &DataType,
+        iter: impl IntoIterator<Item = T>,
+    ) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = datatype.create_array_builder(iter.size_hint().0);
+        for datum in iter {
+            builder.append(datum);
+        }
+        Self::new(builder.finish())
     }
 
     /// Returns the length of the list.

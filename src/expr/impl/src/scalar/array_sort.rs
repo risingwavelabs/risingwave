@@ -19,9 +19,8 @@ use risingwave_expr::function;
 
 #[function("array_sort(anyarray) -> anyarray")]
 pub fn array_sort(array: ListRef<'_>) -> ListValue {
-    let mut builder = array.data_type().create_array_builder(array.len());
-    for v in array.iter().map(DefaultOrdered).sorted() {
-        builder.append(v.0);
-    }
-    ListValue::new(builder.finish())
+    ListValue::from_datum_iter(
+        &array.data_type(),
+        array.iter().map(DefaultOrdered).sorted().map(|v| v.0),
+    )
 }

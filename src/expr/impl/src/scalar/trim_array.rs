@@ -84,9 +84,8 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
                 name: "n",
                 reason: "more than array length".into(),
             })?;
-    let mut builder = array.data_type().create_array_builder(len_to_retain);
-    for val in values.take(len_to_retain) {
-        builder.append(val);
-    }
-    Ok(ListValue::new(builder.finish()))
+    Ok(ListValue::from_datum_iter(
+        &array.data_type(),
+        values.take(len_to_retain),
+    ))
 }

@@ -61,12 +61,11 @@ fn array_replace(
     elem_to: Option<ScalarRefImpl<'_>>,
 ) -> Option<ListValue> {
     let array = array?;
-    let mut builder = array.data_type().create_array_builder(array.len());
-    for val in array.iter() {
-        builder.append(match val == elem_from {
+    Some(ListValue::from_datum_iter(
+        &array.data_type(),
+        array.iter().map(|val| match val == elem_from {
             true => elem_to,
             false => val,
-        });
-    }
-    Some(ListValue::new(builder.finish()))
+        }),
+    ))
 }

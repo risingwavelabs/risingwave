@@ -20,11 +20,7 @@ use risingwave_expr::function;
 
 #[function("array(...) -> anyarray", type_infer = "panic")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
-    let mut builder = ctx.return_type.as_list().create_array_builder(row.len());
-    for datum in row.iter() {
-        builder.append(datum);
-    }
-    ListValue::new(builder.finish())
+    ListValue::from_datum_iter(ctx.return_type.as_list(), row.iter())
 }
 
 #[function("row(...) -> struct", type_infer = "panic")]

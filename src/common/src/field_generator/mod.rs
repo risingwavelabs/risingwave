@@ -292,11 +292,10 @@ impl FieldGeneratorImpl {
                 Some(ScalarImpl::Struct(StructValue::new(data)))
             }
             FieldGeneratorImpl::List(field, list_length) => {
-                let mut builder = field.data_type().create_array_builder(*list_length);
-                for _ in 0..*list_length {
-                    builder.append(field.generate_datum(offset));
-                }
-                Some(ScalarImpl::List(ListValue::new(builder.finish())))
+                Some(ScalarImpl::List(ListValue::from_datum_iter(
+                    &field.data_type(),
+                    std::iter::repeat_with(|| field.generate_datum(offset)).take(*list_length),
+                )))
             }
         }
     }

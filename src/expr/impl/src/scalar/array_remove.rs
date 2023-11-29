@@ -69,9 +69,8 @@ use risingwave_expr::function;
 #[function("array_remove(anyarray, any) -> anyarray")]
 fn array_remove(array: Option<ListRef<'_>>, elem: Option<ScalarRefImpl<'_>>) -> Option<ListValue> {
     let array = array?;
-    let mut builder = array.data_type().create_array_builder(array.len());
-    for val in array.iter().filter(|x| x != &elem) {
-        builder.append(val);
-    }
-    Some(ListValue::new(builder.finish()))
+    Some(ListValue::from_datum_iter(
+        &array.data_type(),
+        array.iter().filter(|x| x != &elem),
+    ))
 }

@@ -25,10 +25,8 @@ pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Option<Lis
     if start > end {
         return Some(ListValue::empty(&list.data_type()));
     }
-
-    let mut builder = list.data_type().create_array_builder(end - start);
-    for datumref in list_all_values.take(end).skip(start - 1) {
-        builder.append(datumref);
-    }
-    Some(ListValue::new(builder.finish()))
+    Some(ListValue::from_datum_iter(
+        &list.data_type(),
+        list_all_values.take(end).skip(start - 1),
+    ))
 }
