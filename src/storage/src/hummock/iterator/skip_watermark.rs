@@ -186,7 +186,12 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
     async fn next(&mut self) -> HummockResult<()> {
         self.inner.next().await?;
-        self.advance_key_and_watermark().await?;
+        // Check whether there is any remaining watermark and return early to
+        // avoid calling the async `advance_key_and_watermark`, since in benchmark
+        // performance downgrade is observed without this early return.
+        if !self.remain_watermarks.is_empty() {
+            self.advance_key_and_watermark().await?;
+        }
         Ok(())
     }
 
