@@ -120,6 +120,7 @@ pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
 
 pub fn is_max_epoch(epoch: u64) -> bool {
+    // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version, it means that there may be two value in our system which represent infinite. We must check both of them for compatibility.
     epoch >= MAX_EPOCH
 }
 pub fn is_compatibility_epoch(epoch: u64) -> bool {

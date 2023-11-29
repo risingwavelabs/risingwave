@@ -311,7 +311,6 @@ where
             if  !is_max_epoch(builder.last_range_tombstone_epoch()) {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: event.event_key.clone(),
-                    // write `HummockEpoch::MAX` instead of `HummockEpoch::MAX` for forward compatibility.
                     new_epoch: HummockEpoch::MAX,
                 });
             }
