@@ -577,7 +577,13 @@ impl BlockBuilder {
     ///
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
-        assert!(self.entry_count > 0);
+        assert!(
+            self.entry_count > 0,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
 
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
@@ -626,7 +632,13 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
-        assert!(self.buf.len() < (u32::MAX) as usize);
+        assert!(
+            self.buf.len() < (u32::MAX) as usize,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
 
         self.buf.as_ref()
     }

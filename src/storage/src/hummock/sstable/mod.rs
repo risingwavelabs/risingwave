@@ -17,7 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
@@ -192,6 +192,16 @@ impl MonotonicDeleteEvent {
     #[inline]
     pub fn encoded_size(&self) -> usize {
         4 + self.event_key.left_user_key.encoded_len() + 1 + 8
+    }
+}
+
+impl Display for MonotonicDeleteEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event key {:?} epoch {:?}",
+            self.event_key, self.new_epoch
+        )
     }
 }
 

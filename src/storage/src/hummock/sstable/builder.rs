@@ -256,8 +256,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
                 iter.seek_to_first();
                 while iter.is_valid() {
-                    let value = HummockValue::from_slice(iter.value())
-                        .expect("decode failed for fast compact");
+                    let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
+                        panic!(
+                            "decode failed for fast compact last_table_id {:?}",
+                            self.last_table_id
+                        )
+                    });
                     self.add_impl(iter.key(), value, false).await?;
                     iter.next();
                 }
@@ -266,7 +270,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.build_block().await?;
         }
         self.last_full_key = largest_key;
-        assert_eq!(meta.len as usize, buf.len());
+        assert_eq!(
+            meta.len as usize,
+            buf.len(),
+            "meta {} buf {} last_table_id {:?}",
+            meta.len,
+            buf.len(),
+            self.last_table_id
+        );
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
@@ -323,7 +334,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
         if is_new_table {
-            assert!(could_switch_block);
+            assert!(
+                could_switch_block,
+                "is_new_user_key {} table_id {} last_table_id {:?} full_key {:?}",
+                is_new_user_key, table_id, self.last_table_id, full_key
+            );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
@@ -402,10 +417,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
+        // Each DeleteRange generates at least two Events to indicate the left and right boundaries
+        assert_ne!(
+            1,
+            self.monotonic_deletes.len(),
+            "delete_event {:?} table_ids {:?}",
+            self.monotonic_deletes.first().unwrap(),
+            self.table_ids
+        );
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            assert_eq!(monotonic_delete.new_epoch, MAX_EPOCH);
+            assert_eq!(
+                monotonic_delete.new_epoch, MAX_EPOCH,
+                "delete_event {:?} table_ids {:?}",
+                monotonic_delete, self.table_ids
+            );
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
                     || !KeyComparator::encoded_greater_than_unencoded(
@@ -437,7 +463,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
-            assert_ne!(monotonic_delete.new_epoch, MAX_EPOCH);
+            assert_ne!(
+                monotonic_delete.new_epoch, MAX_EPOCH,
+                "delete_event {:?} table_ids {:?}",
+                monotonic_delete, self.table_ids
+            );
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),

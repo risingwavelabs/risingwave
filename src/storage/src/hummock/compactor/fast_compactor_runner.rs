@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -332,7 +332,14 @@ impl CompactorRunner {
             task_config.split_by_table,
             task_config.split_weight_by_vnode,
         );
-        assert_eq!(task.input_ssts.len(), 2);
+        assert_eq!(
+            task.input_ssts.len(),
+            2,
+            "TaskId {} target_level {:?} task {:?}",
+            task.task_id,
+            task.target_level,
+            compact_task_to_string(&task)
+        );
         let left = Box::new(ConcatSstableIterator::new(
             task.input_ssts[0].table_infos.clone(),
             context.sstable_store.clone(),
@@ -370,7 +377,11 @@ impl CompactorRunner {
             } else {
                 (&mut self.right, &mut self.left)
             };
-            assert!(ret != Ordering::Equal);
+            assert!(
+                ret != Ordering::Equal,
+                "sst range overlap equal_key {:?}",
+                self.left.current_sstable().key()
+            );
             if first.current_sstable().iter.is_none() {
                 let right_key = second.current_sstable().key();
                 while first.current_sstable().is_valid() {
@@ -452,7 +463,11 @@ impl CompactorRunner {
             let target_key = FullKey::decode(&sstable_iter.sstable.value().meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
                 self.executor.run(iter, target_key).await?;
-                assert!(!iter.is_valid());
+                assert!(
+                    !iter.is_valid(),
+                    "iter should not be valid key {:?}",
+                    iter.key()
+                );
             }
             sstable_iter.iter.take();
         }
