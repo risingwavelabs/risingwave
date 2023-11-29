@@ -23,7 +23,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
-use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range_with_vnode, TableKeyRange};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
@@ -158,7 +158,5 @@ fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange 
     let left = map_bound(left_bound, r.left);
     let right = map_bound(right_bound, r.right);
 
-    let vnode_slice = vnode.to_be_bytes();
-
-    map_table_key_range(prefixed_range((left, right), &vnode_slice[..]))
+    map_table_key_range(prefixed_range_with_vnode((left, right), vnode))
 }
