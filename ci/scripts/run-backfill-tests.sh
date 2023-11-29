@@ -146,6 +146,7 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
+  cargo make wait-processes-exit
   wait
 }
 
