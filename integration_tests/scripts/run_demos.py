@@ -338,12 +338,16 @@ def run_bigquery_demo():
             print("run sql {} on Bigquery".format(sql))
             rows = subprocess.check_output(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", sql], cwd=demo_dir)
             rows = json.loads(rows.decode("utf-8"))[0]['count']
+            print("{} rows in {}".format(rows, rel))
             if rows < 1:
                 failed_cases.append(rel)
 
             drop_sql = "DROP TABLE IF EXISTS `{}`".format(rel)
             print("delete test table [{}] in big query".format(rel))
             subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", drop_sql], cwd=demo_dir, check=True)
+
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
 
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
