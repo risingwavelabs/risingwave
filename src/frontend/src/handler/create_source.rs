@@ -863,23 +863,29 @@ pub(super) fn bind_source_watermark(
     Ok(watermark_descs)
 }
 
-static CONNECTOR_COMPATOBLE_ADDITIONAL_COLUMNS: LazyLock<
-    HashMap<
-        String,
-        Vec<(
-            &'static str,
-            Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>,
-        )>,
-    >,
+type CompatibleAdditionalColumnsFn =
+    Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>;
+
+static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
+    HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>>,
 > = LazyLock::new(|| {
-    convert_args!(hashmap!(
-        KAFKA_CONNECTOR => vec![("key", Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            ColumnCatalog {
-                column_desc: ColumnDesc::named(name, id, DataType::Bytea),
-                is_hidden: false,
-            }
-        }))],
-    ))
+    let mut res: HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>> =
+        HashMap::new();
+
+    res.insert(
+        KAFKA_CONNECTOR.to_string(),
+        vec![(
+            "key",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named(name, id, DataType::Bytea),
+                    is_hidden: false,
+                }
+            }),
+        )],
+    );
+
+    res
 });
 
 // TODO: Better design if we want to support ENCODE KEY where we will have 4 dimensional array
