@@ -3,7 +3,7 @@
 control substitution on
 
 statement ok
-ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
 
 system ok
 mysql --protocol=tcp -u root -e "
