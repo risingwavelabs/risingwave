@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -97,10 +98,7 @@ pub async fn handle_alter_table_column(
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter table with source having schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter table with source having schema registry");
         }
     }
 
@@ -140,10 +138,7 @@ pub async fn handle_alter_table_column(
             cascade,
         } => {
             if cascade {
-                Err(ErrorCode::NotImplemented(
-                    "drop column cascade".to_owned(),
-                    6903.into(),
-                ))?
+                bail_not_implemented!(issue = 6903, "drop column cascade");
             }
 
             // Locate the column by name and remove it.
