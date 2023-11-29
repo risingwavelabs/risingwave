@@ -125,7 +125,7 @@ impl Array for BoolArray {
 }
 
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,

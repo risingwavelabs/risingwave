@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
+    StreamScanType,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -177,13 +178,14 @@ impl FragmentManager {
         let map = &self.core.read().await.table_fragments;
         let mut table_map = HashMap::new();
         // TODO(kwannoel): Can this be unified with `PlanVisitor`?
-        fn has_stream_scan(stream_node: &StreamNode) -> bool {
-            let is_node_scan = if let Some(node) = &stream_node.node_body {
-                node.is_stream_scan()
+        fn has_backfill(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+            && let Some(node) = node.as_stream_scan() {
+                node.stream_scan_type == StreamScanType::Backfill as i32
             } else {
                 false
             };
-            is_node_scan || stream_node.get_input().iter().any(has_stream_scan)
+            is_backfill || stream_node.get_input().iter().any(has_backfill)
         }
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
@@ -191,7 +193,7 @@ impl FragmentManager {
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
                         if let Some(node) = &actor.nodes
-                            && has_stream_scan(node)
+                            && has_backfill(node)
                         {
                             actors.insert(actor.actor_id);
                         } else {

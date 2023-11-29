@@ -27,11 +27,7 @@ pub async fn handle_drop_function(
     _option: Option<ReferentialAction>,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {
-        return Err(ErrorCode::NotImplemented(
-            "only support dropping 1 function".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("only support dropping 1 function");
     }
     let func_desc = func_desc.remove(0);
 

@@ -15,6 +15,8 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
+use crate::error::{bail_not_implemented, NotImplemented};
+
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
 #[allow(dead_code)]
@@ -27,10 +29,10 @@ pub enum IsolationLevel {
 }
 
 impl FromStr for IsolationLevel {
-    type Err = &'static str;
+    type Err = NotImplemented;
 
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        Err("isolation level is not yet supported")
+        bail_not_implemented!(issue = 10736, "isolation level");
     }
 }
 

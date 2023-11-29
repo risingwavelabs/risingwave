@@ -490,13 +490,9 @@ mod tests {
         // NOTE: `NULL`s inside composite type values are always the largest.
 
         let list_none = Datum::None;
-        let list_1 = Datum::Some(
-            ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into(),
-        );
-        let list_2 = Datum::Some(
-            ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into(),
-        );
-        let list_3 = Datum::Some(ListValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+        let list_1 = Datum::Some(ListValue::from_iter([1, 2]).into());
+        let list_2 = Datum::Some(ListValue::from_iter([1, 3]).into());
+        let list_3 = Datum::Some(ListValue::from_iter([Some(1), None]).into());
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)

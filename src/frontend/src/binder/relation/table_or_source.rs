@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{is_system_schema, Field};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
@@ -100,19 +101,17 @@ impl Binder {
                         {
                             self.resolve_view_relation(&view_catalog.clone())?
                         } else {
-                            return Err(ErrorCode::NotImplemented(
-                                format!(
-                                    r###"{}.{} is not supported, please use `SHOW` commands for now.
+                            bail_not_implemented!(
+                                issue = 1695,
+                                r###"{}.{} is not supported, please use `SHOW` commands for now.
 `SHOW TABLES`,
 `SHOW MATERIALIZED VIEWS`,
 `DESCRIBE <table>`,
 `SHOW COLUMNS FROM [table]`
 "###,
-                                    schema_name, table_name
-                                ),
-                                1695.into(),
-                            )
-                            .into());
+                                schema_name,
+                                table_name
+                            );
                         }
                     } else if let Ok((table_catalog, schema_name)) =
                         self.catalog
