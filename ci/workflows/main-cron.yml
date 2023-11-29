@@ -326,7 +326,7 @@ steps:
     retry: *auto-retry
 
   - label: "misc check"
-    command: "ci/scripts/misc-check.sh"
+    command: "ci/scripts/misc-check-cron.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-misc-check"
