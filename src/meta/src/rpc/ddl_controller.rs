@@ -1152,6 +1152,11 @@ impl DdlController {
                     .alter_schema_name(schema_id, new_name)
                     .await
             }
+            Relation::DatabaseId(database_id) => {
+                self.catalog_manager
+                    .alter_database_name(database_id, new_name)
+                    .await
+            }
         }
     }
 

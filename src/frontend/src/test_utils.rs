@@ -572,6 +572,10 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_schema_name(&self, _schema_id: u32, _schema_name: &str) -> Result<()> {
         unreachable!()
     }
+
+    async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
+        unreachable!()
+    }
 }
 
 impl MockCatalogWriter {

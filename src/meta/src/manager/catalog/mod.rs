@@ -1810,6 +1810,35 @@ impl CatalogManager {
         Ok(version)
     }
 
+    pub async fn alter_database_name(
+        &self,
+        database_id: SchemaId,
+        database_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(database_id)?;
+
+        // 1. validate new database name.
+        let database_name = database_name.to_string();
+        let mut database = database_core.databases.get(&database_id).unwrap().clone();
+        database_core.check_database_duplicated(&database_name)?;
+
+        // 2. rename schema.
+        database.name = database_name;
+
+        // 3. update, commit and notify.
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        databases.insert(database_id, database.clone());
+        commit_meta!(self, databases)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Database(database))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;

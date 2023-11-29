@@ -438,6 +438,10 @@ pub async fn handle(
         }
         Statement::AlterDatabase {
             name,
+            operation: AlterDatabaseOperation::RenameDatabase { database_name },
+        } => alter_relation_rename::handle_rename_database(handler_args, name, database_name).await,
+        Statement::AlterDatabase {
+            name,
             operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
         } => {
             alter_owner::handle_alter_owner(

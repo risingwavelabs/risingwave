@@ -296,14 +296,18 @@ impl Catalog {
     pub fn update_database(&mut self, proto: &PbDatabase) {
         let id = proto.id;
         let name = proto.name.clone();
-        let db = proto.into();
 
-        let old_database_name = self.get_database_by_id(&id).unwrap().name().to_owned();
-        if old_database_name != name {
-            self.database_by_name.remove(&old_database_name);
-            self.db_name_by_id.remove(&id);
-        }
-        self.database_by_name.insert(name.clone(), db);
+        let database = self.get_database_by_id(&id).unwrap();
+        let old_database_name = database.name().to_string();
+        let mut database = if old_database_name != name {
+            self.database_by_name.remove(&old_database_name).unwrap()
+        } else {
+            database.clone()
+        };
+        database.name = name.clone();
+        database.owner = proto.owner;
+
+        self.database_by_name.insert(name.clone(), database);
         self.db_name_by_id.insert(id, name);
     }
 

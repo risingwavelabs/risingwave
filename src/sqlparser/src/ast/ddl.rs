@@ -28,6 +28,7 @@ use crate::tokenizer::Token;
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameDatabase { database_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -137,6 +138,9 @@ impl fmt::Display for AlterDatabaseOperation {
         match self {
             AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterDatabaseOperation::RenameDatabase { database_name } => {
+                write!(f, "RENAME TO {}", database_name)
             }
         }
     }

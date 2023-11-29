@@ -2824,6 +2824,13 @@ impl Parser {
             AlterDatabaseOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let database_name = self.parse_object_name()?;
+                AlterDatabaseOperation::RenameDatabase { database_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
         } else {
             return self.expected("OWNER TO after ALTER DATABASE", self.peek_token());
         };

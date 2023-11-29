@@ -161,6 +161,8 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()>;
 
+    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()>;
+
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
 
     async fn alter_set_schema(
@@ -431,6 +433,14 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .alter_relation_name(Relation::SchemaId(schema_id), schema_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::DatabaseId(database_id), database_name)
             .await?;
         self.wait_version(version).await
     }

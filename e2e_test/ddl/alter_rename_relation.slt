@@ -59,6 +59,9 @@ CREATE SCHEMA schema;
 statement ok
 CREATE TABLE schema.t(id INT);
 
+statement ok
+CREATE DATABASE database;
+
 query TT
 SHOW CREATE TABLE t;
 ----
@@ -204,6 +207,15 @@ ALTER SCHEMA schema RENAME TO schema1;
 
 statement error
 ALTER SCHEMA pg_catalog RENAME TO pg_catalog1;
+
+statement error
+ALTER DATABASE dev RENAME TO dev1;
+
+statement ok
+ALTER DATABASE database RENAME TO database1;
+
+statement ok
+DROP DATABASE database1;
 
 statement ok
 SELECT * FROM schema1.t;
