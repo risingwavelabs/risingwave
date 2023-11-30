@@ -1,0 +1,32 @@
+[package]
+name = "risingwave_common_heap_profiling"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+parking_lot = "0.12"
+risingwave_common = { workspace = true }
+thiserror = "1"
+thiserror-ext = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
+
+[lints]
+workspace = true

@@ -14,7 +14,7 @@
 
 use std::ops::{Index, IndexMut};
 
-use risingwave_common::error::{Result, RwError};
+use crate::error::{BatchError, Result};
 
 /// Id of one row in chunked data.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
@@ -151,7 +151,7 @@ impl<V> IndexMut<RowId> for ChunkedData<V> {
 }
 
 impl<V> TryFrom<Vec<Vec<V>>> for ChunkedData<V> {
-    type Error = RwError;
+    type Error = BatchError;
 
     fn try_from(value: Vec<Vec<V>>) -> Result<Self> {
         let chunk_offsets = std::iter::once(Ok(0))

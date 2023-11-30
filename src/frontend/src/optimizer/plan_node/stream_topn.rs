@@ -17,55 +17,45 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
+use super::stream::prelude::*;
 use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
-    pub base: PlanBase,
-    logical: generic::TopN<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl StreamTopN {
-    fn new_inner(logical: generic::TopN<PlanRef>, stream_key: Option<Vec<usize>>) -> Self {
-        assert!(logical.group_key.is_empty());
-        assert!(logical.limit_attr.limit() > 0);
-        let input = &logical.input;
+    pub fn new(core: generic::TopN<PlanRef>) -> Self {
+        assert!(core.group_key.is_empty());
+        assert!(core.limit_attr.limit() > 0);
+        let input = &core.input;
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
         let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let mut base =
-            PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
-        if let Some(stream_key) = stream_key {
-            base.logical_pk = stream_key;
-        }
-        StreamTopN { base, logical }
-    }
-
-    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
-        Self::new_inner(logical, None)
-    }
-
-    pub fn with_stream_key(logical: generic::TopN<PlanRef>, stream_key: Vec<usize>) -> Self {
-        Self::new_inner(logical, Some(stream_key))
+        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
+        StreamTopN { base, core }
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
-        self.logical.limit_attr
+        self.core.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset
+        self.core.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        &self.logical.order
+        &self.core.order
     }
 }
 
@@ -74,19 +64,19 @@ impl Distill for StreamTopN {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );
-        self.logical.distill_with_name(name)
+        self.core.distill_with_name(name)
     }
 }
 
 impl PlanTreeNodeUnary for StreamTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new_inner(logical, Some(self.logical_pk().to_vec()))
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -102,11 +92,11 @@ impl StreamNode for StreamTopN {
             offset: self.offset(),
             with_ties: self.limit_attr().with_ties(),
             table: Some(
-                self.logical
+                self.core
                     .infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.logical_pk(),
+                        input.expect_stream_key(),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())
@@ -121,4 +111,7 @@ impl StreamNode for StreamTopN {
         }
     }
 }
+
 impl ExprRewritable for StreamTopN {}
+
+impl ExprVisitable for StreamTopN {}

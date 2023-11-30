@@ -24,8 +24,8 @@
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select ARRAY[];
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[]
+  binder_error: |
+    Failed to bind expression: ARRAY[]
 
     Caused by:
       Bind error: cannot determine type of empty array
@@ -42,8 +42,8 @@
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select ARRAY[]::int;
-  binder_error: |-
-    Bind error: failed to bind expression: CAST(ARRAY[] AS INT)
+  binder_error: |
+    Failed to bind expression: CAST(ARRAY[] AS INT)
 
     Caused by:
       Bind error: cannot determine type of empty array
@@ -56,7 +56,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Timestamptz)]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Timestamptz), 0:Int64]] }
 - sql: |
     select ARRAY[]::STRUCT<f1 INT>[];
   logical_plan: |-
@@ -65,7 +65,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] }))]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] })), 0:Int64]] }
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |-
@@ -86,22 +86,22 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[{233}, {66}]:List(List(Int32))]] }'
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: |-
-    Bind error: failed to bind expression: array_cat(ARRAY[233], ARRAY[ARRAY[ARRAY[66]]])
+  binder_error: |
+    Failed to bind expression: array_cat(ARRAY[233], ARRAY[ARRAY[ARRAY[66]]])
 
     Caused by:
       Bind error: Cannot concatenate integer[] and integer[][][]
 - sql: |
     select array_cat(array[233], 123);
-  binder_error: |-
-    Bind error: failed to bind expression: array_cat(ARRAY[233], 123)
+  binder_error: |
+    Failed to bind expression: array_cat(ARRAY[233], 123)
 
     Caused by:
       Bind error: Cannot concatenate integer[] and integer
 - sql: |
     select array_cat(123, array[233]);
-  binder_error: |-
-    Bind error: failed to bind expression: array_cat(123, ARRAY[233])
+  binder_error: |
+    Failed to bind expression: array_cat(123, ARRAY[233])
 
     Caused by:
       Bind error: Cannot concatenate integer and integer[]
@@ -115,7 +115,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }'
 - name: array_cat(unknown as text[], unknown as text[]) -> text[]
   sql: |
-    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+    select array_cat('{a}', '{"{b}"}') = array['a', '{b}'];
   batch_plan: 'BatchValues { rows: [[true:Boolean]] }'
 - name: array_cat(unknown as int[], int[]) -> int[]
   sql: |
@@ -124,11 +124,11 @@
 - name: array_cat(unknown, int) -> err
   sql: |
     select array_cat('{1}', 2);
-  binder_error: |-
-    Bind error: failed to bind expression: array_cat('{1}', 2)
+  binder_error: |
+    Failed to bind expression: array_cat('{1}', 2)
 
     Caused by:
-      Bind error: Cannot concatenate varchar and integer
+      Bind error: Cannot concatenate character varying and integer
 - sql: |
     select array_append(array[66], 123);
   logical_plan: |-
@@ -137,8 +137,8 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[66, 123]:List(Int32)]] }'
 - sql: |
     select array_append(123, 234);
-  binder_error: |-
-    Bind error: failed to bind expression: array_append(123, 234)
+  binder_error: |
+    Failed to bind expression: array_append(123, 234)
 
     Caused by:
       Bind error: Cannot append integer to integer
@@ -172,8 +172,8 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[123, 66]:List(Int32)]] }'
 - sql: |
     select array_prepend(123, 234);
-  binder_error: |-
-    Bind error: failed to bind expression: array_prepend(123, 234)
+  binder_error: |
+    Failed to bind expression: array_prepend(123, 234)
 
     Caused by:
       Bind error: Cannot prepend integer to integer
@@ -182,6 +182,44 @@
   logical_plan: |-
     LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int[]) -> bool
+  sql: select array[1,2] @> array[2,3];
+  logical_plan: |-
+    LogicalProject { exprs: [(Array(1:Int32, 2:Int32) @> Array(2:Int32, 3:Int32)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[][], int[]) -> bool
+  sql: select array[[1,2]] @> array[2,3];
+  logical_plan: |-
+    LogicalProject { exprs: [(Array(Array(1:Int32, 2:Int32)) @> Array(2:Int32, 3:Int32)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int) -> bool
+  sql: select array[1,2] @> 2;
+  binder_error: |
+    Failed to bind expression: ARRAY[1, 2] @> 2
+
+    Caused by:
+      Bind error: operator does not exist: integer[] @> integer
+- name: array_contains(int[], varchar[]) -> bool
+  sql: select array[2,3] @> array['1'];
+  binder_error: |
+    Failed to bind expression: ARRAY[2, 3] @> ARRAY['1']
+
+    Caused by:
+      Bind error: Cannot array_contains unnested type integer to unnested type character varying
+- name: array_contains(int[][], varchar[][]) -> bool
+  sql: select array[array[1,2]] @> array[array['2','3']];
+  binder_error: |
+    Failed to bind expression: ARRAY[ARRAY[1, 2]] @> ARRAY[ARRAY['2', '3']]
+
+    Caused by:
+      Bind error: Cannot array_contains unnested type integer to unnested type character varying
+- name: any contains(null, null) -> bool
+  sql: select '{}' @> '{}';
+  binder_error: |
+    Failed to bind expression: '{}' @> '{}'
+
+    Caused by:
+      Bind error: operator does not exist: unknown @> unknown
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
@@ -190,7 +228,7 @@
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
-  binder_error: 'Bind error: cannot cast type "varchar" to "varchar[]" in Assign context'
+  binder_error: 'Bind error: cannot cast type "character varying" to "character varying[]" in Assign context'
 - name: string to varchar[] in explicit context
   sql: |
     select ('{c,' || 'd}')::varchar[];
@@ -200,19 +238,19 @@
 - name: unknown to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,d}');
-  logical_plan: 'LogicalValues { rows: [[Array(''a'':Varchar, ''b'':Varchar)], [''{c,d}'':Varchar::List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }'
+  logical_plan: 'LogicalValues { rows: [[Array(''a'':Varchar, ''b'':Varchar)], [ARRAY[c, d]:List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }'
 - name: unknown to varchar[] in assign context
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,d}');
   logical_plan: |-
     LogicalInsert { table: t, mapping: [0:0] }
-    └─LogicalValues { rows: [['{c,d}':Varchar::List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }
+    └─LogicalValues { rows: [[ARRAY[c, d]:List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }
 - name: unknown to varchar[] in explicit context
   sql: |
     select ('{c,d}')::varchar[];
   logical_plan: |-
-    LogicalProject { exprs: ['{c,d}':Varchar::List(Varchar) as $expr1] }
+    LogicalProject { exprs: [ARRAY[c, d]:List(Varchar)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: varchar[] to string in assign context
   sql: |
@@ -249,13 +287,13 @@
   sql: |
     select array[1] = '{1}';
   logical_plan: |-
-    LogicalProject { exprs: [(Array(1:Int32) = '{1}':Varchar::List(Int32)) as $expr1] }
+    LogicalProject { exprs: [(Array(1:Int32) = ARRAY[1]:List(Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: compare with different type
   sql: |
     select array[1] = array[1.2];
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[1] = ARRAY[1.2]
+  binder_error: |
+    Failed to bind expression: ARRAY[1] = ARRAY[1.2]
 
     Caused by:
       Bind error: cannot compare integer[] and numeric[]

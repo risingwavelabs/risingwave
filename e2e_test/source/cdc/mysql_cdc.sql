@@ -1,4 +1,4 @@
-DROP DATABASE IF EXISTS mydb;
+DROP DATABASE IF EXISTS `my@db`;
 CREATE DATABASE `my@db`;
 
 USE `my@db`;

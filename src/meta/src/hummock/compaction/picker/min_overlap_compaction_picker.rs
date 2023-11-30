@@ -209,6 +209,13 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            // more than 1 sub_level
+            if ret.total_file_count > 1 && ret.total_file_size >= self.max_compaction_bytes
+                || ret.total_file_count >= self.max_file_count as usize
+            {
+                break;
+            }
+
             let mut overlap_files_range =
                 overlap_info.check_multiple_include(&target_level.table_infos);
             if overlap_files_range.is_empty() {
@@ -288,15 +295,6 @@ impl NonOverlapSubLevelPicker {
                     .map(|(_, files)| files.len())
                     .sum::<usize>();
 
-            // more than 1 sub_level
-            if ret.total_file_count > 1
-                && (ret.total_file_size + (add_files_size + current_level_size)
-                    >= self.max_compaction_bytes
-                    || ret.total_file_count + add_files_count >= self.max_file_count as usize)
-            {
-                break;
-            }
-
             if ret
                 .sstable_infos
                 .iter()
@@ -360,29 +358,50 @@ impl NonOverlapSubLevelPicker {
             return vec![];
         }
 
+        let mut expected = Vec::with_capacity(scores.len());
+        let mut unexpected = vec![];
+
+        for selected_task in scores {
+            if selected_task.sstable_infos.len() > MAX_COMPACT_LEVEL_COUNT {
+                unexpected.push(selected_task);
+            } else {
+                expected.push(selected_task);
+            }
+        }
+
         // The logic of sorting depends on the interval we expect to select.
         // 1. contain as many levels as possible
         // 2. fewer files in the bottom sub level, containing as many smaller intervals as possible.
-        scores.sort_by(|a, b| {
+        expected.sort_by(|a, b| {
             b.sstable_infos
                 .len()
                 .cmp(&a.sstable_infos.len())
                 .then_with(|| a.total_file_count.cmp(&b.total_file_count))
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
-        scores
+
+        unexpected.sort_by(|a, b| {
+            b.sstable_infos
+                .len()
+                .cmp(&a.sstable_infos.len())
+                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
+                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+        });
+        expected.extend(unexpected);
+
+        expected
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 
     #[test]
     fn test_compact_l1() {

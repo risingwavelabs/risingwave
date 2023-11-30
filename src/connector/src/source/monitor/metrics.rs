@@ -33,7 +33,7 @@ pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
 impl EnumeratorMetrics {
     fn new(registry: &Registry) -> Self {
         let high_watermark = register_int_gauge_vec_with_registry!(
-            "high_watermark",
+            "source_kafka_high_watermark",
             "High watermark for a exec per partition",
             &["source_id", "partition"],
             registry,
@@ -56,12 +56,15 @@ impl Default for EnumeratorMetrics {
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
     pub partition_input_count: GenericCounterVec<AtomicU64>,
+
+    // **Note**: for normal messages, the metric is the message's payload size.
+    // For messages from load generator, the metric is the size of stream chunk.
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
-    /// User error reporting
-    pub user_source_error_count: GenericCounterVec<AtomicU64>,
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
+
+    pub connector_source_rows_received: GenericCounterVec<AtomicU64>,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -70,46 +73,42 @@ pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
 impl SourceMetrics {
     fn new(registry: &Registry) -> Self {
         let partition_input_count = register_int_counter_vec_with_registry!(
-            "partition_input_count",
+            "source_partition_input_count",
             "Total number of rows that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
         )
         .unwrap();
         let partition_input_bytes = register_int_counter_vec_with_registry!(
-            "partition_input_bytes",
+            "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
         )
         .unwrap();
-        let user_source_error_count = register_int_counter_vec_with_registry!(
-            "user_source_error_count",
-            "Source errors in the system, queryable by tags",
-            &[
-                "error_type",
-                "error_msg",
-                "executor_name",
-                "fragment_id",
-                "table_id"
-            ],
-            registry,
-        )
-        .unwrap();
         let latest_message_id = register_int_gauge_vec_with_registry!(
-            "latest_message_id",
+            "source_latest_message_id",
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
         )
         .unwrap();
+
+        let connector_source_rows_received = register_int_counter_vec_with_registry!(
+            "source_rows_received",
+            "Number of rows received by source",
+            &["source_type", "source_id"],
+            registry
+        )
+        .unwrap();
+
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
-            user_source_error_count,
             latest_message_id,
             rdkafka_native_metric,
+            connector_source_rows_received,
         }
     }
 }

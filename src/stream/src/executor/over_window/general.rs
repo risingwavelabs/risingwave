@@ -21,8 +21,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{RowRef, StreamChunk};
-use risingwave_common::catalog::Field;
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
@@ -47,7 +46,7 @@ use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
-    PkIndices, StreamExecutorError, StreamExecutorResult,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -143,11 +142,10 @@ impl<S: StateStore> ExecutorInner<S> {
 }
 
 pub struct OverWindowExecutorArgs<S: StateStore> {
-    pub input: BoxedExecutor,
-
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
+
+    pub input: BoxedExecutor,
 
     pub calls: Vec<WindowFuncCall>,
     pub partition_key_indices: Vec<usize>,
@@ -165,14 +163,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info();
-
-        let schema = {
-            let mut schema = input_info.schema.clone();
-            args.calls.iter().for_each(|call| {
-                schema.fields.push(Field::unnamed(call.return_type.clone()));
-            });
-            schema
-        };
+        let input_schema = &input_info.schema;
 
         let has_unbounded_frame = args.calls.iter().any(|call| call.frame.is_unbounded());
         let cache_policy = if has_unbounded_frame {
@@ -186,25 +177,21 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let order_key_data_types = args
             .order_key_indices
             .iter()
-            .map(|i| schema.fields()[*i].data_type.clone())
+            .map(|i| input_schema.fields()[*i].data_type.clone())
             .collect();
 
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("OverWindowExecutor {:X}", args.executor_id),
-                },
+                info: args.info,
                 calls: args.calls,
                 partition_key_indices: args.partition_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
-                input_schema_len: input_info.schema.len(),
+                input_schema_len: input_schema.len(),
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
                 metrics: args.metrics,
@@ -225,26 +212,25 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: &'a StreamChunk,
     ) -> impl Iterator<Item = Record<RowRef<'a>>> {
         let mut changes_merged = BTreeMap::new();
-        for record in chunk.records() {
-            match record {
-                Record::Insert { new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(new_row));
+        for (op, row) in chunk.rows() {
+            let pk = DefaultOrdered(this.get_input_pk(row));
+            match op {
+                Op::Insert | Op::UpdateInsert => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Delete { old_row } => {
                                 *prev_change = Record::Update {
                                     old_row: *old_row,
-                                    new_row,
+                                    new_row: row,
                                 };
                             }
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Insert { new_row: row });
                     }
                 }
-                Record::Delete { old_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
+                Op::Delete | Op::UpdateDelete => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Insert { .. } => {
@@ -261,29 +247,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
-                    }
-                }
-                Record::Update { old_row, new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Insert { .. } => {
-                                *prev_change = Record::Insert { new_row };
-                            }
-                            Record::Update {
-                                old_row: real_old_row,
-                                ..
-                            } => {
-                                *prev_change = Record::Update {
-                                    old_row: *real_old_row,
-                                    new_row,
-                                };
-                            }
-                            _ => panic!("inconsistent changes in input chunk"),
-                        }
-                    } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Delete { old_row: row });
                     }
                 }
             }
@@ -368,7 +332,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &mut cache,
                 this.cache_policy,
                 &this.calls,
-                &this.partition_key_indices,
                 &this.order_key_data_types,
                 &this.order_key_order_types,
                 &this.order_key_indices,
@@ -413,7 +376,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
 
             // Update recently accessed range for later shrinking cache.
-            if !this.cache_policy.is_full() && let Some(accessed_range) = accessed_range {
+            if !this.cache_policy.is_full()
+                && let Some(accessed_range) = accessed_range
+            {
                 match vars.recently_accessed_ranges.entry(part_key) {
                     btree_map::Entry::Vacant(vacant) => {
                         vacant.insert(accessed_range);
@@ -534,7 +499,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
             // because it must exist in the states, by the definition of affected range.
             while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
-                states.just_slide_forward();
+                states.just_slide()?;
             }
             let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
             assert_eq!(
@@ -547,7 +512,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 let (key, row) = curr_key_cursor
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
-                let output = states.curr_output()?;
+                let output = states.slide_no_evict_hint()?;
                 let new_row = OwnedRow::new(
                     row.as_inner()
                         .iter()
@@ -576,7 +541,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     }
                 }
 
-                states.just_slide_forward();
                 curr_key_cursor.move_next();
 
                 key != last_curr_key
@@ -636,18 +600,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     {
                         // update metrics
                         let actor_id_str = this.actor_ctx.id.to_string();
+                        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
                         let table_id_str = this.state_table.table_id().to_string();
                         this.metrics
                             .over_window_cached_entry_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .set(vars.cached_partitions.len() as _);
                         this.metrics
                             .over_window_cache_lookup_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
                         this.metrics
                             .over_window_cache_miss_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .inc_by(std::mem::take(&mut vars.stats.cache_miss));
                     }
 

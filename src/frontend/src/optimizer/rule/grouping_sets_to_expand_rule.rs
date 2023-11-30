@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -75,10 +75,11 @@ impl Rule for GroupingSetsToExpandRule {
             return None;
         }
         let agg = Self::prune_column_for_agg(agg);
-        let (agg_calls, mut group_keys, grouping_sets, input, enable_two_phase) = agg.decompose();
+        let (old_agg_calls, old_group_keys, grouping_sets, input, enable_two_phase) =
+            agg.decompose();
 
-        let flag_col_idx = group_keys.len();
-        let input_schema_len = input.schema().len();
+        let old_input_schema_len = input.schema().len();
+        let flag_col_idx = old_group_keys.len();
 
         let column_subset = grouping_sets
             .iter()
@@ -86,17 +87,23 @@ impl Rule for GroupingSetsToExpandRule {
             .collect_vec();
 
         let expand = LogicalExpand::create(input, column_subset.clone());
-        // Add the expand flag.
-        group_keys.extend(std::iter::once(expand.schema().len() - 1));
+        let new_group_keys = {
+            let mut k = old_group_keys.clone();
+            // Add the expand flag.
+            k.extend(std::iter::once(expand.schema().len() - 1));
+            k
+        };
 
+        // Map from old input ref to expanded input (`LogicalExpand` prepends the same number of fields
+        // as expanded ones with NULLs before the real input fields).
         let mut input_col_change =
-            ColIndexMapping::with_shift_offset(input_schema_len, input_schema_len as isize);
+            ColIndexMapping::with_shift_offset(old_input_schema_len, old_input_schema_len as isize);
 
         // Grouping agg calls need to be transformed into a project expression, and other agg calls
         // need to shift their `input_ref`.
-        let mut project_exprs = vec![];
+        let mut project_agg_call_exprs = vec![];
         let mut new_agg_calls = vec![];
-        for mut agg_call in agg_calls {
+        for agg_call in old_agg_calls {
             // Deal with grouping agg call for grouping sets.
             if agg_call.agg_kind == AggKind::Grouping {
                 let mut grouping_values = vec![];
@@ -140,34 +147,35 @@ impl Rule for GroupingSetsToExpandRule {
                     FunctionCall::new_unchecked(ExprType::Case, case_inputs, DataType::Int32)
                         .into(),
                 );
-                project_exprs.push(case_expr);
+                project_agg_call_exprs.push(case_expr);
             } else {
+                let mut new_agg_call = agg_call;
                 // Shift agg_call to the original input columns
-                agg_call.inputs.iter_mut().for_each(|i| {
-                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                new_agg_call.inputs.iter_mut().for_each(|i| {
+                    let new_i = input_col_change.map(i.index());
+                    assert_eq!(expand.schema()[new_i].data_type(), i.return_type());
+                    *i = InputRef::new(new_i, i.return_type());
                 });
-                agg_call.order_by.iter_mut().for_each(|o| {
+                new_agg_call.order_by.iter_mut().for_each(|o| {
                     o.column_index = input_col_change.map(o.column_index);
                 });
-                agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
-                let agg_return_type = agg_call.return_type.clone();
-                new_agg_calls.push(agg_call);
-                project_exprs.push(ExprImpl::InputRef(
-                    InputRef::new(group_keys.len() + new_agg_calls.len() - 1, agg_return_type)
-                        .into(),
+                new_agg_call.filter = new_agg_call.filter.rewrite_expr(&mut input_col_change);
+                project_agg_call_exprs.push(ExprImpl::InputRef(
+                    InputRef::new(
+                        new_group_keys.len() + new_agg_calls.len(),
+                        new_agg_call.return_type.clone(),
+                    )
+                    .into(),
                 ));
+                new_agg_calls.push(new_agg_call);
             }
         }
 
         let new_agg =
-            Agg::new(new_agg_calls, group_keys, expand).with_enable_two_phase(enable_two_phase);
-        let project_exprs = (0..flag_col_idx)
-            .map(|i| {
-                ExprImpl::InputRef(
-                    InputRef::new(i, new_agg.schema().fields()[i].data_type.clone()).into(),
-                )
-            })
-            .chain(project_exprs)
+            Agg::new(new_agg_calls, new_group_keys, expand).with_enable_two_phase(enable_two_phase);
+        let project_exprs = (0..old_group_keys.len())
+            .map(|i| ExprImpl::InputRef(InputRef::new(i, new_agg.schema()[i].data_type()).into()))
+            .chain(project_agg_call_exprs)
             .collect();
 
         let project = LogicalProject::new(new_agg.into(), project_exprs);

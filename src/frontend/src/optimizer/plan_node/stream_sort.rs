@@ -20,14 +20,16 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
 
     input: PlanRef,
     sort_column_index: usize,
@@ -48,7 +50,7 @@ impl StreamEowcSort {
         assert!(input.watermark_columns().contains(sort_column_index));
 
         let schema = input.schema().clone();
-        let logical_pk = input.logical_pk().to_vec();
+        let stream_key = input.stream_key().map(|v| v.to_vec());
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
         let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
@@ -56,7 +58,7 @@ impl StreamEowcSort {
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            logical_pk,
+            stream_key,
             fd_set,
             dist,
             true,
@@ -84,7 +86,7 @@ impl StreamEowcSort {
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
         order_cols.insert(self.sort_column_index);
 
-        let dist_key = self.base.dist.dist_column_indices().to_vec();
+        let dist_key = self.base.distribution().dist_column_indices().to_vec();
         for idx in &dist_key {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
@@ -92,7 +94,7 @@ impl StreamEowcSort {
             }
         }
 
-        for idx in self.input.logical_pk() {
+        for idx in self.input.expect_stream_key() {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
@@ -131,3 +133,5 @@ impl StreamNode for StreamEowcSort {
 }
 
 impl ExprRewritable for StreamEowcSort {}
+
+impl ExprVisitable for StreamEowcSort {}

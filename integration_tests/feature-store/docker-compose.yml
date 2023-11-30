@@ -66,7 +66,6 @@ services:
       - "./mfa-start.sql:/mfa-start.sql"
       - "./mfa-mock.sql:/mfa-mock.sql"
   feature-store:
-    image: rust:1.67
     build:
       context: .
       target: feature-store-server
@@ -102,10 +101,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 volumes:
   etcd-0:
     external: false

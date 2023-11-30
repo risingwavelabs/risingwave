@@ -260,7 +260,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
         generate_l0_overlapping_sublevels, generate_level, generate_table,
         push_table_level0_overlapping, push_tables_level0_nonoverlapping,
@@ -622,54 +622,5 @@ pub mod tests {
             .unwrap();
         assert!(is_l0_trivial_move(&ret));
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-    }
-
-    #[test]
-    fn test_issue_11154() {
-        let mut local_stats = LocalPickerStatistic::default();
-        let mut l0 = generate_l0_overlapping_sublevels(vec![
-            vec![
-                generate_table(4, 1, 1, 200, 1),
-                generate_table(5, 1, 400, 600, 1),
-            ],
-            vec![
-                generate_table(6, 1, 1, 200, 1),
-                generate_table(7, 1, 400, 600, 1),
-            ],
-            vec![
-                generate_table(8, 1, 1, 200, 1),
-                generate_table(9, 1, 400, 600, 1),
-            ],
-            vec![generate_table(10, 1, 1, 600, 1)],
-        ]);
-        // We can set level_type only because the input above is valid.
-        for s in &mut l0.sub_levels {
-            s.level_type = LevelType::Nonoverlapping as i32;
-        }
-        let levels = Levels {
-            l0: Some(l0),
-            levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
-            member_table_ids: vec![1],
-            ..Default::default()
-        };
-        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-
-        // Pick with large max_compaction_bytes results all sub levels included in input.
-        let config = Arc::new(
-            CompactionConfigBuilder::new()
-                .max_compaction_bytes(800)
-                .sub_level_max_compaction_bytes(50000)
-                .max_bytes_for_level_base(500000)
-                .level0_sub_level_compact_level_count(1)
-                .build(),
-        );
-        // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
-        // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let mut picker = IntraCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // avoid add sst_10 and cause a big task
-        assert_eq!(3, ret.input_levels.len());
     }
 }

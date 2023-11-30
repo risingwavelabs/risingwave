@@ -18,12 +18,11 @@
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
 #![feature(lint_reasons)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
 #![feature(hash_extract_if)]
 #![feature(extract_if)]
-#![feature(generators)]
-#![feature(iter_from_generator)]
+#![feature(coroutines)]
+#![feature(iter_from_coroutine)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(allocator_api)]
@@ -37,13 +36,11 @@
 #![feature(bound_map)]
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(test)]
 #![feature(is_sorted)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
-#![feature(async_fn_in_trait)]
 
 #[macro_use]
 extern crate tracing;
@@ -54,3 +51,6 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

@@ -18,11 +18,11 @@ use std::hash::{BuildHasher, Hash};
 
 use lru::{DefaultHasher, KeyRef, LruCache};
 
-use super::{MutGuard, UnsafeMutGuard};
+use super::{AtomicMutGuard, MutGuard};
 use crate::estimate_size::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `GlobalMemoryManager`.
+/// Should be used with `MemoryManager`.
 pub struct EstimatedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
     kv_heap_size: KvSize,
@@ -64,17 +64,22 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         v.map(|inner| MutGuard::new(inner, &mut self.kv_heap_size))
     }
 
-    pub fn get_mut_unsafe(&mut self, k: &K) -> Option<UnsafeMutGuard<V>> {
-        let v = self.inner.get_mut(k);
-        v.map(|inner| UnsafeMutGuard::new(inner, &mut self.kv_heap_size))
-    }
-
     pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
     where
         KeyRef<K>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.inner.get(k)
+    }
+
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl ExactSizeIterator<Item = (&'_ K, AtomicMutGuard<'_, V>)> + '_ {
+        let kv_heap_size = &self.kv_heap_size;
+        self.inner.iter_mut().map(move |(k, v)| {
+            let guard = AtomicMutGuard::new(v, kv_heap_size);
+            (k, guard)
+        })
     }
 
     pub fn peek_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {

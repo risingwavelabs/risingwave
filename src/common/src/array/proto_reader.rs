@@ -52,9 +52,7 @@ impl ArrayImpl {
             PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
             PbArrayType::Timestamptz => read_timestamptz_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
-            PbArrayType::Jsonb => {
-                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
-            }
+            PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
             PbArrayType::Unspecified => unreachable!(),
@@ -258,13 +256,12 @@ mod tests {
         DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
         TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
     };
-    use crate::error::Result;
     use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
     #[test]
-    fn test_column_protobuf_conversion() -> Result<()> {
+    fn test_column_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -285,11 +282,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_bool_column_protobuf_conversion() -> Result<()> {
+    fn test_bool_column_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -308,11 +304,10 @@ mod tests {
             1 => assert_eq!(Some(true), x),
             _ => assert_eq!(None, x),
         });
-        Ok(())
     }
 
     #[test]
-    fn test_utf8_column_conversion() -> Result<()> {
+    fn test_utf8_column_conversion() {
         let cardinality = 2048;
         let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -332,11 +327,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_decimal_protobuf_conversion() -> Result<()> {
+    fn test_decimal_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -357,11 +351,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_date_protobuf_conversion() -> Result<()> {
+    fn test_date_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -382,11 +375,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_time_protobuf_conversion() -> Result<()> {
+    fn test_time_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = TimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -412,11 +404,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_timestamp_protobuf_conversion() -> Result<()> {
+    fn test_timestamp_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = TimestampArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -442,6 +433,5 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 }

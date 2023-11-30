@@ -14,82 +14,155 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_compactor::CompactorOpts;
+use risingwave_compute::ComputeNodeOpts;
+use risingwave_frontend::FrontendOpts;
+use risingwave_meta_node::MetaNodeOpts;
 use shell_words::split;
 use tokio::signal;
 
-use crate::common::{osstrs, RisingWaveService};
+use crate::common::osstrs;
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct StandaloneOpts {
     /// Compute node options
-    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS", default_value = "")]
-    compute_opts: String,
+    /// If missing, compute node won't start
+    #[clap(short, long, env = "RW_STANDALONE_COMPUTE_OPTS")]
+    compute_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_META_OPTS", default_value = "")]
+    #[clap(short, long, env = "RW_STANDALONE_META_OPTS")]
     /// Meta node options
-    meta_opts: String,
+    /// If missing, meta node won't start
+    meta_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS", default_value = "")]
+    #[clap(short, long, env = "RW_STANDALONE_FRONTEND_OPTS")]
     /// Frontend node options
-    frontend_opts: String,
+    /// If missing, frontend node won't start
+    frontend_opts: Option<String>,
+
+    #[clap(long, env = "RW_STANDALONE_COMPACTOR_OPTS")]
+    /// Compactor node options
+    /// If missing compactor node won't start
+    compactor_opts: Option<String>,
+
+    #[clap(long, env = "RW_STANDALONE_PROMETHEUS_LISTENER_ADDR")]
+    /// Prometheus listener address
+    /// If present, it will override prometheus listener address for
+    /// Frontend, Compute and Compactor nodes
+    prometheus_listener_addr: Option<String>,
+
+    #[clap(long, env = "RW_STANDALONE_CONFIG_PATH")]
+    /// Path to the config file
+    /// If present, it will override config path for
+    /// Frontend, Compute and Compactor nodes
+    config_path: Option<String>,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
-    let meta_opts = split(&opts.meta_opts).unwrap();
-    let compute_opts = split(&opts.compute_opts).unwrap();
-    let frontend_opts = split(&opts.frontend_opts).unwrap();
-    (meta_opts, compute_opts, frontend_opts)
+#[derive(Debug)]
+pub struct ParsedStandaloneOpts {
+    pub meta_opts: Option<MetaNodeOpts>,
+    pub compute_opts: Option<ComputeNodeOpts>,
+    pub frontend_opts: Option<FrontendOpts>,
+    pub compactor_opts: Option<CompactorOpts>,
 }
 
-fn get_services(opts: &StandaloneOpts) -> Vec<RisingWaveService> {
-    let (meta_opts, compute_opts, frontend_opts) = parse_opt_args(opts);
-    let services = vec![
-        RisingWaveService::Meta(osstrs(meta_opts)),
-        RisingWaveService::Compute(osstrs(compute_opts)),
-        RisingWaveService::Frontend(osstrs(frontend_opts)),
-    ];
-    services
+fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+    let meta_opts = opts.meta_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "meta-node".into());
+        s
+    });
+    let mut meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
+
+    let compute_opts = opts.compute_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "compute-node".into());
+        s
+    });
+    let mut compute_opts = compute_opts.map(|o| ComputeNodeOpts::parse_from(osstrs(o)));
+
+    let frontend_opts = opts.frontend_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "frontend-node".into());
+        s
+    });
+    let mut frontend_opts = frontend_opts.map(|o| FrontendOpts::parse_from(osstrs(o)));
+
+    let compactor_opts = opts.compactor_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "compactor-node".into());
+        s
+    });
+    let mut compactor_opts = compactor_opts.map(|o| CompactorOpts::parse_from(osstrs(o)));
+
+    if let Some(config_path) = opts.config_path.as_ref() {
+        if let Some(meta_opts) = meta_opts.as_mut() {
+            meta_opts.config_path = config_path.clone();
+        }
+        if let Some(compute_opts) = compute_opts.as_mut() {
+            compute_opts.config_path = config_path.clone();
+        }
+        if let Some(frontend_opts) = frontend_opts.as_mut() {
+            frontend_opts.config_path = config_path.clone();
+        }
+        if let Some(compactor_opts) = compactor_opts.as_mut() {
+            compactor_opts.config_path = config_path.clone();
+        }
+    }
+    if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
+        if let Some(compute_opts) = compute_opts.as_mut() {
+            compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        }
+        if let Some(frontend_opts) = frontend_opts.as_mut() {
+            frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        }
+        if let Some(compactor_opts) = compactor_opts.as_mut() {
+            compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        }
+        if let Some(meta_opts) = meta_opts.as_mut() {
+            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+        }
+    }
+    ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    }
 }
 
 pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
     tracing::info!("launching Risingwave in standalone mode");
 
-    let services = get_services(&opts);
+    let ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    } = parse_opt_args(&opts);
 
-    for service in services {
-        match service {
-            RisingWaveService::Meta(mut opts) => {
-                opts.insert(0, "meta-node".into());
-                tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
-                let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
-                    tracing::warn!("meta is stopped, shutdown all nodes");
-                });
-                // wait for the service to be ready
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            RisingWaveService::Compute(mut opts) => {
-                opts.insert(0, "compute-node".into());
-                tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle =
-                    tokio::spawn(async move { risingwave_compute::start(opts).await });
-            }
-            RisingWaveService::Frontend(mut opts) => {
-                opts.insert(0, "frontend-node".into());
-                tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
-                let opts = risingwave_frontend::FrontendOpts::parse_from(opts);
-                let _frontend_handle =
-                    tokio::spawn(async move { risingwave_frontend::start(opts).await });
-            }
-            RisingWaveService::Compactor(_) => {
-                panic!("Compactor node unsupported in Risingwave standalone mode.");
-            }
-            RisingWaveService::ConnectorNode(_) => {
-                panic!("Connector node unsupported in Risingwave standalone mode.");
-            }
-        }
+    if let Some(opts) = meta_opts {
+        tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+
+        let _meta_handle = tokio::spawn(async move {
+            risingwave_meta_node::start(opts).await;
+            tracing::warn!("meta is stopped, shutdown all nodes");
+        });
+        // wait for the service to be ready
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if let Some(opts) = compute_opts {
+        tracing::info!("starting compute-node thread with cli args: {:?}", opts);
+        let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
+    }
+    if let Some(opts) = frontend_opts {
+        tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
+        let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
+    }
+    if let Some(opts) = compactor_opts {
+        tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        let _compactor_handle =
+            tokio::spawn(async move { risingwave_compactor::start(opts).await });
     }
 
     // wait for log messages to be flushed
@@ -122,32 +195,102 @@ mod test {
 
     #[test]
     fn test_parse_opt_args() {
+        // Test parsing into standalone-level opts.
+        let raw_opts = "
+--compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10
+--meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234
+--frontend-opts=--config-path=src/config/original.toml
+--prometheus-listener-addr=127.0.0.1:1234
+--config-path=src/config/test.toml
+";
+        let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
-            compute_opts: "--listen-address 127.0.0.1 --port 8000".into(),
-            meta_opts: "--data-dir \"some path with spaces\" --port 8001".into(),
-            frontend_opts: "--some-option".into(),
+            compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10".into()),
+            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234".into()),
+            frontend_opts: Some("--config-path=src/config/original.toml".into()),
+            compactor_opts: None,
+            prometheus_listener_addr: Some("127.0.0.1:1234".into()),
+            config_path: Some("src/config/test.toml".into()),
         };
+        assert_eq!(actual, opts);
+
+        // Test parsing into node-level opts.
         let actual = parse_opt_args(&opts);
         check(
             actual,
             expect![[r#"
-            (
-                [
-                    "--data-dir",
-                    "some path with spaces",
-                    "--port",
-                    "8001",
-                ],
-                [
-                    "--listen-address",
-                    "127.0.0.1",
-                    "--port",
-                    "8000",
-                ],
-                [
-                    "--some-option",
-                ],
-            )"#]],
+                ParsedStandaloneOpts {
+                    meta_opts: Some(
+                        MetaNodeOpts {
+                            vpc_id: None,
+                            security_group_id: None,
+                            listen_addr: "127.0.0.1:8001",
+                            advertise_addr: "127.0.0.1:9999",
+                            dashboard_host: None,
+                            prometheus_host: Some(
+                                "127.0.0.1:1234",
+                            ),
+                            etcd_endpoints: "",
+                            etcd_auth: false,
+                            etcd_username: "",
+                            etcd_password: [REDACTED alloc::string::String],
+                            sql_endpoint: None,
+                            dashboard_ui_path: None,
+                            prometheus_endpoint: None,
+                            prometheus_selector: None,
+                            connector_rpc_endpoint: None,
+                            privatelink_endpoint_default_tags: None,
+                            config_path: "src/config/test.toml",
+                            backend: None,
+                            barrier_interval_ms: None,
+                            sstable_size_mb: None,
+                            block_size_kb: None,
+                            bloom_false_positive: None,
+                            state_store: None,
+                            data_directory: Some(
+                                "some path with spaces",
+                            ),
+                            do_not_config_object_storage_lifecycle: None,
+                            backup_storage_url: None,
+                            backup_storage_directory: None,
+                            heap_profiling_dir: None,
+                        },
+                    ),
+                    compute_opts: Some(
+                        ComputeNodeOpts {
+                            listen_addr: "127.0.0.1:8000",
+                            advertise_addr: None,
+                            prometheus_listener_addr: "127.0.0.1:1234",
+                            meta_address: "http://127.0.0.1:5690",
+                            connector_rpc_endpoint: None,
+                            connector_rpc_sink_payload_format: None,
+                            config_path: "src/config/test.toml",
+                            total_memory_bytes: 34359738368,
+                            mem_table_spill_threshold: 4194304,
+                            parallelism: 10,
+                            role: Both,
+                            metrics_level: None,
+                            data_file_cache_dir: None,
+                            meta_file_cache_dir: None,
+                            async_stack_trace: None,
+                            heap_profiling_dir: None,
+                        },
+                    ),
+                    frontend_opts: Some(
+                        FrontendOpts {
+                            listen_addr: "127.0.0.1:4566",
+                            advertise_addr: None,
+                            port: None,
+                            meta_addr: "http://127.0.0.1:5690",
+                            prometheus_listener_addr: "127.0.0.1:1234",
+                            health_check_listener_addr: "127.0.0.1:6786",
+                            config_path: "src/config/test.toml",
+                            metrics_level: None,
+                            enable_barrier_read: None,
+                        },
+                    ),
+                    compactor_opts: None,
+                }"#]],
         );
     }
 }

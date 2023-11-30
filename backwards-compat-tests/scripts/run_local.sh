@@ -46,13 +46,14 @@ EOF
 
 setup_old_cluster() {
   echo "--- Setting up old cluster"
-  git checkout "v${OLD_VERSION}-rc"
+  LATEST_BRANCH=$(git branch --show-current)
+  git checkout "v${OLD_VERSION}"
 }
 
 setup_new_cluster() {
   echo "--- Setting up new cluster"
   rm -r .risingwave/bin/risingwave
-  git checkout main
+  git checkout $LATEST_BRANCH
 }
 
 main() {

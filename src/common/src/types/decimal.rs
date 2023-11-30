@@ -28,14 +28,11 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result as RwResult;
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(
-    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
-)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -46,6 +43,8 @@ pub enum Decimal {
     #[display("NaN")]
     NaN,
 }
+
+impl ZeroHeapSize for Decimal {}
 
 impl ToText for Decimal {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
@@ -82,7 +81,7 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
@@ -414,6 +413,12 @@ impl Decimal {
             return None;
         };
         Some(d.scale() as _)
+    }
+
+    pub fn rescale(&mut self, scale: u32) {
+        if let Normalized(a) = self {
+            a.rescale(scale);
+        }
     }
 
     #[must_use]
@@ -766,6 +771,7 @@ mod tests {
     use itertools::Itertools as _;
 
     use super::*;
+    use crate::estimate_size::EstimateSize;
     use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {

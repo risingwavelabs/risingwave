@@ -163,11 +163,11 @@ pub mod tests {
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
-    };
     use crate::hummock::compaction::picker::{
         CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
+    };
+    use crate::hummock::compaction::selector::tests::{
+        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
     };
     use crate::hummock::level_handler::LevelHandler;
 

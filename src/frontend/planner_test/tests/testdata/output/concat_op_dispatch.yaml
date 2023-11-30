@@ -26,27 +26,19 @@
 - name: int[] || text -> err
   sql: |
     with t(s) as (select '2') select array[1] || s from t;
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[1] || s
+  binder_error: |
+    Failed to bind expression: ARRAY[1] || s
 
     Caused by:
-      Bind error: Cannot append varchar to integer[]
+      Bind error: Cannot append character varying to integer[]
 - name: jsonb || jsonb -> jsonb
   sql: |
     select '1'::jsonb || '2'::jsonb;
-  binder_error: |-
-    Bind error: failed to bind expression: CAST('1' AS jsonb) || CAST('2' AS jsonb)
-
-    Caused by:
-      Bind error: operator not implemented yet: jsonb || jsonb
+  batch_plan: 'BatchValues { rows: [[''[1, 2]'':Jsonb]] }'
 - name: jsonb || unknown (as jsonb) -> jsonb
   sql: |
     select '1'::jsonb || '2';
-  binder_error: |-
-    Bind error: failed to bind expression: CAST('1' AS jsonb) || '2'
-
-    Caused by:
-      Bind error: operator not implemented yet: jsonb || jsonb
+  batch_plan: 'BatchValues { rows: [[''[1, 2]'':Jsonb]] }'
 - name: jsonb || text -> text
   sql: |
     with t(s) as (select '2') select '1'::jsonb || s from t;
@@ -58,8 +50,8 @@
 - name: int || int -> err
   sql: |
     select 1 || 2;
-  binder_error: |-
-    Bind error: failed to bind expression: 1 || 2
+  binder_error: |
+    Failed to bind expression: 1 || 2
 
     Caused by:
       Bind error: operator does not exist: integer || integer

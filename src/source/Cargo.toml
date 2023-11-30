@@ -15,10 +15,9 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-itertools = "0.11"
+itertools = "0.12"
 parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { workspace = true }

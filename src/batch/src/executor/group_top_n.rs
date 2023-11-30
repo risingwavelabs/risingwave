@@ -22,7 +22,6 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::DataType;
@@ -33,6 +32,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::top_n::{HeapElem, TopNHeap};
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -183,7 +183,7 @@ impl<K: HashKey> Executor for GroupTopNExecutor<K> {
 }
 
 impl<K: HashKey> GroupTopNExecutor<K> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
@@ -196,14 +196,19 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = Arc::new(chunk?.compact());
+            let chunk = Arc::new(chunk?);
             let keys = K::build(self.group_key.as_slice(), &chunk)?;
 
-            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
-                .into_iter()
-                .zip_eq_fast(keys.into_iter())
-                .enumerate()
+            for (row_id, ((encoded_row, key), visible)) in
+                encode_chunk(&chunk, &self.column_orders)?
+                    .into_iter()
+                    .zip_eq_fast(keys.into_iter())
+                    .zip_eq_fast(chunk.visibility().iter())
+                    .enumerate()
             {
+                if !visible {
+                    continue;
+                }
                 let heap = groups.entry(key).or_insert_with(|| {
                     TopNHeap::new(
                         self.limit,
@@ -235,9 +240,9 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use prometheus::IntGauge;
     use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -249,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_top_n_executor() {
-        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
         {
             let schema = Schema {
                 fields: vec![
@@ -285,7 +290,7 @@ mod tests {
             ];
             let mem_ctx = MemoryContext::new(
                 Some(parent_mem.clone()),
-                IntGauge::new("memory_usage", " ").unwrap(),
+                LabelGuardedIntGauge::<4>::test_int_gauge(),
             );
             let top_n_executor = (GroupTopNExecutorBuilder {
                 child: Box::new(mock_executor),

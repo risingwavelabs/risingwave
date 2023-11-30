@@ -25,13 +25,8 @@ use super::{
 ///
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
-pub trait ExprVisitor<R: Default> {
-    /// This merge function is used to reduce results of expr inputs.
-    /// In order to always remind users to implement themselves, we don't provide an default
-    /// implementation.
-    fn merge(a: R, b: R) -> R;
-
-    fn visit_expr(&mut self, expr: &ExprImpl) -> R {
+pub trait ExprVisitor {
+    fn visit_expr(&mut self, expr: &ExprImpl) {
         match expr {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
@@ -47,68 +42,37 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::Now(inner) => self.visit_now(inner),
         }
     }
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
         func_call
             .inputs()
             .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
+            .for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) -> R {
+    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) {
         self.visit_function_call(func_call.base())
     }
-    fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
-        let mut r = agg_call
+    fn visit_agg_call(&mut self, agg_call: &AggCall) {
+        agg_call
             .args()
             .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default();
-        r = Self::merge(r, agg_call.order_by().visit_expr(self));
-        r = Self::merge(r, agg_call.filter().visit_expr(self));
-        r
+            .for_each(|expr| self.visit_expr(expr));
+        agg_call.order_by().visit_expr(self);
+        agg_call.filter().visit_expr(self);
     }
-    fn visit_parameter(&mut self, _: &Parameter) -> R {
-        R::default()
+    fn visit_parameter(&mut self, _: &Parameter) {}
+    fn visit_literal(&mut self, _: &Literal) {}
+    fn visit_input_ref(&mut self, _: &InputRef) {}
+    fn visit_subquery(&mut self, _: &Subquery) {}
+    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
+
+    fn visit_table_function(&mut self, func_call: &TableFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_literal(&mut self, _: &Literal) -> R {
-        R::default()
+    fn visit_window_function(&mut self, func_call: &WindowFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_input_ref(&mut self, _: &InputRef) -> R {
-        R::default()
+    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_subquery(&mut self, _: &Subquery) -> R {
-        R::default()
-    }
-    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> R {
-        R::default()
-    }
-    fn visit_table_function(&mut self, func_call: &TableFunction) -> R {
-        func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
-    }
-    fn visit_window_function(&mut self, func_call: &WindowFunction) -> R {
-        func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
-    }
-    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> R {
-        func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
-    }
-    fn visit_now(&mut self, _: &Now) -> R {
-        R::default()
-    }
+    fn visit_now(&mut self, _: &Now) {}
 }

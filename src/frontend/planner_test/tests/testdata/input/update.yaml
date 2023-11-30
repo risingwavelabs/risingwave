@@ -76,3 +76,18 @@
     update t set v2 = 3;
   expected_outputs:
   - binder_error
+- name: update subquery
+  sql: |
+    create table t (a int, b int);
+    update t set a = 777 where b not in (select a from t);
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+
+- name: delete subquery
+  sql: |
+    create table t (a int, b int);
+    delete from t where a not in (select b from t);
+  expected_outputs:
+    - logical_plan
+    - batch_plan

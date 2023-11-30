@@ -1,0 +1,40 @@
+query TT
+select int8send(2147483647);
+----
+\x000000007fffffff
+
+query I
+select int8recv(int8send(76));
+----
+76
+
+query I
+select int8recv('       a'::bytea);
+----
+2314885530818453601
+
+statement error could not convert slice to array
+select int8recv('a'::bytea);
+
+query I
+select int8recv(decode(substr(md5(''), 3, 16), 'hex'));
+----
+2129315932054619369
+
+query I
+select int8recv(substr(decode(md5(''), 'hex'), 2, 8));
+----
+2129315932054619369
+
+query I
+select int8recv(substr(sha256(''), 2, 8));
+----
+-5709365202766785382
+
+statement error decode
+select int8recv(to_hex(2129315932054619369));
+
+query I
+select int8recv(decode(to_hex(2129315932054619369), 'hex'));
+----
+2129315932054619369

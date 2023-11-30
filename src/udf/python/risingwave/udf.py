@@ -1,3 +1,17 @@
+# Copyright 2023 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import *
 import pyarrow as pa
 import pyarrow.flight
@@ -7,6 +21,7 @@ import traceback
 import json
 from concurrent.futures import ThreadPoolExecutor
 import concurrent
+import signal
 
 
 class UserDefinedFunction:
@@ -378,11 +393,16 @@ class UdfServer(pa.flight.FlightServerBase):
             raise e
 
     def serve(self):
-        """Start the server."""
+        """
+        Block until the server shuts down.
+
+        This method only returns if shutdown() is called or a signal (SIGINT, SIGTERM) received.
+        """
         print(
             "Note: You can use arbitrary function names and struct field names in CREATE FUNCTION statements."
             f"\n\nlistening on {self._location}"
         )
+        signal.signal(signal.SIGTERM, lambda s, f: self.shutdown())
         super(UdfServer, self).serve()
 
 
@@ -439,12 +459,23 @@ def _string_to_data_type(type_str: str):
     elif type_str in ("BYTEA"):
         return pa.binary()
     elif type_str.startswith("STRUCT"):
-        # extract 'STRUCT<INT, VARCHAR, ...>'
-        type_list = type_str[6:].strip("<>")
+        # extract 'STRUCT<INT, VARCHAR, STRUCT<INT>, ...>'
+        type_list = type_str[7:-1]  # strip "STRUCT<>"
         fields = []
-        for type_str in type_list.split(","):
-            type_str = type_str.strip()
-            fields.append(pa.field("", _string_to_data_type(type_str)))
+        elements = []
+        start = 0
+        depth = 0
+        for i, c in enumerate(type_list):
+            if c == "<":
+                depth += 1
+            elif c == ">":
+                depth -= 1
+            elif c == "," and depth == 0:
+                type_str = type_list[start:i].strip()
+                fields.append(pa.field("", _string_to_data_type(type_str)))
+                start = i + 1
+        type_str = type_list[start:].strip()
+        fields.append(pa.field("", _string_to_data_type(type_str)))
         return pa.struct(fields)
 
     raise ValueError(f"Unsupported type: {type_str}")
@@ -488,7 +519,7 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return (
             "STRUCT<"
             + ",".join(
-                f"field_{i} {_data_type_to_string(field.type)}"
+                f"f{i+1} {_data_type_to_string(field.type)}"
                 for i, field in enumerate(t)
             )
             + ">"

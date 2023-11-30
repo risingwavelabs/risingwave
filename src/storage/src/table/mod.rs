@@ -162,7 +162,7 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
         vnode
     };
 
-    tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
+    tracing::debug!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
     vnode
 }
@@ -184,7 +184,7 @@ pub fn compute_chunk_vnode(
 
         VirtualNode::compute_chunk(chunk, &dist_key_indices)
             .into_iter()
-            .zip_eq_fast(chunk.vis().iter())
+            .zip_eq_fast(chunk.visibility().iter())
             .map(|(vnode, vis)| {
                 // Ignore the invisible rows.
                 if vis {

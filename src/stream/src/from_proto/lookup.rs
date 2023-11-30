@@ -24,7 +24,6 @@ use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
     type Node = LookupNode;
 
@@ -126,12 +125,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
             ctx: params.actor_context,
-            schema: params.schema,
+            info: params.info,
             arrangement,
             stream,
             arrangement_col_descs,
             arrangement_order_rules,
-            pk_indices: params.pk_indices,
             use_current_epoch: lookup.use_current_epoch,
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),

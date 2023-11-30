@@ -16,13 +16,15 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -34,7 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Insert<PlanRef>,
 }
 
@@ -90,7 +92,9 @@ impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl Distill for LogicalInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
         childless_record("LogicalInsert", vec)
     }
 }
@@ -129,6 +133,15 @@ impl ExprRewritable for LogicalInsert {
     }
 }
 
+impl ExprVisitable for LogicalInsert {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
+    }
+}
+
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(
         &self,
@@ -142,9 +155,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut logical = self.core.clone();
-        logical.input = new_input;
-        Ok(BatchInsert::new(logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchInsert::new(core).into())
     }
 }
 

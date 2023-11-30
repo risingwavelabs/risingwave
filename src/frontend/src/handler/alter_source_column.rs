@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_connector::source::{SourceEncode, SourceStruct};
-use risingwave_source::source_desc::extract_source_struct;
+use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
 };
@@ -42,7 +42,7 @@ pub async fn handle_alter_source_column(
     let db_name = session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -63,16 +63,10 @@ pub async fn handle_alter_source_column(
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter source with schema registry")
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter source with schema registry")
         }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(

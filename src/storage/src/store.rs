@@ -22,30 +22,28 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedWriteOptions,
+    TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
-use crate::write_batch::WriteBatch;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }
@@ -70,8 +68,6 @@ pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
-pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
-
 pub trait StateStoreRead: StaticSendSync {
     type IterStream: StateStoreReadIterStream;
 
@@ -79,7 +75,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
@@ -91,7 +87,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// corresponding to the given `epoch`.
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + Send + '_;
@@ -107,7 +103,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -117,13 +113,13 @@ pub trait StateStoreReadExt: StaticSendSync {
 impl<S: StateStoreRead> StateStoreReadExt for S {
     async fn scan(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         limit: Option<usize>,
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.exhaust_iter = false;
+            read_options.prefetch_options.preload = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -151,18 +147,10 @@ pub trait StateStoreWrite: StaticSendSync {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
-
-    /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self>
-    where
-        Self: Sized,
-    {
-        WriteBatch::new(self, write_options)
-    }
 }
 
 #[derive(Default, Debug)]
@@ -213,7 +201,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// The result is based on the latest written snapshot.
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
 
@@ -224,22 +212,28 @@ pub trait LocalStateStore: StaticSendSync {
     /// snapshot.
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
     fn flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
@@ -250,12 +244,12 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -268,7 +262,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// - true: `key_range` may or may not exist in storage.
     fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
@@ -279,23 +273,25 @@ pub trait LocalStateStore: StaticSendSync {
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
-    pub exhaust_iter: bool,
+    pub preload: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_exhaust_iter() -> Self {
+    pub fn new_for_large_range_scan() -> Self {
         Self::new_with_exhaust_iter(true)
     }
 
     pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self { exhaust_iter }
+        Self {
+            preload: exhaust_iter,
+        }
     }
 }
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            preload: value.exhaust_iter,
         }
     }
 }
@@ -303,7 +299,7 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            exhaust_iter: value.preload,
         }
     }
 }
@@ -485,5 +481,34 @@ impl From<TracedInitOptions> for InitOptions {
         InitOptions {
             epoch: value.epoch.into(),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SealCurrentEpochOptions {}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(_value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {}
+    }
+}
+
+impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
+        Ok(SealCurrentEpochOptions {})
+    }
+}
+
+impl SealCurrentEpochOptions {
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test() -> Self {
+        Self::new()
     }
 }

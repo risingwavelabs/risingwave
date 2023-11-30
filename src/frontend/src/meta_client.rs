@@ -17,13 +17,19 @@ use std::collections::HashMap;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::hummock::write_limits::WriteLimit;
+use risingwave_pb::hummock::{
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot, HummockVersion, HummockVersionDelta,
+};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::EventLog;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -39,6 +45,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+
+    async fn wait(&self) -> Result<()>;
 
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
@@ -76,6 +84,27 @@ pub trait FrontendMetaClient: Send + Sync {
 
     /// Returns vector of (worker_id, min_pinned_snapshot_id)
     async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
+
+    async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
+
+    async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion>;
+
+    async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>>;
+
+    async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>>;
+
+    async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>>;
+
+    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
+
+    async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
+
+    async fn list_event_log(&self) -> Result<Vec<EventLog>>;
+    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
+
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -92,6 +121,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn wait(&self) -> Result<()> {
+        self.0.wait().await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
@@ -180,5 +213,56 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .map(|s| (s.context_id, s.minimal_pinned_snapshot))
             .collect();
         Ok(ret)
+    }
+
+    async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
+        self.0.get_current_version().await
+    }
+
+    async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion> {
+        self.0
+            .risectl_get_checkpoint_hummock_version()
+            .await
+            .map(|v| v.checkpoint_version.unwrap())
+    }
+
+    async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
+        // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
+        self.0
+            .list_version_deltas(0, u32::MAX, u64::MAX)
+            .await
+            .map(|v| v.version_deltas)
+    }
+
+    async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {
+        self.0.list_branched_object().await
+    }
+
+    async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>> {
+        self.0.risectl_list_compaction_group().await
+    }
+
+    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>> {
+        self.0.list_active_write_limit().await
+    }
+
+    async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>> {
+        self.0.list_hummock_meta_config().await
+    }
+
+    async fn list_event_log(&self) -> Result<Vec<EventLog>> {
+        self.0.list_event_log().await
+    }
+
+    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+        self.0.list_compact_task_assignment().await
+    }
+
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>> {
+        self.0.list_worker_nodes(None).await
+    }
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        self.0.list_compact_task_progress().await
     }
 }

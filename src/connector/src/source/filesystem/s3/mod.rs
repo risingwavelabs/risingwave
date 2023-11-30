@@ -18,7 +18,7 @@ mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::SourceProperties;
 
@@ -37,7 +37,7 @@ pub struct S3Properties {
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
-    endpoint_url: Option<String>,
+    pub endpoint_url: Option<String>,
 }
 
 impl SourceProperties for S3Properties {

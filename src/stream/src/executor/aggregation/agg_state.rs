@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StreamChunk, Vis};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
@@ -33,10 +36,11 @@ pub enum AggStateStorage<S: StateStore> {
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
-    /// chunks.
+    /// chunks. `order_columns` list the index and order type of sort keys.
     MaterializedInput {
         table: StateTable<S>,
         mapping: StateTableColumnMapping,
+        order_columns: Vec<ColumnOrder>,
     },
 }
 
@@ -64,6 +68,7 @@ impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
     pub fn create(
+        version: PbAggNodeVersion,
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
@@ -80,15 +85,19 @@ impl AggState {
                 };
                 Self::Value(state)
             }
-            AggStateStorage::MaterializedInput { mapping, .. } => {
-                Self::MaterializedInput(Box::new(MaterializedInputState::new(
-                    agg_call,
-                    pk_indices,
-                    mapping,
-                    extreme_cache_size,
-                    input_schema,
-                )?))
-            }
+            AggStateStorage::MaterializedInput {
+                mapping,
+                order_columns,
+                ..
+            } => Self::MaterializedInput(Box::new(MaterializedInputState::new(
+                version,
+                agg_call,
+                pk_indices,
+                order_columns,
+                mapping,
+                extreme_cache_size,
+                input_schema,
+            )?)),
         })
     }
 
@@ -98,7 +107,7 @@ impl AggState {
         chunk: &StreamChunk,
         call: &AggCall,
         func: &BoxedAggregateFunction,
-        visibility: Vis,
+        visibility: Bitmap,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
@@ -108,7 +117,7 @@ impl AggState {
             }
             Self::MaterializedInput(state) => {
                 // the input chunk for minput is unprojected
-                let chunk = chunk.with_visibility(visibility);
+                let chunk = chunk.clone_with_vis(visibility);
                 state.apply_chunk(&chunk)
             }
         }

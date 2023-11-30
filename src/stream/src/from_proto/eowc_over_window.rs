@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_expr::function::window::WindowFuncCall;
+use risingwave_expr::window_function::WindowFuncCall;
 use risingwave_pb::stream_plan::PbEowcOverWindowNode;
 use risingwave_storage::StateStore;
 
@@ -28,7 +28,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct EowcOverWindowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
     type Node = PbEowcOverWindowNode;
 
@@ -59,10 +58,11 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             StateTable::from_table_catalog_inconsistent_op(node.get_state_table()?, store, vnodes)
                 .await;
         Ok(EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-            input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
+
+            input,
+
             calls,
             partition_key_indices,
             order_key_index,

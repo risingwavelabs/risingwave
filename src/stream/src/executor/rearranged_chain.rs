@@ -25,7 +25,6 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -36,6 +35,8 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
 pub struct RearrangedChainExecutor {
+    info: ExecutorInfo,
+
     snapshot: BoxedExecutor,
 
     upstream: BoxedExecutor,
@@ -43,8 +44,6 @@ pub struct RearrangedChainExecutor {
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 }
 
 #[derive(Debug)]
@@ -86,18 +85,13 @@ impl RearrangedMessage {
 
 impl RearrangedChainExecutor {
     pub fn new(
+        info: ExecutorInfo,
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
     ) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "RearrangedChain".to_owned(),
-            },
+            info,
             snapshot,
             upstream,
             actor_id: progress.actor_id(),
@@ -135,6 +129,8 @@ impl RearrangedChainExecutor {
                 .unbounded_send(RearrangedMessage::PhantomBarrier(first_barrier))
                 .unwrap();
 
+            let mut processed_rows: u64 = 0;
+
             {
                 // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
                 let rearranged_barrier =
@@ -161,8 +157,6 @@ impl RearrangedChainExecutor {
                 // Record the epoch of the last rearranged barrier we received.
                 let mut last_rearranged_epoch = create_epoch;
                 let mut stop_rearrange_tx = Some(stop_rearrange_tx);
-
-                let mut processed_rows: u64 = 0;
 
                 #[for_await]
                 for rearranged_msg in &mut rearranged {
@@ -223,7 +217,7 @@ impl RearrangedChainExecutor {
                         continue;
                     };
                     if let Some(barrier) = msg.as_barrier() {
-                        self.progress.finish(barrier.epoch.curr);
+                        self.progress.finish(barrier.epoch.curr, processed_rows);
                     }
                     yield msg;
                 }
@@ -236,7 +230,7 @@ impl RearrangedChainExecutor {
             for msg in upstream {
                 let msg: Message = msg?;
                 if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, processed_rows);
                 }
                 yield msg;
             }

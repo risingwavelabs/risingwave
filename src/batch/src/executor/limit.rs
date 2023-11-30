@@ -19,9 +19,9 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -62,7 +62,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
 }
 
 impl LimitExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
@@ -91,8 +91,8 @@ impl LimitExecutor {
             }
             // process chunk
             let mut new_vis;
-            if let Some(old_vis) = data_chunk.visibility() {
-                new_vis = old_vis.iter().collect_vec();
+            if !data_chunk.is_compacted() {
+                new_vis = data_chunk.visibility().iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
                     if skipped < self.offset {
                         skipped += 1;

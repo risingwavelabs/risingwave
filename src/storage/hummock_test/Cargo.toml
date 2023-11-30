@@ -20,8 +20,8 @@ bytes = { version = "1" }
 clap = { version = "4", features = ["derive"] }
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
-itertools = "0.11"
+futures-async-stream = "0.2.9"
+itertools = "0.12"
 parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { workspace = true }
@@ -47,7 +47,8 @@ futures = { version = "0.3", default-features = false, features = [
     "executor",
 ] }
 
-futures-async-stream = "0.2"
+futures-async-stream = "0.2.9"
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 serial_test = "2.0"
 sync-point = { path = "../../utils/sync-point" }

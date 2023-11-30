@@ -164,8 +164,7 @@ impl VacuumManager {
         &self,
         objects_to_delete: &mut Vec<HummockSstableObjectId>,
     ) -> MetaResult<()> {
-        let reject: HashSet<HummockSstableObjectId> =
-            self.backup_manager.list_pinned_ssts().into_iter().collect();
+        let reject = self.backup_manager.list_pinned_ssts();
         // Ack these SSTs immediately, because they tend to be pinned for long time.
         // They will be GCed during full GC when they are no longer pinned.
         let to_ack = objects_to_delete
@@ -220,10 +219,8 @@ mod tests {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        let backup_manager = Arc::new(BackupManager::for_test(
-            env.clone(),
-            hummock_manager.clone(),
-        ));
+        let backup_manager =
+            Arc::new(BackupManager::for_test(env.clone(), hummock_manager.clone()).await);
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),

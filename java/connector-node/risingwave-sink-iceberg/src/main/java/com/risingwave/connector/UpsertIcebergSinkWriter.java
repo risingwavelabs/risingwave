@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -140,61 +139,56 @@ public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                if (row.size() != tableSchema.getColumnNames().length) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription("row values do not match table schema")
-                            .asRuntimeException();
-                }
-                Record record = newRecord(rowSchema, row);
-                PartitionKey partitionKey =
-                        new PartitionKey(icebergTable.spec(), icebergTable.schema());
-                partitionKey.partition(record);
-                SinkRowMap sinkRowMap;
-                if (sinkRowMapByPartition.containsKey(partitionKey)) {
-                    sinkRowMap = sinkRowMapByPartition.get(partitionKey);
-                } else {
-                    sinkRowMap = new SinkRowMap();
-                    sinkRowMapByPartition.put(partitionKey, sinkRowMap);
-                }
-                switch (row.getOp()) {
-                    case INSERT:
-                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
-                        break;
-                    case DELETE:
-                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
-                        break;
-                    case UPDATE_DELETE:
-                        if (updateBufferExists) {
-                            throw Status.FAILED_PRECONDITION
-                                    .withDescription(
-                                            "an UPDATE_INSERT should precede an UPDATE_DELETE")
-                                    .asRuntimeException();
-                        }
-                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
-                        updateBufferExists = true;
-                        break;
-                    case UPDATE_INSERT:
-                        if (!updateBufferExists) {
-                            throw Status.FAILED_PRECONDITION
-                                    .withDescription(
-                                            "an UPDATE_INSERT should precede an UPDATE_DELETE")
-                                    .asRuntimeException();
-                        }
-                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
-                        updateBufferExists = false;
-                        break;
-                    default:
-                        throw UNIMPLEMENTED
-                                .withDescription("unsupported operation: " + row.getOp())
+    public boolean write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
+            if (row.size() != tableSchema.getColumnNames().length) {
+                throw Status.FAILED_PRECONDITION
+                        .withDescription("row values do not match table schema")
+                        .asRuntimeException();
+            }
+            Record record = newRecord(rowSchema, row);
+            PartitionKey partitionKey =
+                    new PartitionKey(icebergTable.spec(), icebergTable.schema());
+            partitionKey.partition(record);
+            SinkRowMap sinkRowMap;
+            if (sinkRowMapByPartition.containsKey(partitionKey)) {
+                sinkRowMap = sinkRowMapByPartition.get(partitionKey);
+            } else {
+                sinkRowMap = new SinkRowMap();
+                sinkRowMapByPartition.put(partitionKey, sinkRowMap);
+            }
+            switch (row.getOp()) {
+                case INSERT:
+                    sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
+                    break;
+                case DELETE:
+                    sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
+                    break;
+                case UPDATE_DELETE:
+                    if (updateBufferExists) {
+                        throw Status.FAILED_PRECONDITION
+                                .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
                                 .asRuntimeException();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+                    }
+                    sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
+                    updateBufferExists = true;
+                    break;
+                case UPDATE_INSERT:
+                    if (!updateBufferExists) {
+                        throw Status.FAILED_PRECONDITION
+                                .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
+                                .asRuntimeException();
+                    }
+                    sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
+                    updateBufferExists = false;
+                    break;
+                default:
+                    throw UNIMPLEMENTED
+                            .withDescription("unsupported operation: " + row.getOp())
+                            .asRuntimeException();
             }
         }
+        return false;
     }
 
     @Override

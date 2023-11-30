@@ -50,7 +50,11 @@ CREATE TABLE rw_typed_data (
     interval_column INTERVAL,
     jsonb_column JSONB,
     array_column VARCHAR[],
-    array_column2 FLOAT[]
+    array_column2 FLOAT[],
+    array_column3 SMALLINT[],
+    array_column4 INTEGER[],
+    array_column5 BIGINT[],
+    array_column6 DOUBLE PRECISION[],
 );
 
 statement ok
@@ -144,6 +148,22 @@ CREATE SINK s_pg_t2 FROM tt2 WITH (
     force_append_only=true
 );
 
+
+statement ok
+create table t1_uuid (v1 int primary key, v2 varchar, v3 varchar);
+
+statement ok
+CREATE SINK s1_uuid FROM t1_uuid WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t1_uuid',
+    primary_key='v1',
+    type='upsert'
+);
+
+statement ok
+INSERT INTO t1_uuid values (221, '74605c5a-a7bb-4b3b-8742-2a12e9709dea', 'hello world');
+
 statement ok
 INSERT INTO tt2 VALUES
     (1),
@@ -180,10 +200,10 @@ INSERT INTO t_remote_1 VALUES
     (6, 'Varchar value 6', 'Text value 6', 789, 123, 456, 67.89, 34.56, 78.91, FALSE, '2023-05-27', '23:45:01', '2023-05-27 23:45:01', '2023-05-27 23:45:01', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value6"}', E'\\xDEADBABE');
 
 statement ok
-INSERT INTO rw_typed_data (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, array_column, array_column2) VALUES
-    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['Value 1', 'Value 2'], '{12.345,56.789}'),
-    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', ARRAY['Value 3', 'Value 4'], '{43.21,65.432}'),
-    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['How''re you?', '"hello\ \world"'], ARRAY[12.345,56.789]);
+INSERT INTO rw_typed_data (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, array_column, array_column2, array_column3, array_column4, array_column5, array_column6) VALUES
+    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['Value 1', 'Value 2'], '{12.345,56.789}', '{1, 2, 3}', '{1, 2, 3}', '{1, 2, 3}', '{12.3,56.7}'),
+    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', ARRAY['Value 3', 'Value 4'], '{43.21,65.432}', '{4, 5, 6}', '{4, 5, 6}', '{4, 5, 6}', '{43.2,65.4}'),
+    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['How''re you?', '"hello\ \world"'], ARRAY[12.345,56.789], ARRAY[1, 2, 3], ARRAY[1, 2, 3], ARRAY[1, 2, 3], ARRAY[43.2,65.4]);
 
 statement ok
 FLUSH;

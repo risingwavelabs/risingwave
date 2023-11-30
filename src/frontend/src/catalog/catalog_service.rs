@@ -21,10 +21,13 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView,
 };
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::{
+    alter_name_request, alter_set_schema_request, create_connection_request, PbTableJobType,
+};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -77,6 +80,7 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -98,6 +102,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_source(&self, source: PbSource) -> Result<()>;
 
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
@@ -110,6 +120,8 @@ pub trait CatalogWriter: Send + Sync {
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
+
+    async fn comment_on(&self, comment: PbComment) -> Result<()>;
 
     async fn drop_table(
         &self,
@@ -145,6 +157,18 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
 
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
+
+    async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()>;
+
+    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()>;
+
+    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -191,11 +215,15 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
+        let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let (_, version) = self
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
-        self.wait_version(version).await
+        if matches!(create_type, PbCreateType::Foreground) {
+            self.wait_version(version).await?
+        }
+        Ok(())
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
@@ -218,8 +246,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        let (_, version) = self
+            .meta_client
+            .create_table(source, table, graph, job_type)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -244,6 +276,18 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let (_id, version) = self
+            .meta_client
+            .create_source_with_graph(source, graph)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -275,6 +319,11 @@ impl CatalogWriter for CatalogWriterImpl {
                 connection,
             )
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn comment_on(&self, comment: PbComment) -> Result<()> {
+        let version = self.meta_client.comment_on(comment).await?;
         self.wait_version(version).await
     }
 
@@ -342,7 +391,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_relation_name(Relation::TableId(table_id), table_name)
+            .alter_name(alter_name_request::Object::TableId(table_id), table_name)
             .await?;
         self.wait_version(version).await
     }
@@ -350,7 +399,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_relation_name(Relation::ViewId(view_id), view_name)
+            .alter_name(alter_name_request::Object::ViewId(view_id), view_name)
             .await?;
         self.wait_version(version).await
     }
@@ -358,7 +407,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_relation_name(Relation::IndexId(index_id), index_name)
+            .alter_name(alter_name_request::Object::IndexId(index_id), index_name)
             .await?;
         self.wait_version(version).await
     }
@@ -366,7 +415,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_relation_name(Relation::SinkId(sink_id), sink_name)
+            .alter_name(alter_name_request::Object::SinkId(sink_id), sink_name)
             .await?;
         self.wait_version(version).await
     }
@@ -374,7 +423,43 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_relation_name(Relation::SourceId(source_id), source_name)
+            .alter_name(alter_name_request::Object::SourceId(source_id), source_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_schema_name(&self, schema_id: u32, schema_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_name(alter_name_request::Object::SchemaId(schema_id), schema_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_database_name(&self, database_id: u32, database_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_name(
+                alter_name_request::Object::DatabaseId(database_id),
+                database_name,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+        let version = self.meta_client.alter_owner(object, owner_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_set_schema(object, new_schema_id)
             .await?;
         self.wait_version(version).await
     }

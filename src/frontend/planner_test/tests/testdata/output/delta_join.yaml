@@ -33,8 +33,8 @@
     /* should generate delta join plan, and stream index scan */
     select * from a join b on a.a1 = b.b1 ;
   stream_plan: |-
-    StreamMaterialize { columns: [a1, a2, b1, b2], stream_key: [a1, b1], pk_columns: [a1, b1], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(a.a1, b.b1) }
+    StreamMaterialize { columns: [a1, a2, b1, b2], stream_key: [a1], pk_columns: [a1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(a.a1) }
       └─StreamDeltaJoin { type: Inner, predicate: a.a1 = b.b1, output: all }
         ├─StreamTableScan { table: a, columns: [a.a1, a.a2], pk: [a.a1], dist: UpstreamHashShard(a.a1) }
         └─StreamTableScan { table: b, columns: [b.b1, b.b2], pk: [b.b1], dist: UpstreamHashShard(b.b1) }

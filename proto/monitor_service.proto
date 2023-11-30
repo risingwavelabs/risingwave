@@ -31,8 +31,27 @@ message HeapProfilingRequest {
 
 message HeapProfilingResponse {}
 
+message ListHeapProfilingRequest {}
+message ListHeapProfilingResponse {
+  string dir = 1;
+  repeated string name_manually = 2;
+  repeated string name_auto = 3;
+}
+
+// Analyze dumped files
+message AnalyzeHeapRequest {
+  // The file path
+  string path = 1;
+}
+
+message AnalyzeHeapResponse {
+  bytes result = 1;
+}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
+  rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
+  rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
 }

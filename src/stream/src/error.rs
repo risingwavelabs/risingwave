@@ -16,8 +16,10 @@ use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
 use risingwave_connector::error::ConnectorError;
+use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
 use crate::executor::StreamExecutorError;
@@ -45,21 +47,44 @@ enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
     #[error("Expression error: {0}")]
-    Expression(#[source] ExprError),
+    Expression(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     #[error("Array/Chunk error: {0}")]
-    Array(#[source] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Executor error: {0:?}")]
-    Executor(#[source] StreamExecutorError),
+    Executor(
+        #[from]
+        #[backtrace]
+        StreamExecutorError,
+    ),
+
+    #[error("Sink error: {0:?}")]
+    Sink(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl std::fmt::Debug for StreamError {
@@ -115,6 +140,12 @@ impl From<StreamExecutorError> for StreamError {
     }
 }
 
+impl From<SinkError> for StreamError {
+    fn from(value: SinkError) -> Self {
+        ErrorKind::Sink(value).into()
+    }
+}
+
 impl From<PbFieldNotFound> for StreamError {
     fn from(err: PbFieldNotFound) -> Self {
         Self::from(anyhow::anyhow!(
@@ -139,8 +170,7 @@ impl From<anyhow::Error> for StreamError {
 
 impl From<StreamError> for tonic::Status {
     fn from(error: StreamError) -> Self {
-        // Only encode the error message without the backtrace.
-        tonic::Status::internal(error.inner.to_string())
+        error.to_status(tonic::Code::Internal, "stream")
     }
 }
 

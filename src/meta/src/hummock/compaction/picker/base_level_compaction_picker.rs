@@ -131,28 +131,13 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        // TODO: remove this
-        let l0_size = l0.total_file_size - level_handlers[0].get_pending_file_size();
-        let base_level_size = target_level.total_file_size
-            - level_handlers[target_level.level_idx as usize].get_pending_file_size();
-        if l0_size < base_level_size {
-            stats.skip_by_write_amp_limit += 1;
-            return None;
-        }
-
-        // no running base_compaction
-        let strict_check = level_handlers[0]
-            .get_pending_tasks()
-            .iter()
-            .any(|task| task.target_level != 0);
-
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
-            std::cmp::min(
+            std::cmp::max(
                 self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
@@ -239,8 +224,7 @@ impl LevelCompactionPicker {
                 &result,
                 ValidationRuleType::ToBase,
                 stats,
-            ) && strict_check
-            {
+            ) {
                 continue;
             }
 
@@ -256,12 +240,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
-        generate_l0_overlapping_sublevels, generate_level, generate_table,
-        push_table_level0_nonoverlapping, push_table_level0_overlapping,
-        push_tables_level0_nonoverlapping,
-    };
+    use crate::hummock::compaction::selector::tests::*;
     use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
@@ -588,7 +567,8 @@ pub mod tests {
         // Pick with small max_compaction_bytes results partial sub levels included in input.
         let config = Arc::new(
             CompactionConfigBuilder::new()
-                .max_compaction_bytes(50000)
+                .max_compaction_bytes(100010)
+                .max_bytes_for_level_base(512)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );

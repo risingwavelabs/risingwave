@@ -342,6 +342,13 @@ impl KafkaSplitEnumerator {
             .set(offset);
     }
 
+    pub async fn check_reachability(&self) -> bool {
+        self.client
+            .fetch_metadata(None, self.sync_call_timeout)
+            .await
+            .is_ok()
+    }
+
     async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self

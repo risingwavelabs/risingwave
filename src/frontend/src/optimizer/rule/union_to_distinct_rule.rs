@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
@@ -24,7 +24,7 @@ impl Rule for UnionToDistinctRule {
         let union: &LogicalUnion = plan.as_logical_union()?;
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());
-            let distinct = Agg::new(vec![], (0..union.base.schema.len()).collect(), union_all)
+            let distinct = Agg::new(vec![], (0..union.base.schema().len()).collect(), union_all)
                 .with_enable_two_phase(false);
             Some(distinct.into())
         } else {

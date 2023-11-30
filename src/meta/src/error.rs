@@ -19,7 +19,7 @@ use aws_sdk_ec2::error::DisplayErrorContext;
 use risingwave_common::error::BoxedError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
-use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
 use crate::manager::WorkerId;
@@ -31,16 +31,32 @@ pub type MetaResult<T> = std::result::Result<T, MetaError>;
 #[derive(thiserror::Error, Debug)]
 enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
-    TransactionError(MetaStoreError),
+    TransactionError(
+        #[from]
+        #[backtrace]
+        MetaStoreError,
+    ),
 
     #[error("MetadataModel error: {0}")]
-    MetadataModelError(MetadataModelError),
+    MetadataModelError(
+        #[from]
+        #[backtrace]
+        MetadataModelError,
+    ),
 
     #[error("Hummock error: {0}")]
-    HummockError(HummockError),
+    HummockError(
+        #[from]
+        #[backtrace]
+        HummockError,
+    ),
 
-    #[error("Rpc error: {0}")]
-    RpcError(RpcError),
+    #[error(transparent)]
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
@@ -53,7 +69,10 @@ enum MetaErrorInner {
 
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
-    CatalogIdNotFound(&'static str, u32),
+    CatalogIdNotFound(&'static str, String),
+
+    #[error("table_fragment not exist: id={0}")]
+    FragmentNotFound(u32),
 
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
@@ -62,7 +81,7 @@ enum MetaErrorInner {
     Unavailable(String),
 
     #[error("Election failed: {0}")]
-    Election(etcd_client::Error),
+    Election(String),
 
     #[error("Cancelled: {0}")]
     Cancelled(String),
@@ -71,13 +90,21 @@ enum MetaErrorInner {
     SystemParams(String),
 
     #[error("Sink error: {0}")]
-    Sink(SinkError),
+    Sink(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
-    #[error("AWS SDK error: {}", DisplayErrorContext(&**.0))]
-    Aws(BoxedError),
+    #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
+    Aws(#[source] BoxedError),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<MetaErrorInner> for MetaError {
@@ -130,8 +157,16 @@ impl MetaError {
         MetaErrorInner::InvalidParameter(s.into()).into()
     }
 
-    pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
-        MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
+    pub fn catalog_id_not_found<T: ToString>(relation: &'static str, id: T) -> Self {
+        MetaErrorInner::CatalogIdNotFound(relation, id.to_string()).into()
+    }
+
+    pub fn fragment_not_found<T: Into<u32>>(id: T) -> Self {
+        MetaErrorInner::FragmentNotFound(id.into()).into()
+    }
+
+    pub fn is_fragment_not_found(&self) -> bool {
+        matches!(self.inner.as_ref(), &MetaErrorInner::FragmentNotFound(..))
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
@@ -165,7 +200,7 @@ impl From<HummockError> for MetaError {
 
 impl From<etcd_client::Error> for MetaError {
     fn from(e: etcd_client::Error) -> Self {
-        MetaErrorInner::Election(e).into()
+        MetaErrorInner::Election(e.to_string()).into()
     }
 }
 
@@ -198,19 +233,19 @@ where
 
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
-        match &*err.inner {
-            MetaErrorInner::PermissionDenied(_) => {
-                tonic::Status::permission_denied(err.to_string())
-            }
-            MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
-            MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
-            MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
-            MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
-            MetaErrorInner::InvalidParameter(msg) => {
-                tonic::Status::invalid_argument(msg.to_owned())
-            }
-            _ => tonic::Status::internal(err.to_string()),
-        }
+        use tonic::Code;
+
+        let code = match &*err.inner {
+            MetaErrorInner::PermissionDenied(_) => Code::PermissionDenied,
+            MetaErrorInner::CatalogIdNotFound(_, _) => Code::NotFound,
+            MetaErrorInner::Duplicated(_, _) => Code::AlreadyExists,
+            MetaErrorInner::Unavailable(_) => Code::Unavailable,
+            MetaErrorInner::Cancelled(_) => Code::Cancelled,
+            MetaErrorInner::InvalidParameter(_) => Code::InvalidArgument,
+            _ => Code::Internal,
+        };
+
+        err.to_status(code, "meta")
     }
 }
 

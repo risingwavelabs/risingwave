@@ -24,11 +24,12 @@ use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
+use crate::user::user_catalog::UserCatalog;
 
 fn alter_prost_user_info(
     mut user_info: UserInfo,
     options: &UserOptions,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>)> {
     if !session_user.is_super {
         let require_super = user_info.is_super
@@ -101,7 +102,9 @@ fn alter_prost_user_info(
             }
             UserOption::Password(opt) => {
                 // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
-                if let Some(password) = opt && !password.0.is_empty() {
+                if let Some(password) = opt
+                    && !password.0.is_empty()
+                {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 } else {
                     user_info.auth_info = None;
@@ -116,7 +119,7 @@ fn alter_prost_user_info(
 fn alter_rename_prost_user_info(
     mut user_info: UserInfo,
     new_name: ObjectName,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>)> {
     if session_user.id == user_info.id {
         return Err(InternalError("session user cannot be renamed".to_string()).into());
@@ -153,7 +156,7 @@ pub async fn handle_alter_user(
         let old_info = user_reader
             .get_user_by_name(&user_name)
             .ok_or(CatalogError::NotFound("user", user_name))?
-            .clone();
+            .to_prost();
 
         let session_user = user_reader
             .get_user_by_name(session.user_name())

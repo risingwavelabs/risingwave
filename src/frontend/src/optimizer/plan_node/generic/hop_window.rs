@@ -63,7 +63,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
             .collect()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let window_start_index = self
             .output_indices
             .iter()
@@ -77,7 +77,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
         } else {
             let mut pk = self
                 .input
-                .logical_pk()
+                .stream_key()?
                 .iter()
                 .filter_map(|&pk_idx| self.output_indices.iter().position(|&idx| idx == pk_idx))
                 .collect_vec();
@@ -106,7 +106,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
                 internal2output.try_map(self.internal_window_end_col_idx()),
             )
         };
-        if let Some(start_idx) = start_idx_in_output && let Some(end_idx) = end_idx_in_output {
+        if let Some(start_idx) = start_idx_in_output
+            && let Some(end_idx) = end_idx_in_output
+        {
             fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
             fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
         }

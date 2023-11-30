@@ -15,23 +15,25 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
-use super::Executor;
+use super::{Executor, ExecutorInfo};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, PkIndices};
+use crate::executor::ActorContextRef;
 use crate::task::AtomicU64Ref;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
+    pub version: PbAggNodeVersion,
+
     // basic
     pub input: Box<dyn Executor>,
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
 
     // system configs
     pub extreme_cache_size: usize,
@@ -57,6 +59,7 @@ impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
+    pub max_dirty_groups_heap_size: usize,
     pub emit_on_window_close: bool,
 }
 impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

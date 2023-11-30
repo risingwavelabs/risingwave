@@ -18,18 +18,20 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{
     ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb,
     ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     logical: LogicalValues,
 }
 
@@ -42,7 +44,7 @@ impl BatchValues {
     }
 
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchValues { base, logical }
     }
@@ -112,5 +114,15 @@ impl ExprRewritable for BatchValues {
                 .clone(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .rows()
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
     }
 }

@@ -16,14 +16,17 @@
 #![feature(hash_extract_if)]
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
 pub mod cmd_impl;
@@ -67,12 +70,15 @@ enum Commands {
     /// Commands for Debug
     #[clap(subcommand)]
     Debug(DebugCommands),
-    /// Commands for tracing the compute nodes
-    Trace,
+    /// Dump the await-tree of compute nodes and compactors
+    #[clap(visible_alias("trace"))]
+    AwaitTree,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
+    #[clap(subcommand)]
+    Throttle(ThrottleCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -154,7 +160,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = u64::MAX)]
+        #[clap(short, long = "epoch", default_value_t = HummockEpoch::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
@@ -220,6 +226,10 @@ enum HummockCommands {
         level0_max_compact_file_number: Option<u64>,
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        enable_emergency_picker: Option<bool>,
+        #[clap(long)]
+        tombstone_reclaim_ratio: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -239,8 +249,14 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    GetCompactionScore {
+        #[clap(long)]
+        compaction_group_id: u64,
+    },
     /// Validate the current HummockVersion.
     ValidateVersion,
+    /// Rebuild table stats
+    RebuildTableStats,
 }
 
 #[derive(Subcommand)]
@@ -310,7 +326,7 @@ pub struct ScaleCommon {
 
     /// Specify the fragment ids that need to be scheduled.
     /// empty by default, which means all fragments will be scheduled
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     fragments: Option<Vec<u32>>,
 }
 
@@ -323,14 +339,19 @@ pub struct ScaleVerticalCommands {
     /// supported
     #[clap(
         long,
+        required = true,
         value_delimiter = ',',
         value_name = "all or worker_id or worker_host, ..."
     )]
     workers: Option<Vec<String>>,
 
     /// The target parallelism per worker, requires `workers` to be set.
-    #[clap(long, requires = "workers")]
+    #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
+
+    /// It will exclude all other workers to maintain the target parallelism only for the target workers.
+    #[clap(long, default_value_t = false)]
+    exclusive: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -416,6 +437,11 @@ enum MetaCommands {
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
+    /// restore meta by recovering from a meta snapshot
+    RestoreMeta {
+        #[command(flatten)]
+        opts: RestoreOpts,
+    },
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 
@@ -455,6 +481,18 @@ enum MetaCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+enum ThrottleCommands {
+    Source(ThrottleCommandArgs),
+    Mv(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct ThrottleCommandArgs {
+    id: u32,
+    rate: Option<u32>,
+}
+
+#[derive(Subcommand, Clone, Debug)]
 pub enum ProfileCommands {
     /// CPU profile
     Cpu {
@@ -466,7 +504,7 @@ pub enum ProfileCommands {
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
-        dir: String,
+        dir: Option<String>,
     },
 }
 
@@ -549,6 +587,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
+            enable_emergency_picker,
+            tombstone_reclaim_ratio,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -567,6 +607,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
+                    enable_emergency_picker,
+                    tombstone_reclaim_ratio,
                 ),
             )
             .await?
@@ -590,8 +632,16 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
         }
+        Commands::Hummock(HummockCommands::GetCompactionScore {
+            compaction_group_id,
+        }) => {
+            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
+        }
         Commands::Hummock(HummockCommands::ValidateVersion) => {
             cmd_impl::hummock::validate_version(context).await?;
+        }
+        Commands::Hummock(HummockCommands::RebuildTableStats) => {
+            cmd_impl::hummock::rebuild_table_stats(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
@@ -618,6 +668,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
+            risingwave_meta::backup_restore::restore(opts).await?
+        }
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
@@ -635,7 +688,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
-        Commands::Trace => cmd_impl::trace::trace(context).await?,
+        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
@@ -658,6 +711,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Throttle(ThrottleCommands::Source(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
+        }
+        Commands::Throttle(ThrottleCommands::Mv(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
     }
     Ok(())
 }

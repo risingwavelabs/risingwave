@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -81,9 +83,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         offset: usize,
         limit: Option<usize>,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(&group_key, Default::default())
+            .iter_with_prefix(&group_key, sub_range, Default::default())
             .await?;
         pin_mut!(state_table_iter);
 
@@ -118,12 +121,14 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 &group_key,
+                sub_range,
                 PrefetchOptions {
-                    exhaust_iter: cache_size_limit == usize::MAX,
+                    preload: cache_size_limit == usize::MAX,
                 },
             )
             .await?;
@@ -131,7 +136,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
-            if let Some(start_key) = start_key.as_ref() && &topn_row.cache_key <= start_key {
+            if let Some(start_key) = start_key.as_ref()
+                && &topn_row.cache_key <= start_key
+            {
                 continue;
             }
             // let row= &topn_row.row;
@@ -165,13 +172,14 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
-
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 &group_key,
+                sub_range,
                 PrefetchOptions {
-                    exhaust_iter: topn_cache.limit == usize::MAX,
+                    preload: topn_cache.limit == usize::MAX,
                 },
             )
             .await?;
@@ -219,7 +227,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             topn_cache.high_capacity > 0,
             "topn cache high_capacity should always > 0"
         );
-        while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
+        while !topn_cache.is_high_cache_full()
+            && let Some(item) = state_table_iter.next().await
+        {
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .high

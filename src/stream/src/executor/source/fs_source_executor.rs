@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// *** NOTICE: TO BE DEPRECATED *** //
+
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -45,12 +47,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-
-    identity: String,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
+    info: ExecutorInfo,
 
     /// Streaming source  for external
     stream_source_core: StreamSourceCore<S>,
@@ -70,21 +67,17 @@ pub struct FsSourceExecutor<S: StateStore> {
 impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ctx: ActorContextRef,
-        schema: Schema,
-        pk_indices: PkIndices,
+        actor_ctx: ActorContextRef,
+        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
     ) -> StreamResult<Self> {
         Ok(Self {
-            actor_ctx: ctx,
-            identity: format!("SourceExecutor {:X}", executor_id),
-            schema,
-            pk_indices,
+            actor_ctx,
+            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -468,15 +461,15 @@ impl<S: StateStore> Executor for FsSourceExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -485,7 +478,7 @@ impl<S: StateStore> Debug for FsSourceExecutor<S> {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            .field("pk_indices", &self.pk_indices)
+            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

@@ -29,8 +29,8 @@ use crate::executor::{BoxedMessageStream, ExecutorInfo};
 /// pipe the second, and finally the first. In the future we could have more efficient
 /// implementation.
 pub struct LookupUnionExecutor {
-    inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
+    inputs: Vec<BoxedExecutor>,
     order: Vec<usize>,
 }
 
@@ -44,13 +44,9 @@ impl std::fmt::Debug for LookupUnionExecutor {
 }
 
 impl LookupUnionExecutor {
-    pub fn new(pk_indices: PkIndices, inputs: Vec<BoxedExecutor>, order: Vec<u32>) -> Self {
+    pub fn new(info: ExecutorInfo, inputs: Vec<BoxedExecutor>, order: Vec<u32>) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema: inputs[0].schema().clone(),
-                pk_indices,
-                identity: "LookupUnionExecutor".to_string(),
-            },
+            info,
             inputs,
             order: order.iter().map(|x| *x as _).collect(),
         }
@@ -195,7 +191,11 @@ mod tests {
         .stop_on_finish(false);
 
         let executor = Box::new(LookupUnionExecutor::new(
-            vec![0],
+            ExecutorInfo {
+                schema: source0.schema().clone(),
+                pk_indices: vec![0],
+                identity: "LookupUnionExecutor".to_string(),
+            },
             vec![Box::new(source0), Box::new(source1), Box::new(source2)],
             vec![2, 1, 0],
         ))

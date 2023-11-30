@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 
 use super::Planner;
 use crate::binder::BoundDelete;
-use crate::optimizer::plan_node::{generic, LogicalDelete, LogicalFilter, LogicalProject};
+use crate::optimizer::plan_node::{generic, LogicalDelete, LogicalProject};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
@@ -25,7 +25,7 @@ impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
         let scan = self.plan_base_table(&delete.table)?;
         let input = if let Some(expr) = delete.selection {
-            LogicalFilter::create_with_expr(scan, expr)
+            self.plan_where(scan, expr)?
         } else {
             scan
         };

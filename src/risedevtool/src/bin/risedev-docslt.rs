@@ -53,11 +53,12 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
             if !(line.starts_with("///") || line.starts_with("//!")) {
                 panic!("expect /// or //! at {}:{}", filepath.display(), i + 1);
             }
-            line = line[3..].trim();
-            if line == "```" {
+            line = &line[3..];
+            if line.trim() == "```" {
                 break;
             }
-            content += line;
+            // strip one leading space
+            content += line.strip_prefix(' ').unwrap_or(line);
             content += "\n";
         }
         blocks.push(SltBlock {
@@ -112,10 +113,7 @@ fn main() -> Result<()> {
             # This file is generated from `{}` at {}.\n\
             \n\
             statement ok\n\
-            set RW_IMPLICIT_FLUSH to true;\n\
-            \n\
-            statement ok\n\
-            set CREATE_COMPACTION_GROUP_FOR_MV to true;\n",
+            set RW_IMPLICIT_FLUSH to true;\n",
             path.display(),
             chrono::Utc::now()
         )?;

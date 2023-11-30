@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
@@ -192,11 +193,13 @@ impl Binder {
         let schema_name = identifiers.pop().map(|ident| ident.real_value());
         let database_name = identifiers.pop().map(|ident| ident.real_value());
 
-        if let Some(database_name) = database_name && database_name != db_name {
+        if let Some(database_name) = database_name
+            && database_name != db_name
+        {
             return Err(ResolveQualifiedNameError::new(
                 formatted_name,
-                ResolveQualifiedNameErrorKind::NotCurrentDatabase)
-            );
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase,
+            ));
         }
 
         Ok((schema_name, name))
@@ -329,7 +332,9 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
+        if schema_name.is_none()
+            && let Some(item) = self.context.cte_to_relation.get(&table_name)
+        {
             // Handles CTE
 
             let (share_id, query, mut original_alias) = item.deref().clone();
@@ -337,11 +342,11 @@ impl Binder {
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
-                let mut alias_iter = from_alias.columns.into_iter();
                 original_alias.columns = original_alias
                     .columns
                     .into_iter()
-                    .map(|ident| alias_iter.next().unwrap_or(ident))
+                    .zip_longest(from_alias.columns)
+                    .map(EitherOrBoth::into_right)
                     .collect();
             }
 
@@ -357,7 +362,10 @@ impl Binder {
             )?;
 
             // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query, lateral: false }));
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery {
+                query,
+                lateral: false,
+            }));
             let share_relation = Relation::Share(Box::new(BoundShare {
                 share_id,
                 input: input_relation,

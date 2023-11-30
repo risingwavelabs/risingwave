@@ -17,7 +17,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::utils::impl_distill_by_unit;
-use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::{
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -28,7 +31,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalIntersect {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Intersect<PlanRef>,
 }
 
@@ -73,6 +76,8 @@ impl ColPrunable for LogicalIntersect {
 }
 
 impl ExprRewritable for LogicalIntersect {}
+
+impl ExprVisitable for LogicalIntersect {}
 
 impl PredicatePushdown for LogicalIntersect {
     fn predicate_pushdown(

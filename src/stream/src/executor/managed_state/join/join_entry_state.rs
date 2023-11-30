@@ -12,20 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap};
-
 use risingwave_common::estimate_size::KvSize;
 
 use super::*;
-
-#[expect(dead_code)]
-type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
-
-#[expect(dead_code)]
-type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
-
-#[expect(dead_code)]
-type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -35,7 +24,7 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 #[derive(Default)]
 pub struct JoinEntryState {
     /// The full copy of the state.
-    cached: BTreeMap<PkType, StateValueType>,
+    cached: join_row_set::JoinRowSet<PkType, StateValueType>,
     kv_heap_size: KvSize,
 }
 
@@ -97,20 +86,11 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_managed_all_or_none_state() {
-        let mut managed_state = JoinEntryState::default();
-        let pk_indices = [0];
-        let col1 = [1, 2, 3];
-        let col2 = [6, 5, 4];
-        let col_types = vec![DataType::Int64, DataType::Int64];
-        let data_chunk = DataChunk::from_pretty(
-            "I I
-             3 4
-             2 5
-             1 6",
-        );
-
+    fn insert_chunk(
+        managed_state: &mut JoinEntryState,
+        pk_indices: &[usize],
+        data_chunk: &DataChunk,
+    ) {
         for row_ref in data_chunk.rows() {
             let row: OwnedRow = row_ref.into_owned_row();
             let value_indices = (0..row.len() - 1).collect_vec();
@@ -120,9 +100,16 @@ mod tests {
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode());
         }
+    }
 
+    fn check(
+        managed_state: &mut JoinEntryState,
+        col_types: &[DataType],
+        col1: &[i64],
+        col2: &[i64],
+    ) {
         for ((_, matched_row), (d1, d2)) in managed_state
-            .values_mut(&col_types)
+            .values_mut(col_types)
             .zip_eq_debug(col1.iter().zip_eq_debug(col2.iter()))
         {
             let matched_row = matched_row.unwrap();
@@ -130,5 +117,36 @@ mod tests {
             assert_eq!(matched_row.row[1], Some(ScalarImpl::Int64(*d2)));
             assert_eq!(matched_row.degree, 0);
         }
+    }
+
+    #[tokio::test]
+    async fn test_managed_all_or_none_state() {
+        let mut managed_state = JoinEntryState::default();
+        let col_types = vec![DataType::Int64, DataType::Int64];
+        let pk_indices = [0];
+
+        let col1 = [3, 2, 1];
+        let col2 = [4, 5, 6];
+        let data_chunk1 = DataChunk::from_pretty(
+            "I I
+             3 4
+             2 5
+             1 6",
+        );
+
+        // `Vec` in state
+        insert_chunk(&mut managed_state, &pk_indices, &data_chunk1);
+        check(&mut managed_state, &col_types, &col1, &col2);
+
+        // `BtreeMap` in state
+        let col1 = [1, 2, 3, 4, 5];
+        let col2 = [6, 5, 4, 9, 8];
+        let data_chunk2 = DataChunk::from_pretty(
+            "I I
+             5 8
+             4 9",
+        );
+        insert_chunk(&mut managed_state, &pk_indices, &data_chunk2);
+        check(&mut managed_state, &col_types, &col1, &col2);
     }
 }

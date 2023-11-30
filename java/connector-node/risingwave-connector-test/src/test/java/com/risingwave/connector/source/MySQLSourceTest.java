@@ -124,10 +124,12 @@ public class MySQLSourceTest {
                     int count = 0;
                     while (eventStream.hasNext()) {
                         List<CdcMessage> messages = eventStream.next().getEventsList();
-                        for (CdcMessage ignored : messages) {
-                            count++;
+                        for (CdcMessage msg : messages) {
+                            if (!msg.getPayload().isBlank()) {
+                                count++;
+                            }
                         }
-                        if (count == 10000) {
+                        if (count >= 10000) {
                             return count;
                         }
                     }

@@ -75,10 +75,14 @@ impl Parse for FunctionAttr {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {
                 parsed.type_infer = Some(get_value()?);
+            } else if meta.path().is_ident("generic") {
+                parsed.generic = Some(get_value()?);
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
-            } else if meta.path().is_ident("deprecated") {
+            } else if meta.path().is_ident("deprecated") || meta.path().is_ident("internal") {
                 parsed.deprecated = true;
+            } else if meta.path().is_ident("rewritten") {
+                parsed.rewritten = true;
             } else if meta.path().is_ident("append_only") {
                 parsed.append_only = true;
             } else {
@@ -121,6 +125,7 @@ impl From<&syn::Signature> for UserFunctionAttr {
             context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
             arg_option: args_contain_option(sig),
+            first_mut_ref_arg: first_mut_ref_arg(sig),
             return_type_kind,
             iterator_item_kind,
             core_return_type,
@@ -141,12 +146,18 @@ impl Parse for AggregateImpl {
                 _ => None,
             })
         };
+        let self_path = itemimpl.self_ty.to_token_stream().to_string();
+        let struct_name = match self_path.split_once('<') {
+            Some((path, _)) => path.trim().into(), // remove generic parameters
+            None => self_path,
+        };
         Ok(AggregateImpl {
-            struct_name: itemimpl.self_ty.to_token_stream().to_string(),
+            struct_name,
             accumulate: parse_function("accumulate").expect("expect accumulate function"),
             retract: parse_function("retract"),
             merge: parse_function("merge"),
             finalize: parse_function("finalize"),
+            create_state: parse_function("create_state"),
             encode_state: parse_function("encode_state"),
             decode_state: parse_function("decode_state"),
         })
@@ -155,6 +166,8 @@ impl Parse for AggregateImpl {
 
 impl Parse for AggregateFnOrImpl {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
+        // consume attributes
+        let _ = input.call(syn::Attribute::parse_outer)?;
         if input.peek(Token![impl]) {
             Ok(AggregateFnOrImpl::Impl(input.parse()?))
         } else {
@@ -213,24 +226,41 @@ fn last_arg_is_retract(sig: &syn::Signature) -> bool {
 
 /// Check if any argument is `Option`.
 fn args_contain_option(sig: &syn::Signature) -> bool {
-    if sig.inputs.is_empty() {
-        return false;
-    }
     for arg in &sig.inputs {
         let syn::FnArg::Typed(arg) = arg else {
-            return false;
+            continue;
         };
         let syn::Type::Path(path) = arg.ty.as_ref() else {
-            return false;
+            continue;
         };
         let Some(seg) = path.path.segments.last() else {
-            return false;
+            continue;
         };
         if seg.ident == "Option" {
             return true;
         }
     }
     false
+}
+
+/// Returns `T` if the first argument (except `self`) is `&mut T`.
+fn first_mut_ref_arg(sig: &syn::Signature) -> Option<String> {
+    let arg = match sig.inputs.first()? {
+        syn::FnArg::Typed(arg) => arg,
+        syn::FnArg::Receiver(_) => match sig.inputs.iter().nth(1)? {
+            syn::FnArg::Typed(arg) => arg,
+            _ => return None,
+        },
+    };
+    let syn::Type::Reference(syn::TypeReference {
+        elem,
+        mutability: Some(_),
+        ..
+    }) = arg.ty.as_ref()
+    else {
+        return None;
+    };
+    Some(elem.to_token_stream().to_string())
 }
 
 /// Check the return type.
@@ -286,7 +316,9 @@ fn strip_iterator(ty: &syn::Type) -> Option<&syn::Type> {
         return None;
     };
     for arg in &angle_bracketed.args {
-        if let syn::GenericArgument::AssocType(b) = arg && b.ident == "Item" {
+        if let syn::GenericArgument::AssocType(b) = arg
+            && b.ident == "Item"
+        {
             return Some(&b.ty);
         }
     }

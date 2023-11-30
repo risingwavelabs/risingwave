@@ -19,77 +19,80 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{GenericPlanNode, PlanWindowFunction};
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {
-    pub base: PlanBase,
-    logical: generic::OverWindow<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::OverWindow<PlanRef>,
 }
 
 impl StreamOverWindow {
-    pub fn new(logical: generic::OverWindow<PlanRef>) -> Self {
-        assert!(logical.funcs_have_same_partition_and_order());
+    pub fn new(core: generic::OverWindow<PlanRef>) -> Self {
+        assert!(core.funcs_have_same_partition_and_order());
 
-        let input = &logical.input;
-        let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
+        let input = &core.input;
+        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             input.distribution().clone(),
             false, // general over window cannot be append-only
             false,
             watermark_columns,
         );
-        StreamOverWindow { base, logical }
+        StreamOverWindow { base, core }
     }
 
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder =
             TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
 
-        let out_schema = self.logical.schema();
+        let out_schema = self.core.schema();
         for field in out_schema.fields() {
             tbl_builder.add_column(field);
         }
 
         let mut order_cols = HashSet::new();
-        for idx in self.logical.partition_key_indices() {
+        for idx in self.core.partition_key_indices() {
             if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
             }
         }
         let read_prefix_len_hint = tbl_builder.get_current_pk_len();
-        for o in self.logical.order_key() {
+        for o in self.core.order_key() {
             if order_cols.insert(o.column_index) {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
             }
         }
-        for &idx in self.logical.input.logical_pk() {
+        for &idx in self.core.input.expect_stream_key() {
             if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
             }
         }
 
-        let in_dist_key = self.logical.input.distribution().dist_column_indices();
+        let in_dist_key = self.core.input.distribution().dist_column_indices();
         tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
 }
 
-impl_distill_by_unit!(StreamOverWindow, logical, "StreamOverWindow");
+impl_distill_by_unit!(StreamOverWindow, core, "StreamOverWindow");
 
 impl PlanTreeNodeUnary for StreamOverWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! { StreamOverWindow }
@@ -99,19 +102,19 @@ impl StreamNode for StreamOverWindow {
         use risingwave_pb::stream_plan::*;
 
         let calls = self
-            .logical
+            .core
             .window_functions()
             .iter()
             .map(PlanWindowFunction::to_protobuf)
             .collect();
         let partition_by = self
-            .logical
+            .core
             .partition_key_indices()
             .into_iter()
             .map(|idx| idx as _)
             .collect();
         let order_by = self
-            .logical
+            .core
             .order_key()
             .iter()
             .map(ColumnOrder::to_protobuf)
@@ -122,10 +125,10 @@ impl StreamNode for StreamOverWindow {
             .to_internal_table_prost();
         let cache_policy = self
             .base
-            .ctx
+            .ctx()
             .session_ctx()
             .config()
-            .get_streaming_over_window_cache_policy();
+            .streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(OverWindowNode {
             calls,
@@ -138,3 +141,5 @@ impl StreamNode for StreamOverWindow {
 }
 
 impl ExprRewritable for StreamOverWindow {}
+
+impl ExprVisitable for StreamOverWindow {}

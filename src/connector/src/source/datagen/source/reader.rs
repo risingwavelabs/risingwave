@@ -120,7 +120,7 @@ impl SplitReader for DatagenSplitReader {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             field_names,
-            parser_config.specific.get_source_struct(),
+            parser_config.specific.clone(),
             data_types,
             rows_per_second,
             events_so_far,
@@ -213,9 +213,9 @@ fn generator_from_data_type(
         None => split_index,
     };
     match data_type {
-        DataType::Timestamp => {
+        ty @ (DataType::Timestamp | DataType::Timestamptz) => {
             let max_past_key = format!("fields.{}.max_past", name);
-            let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
+            let max_past_value = fields_option_map.get(&max_past_key).cloned();
             let max_past_mode_key = format!("fields.{}.max_past_mode", name);
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
@@ -230,12 +230,21 @@ fn generator_from_data_type(
                 None => None,
             };
 
-            FieldGeneratorImpl::with_timestamp(
-                basetime,
-                max_past_value,
-                max_past_mode_value,
-                random_seed,
-            )
+            if ty == DataType::Timestamptz {
+                FieldGeneratorImpl::with_timestamptz(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            } else {
+                FieldGeneratorImpl::with_timestamp(
+                    basetime,
+                    max_past_value,
+                    max_past_mode_value,
+                    random_seed,
+                )
+            }
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);

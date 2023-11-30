@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
@@ -28,7 +29,7 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::system_catalog::pg_catalog::{
     PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprImpl};
 
 impl Binder {
     /// Binds a table function AST, which is a function call in a relation position.
@@ -49,14 +50,10 @@ impl Binder {
         {
             if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                 if with_ordinality {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "WITH ORDINALITY for internal/system table function {}",
-                            func_name
-                        ),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "WITH ORDINALITY for internal/system table function {}",
+                        func_name
+                    );
                 }
                 return self.bind_internal_table(args, alias);
             }
@@ -66,14 +63,10 @@ impl Binder {
                 )
             {
                 if with_ordinality {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "WITH ORDINALITY for internal/system table function {}",
-                            func_name
-                        ),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "WITH ORDINALITY for internal/system table function {}",
+                        func_name
+                    );
                 }
                 return self.bind_relation_by_name_inner(
                     Some(PG_CATALOG_SCHEMA_NAME),
@@ -124,6 +117,20 @@ impl Binder {
         self.context.clause = clause;
         self.pop_context()?;
         let func = func?;
+
+        if let ExprImpl::TableFunction(func) = &func {
+            if func
+                .args
+                .iter()
+                .any(|arg| matches!(arg, ExprImpl::Subquery(_)))
+            {
+                // Same error reports as DuckDB.
+                return Err(ErrorCode::InvalidInputSyntax(
+                    format!("Only table-in-out functions can have subquery parameters, {} only accepts constant parameters", func.name()),
+                )
+                    .into());
+            }
+        }
 
         // bool indicates if the field is hidden
         let mut columns = if let DataType::Struct(s) = func.return_type() {

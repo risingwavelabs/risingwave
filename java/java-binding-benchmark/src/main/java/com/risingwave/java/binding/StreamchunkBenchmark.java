@@ -19,28 +19,27 @@ package com.risingwave.java.binding;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(org.openjdk.jmh.annotations.Scope.Benchmark)
 public class StreamchunkBenchmark {
     @Param({"100", "1000", "10000"})
-    static int loopTime;
+    int loopTime;
 
-    String str;
-    StreamChunkIterator iter;
+    StreamChunk chunk;
 
-    @Setup(Level.Invocation)
+    @Setup(Level.Iteration)
     public void setup() {
-        str = "i i I f F B i";
+        String str = "i i I f F B i";
         for (int i = 0; i < loopTime; i++) {
             String b = i % 2 == 0 ? "f" : "t";
             String n = i % 2 == 0 ? "." : "1";
             str += String.format("\n + %d %d %d %d.0 %d.0 %s %s", i, i, i, i, i, b, n);
         }
-        iter = new StreamChunkIterator(str);
+        chunk = StreamChunk.fromPretty(str);
     }
 
     public void getValue(StreamChunkRow row) {
@@ -55,15 +54,15 @@ public class StreamchunkBenchmark {
 
     @Benchmark
     public void streamchunkTest() {
+        var iter = new StreamChunkIterator(chunk);
         int count = 0;
         while (true) {
-            try (StreamChunkRow row = iter.next()) {
-                if (row == null) {
-                    break;
-                }
-                count += 1;
-                getValue(row);
+            StreamChunkRow row = iter.next();
+            if (row == null) {
+                break;
             }
+            count += 1;
+            getValue(row);
         }
         if (count != loopTime) {
             throw new RuntimeException(

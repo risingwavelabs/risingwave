@@ -17,48 +17,51 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
-    pub base: PlanBase,
-    logical: generic::HopWindow<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
 }
 
 impl StreamHopWindow {
     pub fn new(
-        logical: generic::HopWindow<PlanRef>,
+        core: generic::HopWindow<PlanRef>,
         window_start_exprs: Vec<ExprImpl>,
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
-        let input = logical.input.clone();
-        let i2o = logical.i2o_col_mapping();
+        let input = core.input.clone();
+        let i2o = core.i2o_col_mapping();
         let dist = i2o.rewrite_provided_distribution(input.distribution());
 
         let mut watermark_columns = input.watermark_columns().clone();
-        watermark_columns.grow(logical.internal_column_num());
+        watermark_columns.grow(core.internal_column_num());
 
-        if watermark_columns.contains(logical.time_col.index) {
+        if watermark_columns.contains(core.time_col.index) {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
-            watermark_columns.insert(logical.internal_window_start_col_idx());
-            watermark_columns.insert(logical.internal_window_end_col_idx());
+            watermark_columns.insert(core.internal_window_start_col_idx());
+            watermark_columns.insert(core.internal_window_end_col_idx());
         }
         let watermark_columns = ColIndexMapping::with_remaining_columns(
-            &logical.output_indices,
-            logical.internal_column_num(),
+            &core.output_indices,
+            core.internal_column_num(),
         )
         .rewrite_bitset(&watermark_columns);
 
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             dist,
             input.append_only(),
             input.emit_on_window_close(),
@@ -66,7 +69,7 @@ impl StreamHopWindow {
         );
         Self {
             base,
-            logical,
+            core,
             window_start_exprs,
             window_end_exprs,
         }
@@ -75,8 +78,8 @@ impl StreamHopWindow {
 
 impl Distill for StreamHopWindow {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut vec = self.logical.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        let mut vec = self.core.fields_pretty();
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record("StreamHopWindow", vec)
@@ -85,14 +88,14 @@ impl Distill for StreamHopWindow {
 
 impl PlanTreeNodeUnary for StreamHopWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
+        let mut core = self.core.clone();
+        core.input = input;
         Self::new(
-            logical,
+            core,
             self.window_start_exprs.clone(),
             self.window_end_exprs.clone(),
         )
@@ -104,15 +107,10 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         PbNodeBody::HopWindow(HopWindowNode {
-            time_col: self.logical.time_col.index() as _,
-            window_slide: Some(self.logical.window_slide.into()),
-            window_size: Some(self.logical.window_size.into()),
-            output_indices: self
-                .logical
-                .output_indices
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
+            time_col: self.core.time_col.index() as _,
+            window_slide: Some(self.core.window_slide.into()),
+            window_size: Some(self.core.window_size.into()),
+            output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             window_start_exprs: self
                 .window_start_exprs
                 .clone()
@@ -136,7 +134,7 @@ impl ExprRewritable for StreamHopWindow {
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         Self::new(
-            self.logical.clone(),
+            self.core.clone(),
             self.window_start_exprs
                 .clone()
                 .into_iter()
@@ -149,5 +147,12 @@ impl ExprRewritable for StreamHopWindow {
                 .collect(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for StreamHopWindow {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.window_start_exprs.iter().for_each(|e| v.visit_expr(e));
+        self.window_end_exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

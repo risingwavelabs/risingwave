@@ -19,15 +19,16 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_expr::expr::BoxedExpression;
 
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
@@ -68,7 +69,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     ///      deduplication.
     ///   2. Inner side input lookups inner side table with keys and builds hash map.
     ///   3. Outer side rows join each inner side rows by probing the hash map.
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
@@ -128,7 +129,7 @@ impl<K: HashKey> LookupJoinBase<K> {
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
-                let build_chunk = build_chunk?.compact();
+                let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
                     self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
@@ -147,7 +148,14 @@ impl<K: HashKey> LookupJoinBase<K> {
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
                 let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
 
-                for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+                for (build_row_id, (build_key, visible)) in build_keys
+                    .into_iter()
+                    .zip_eq_fast(build_chunk.visibility().iter())
+                    .enumerate()
+                {
+                    if !visible {
+                        continue;
+                    }
                     // Only insert key to hash map if it is consistent with the null safe
                     // restriction.
                     if build_key.null_bitmap().is_subset(&null_matched) {

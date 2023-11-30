@@ -20,3 +20,5 @@ mod standalone;
 
 pub use playground::*;
 pub use standalone::*;
+
+risingwave_expr_impl::enable!();

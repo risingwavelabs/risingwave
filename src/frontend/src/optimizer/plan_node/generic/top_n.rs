@@ -42,7 +42,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         &self,
         schema: &Schema,
         ctx: OptimizerContextRef,
-        stream_key: &[usize],
+        input_stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         let columns_fields = schema.fields().to_vec();
@@ -64,17 +64,16 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             internal_table_catalog_builder.add_order_column(idx, OrderType::ascending());
             order_cols.insert(idx);
         });
-
         let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
+
         column_orders.iter().for_each(|order| {
             internal_table_catalog_builder.add_order_column(order.column_index, order.order_type);
             order_cols.insert(order.column_index);
         });
 
-        stream_key.iter().for_each(|idx| {
-            if !order_cols.contains(idx) {
+        input_stream_key.iter().for_each(|idx| {
+            if order_cols.insert(*idx) {
                 internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
-                order_cols.insert(*idx);
             }
         });
         if let Some(vnode_col_idx) = vnode_col_idx {
@@ -170,20 +169,20 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        // We can use the group key as the stream key when there is at most one record for each
-        // value of the group key.
-        if self.limit_attr.max_one_row() {
-            Some(self.group_key.clone())
-        } else {
-            let mut pk = self.input.logical_pk().to_vec();
-            for i in &self.group_key {
-                if !pk.contains(i) {
-                    pk.push(*i);
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        let input_stream_key = self.input.stream_key()?;
+        let mut stream_key = self.group_key.clone();
+        if !self.limit_attr.max_one_row() {
+            for i in input_stream_key {
+                if !stream_key.contains(i) {
+                    stream_key.push(*i);
                 }
             }
-            Some(pk)
         }
+        // else: We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+
+        Some(stream_key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {

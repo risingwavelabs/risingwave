@@ -284,3 +284,20 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: test hop window subquery 1
+  sql: |
+    create table t1 (k int primary key, ts timestamp);
+    select * from (select 1 as col union select 2) u , lateral(select * from hop(t1, ts, interval '10' minute, interval '30' minute) where col = k);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: Only table-in-out functions can have subquery parameters.
+  sql: |
+    SELECT * FROM generate_series(1, (select 1));
+  expected_outputs:
+    - binder_error
+- name: While this one is allowed.
+  sql: |
+    SELECT generate_series(1, (select 1));
+  expected_outputs:
+    - batch_plan

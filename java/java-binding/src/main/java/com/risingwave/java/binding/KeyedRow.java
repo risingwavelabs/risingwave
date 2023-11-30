@@ -20,6 +20,6 @@ public class KeyedRow extends BaseRow {
     }
 
     public byte[] getKey() {
-        return Binding.rowGetKey(pointer);
+        return Binding.iteratorGetKey(pointer);
     }
 }

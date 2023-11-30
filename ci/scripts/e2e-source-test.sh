@@ -6,7 +6,6 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 # prepare environment
-export CONNECTOR_RPC_ENDPOINT="localhost:50051"
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
@@ -45,44 +44,25 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGPASSWORD='postgres';
-createdb -h db -U postgres cdc_test
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
+export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+createdb
+psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
-node_port=50051
-node_timeout=10
-
-wait_for_connector_node_start() {
-  start_time=$(date +%s)
-  while :
-  do
-      if nc -z localhost $node_port; then
-          echo "Port $node_port is listened! Connector Node is up!"
-          break
-      fi
-
-      current_time=$(date +%s)
-      elapsed_time=$((current_time - start_time))
-      if [ $elapsed_time -ge $node_timeout ]; then
-          echo "Timeout waiting for port $node_port to be listened!"
-          exit 1
-      fi
-      sleep 0.1
-  done
-  sleep 2
-}
-
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
-echo "waiting for connector node to start"
-wait_for_connector_node_start
+echo "--- inline cdc test"
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
+
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
 
 echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
@@ -90,22 +70,25 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
-# kill cluster and the connector node
+# kill cluster
 cargo make kill
-pkill -f connector-node
 echo "cluster killed "
+
+# insert into mytest database (cdc.share_stream.slt)
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products
+       VALUES (default,'RisingWave','Next generation Streaming Database'),
+              (default,'Materialize','The Streaming Database You Already Know How to Use');
+       UPDATE products SET name = 'RW' WHERE id <= 103;
+       INSERT INTO orders VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);"
+
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-touch .risingwave/log/connector-node.log
-./connector-node/start-service.sh -p $node_port >> .risingwave/log/connector-node.log 2>&1 &
-echo "(recovery) waiting for connector node to start"
-wait_for_connector_node_start
 
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for cluster recovery finish"
@@ -114,15 +97,21 @@ echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
+# drop relations
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
+
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20
+echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
+curl --silent 'http://message_queue:8081/subjects'; echo
+# curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
+curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
 
 echo "--- Kill cluster"

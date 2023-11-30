@@ -451,8 +451,8 @@ impl<'a> BeMessage<'a> {
 
                 // Parameter names and values are passed as null-terminated strings
                 let iov = &mut [name, b"\0", value, b"\0"].map(IoSlice::new);
-                let mut buffer = [0u8; 64]; // this should be enough
-                let cnt = buffer.as_mut().write_vectored(iov).unwrap();
+                let mut buffer = vec![];
+                let cnt = buffer.write_vectored(iov).unwrap();
 
                 buf.put_u8(b'S');
                 write_body(buf, |stream| {
@@ -628,12 +628,14 @@ impl<'a> BeMessage<'a> {
             }
 
             BeMessage::ErrorResponse(error) => {
+                use thiserror_ext::AsReport;
                 // For all the errors set Severity to Error and error code to
                 // 'internal error'.
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                let msg = error.to_string();
+                // Format the error as a pretty report.
+                let msg = error.to_report_string_pretty();
                 write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 

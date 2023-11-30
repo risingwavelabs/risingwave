@@ -139,6 +139,11 @@ pub struct Args {
 
     #[arg(short, long)]
     e2e_extended_test: bool,
+
+    /// Background ddl
+    /// The probability of background ddl for a ddl query.
+    #[clap(long, default_value = "0.0")]
+    background_ddl_rate: f64,
 }
 
 #[tokio::main]
@@ -245,7 +250,7 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts).await;
+                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
             }
         })
         .await;

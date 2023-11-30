@@ -46,6 +46,17 @@ impl SplitMetaData for KinesisSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let start_offset = if start_offset.is_empty() {
+            KinesisOffset::Earliest
+        } else {
+            KinesisOffset::SequenceNumber(start_offset)
+        };
+
+        self.start_position = start_offset;
+        Ok(())
+    }
 }
 
 impl KinesisSplit {
@@ -59,16 +70,5 @@ impl KinesisSplit {
             start_position,
             end_position,
         }
-    }
-
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        let start_offset = if start_offset.is_empty() {
-            KinesisOffset::Earliest
-        } else {
-            KinesisOffset::SequenceNumber(start_offset)
-        };
-
-        self.start_position = start_offset;
-        Ok(())
     }
 }

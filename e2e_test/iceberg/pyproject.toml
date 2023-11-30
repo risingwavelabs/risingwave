@@ -7,7 +7,7 @@ authors = ["risingwavelabs"]
 [tool.poetry.dependencies]
 python = "^3.10"
 pyspark = { version = "3.4.1", extras = ["sql", "connect"] }
-
+tomli = "2.0"
 
 
 [build-system]

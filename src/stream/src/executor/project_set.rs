@@ -20,15 +20,16 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
 use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef,
     StreamExecutorResult, Watermark,
 };
 use crate::common::StreamChunkBuilder;
@@ -44,8 +45,9 @@ pub struct ProjectSetExecutor {
 }
 
 struct Inner {
+    _ctx: ActorContextRef,
     info: ExecutorInfo,
-    ctx: ActorContextRef,
+
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
@@ -60,30 +62,16 @@ impl ProjectSetExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         input: Box<dyn Executor>,
-        pk_indices: PkIndices,
         select_list: Vec<ProjectSetSelectItem>,
-        executor_id: u64,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
     ) -> Self {
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(
-            select_list
-                .iter()
-                .map(|expr| Field::unnamed(expr.return_type())),
-        );
-
-        let info = ExecutorInfo {
-            schema: Schema { fields },
-            pk_indices,
-            identity: format!("ProjectSet {:X}", executor_id),
-        };
-
         let inner = Inner {
+            _ctx: ctx,
             info,
-            ctx,
             select_list,
             chunk_size,
             watermark_derivations,
@@ -188,11 +176,15 @@ impl Inner {
                             // for each column
                             for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
-                                    Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
-                                        valid = true;
-                                        value
-                                    } else {
-                                        None
+                                    Either::Left(state) => {
+                                        if let Some((i, value)) = state.peek()
+                                            && i == row_idx
+                                        {
+                                            valid = true;
+                                            value
+                                        } else {
+                                            None
+                                        }
                                     }
                                     Either::Right(array) => array.value_at(row_idx),
                                 };
@@ -210,7 +202,9 @@ impl Inner {
                             }
                             // move to the next row
                             for item in &mut results {
-                                if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
+                                if let Either::Left(state) = item
+                                    && matches!(state.peek(), Some((i, _)) if i == row_idx)
+                                {
                                     state.next().await?;
                                 }
                             }
@@ -260,12 +254,11 @@ impl Inner {
                 ProjectSetSelectItem::Expr(expr) => {
                     watermark
                         .clone()
-                        .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET, |err| {
-                            self.ctx.on_compute_error(
-                                err,
-                                &(self.info.identity.to_string() + "(when computing watermark)"),
-                            )
-                        })
+                        .transform_with_expr(
+                            // TODO: should we build `expr` in non-strict mode?
+                            &NonStrictExpression::new_topmost(expr, LogReport),
+                            expr_idx + PROJ_ROW_ID_OFFSET,
+                        )
                         .await
                 }
                 ProjectSetSelectItem::TableFunction(_) => {

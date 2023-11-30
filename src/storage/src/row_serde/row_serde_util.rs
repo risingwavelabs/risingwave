@@ -16,6 +16,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_hummock_sdk::key::TableKey;
 
 pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Bytes {
     let mut buf = BytesMut::with_capacity(pk.len());
@@ -27,11 +28,11 @@ pub fn serialize_pk_with_vnode(
     pk: impl Row,
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
-) -> Bytes {
+) -> TableKey<Bytes> {
     let mut buffer = BytesMut::new();
     buffer.put_slice(&vnode.to_be_bytes()[..]);
     pk.memcmp_serialize_into(serializer, &mut buffer);
-    buffer.freeze()
+    TableKey(buffer.freeze())
 }
 
 pub fn deserialize_pk_with_vnode(

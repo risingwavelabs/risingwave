@@ -22,7 +22,7 @@ use sysinfo::{System, SystemExt};
 
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
-use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
+use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
 
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
@@ -76,7 +76,6 @@ pub struct SystemData {
 #[derive(Debug, Serialize, Deserialize)]
 struct Memory {
     used: usize,
-    available: usize,
     total: usize,
 }
 
@@ -98,13 +97,9 @@ impl SystemData {
         let mut sys = System::new();
 
         let memory = {
-            let available = total_memory_available_bytes();
+            let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
-            Memory {
-                available,
-                used,
-                total: available + used,
-            }
+            Memory { used, total }
         };
 
         let os = {
@@ -172,7 +167,6 @@ mod tests {
     fn test_system_data_new() {
         let system_data = SystemData::new();
 
-        assert!(system_data.memory.available > 0);
         assert!(system_data.memory.used > 0);
         assert!(system_data.memory.total > 0);
         assert!(!system_data.os.name.is_empty());

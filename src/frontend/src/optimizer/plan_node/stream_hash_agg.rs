@@ -18,17 +18,20 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{self, PlanAggCall};
+use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Agg<PlanRef>,
 
     /// An optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution.
@@ -46,38 +49,38 @@ pub struct StreamHashAgg {
 
 impl StreamHashAgg {
     pub fn new(
-        logical: generic::Agg<PlanRef>,
+        core: generic::Agg<PlanRef>,
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
     ) -> Self {
-        Self::new_with_eowc(logical, vnode_col_idx, row_count_idx, false)
+        Self::new_with_eowc(core, vnode_col_idx, row_count_idx, false)
     }
 
     pub fn new_with_eowc(
-        logical: generic::Agg<PlanRef>,
+        core: generic::Agg<PlanRef>,
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
         emit_on_window_close: bool,
     ) -> Self {
-        assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
+        assert_eq!(core.agg_calls[row_count_idx], PlanAggCall::count_star());
 
-        let input = logical.input.clone();
+        let input = core.input.clone();
         let input_dist = input.distribution();
-        let dist = logical
+        let dist = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
 
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
+        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
         let mut window_col_idx = None;
-        let mapping = logical.i2o_col_mapping();
+        let mapping = core.i2o_col_mapping();
         if emit_on_window_close {
-            let wtmk_group_key = logical.watermark_group_key(input.watermark_columns());
+            let wtmk_group_key = core.watermark_group_key(input.watermark_columns());
             assert!(wtmk_group_key.len() == 1); // checked in `to_eowc_version`
             window_col_idx = Some(wtmk_group_key[0]);
             // EOWC HashAgg only produce one watermark column, i.e. the window column
             watermark_columns.insert(mapping.map(wtmk_group_key[0]));
         } else {
-            for idx in logical.group_key.indices() {
+            for idx in core.group_key.indices() {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(mapping.map(idx));
                 }
@@ -85,8 +88,8 @@ impl StreamHashAgg {
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             dist,
             emit_on_window_close, // in EOWC mode, we produce append only output
             emit_on_window_close,
@@ -94,7 +97,7 @@ impl StreamHashAgg {
         );
         StreamHashAgg {
             base,
-            logical,
+            core,
             vnode_col_idx,
             row_count_idx,
             emit_on_window_close,
@@ -103,22 +106,22 @@ impl StreamHashAgg {
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 
     pub fn group_key(&self) -> &IndexSet {
-        &self.logical.group_key
+        &self.core.group_key
     }
 
     pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.logical.i2o_col_mapping()
+        self.core.i2o_col_mapping()
     }
 
     // TODO(rc): It'll be better to force creation of EOWC version through `new`, especially when we
     // optimize for 2-phase EOWC aggregation later.
     pub fn to_eowc_version(&self) -> Result<PlanRef> {
         let input = self.input();
-        let wtmk_group_key = self.logical.watermark_group_key(input.watermark_columns());
+        let wtmk_group_key = self.core.watermark_group_key(input.watermark_columns());
 
         if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
             return Err(ErrorCode::NotSupported(
@@ -130,7 +133,7 @@ impl StreamHashAgg {
         }
 
         Ok(Self::new_with_eowc(
-            self.logical.clone(),
+            self.core.clone(),
             self.vnode_col_idx,
             self.row_count_idx,
             true,
@@ -141,8 +144,8 @@ impl StreamHashAgg {
 
 impl Distill for StreamHashAgg {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut vec = self.logical.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        let mut vec = self.core.fields_pretty();
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record(
@@ -158,13 +161,13 @@ impl Distill for StreamHashAgg {
 
 impl PlanTreeNodeUnary for StreamHashAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let logical = generic::Agg {
             input,
-            ..self.logical.clone()
+            ..self.core.clone()
         };
         Self::new_with_eowc(
             logical,
@@ -179,9 +182,9 @@ impl_plan_tree_node_for_unary! { StreamHashAgg }
 impl StreamNode for StreamHashAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        let (intermediate_state_table, agg_states, distinct_dedup_tables) = self
-            .logical
-            .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
+        let (intermediate_state_table, agg_states, distinct_dedup_tables) =
+            self.core
+                .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
         PbNodeBody::HashAgg(HashAggNode {
             group_key: self.group_key().to_vec_as_u32(),
@@ -214,7 +217,8 @@ impl StreamNode for StreamHashAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            emit_on_window_close: self.base.emit_on_window_close,
+            emit_on_window_close: self.base.emit_on_window_close(),
+            version: PbAggNodeVersion::Issue13465 as _,
         })
     }
 }
@@ -225,14 +229,20 @@ impl ExprRewritable for StreamHashAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
         Self::new_with_eowc(
-            logical,
+            core,
             self.vnode_col_idx,
             self.row_count_idx,
             self.emit_on_window_close,
         )
         .into()
+    }
+}
+
+impl ExprVisitable for StreamHashAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

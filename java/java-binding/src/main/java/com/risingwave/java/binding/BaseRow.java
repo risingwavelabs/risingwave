@@ -14,75 +14,73 @@
 
 package com.risingwave.java.binding;
 
-public class BaseRow implements AutoCloseable {
+public class BaseRow {
     protected final long pointer;
-    private boolean isClosed;
 
     protected BaseRow(long pointer) {
         this.pointer = pointer;
-        this.isClosed = false;
     }
 
     public boolean isNull(int index) {
-        return Binding.rowIsNull(pointer, index);
+        return Binding.iteratorIsNull(pointer, index);
     }
 
     public short getShort(int index) {
-        return Binding.rowGetInt16Value(pointer, index);
+        return Binding.iteratorGetInt16Value(pointer, index);
     }
 
     public int getInt(int index) {
-        return Binding.rowGetInt32Value(pointer, index);
+        return Binding.iteratorGetInt32Value(pointer, index);
     }
 
     public long getLong(int index) {
-        return Binding.rowGetInt64Value(pointer, index);
+        return Binding.iteratorGetInt64Value(pointer, index);
     }
 
     public float getFloat(int index) {
-        return Binding.rowGetFloatValue(pointer, index);
+        return Binding.iteratorGetFloatValue(pointer, index);
     }
 
     public double getDouble(int index) {
-        return Binding.rowGetDoubleValue(pointer, index);
+        return Binding.iteratorGetDoubleValue(pointer, index);
     }
 
     public boolean getBoolean(int index) {
-        return Binding.rowGetBooleanValue(pointer, index);
+        return Binding.iteratorGetBooleanValue(pointer, index);
     }
 
     public String getString(int index) {
-        return Binding.rowGetStringValue(pointer, index);
+        return Binding.iteratorGetStringValue(pointer, index);
     }
 
     public java.sql.Timestamp getTimestamp(int index) {
-        return Binding.rowGetTimestampValue(pointer, index);
+        return Binding.iteratorGetTimestampValue(pointer, index);
     }
 
     public java.sql.Time getTime(int index) {
-        return Binding.rowGetTimeValue(pointer, index);
+        return Binding.iteratorGetTimeValue(pointer, index);
     }
 
     public java.math.BigDecimal getDecimal(int index) {
-        return Binding.rowGetDecimalValue(pointer, index);
+        return Binding.iteratorGetDecimalValue(pointer, index);
     }
 
     public java.sql.Date getDate(int index) {
-        return Binding.rowGetDateValue(pointer, index);
+        return Binding.iteratorGetDateValue(pointer, index);
     }
 
     // string representation of interval: "2 mons 3 days 00:00:00.000004" or "P1Y2M3DT4H5M6.789123S"
     public String getInterval(int index) {
-        return Binding.rowGetIntervalValue(pointer, index);
+        return Binding.iteratorGetIntervalValue(pointer, index);
     }
 
     // string representation of jsonb: '{"key": "value"}'
     public String getJsonb(int index) {
-        return Binding.rowGetJsonbValue(pointer, index);
+        return Binding.iteratorGetJsonbValue(pointer, index);
     }
 
     public byte[] getBytea(int index) {
-        return Binding.rowGetByteaValue(pointer, index);
+        return Binding.iteratorGetByteaValue(pointer, index);
     }
 
     /**
@@ -92,16 +90,8 @@ public class BaseRow implements AutoCloseable {
      *     Object[] elements)
      */
     public <T> Object[] getArray(int index, Class<T> clazz) {
-        var val = Binding.rowGetArrayValue(pointer, index, clazz);
+        var val = Binding.iteratorGetArrayValue(pointer, index, clazz);
         assert (val instanceof Object[]);
         return (Object[]) val;
-    }
-
-    @Override
-    public void close() {
-        if (!isClosed) {
-            isClosed = true;
-            Binding.rowClose(pointer);
-        }
     }
 }

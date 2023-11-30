@@ -12,17 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::LazyLock;
 
+use either::Either;
 use itertools::Itertools;
+use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::Result;
-use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::{
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableFactor, TableWithJoins,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
+    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -35,8 +42,8 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_connection_in_with_option;
-use crate::Planner;
+use crate::utils::resolve_privatelink_in_with_option;
+use crate::{Planner, WithOptions};
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
@@ -106,7 +113,7 @@ pub fn gen_sink_plan(
     let mut with_options = context.with_options().clone();
     let connection_id = {
         let conn_id =
-            resolve_connection_in_with_option(&mut with_options, &sink_schema_name, session)?;
+            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
         conn_id.map(ConnectionId)
     };
 
@@ -114,6 +121,29 @@ pub fn gen_sink_plan(
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
+
+    let connector = with_options
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+    let format_desc = match stmt.sink_schema {
+        // Case A: new syntax `format ... encode ...`
+        Some(f) => {
+            validate_compatibility(connector, &f)?;
+            Some(bind_sink_format_desc(f)?)
+        },
+        None => match with_options.get(SINK_TYPE_OPTION) {
+            // Case B: old syntax `type = '...'`
+            Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?.map(|mut f| {
+                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+                }
+                f
+            }),
+            // Case C: no format + encode required
+            None => None,
+        },
+    };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
@@ -127,6 +157,7 @@ pub fn gen_sink_plan(
         emit_on_window_close,
         db_name.to_owned(),
         sink_from_table_name,
+        format_desc,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
@@ -158,7 +189,13 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
-    session.check_relation_name_duplicated(stmt.sink_name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.sink_name.clone(),
+        StatementType::CREATE_SINK,
+        stmt.if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (sink, graph) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
@@ -171,10 +208,13 @@ pub async fn handle_create_sink(
             );
         }
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (sink, graph)
     };
 
@@ -193,6 +233,113 @@ pub async fn handle_create_sink(
     catalog_writer.create_sink(sink.to_proto(), graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+/// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
+/// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
+/// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
+fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
+    use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
+    use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
+    use risingwave_sqlparser::ast::{Encode as E, Format as F};
+
+    let format = match value.format {
+        F::Plain => SinkFormat::AppendOnly,
+        F::Upsert => SinkFormat::Upsert,
+        F::Debezium => SinkFormat::Debezium,
+        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            return Err(ErrorCode::BindError(format!("sink format unsupported: {f}")).into())
+        }
+    };
+    let encode = match value.row_encode {
+        E::Json => SinkEncode::Json,
+        E::Protobuf => SinkEncode::Protobuf,
+        E::Avro => SinkEncode::Avro,
+        E::Template => SinkEncode::Template,
+        e @ (E::Native | E::Csv | E::Bytes) => {
+            return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into())
+        }
+    };
+    let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+
+    options
+        .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
+        .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
+
+    Ok(SinkFormatDesc {
+        format,
+        encode,
+        options,
+    })
+}
+
+static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
+    LazyLock::new(|| {
+        use risingwave_connector::sink::kafka::KafkaSink;
+        use risingwave_connector::sink::kinesis::KinesisSink;
+        use risingwave_connector::sink::pulsar::PulsarSink;
+        use risingwave_connector::sink::redis::RedisSink;
+        use risingwave_connector::sink::Sink as _;
+
+        convert_args!(hashmap!(
+                KafkaSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro],
+                    Format::Debezium => vec![Encode::Json],
+                ),
+                KinesisSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json],
+                    Format::Debezium => vec![Encode::Json],
+                ),
+                PulsarSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json],
+                    Format::Debezium => vec![Encode::Json],
+                ),
+                RedisSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json,Encode::Template],
+                    Format::Upsert => vec![Encode::Json,Encode::Template],
+                ),
+        ))
+    });
+pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
+    let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
+        .get(connector)
+        .ok_or_else(|| {
+            ErrorCode::BindError(format!(
+                "connector {} is not supported by FORMAT ... ENCODE ... syntax",
+                connector
+            ))
+        })?;
+    let compatible_encodes = compatible_formats.get(&format_desc.format).ok_or_else(|| {
+        ErrorCode::BindError(format!(
+            "connector {} does not support format {:?}",
+            connector, format_desc.format
+        ))
+    })?;
+    if !compatible_encodes.contains(&format_desc.row_encode) {
+        return Err(ErrorCode::BindError(format!(
+            "connector {} does not support format {:?} with encode {:?}",
+            connector, format_desc.format, format_desc.row_encode
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// For `planner_test` crate so that it does not depend directly on `connector` crate just for `SinkFormatDesc`.
+impl TryFrom<&WithOptions> for Option<SinkFormatDesc> {
+    type Error = risingwave_connector::sink::SinkError;
+
+    fn try_from(value: &WithOptions) -> std::result::Result<Self, Self::Error> {
+        let connector = value.get(CONNECTOR_TYPE_KEY);
+        let r#type = value.get(SINK_TYPE_OPTION);
+        match (connector, r#type) {
+            (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t),
+            _ => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -218,7 +365,7 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE SINK snk1 FROM mv1
-                    WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                    WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
                         mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();

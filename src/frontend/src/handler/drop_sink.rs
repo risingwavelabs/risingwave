@@ -30,7 +30,7 @@ pub async fn handle_drop_sink(
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, sink_name) = Binder::resolve_schema_qualified_name(db_name, sink_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -72,7 +72,7 @@ mod tests {
     async fn test_drop_sink_handler() {
         let sql_create_table = "create table t (v1 smallint primary key);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
-        let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
+        let sql_create_sink = "create sink snk from mv with( connector = 'kafka')";
         let sql_drop_sink = "drop sink snk;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();

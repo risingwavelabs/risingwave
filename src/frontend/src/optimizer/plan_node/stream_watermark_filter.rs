@@ -21,15 +21,18 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     watermark_descs: Vec<WatermarkDesc>,
 }
@@ -43,7 +46,7 @@ impl StreamWatermarkFilter {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
@@ -53,7 +56,11 @@ impl StreamWatermarkFilter {
         Self::with_base(base, input, watermark_descs)
     }
 
-    fn with_base(base: PlanBase, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+    fn with_base(
+        base: PlanBase<Stream>,
+        input: PlanRef,
+        watermark_descs: Vec<WatermarkDesc>,
+    ) -> Self {
         Self {
             base,
             input,
@@ -85,7 +92,7 @@ impl Distill for StreamWatermarkFilter {
             })
             .collect();
         let display_output_watermarks =
-            watermark_pretty(&self.base.watermark_columns, input_schema).unwrap();
+            watermark_pretty(self.base.watermark_columns(), input_schema).unwrap();
         let fields = vec![
             ("watermark_descs", Pretty::Array(display_watermark_descs)),
             ("output_watermarks", display_output_watermarks),
@@ -153,3 +160,5 @@ impl StreamNode for StreamWatermarkFilter {
 
 // TODO(yuhao): may impl a `ExprRewritable` after store `ExplImpl` in catalog.
 impl ExprRewritable for StreamWatermarkFilter {}
+
+impl ExprVisitable for StreamWatermarkFilter {}

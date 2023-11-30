@@ -16,7 +16,7 @@ use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
@@ -53,8 +53,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.input.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -80,5 +80,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
 impl<PlanRef> Filter<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, r: &mut dyn ExprVisitor) {
+        self.predicate.visit_expr(r);
     }
 }

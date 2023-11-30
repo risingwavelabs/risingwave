@@ -18,16 +18,16 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
+use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -212,7 +212,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 }
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
@@ -223,10 +223,17 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = StreamChunk::from(chunk?.compact());
+            let chunk = StreamChunk::from(chunk?);
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
-            for (row_id, key) in keys.into_iter().enumerate() {
+            for (row_id, (key, visible)) in keys
+                .into_iter()
+                .zip_eq_fast(chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 let mut new_group = false;
                 let states = groups.entry(key).or_insert_with(|| {
                     new_group = true;
@@ -301,8 +308,8 @@ mod tests {
     use std::sync::Arc;
 
     use futures_async_stream::for_await;
-    use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
@@ -316,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -363,7 +370,7 @@ mod tests {
 
             let mem_context = MemoryContext::new(
                 Some(parent_mem.clone()),
-                IntGauge::new("memory_usage", " ").unwrap(),
+                LabelGuardedIntGauge::<4>::test_int_gauge(),
             );
             let actual_exec = HashAggExecutorBuilder::deserialize(
                 &agg_prost,

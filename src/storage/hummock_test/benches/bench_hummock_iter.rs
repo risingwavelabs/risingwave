@@ -19,6 +19,8 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
+use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
@@ -34,13 +36,15 @@ use risingwave_storage::StateStore;
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
     batch_count: usize,
-) -> Vec<Vec<(Bytes, StorageValue)>> {
+) -> Vec<Vec<(TableKey<Bytes>, StorageValue)>> {
     let mut ret = Vec::new();
     for i in 0..batch_count {
         let mut batch_data = vec![];
         for j in 0..batch_size {
             batch_data.push((
-                Bytes::copy_from_slice(format!("test_key_{:08}", j * batch_count + i).as_bytes()),
+                TableKey(Bytes::copy_from_slice(
+                    format!("test_key_{:08}", j * batch_count + i).as_bytes(),
+                )),
                 StorageValue::new_put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
@@ -95,7 +99,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
-    hummock_storage.seal_current_epoch(u64::MAX);
+    hummock_storage.seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test());
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {
@@ -105,7 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     epoch,
                     ReadOptions {
                         ignore_range_tombstone: true,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },

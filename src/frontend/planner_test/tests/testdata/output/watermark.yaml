@@ -51,8 +51,12 @@
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-        └─StreamDml { columns: [v1, _row_id] }
-          └─StreamSource { source: t, columns: [v1, _row_id] }
+        └─StreamUnion { all: true }
+          ├─StreamExchange [no_shuffle] { dist: SomeShard }
+          │ └─StreamSource { source: t, columns: [v1, _row_id] }
+          └─StreamExchange [no_shuffle] { dist: SomeShard }
+            └─StreamDml { columns: [v1, _row_id] }
+              └─StreamSource
 - name: watermark on append only table without source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only;
@@ -60,8 +64,10 @@
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-        └─StreamDml { columns: [v1, _row_id] }
-          └─StreamSource
+        └─StreamUnion { all: true }
+          └─StreamExchange [no_shuffle] { dist: SomeShard }
+            └─StreamDml { columns: [v1, _row_id] }
+              └─StreamSource
 - name: hash agg
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -79,11 +85,12 @@
     select t1.ts as t1_ts, t2.ts as ts2, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1, t2 where t1.ts = t2.ts;
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, ts2, t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_ts], pk_columns: [t1._row_id, t2._row_id, t1_ts], pk_conflict: NoCheck, watermark_columns: [t1_ts, ts2] }
-    └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.ts) }
-      │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.ts) }
-        └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.ts, t1._row_id, t2._row_id) }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.ts) }
+        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.ts) }
+          └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: left semi window join
   sql: |
     create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -91,11 +98,12 @@
     select t1.ts as t1_ts, t1.v1 as t1_v1, t1.v2 as t1_v2 from t1 where exists (select * from t2 where t1.ts = t2.ts);
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t1._row_id(hidden)], stream_key: [t1._row_id, t1_ts], pk_columns: [t1._row_id, t1_ts], pk_conflict: NoCheck, watermark_columns: [t1_ts] }
-    └─StreamHashJoin [window] { type: LeftSemi, predicate: t1.ts = t2.ts, output_watermarks: [t1.ts], output: all }
-      ├─StreamExchange { dist: HashShard(t1.ts) }
-      │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.ts) }
-        └─StreamTableScan { table: t2, columns: [t2.ts, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.ts, t1._row_id) }
+      └─StreamHashJoin [window] { type: LeftSemi, predicate: t1.ts = t2.ts, output_watermarks: [t1.ts], output: all }
+        ├─StreamExchange { dist: HashShard(t1.ts) }
+        │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.ts) }
+          └─StreamTableScan { table: t2, columns: [t2.ts, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: interval join(left outer join)
   sql: |
     create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -108,13 +116,14 @@
       └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck, watermark_columns: [t1_ts, t2_ts] }
-    └─StreamHashJoin [interval] { type: LeftOuter, predicate: t1.v1 = t2.v1 AND (t1.ts >= $expr2) AND ($expr1 <= t2.ts), conditions_to_clean_left_state_table: (t1.ts >= $expr2), conditions_to_clean_right_state_table: ($expr1 <= t2.ts), output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr1, t1._row_id], output_watermarks: [t1.ts, $expr1] }
-      │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.v1) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [t2.ts, $expr2] }
-          └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
+      └─StreamHashJoin [interval] { type: LeftOuter, predicate: t1.v1 = t2.v1 AND (t1.ts >= $expr2) AND ($expr1 <= t2.ts), conditions_to_clean_left_state_table: (t1.ts >= $expr2), conditions_to_clean_right_state_table: ($expr1 <= t2.ts), output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr1, t1._row_id], output_watermarks: [t1.ts, $expr1] }
+        │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.v1) }
+          └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [t2.ts, $expr2] }
+            └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: interval join (inner join)
   sql: |
     create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -127,26 +136,27 @@
       └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck, watermark_columns: [t1_ts, t2_ts] }
-    └─StreamHashJoin [interval, append_only] { type: Inner, predicate: t1.v1 = t2.v1 AND (t1.ts >= $expr2) AND ($expr1 <= t2.ts), conditions_to_clean_left_state_table: (t1.ts >= $expr2), conditions_to_clean_right_state_table: ($expr1 <= t2.ts), output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr1, t1._row_id], output_watermarks: [t1.ts, $expr1] }
-      │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.v1) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [t2.ts, $expr2] }
-          └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
+      └─StreamHashJoin [interval, append_only] { type: Inner, predicate: t1.v1 = t2.v1 AND (t1.ts >= $expr2) AND ($expr1 <= t2.ts), conditions_to_clean_left_state_table: (t1.ts >= $expr2), conditions_to_clean_right_state_table: ($expr1 <= t2.ts), output_watermarks: [t1.ts, t2.ts], output: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr1, t1._row_id], output_watermarks: [t1.ts, $expr1] }
+        │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.v1) }
+          └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar) as $expr2, t2._row_id], output_watermarks: [t2.ts, $expr2] }
+            └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: union all
   sql: |
     create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from t1 Union all select * from t2;
   stream_plan: |-
-    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: NoCheck, watermark_columns: [ts] }
+    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck, watermark_columns: [ts] }
     └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
       │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+      └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
           └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: union
   sql: |
@@ -159,11 +169,11 @@
       └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
         └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [t1.ts] }
           └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+            ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
             │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+            └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
                 └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: tumble
   sql: |

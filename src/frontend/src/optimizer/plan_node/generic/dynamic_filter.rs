@@ -58,8 +58,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for DynamicFilter<PlanRef> {
         self.left.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.left.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.left.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -140,7 +140,7 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
 }
 
 pub fn infer_left_internal_table_catalog(
-    me: &impl stream::StreamPlanRef,
+    me: impl stream::StreamPlanRef,
     left_key_index: usize,
 ) -> TableCatalog {
     let schema = me.schema();
@@ -151,7 +151,7 @@ pub fn infer_left_internal_table_catalog(
     let mut pk_indices = vec![left_key_index];
     let read_prefix_len_hint = pk_indices.len();
 
-    for i in me.logical_pk() {
+    for i in me.stream_key().unwrap() {
         if *i != left_key_index {
             pk_indices.push(*i);
         }
@@ -171,7 +171,7 @@ pub fn infer_left_internal_table_catalog(
     internal_table_catalog_builder.build(dist_keys, read_prefix_len_hint)
 }
 
-pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) -> TableCatalog {
+pub fn infer_right_internal_table_catalog(input: impl stream::StreamPlanRef) -> TableCatalog {
     let schema = input.schema();
 
     // We require that the right table has distribution `Single`

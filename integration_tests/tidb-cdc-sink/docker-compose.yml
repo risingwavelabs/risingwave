@@ -33,10 +33,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:
@@ -71,6 +67,7 @@ services:
       - --addr=0.0.0.0:8300
       - --pd=http://pd:2379
       - --advertise-addr=ticdc-capturer0:8300
+      - --tz=UTC
     depends_on:
       - pd
       - "tidb"

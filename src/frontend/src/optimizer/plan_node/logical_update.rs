@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::vec;
-
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
@@ -37,20 +35,13 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `UPDATE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Update<PlanRef>,
 }
 
 impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
-        let ctx = core.input.ctx();
-        let schema = if core.returning {
-            core.input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
@@ -98,6 +89,12 @@ impl ExprRewritable for LogicalUpdate {
         let mut new = self.core.clone();
         new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
         Self::from(new).into()
+    }
+}
+
+impl ExprVisitable for LogicalUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }
 

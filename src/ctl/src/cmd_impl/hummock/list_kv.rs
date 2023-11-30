@@ -15,6 +15,7 @@
 use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
 
@@ -30,8 +31,8 @@ pub async fn list_kv(
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
-    if epoch == u64::MAX {
-        tracing::info!("using u64::MAX as epoch");
+    if is_max_epoch(epoch) {
+        tracing::info!("using MAX EPOCH as epoch");
     }
     let scan_result = {
         let range = (Unbounded, Unbounded);
@@ -42,7 +43,7 @@ pub async fn list_kv(
                 None,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::NotFill,
                     ..Default::default()
                 },

@@ -32,7 +32,8 @@ use risingwave_pb::hummock::{
     HummockVersionCheckpoint, HummockVersionStats, LevelType,
 };
 
-use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
+use super::compaction::get_compression_algorithm;
+use super::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -483,15 +484,15 @@ pub fn trigger_split_stat(
         .with_label_values(&[&group_label])
         .set(member_table_id_len as _);
 
-    let branched_sst_count = branched_ssts
+    let branched_sst_count: usize = branched_ssts
         .values()
-        .map(|branched_map| branched_map.iter())
-        .flat_map(|branched_map| {
+        .map(|branched_map| {
             branched_map
-                .filter(|(group_id, _sst_id)| **group_id == compaction_group_id)
-                .map(|(_, v)| v)
+                .keys()
+                .filter(|group_id| **group_id == compaction_group_id)
+                .count()
         })
-        .sum::<u64>();
+        .sum();
 
     metrics
         .branched_sst_count

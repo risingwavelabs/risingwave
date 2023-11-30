@@ -71,12 +71,10 @@ impl OrderBy {
         }
     }
 
-    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.sort_exprs
             .iter()
-            .map(|expr| visitor.visit_expr(&expr.expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(&expr.expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {

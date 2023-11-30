@@ -16,33 +16,29 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
-use foyer::common::code::{Key, Value};
-use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
+use foyer::common::code::{CodingResult, Key, Value};
+use foyer::intrusive::eviction::lfu::LfuConfig;
+use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
-use foyer::storage::event::EventListener;
+use foyer::storage::compress::Compression;
+use foyer::storage::device::fs::FsDeviceConfig;
 pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
-use foyer::storage::store::FetchValueFuture;
-use foyer::storage::LfuFsStoreConfig;
-use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use foyer::storage::reinsertion::ReinsertionPolicy;
+use foyer::storage::runtime::{
+    RuntimeConfig, RuntimeLazyStore, RuntimeLazyStoreConfig, RuntimeLazyStoreWriter,
+};
+use foyer::storage::storage::{Storage, StorageWriter};
+use foyer::storage::store::{LfuFsStoreConfig, NoneStore, NoneStoreWriter};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use crate::hummock::{Block, Sstable, SstableMeta};
 
-#[derive(thiserror::Error, Debug)]
-pub enum FileCacheError {
-    #[error("foyer error: {0}")]
-    Foyer(#[from] foyer::storage::error::Error),
-    #[error("other {0}")]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-impl FileCacheError {
-    fn foyer(e: foyer::storage::error::Error) -> Self {
-        Self::Foyer(e)
-    }
+pub mod preclude {
+    pub use foyer::storage::storage::{
+        AsyncStorageExt, ForceStorageExt, Storage, StorageExt, StorageWriter,
+    };
 }
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
@@ -50,11 +46,12 @@ pub type Result<T> = core::result::Result<T, FileCacheError>;
 pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
-pub type FoyerStore<K, V> = foyer::storage::LfuFsStore<K, V>;
-pub type FoyerStoreResult<T> = foyer::storage::error::Result<T>;
-pub type FoyerStoreError = foyer::storage::error::Error;
+pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
+pub type FileCacheError = foyer::storage::error::Error;
+pub type FileCacheCompression = foyer::storage::compress::Compression;
 
-pub struct FoyerStoreConfig<K, V>
+#[derive(Debug)]
+pub struct FileCacheConfig<K, V>
 where
     K: Key,
     V: Value,
@@ -63,28 +60,284 @@ where
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
-    pub buffer_pool_size: usize,
     pub device_align: usize,
     pub device_io_size: usize,
     pub flushers: usize,
-    pub flush_rate_limit: usize,
     pub reclaimers: usize,
     pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
-    pub rated_random_rate: usize,
-    pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
-    pub enable_filter: bool,
+    pub insert_rate_limit: usize,
+    pub ring_buffer_capacity: usize,
+    pub catalog_bits: usize,
+    pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    pub compression: Compression,
 }
 
-pub struct FoyerRuntimeConfig<K, V>
+impl<K, V> Clone for FileCacheConfig<K, V>
 where
     K: Key,
     V: Value,
 {
-    pub foyer_store_config: FoyerStoreConfig<K, V>,
-    pub runtime_worker_threads: Option<usize>,
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            dir: self.dir.clone(),
+            capacity: self.capacity,
+            file_capacity: self.file_capacity,
+            device_align: self.device_align,
+            device_io_size: self.device_io_size,
+            flushers: self.flushers,
+            reclaimers: self.reclaimers,
+            reclaim_rate_limit: self.reclaim_rate_limit,
+            recover_concurrency: self.recover_concurrency,
+            lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
+            lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
+            insert_rate_limit: self.insert_rate_limit,
+            ring_buffer_capacity: self.ring_buffer_capacity,
+            catalog_bits: self.catalog_bits,
+            admissions: self.admissions.clone(),
+            reinsertions: self.reinsertions.clone(),
+            compression: self.compression,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    Foyer {
+        writer: RuntimeLazyStoreWriter<K, V>,
+    },
+    None {
+        writer: NoneStoreWriter<K, V>,
+    },
+}
+
+impl<K, V> From<RuntimeLazyStoreWriter<K, V>> for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: RuntimeLazyStoreWriter<K, V>) -> Self {
+        Self::Foyer { writer }
+    }
+}
+
+impl<K, V> From<NoneStoreWriter<K, V>> for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: NoneStoreWriter<K, V>) -> Self {
+        Self::None { writer }
+    }
+}
+
+impl<K, V> StorageWriter for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.key(),
+            FileCacheWriter::None { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.weight(),
+            FileCacheWriter::None { writer } => writer.weight(),
+        }
+    }
+
+    fn judge(&mut self) -> bool {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.judge(),
+            FileCacheWriter::None { writer } => writer.judge(),
+        }
+    }
+
+    fn force(&mut self) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.force(),
+            FileCacheWriter::None { writer } => writer.force(),
+        }
+    }
+
+    async fn finish(self, value: Self::Value) -> FileCacheResult<bool> {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.finish(value).await,
+            FileCacheWriter::None { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.compression(),
+            FileCacheWriter::None { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.set_compression(compression),
+            FileCacheWriter::None { writer } => writer.set_compression(compression),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    Foyer { store: RuntimeLazyStore<K, V> },
+    None { store: NoneStore<K, V> },
+}
+
+impl<K, V> Clone for FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Foyer { store } => Self::Foyer {
+                store: store.clone(),
+            },
+            Self::None { store } => Self::None {
+                store: store.clone(),
+            },
+        }
+    }
+}
+
+impl<K, V> FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub fn none() -> Self {
+        Self::None {
+            store: NoneStore::default(),
+        }
+    }
+}
+
+impl<K, V> Storage for FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Config = FileCacheConfig<K, V>;
+    type Key = K;
+    type Value = V;
+    type Writer = FileCacheWriter<K, V>;
+
+    async fn open(config: Self::Config) -> FileCacheResult<Self> {
+        let mut admissions = config.admissions;
+        if config.insert_rate_limit > 0 {
+            admissions.push(Arc::new(RatedTicketAdmissionPolicy::new(
+                config.insert_rate_limit,
+            )));
+        }
+
+        let c = RuntimeLazyStoreConfig {
+            store: LfuFsStoreConfig {
+                name: config.name.clone(),
+                eviction_config: LfuConfig {
+                    window_to_cache_size_ratio: config.lfu_window_to_cache_size_ratio,
+                    tiny_lru_capacity_ratio: config.lfu_tiny_lru_capacity_ratio,
+                },
+                device_config: FsDeviceConfig {
+                    dir: config.dir,
+                    capacity: config.capacity,
+                    file_capacity: config.file_capacity,
+                    align: config.device_align,
+                    io_size: config.device_io_size,
+                },
+                ring_buffer_capacity: config.ring_buffer_capacity,
+                catalog_bits: config.catalog_bits,
+                admissions,
+                reinsertions: config.reinsertions,
+                flusher_buffer_size: 131072, // TODO: make it configurable
+                flushers: config.flushers,
+                reclaimers: config.reclaimers,
+                reclaim_rate_limit: config.reclaim_rate_limit,
+                clean_region_threshold: config.reclaimers + config.reclaimers / 2,
+                recover_concurrency: config.recover_concurrency,
+                compression: config.compression,
+            }
+            .into(),
+            runtime: RuntimeConfig {
+                worker_threads: None,
+                thread_name: Some(config.name),
+            },
+        };
+        let store = RuntimeLazyStore::open(c).await?;
+        Ok(Self::Foyer { store })
+    }
+
+    fn is_ready(&self) -> bool {
+        match self {
+            FileCache::Foyer { store } => store.is_ready(),
+            FileCache::None { store } => store.is_ready(),
+        }
+    }
+
+    async fn close(&self) -> FileCacheResult<()> {
+        match self {
+            FileCache::Foyer { store } => store.close().await,
+            FileCache::None { store } => store.close().await,
+        }
+    }
+
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+        match self {
+            FileCache::Foyer { store } => store.writer(key, weight).into(),
+            FileCache::None { store } => store.writer(key, weight).into(),
+        }
+    }
+
+    fn exists(&self, key: &Self::Key) -> FileCacheResult<bool> {
+        match self {
+            FileCache::Foyer { store } => store.exists(key),
+            FileCache::None { store } => store.exists(key),
+        }
+    }
+
+    async fn lookup(&self, key: &Self::Key) -> FileCacheResult<Option<Self::Value>> {
+        match self {
+            FileCache::Foyer { store } => store.lookup(key).await,
+            FileCache::None { store } => store.lookup(key).await,
+        }
+    }
+
+    fn remove(&self, key: &Self::Key) -> FileCacheResult<bool> {
+        match self {
+            FileCache::Foyer { store } => store.remove(key),
+            FileCache::None { store } => store.remove(key),
+        }
+    }
+
+    fn clear(&self) -> FileCacheResult<()> {
+        match self {
+            FileCache::Foyer { store } => store.clear(),
+            FileCache::None { store } => store.clear(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -98,15 +351,95 @@ impl Key for SstableBlockIndex {
         8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_u64(self.sst_id);
         buf.put_u64(self.block_idx);
+        Ok(())
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let sst_id = buf.get_u64();
         let block_idx = buf.get_u64();
-        Self { sst_id, block_idx }
+        Ok(Self { sst_id, block_idx })
+    }
+}
+
+/// [`CachedBlock`] uses different coding for writing to use/bypass compression.
+///
+/// But when reading, it will always be `Loaded`.
+#[derive(Debug)]
+pub enum CachedBlock {
+    Loaded {
+        block: Box<Block>,
+    },
+    Fetched {
+        bytes: Bytes,
+        uncompressed_capacity: usize,
+    },
+}
+
+impl CachedBlock {
+    pub fn should_compress(&self) -> bool {
+        match self {
+            CachedBlock::Loaded { .. } => true,
+            // TODO(MrCroxx): based on block original compression algorithm?
+            CachedBlock::Fetched { .. } => false,
+        }
+    }
+
+    pub fn into_inner(self) -> Box<Block> {
+        match self {
+            CachedBlock::Loaded { block } => block,
+            CachedBlock::Fetched { .. } => unreachable!(),
+        }
+    }
+}
+
+impl Value for CachedBlock {
+    fn serialized_len(&self) -> usize {
+        1 /* type */ + match self {
+            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
+        }
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        match self {
+            CachedBlock::Loaded { block } => {
+                buf.put_u8(0);
+                buf.put_slice(block.raw_data())
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                buf.put_u8(1);
+                buf.put_u64(*uncompressed_capacity as u64);
+                buf.put_slice(bytes);
+            }
+        }
+        Ok(())
+    }
+
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let v = buf.get_u8();
+        let res = match v {
+            0 => {
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode_from_raw(data);
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            1 => {
+                let uncompressed_capacity = buf.get_u64() as usize;
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode(data, uncompressed_capacity)?;
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            _ => unreachable!(),
+        };
+        Ok(res)
     }
 }
 
@@ -115,14 +448,16 @@ impl Value for Box<Block> {
         self.raw_data().len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw_data())
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_slice(self.raw_data());
+        Ok(())
     }
 
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> CodingResult<Self> {
         let data = Bytes::copy_from_slice(buf);
         let block = Block::decode_from_raw(data);
-        Box::new(block)
+        let block = Box::new(block);
+        Ok(block)
     }
 }
 
@@ -131,258 +466,20 @@ impl Value for Box<Sstable> {
         8 + self.meta.encoded_size() // id (8B) + meta size
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_u64(self.id);
         // TODO(MrCroxx): avoid buffer copy
         let mut buffer = vec![];
         self.meta.encode_to(&mut buffer);
-        buf.put_slice(&buffer[..])
+        buf.put_slice(&buffer[..]);
+        Ok(())
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let id = buf.get_u64();
         let meta = SstableMeta::decode(buf).unwrap();
-        Box::new(Sstable::new(id, meta))
-    }
-}
-
-#[derive(Clone)]
-pub enum FileCache<K, V>
-where
-    K: Key + Copy,
-    V: Value,
-{
-    None,
-    FoyerRuntime {
-        runtime: Arc<BackgroundShutdownRuntime>,
-        store: Arc<FoyerStore<K, V>>,
-        enable_filter: bool,
-    },
-}
-
-impl<K, V> FileCache<K, V>
-where
-    K: Key + Copy,
-    V: Value,
-{
-    pub fn none() -> Self {
-        Self::None
-    }
-
-    pub async fn foyer(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if let Some(runtime_worker_threads) = config.runtime_worker_threads {
-            builder.worker_threads(runtime_worker_threads);
-        }
-        let runtime = builder
-            .thread_name("risingwave-foyer-storage")
-            .enable_all()
-            .build()
-            .map_err(|e| FileCacheError::Other(e.into()))?;
-
-        let enable_filter = config.foyer_store_config.enable_filter;
-
-        let store = runtime
-            .spawn(async move {
-                let foyer_store_config = config.foyer_store_config;
-
-                let file_capacity = foyer_store_config.file_capacity;
-                let capacity = foyer_store_config.capacity;
-                let capacity = capacity - (capacity % file_capacity);
-
-                let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
-                if foyer_store_config.rated_random_rate > 0 {
-                    let rr = RatedRandomAdmissionPolicy::new(
-                        foyer_store_config.rated_random_rate,
-                        Duration::from_millis(100),
-                    );
-                    admissions.push(Arc::new(rr));
-                }
-
-                let c = LfuFsStoreConfig {
-                    name: foyer_store_config.name,
-                    eviction_config: EvictionConfig {
-                        window_to_cache_size_ratio: foyer_store_config
-                            .lfu_window_to_cache_size_ratio,
-                        tiny_lru_capacity_ratio: foyer_store_config.lfu_tiny_lru_capacity_ratio,
-                    },
-                    device_config: DeviceConfig {
-                        dir: foyer_store_config.dir.clone(),
-                        capacity,
-                        file_capacity,
-                        align: foyer_store_config.device_align,
-                        io_size: foyer_store_config.device_io_size,
-                    },
-                    admissions,
-                    reinsertions: vec![],
-                    buffer_pool_size: foyer_store_config.buffer_pool_size,
-                    flushers: foyer_store_config.flushers,
-                    flush_rate_limit: foyer_store_config.flush_rate_limit,
-                    reclaimers: foyer_store_config.reclaimers,
-                    reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
-                    recover_concurrency: foyer_store_config.recover_concurrency,
-                    event_listeners: foyer_store_config.event_listener,
-                    clean_region_threshold: foyer_store_config.reclaimers
-                        + foyer_store_config.reclaimers / 2,
-                };
-
-                FoyerStore::open(c).await.map_err(FileCacheError::foyer)
-            })
-            .await
-            .unwrap()?;
-
-        Ok(Self::FoyerRuntime {
-            runtime: Arc::new(runtime.into()),
-            store,
-            enable_filter,
-        })
-    }
-
-    #[tracing::instrument(skip(self, value))]
-    pub async fn insert(&self, key: K, value: V) -> Result<bool> {
-        match self {
-            FileCache::None => Ok(false),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime
-                    .spawn(async move { store.insert_if_not_exists(key, value).await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub fn insert_without_wait(&self, key: K, value: V) {
-        match self {
-            FileCache::None => {}
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime.spawn(async move { store.insert_if_not_exists(key, value).await });
-            }
-        }
-    }
-
-    /// only fetch value if judge pass
-    #[tracing::instrument(skip(self, fetch_value))]
-    pub async fn insert_with<F, FU>(
-        &self,
-        key: K,
-        fetch_value: F,
-        value_serialized_len: usize,
-    ) -> Result<bool>
-    where
-        F: FnOnce() -> FU,
-        FU: FetchValueFuture<V>,
-    {
-        match self {
-            FileCache::None => Ok(false),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let future = fetch_value();
-                runtime
-                    .spawn(async move {
-                        store
-                            .insert_if_not_exists_with_future(
-                                key,
-                                || future,
-                                key.serialized_len() + value_serialized_len,
-                            )
-                            .await
-                    })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, key: &K) -> Result<bool> {
-        match self {
-            FileCache::None => Ok(false),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let key = *key;
-                runtime
-                    .spawn(async move { store.remove(&key).await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub fn remove_without_wait(&self, key: &K) {
-        match self {
-            FileCache::None => {}
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let key = *key;
-                runtime.spawn(async move { store.remove(&key).await });
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn clear(&self) -> Result<()> {
-        match self {
-            FileCache::None => Ok(()),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime
-                    .spawn(async move { store.clear().await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub fn clear_without_wait(&self) {
-        match self {
-            FileCache::None => {}
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime.spawn(async move { store.clear().await });
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
-        match self {
-            FileCache::None => Ok(None),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let key = *key;
-                runtime
-                    .spawn(async move { store.lookup(&key).await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn exists(&self, key: &K) -> Result<bool> {
-        match self {
-            FileCache::None => Ok(false),
-            FileCache::FoyerRuntime { store, .. } => {
-                store.exists(key).map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    pub fn is_filter_enabled(&self) -> bool {
-        match self {
-            FileCache::None => false,
-            FileCache::FoyerRuntime { enable_filter, .. } => *enable_filter,
-        }
+        let sstable = Box::new(Sstable::new(id, meta));
+        Ok(sstable)
     }
 }
 
@@ -418,9 +515,9 @@ mod tests {
         );
 
         let mut buf = vec![0; block.serialized_len()];
-        block.write(&mut buf[..]);
+        block.write(&mut buf[..]).unwrap();
 
-        let block = <Box<Block> as Value>::read(&buf[..]);
+        let block = <Box<Block> as Value>::read(&buf[..]).unwrap();
 
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 

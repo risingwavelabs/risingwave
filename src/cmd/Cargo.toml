@@ -25,9 +25,13 @@ risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_ctl = { workspace = true }
+risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
-risingwave_meta = { workspace = true }
+risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -45,30 +49,33 @@ workspace-hack = { path = "../workspace-hack" }
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { workspace = true, features = [
-    "unprefixed_malloc_on_supported_platforms",
-] }
+[lib]
+test = false
 
 [[bin]]
 name = "frontend"
 path = "src/bin/frontend_node.rs"
+test = false
 
 [[bin]]
 name = "meta-node"
 path = "src/bin/meta_node.rs"
+test = false
 
 [[bin]]
 name = "compute-node"
 path = "src/bin/compute_node.rs"
+test = false
 
 [[bin]]
 name = "compactor"
 path = "src/bin/compactor.rs"
+test = false
 
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+test = false
 
 [lints]
 workspace = true

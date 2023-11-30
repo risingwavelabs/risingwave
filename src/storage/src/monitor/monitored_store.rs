@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
@@ -175,7 +176,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
@@ -186,7 +187,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -203,7 +204,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     async fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         let table_id_label = read_options.table_id.to_string();
@@ -223,7 +224,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
         let table_id = read_options.table_id;
@@ -234,7 +235,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
@@ -243,12 +244,17 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             .map_ok(identity)
     }
 
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
         // TODO: collect metrics
         self.inner.insert(key, new_val, old_val)
     }
 
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         // TODO: collect metrics
         self.inner.delete(key, old_val)
     }
@@ -257,7 +263,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        // TODO: collect metrics
         self.inner
             .flush(delete_ranges)
             .verbose_instrument_await("store_flush")
@@ -275,9 +280,15 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.init(options).await
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         // TODO: may collect metrics
-        self.inner.seal_current_epoch(next_epoch)
+        self.inner.seal_current_epoch(next_epoch, opts)
+    }
+
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.inner
+            .try_flush()
+            .verbose_instrument_await("store_try_flush")
     }
 }
 

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::ValuesNode;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::unbounded_channel;
@@ -28,7 +27,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 /// this executor. May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ValuesExecutorBuilder {
     type Node = ValuesNode;
 
@@ -53,18 +51,18 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
                 tuple
                     .get_cells()
                     .iter()
-                    .map(|node| build_from_prost(node).unwrap())
+                    .map(|node| {
+                        build_non_strict_from_prost(node, params.eval_error_report.clone()).unwrap()
+                    })
                     .collect_vec()
             })
             .collect_vec();
-        let schema = Schema::new(node.get_fields().iter().map(Field::from).collect_vec());
         Ok(Box::new(ValuesExecutor::new(
             params.actor_context,
+            params.info,
             progress,
             rows,
-            schema,
             barrier_receiver,
-            params.executor_id,
         )))
     }
 }

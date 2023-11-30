@@ -26,10 +26,11 @@ use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
@@ -133,6 +134,7 @@ async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
     compactor_context: CompactorContext,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
@@ -148,6 +150,7 @@ async fn flush_imms(
         sstable_object_id_manager,
         payload,
         task_info.compaction_group_index,
+        filter_key_extractor_manager,
     )
     .verbose_instrument_await("shared_buffer_compact")
     .await
@@ -159,6 +162,7 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
+        filter_key_extractor_manager: FilterKeyExtractorManager,
         sstable_object_id_manager: Arc<SstableObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         cache_refill_config: CacheRefillConfig,
@@ -184,6 +188,7 @@ impl HummockEventHandler {
                     payload,
                     task_info,
                     upload_compactor_context.clone(),
+                    filter_key_extractor_manager.clone(),
                     cloned_sstable_object_id_manager.clone(),
                 ))
             }),
@@ -232,7 +237,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
-        info_in_release!("epoch has been synced: {}.", epoch);
+        debug!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -305,7 +310,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        info_in_release!("receive await sync epoch: {}", new_sync_epoch);
+        debug!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -320,7 +325,7 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
-            info_in_release!(
+            debug!(
                 "epoch {} has been synced. Current max_sync_epoch {}",
                 new_sync_epoch,
                 self.uploader.max_synced_epoch()
@@ -339,7 +344,7 @@ impl HummockEventHandler {
             return;
         }
 
-        info_in_release!(
+        debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
             self.uploader.max_synced_epoch()
@@ -467,7 +472,7 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
-        info_in_release!(
+        debug!(
             "update to hummock version: {}, epoch: {}",
             new_pinned_version.id(),
             new_pinned_version.max_committed_epoch()
@@ -572,6 +577,9 @@ impl HummockEventHandler {
                     self.uploader.start_merge_imms(epoch);
                 }
             }
+
+            HummockEvent::LocalSealEpoch { .. } => {}
+
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
                 let _ = sender.send(()).inspect_err(|e| {
@@ -619,7 +627,7 @@ impl HummockEventHandler {
                 )) {
                     Ok(_) => {}
                     Err(_) => {
-                        panic!(
+                        warn!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
                         )

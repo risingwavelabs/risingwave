@@ -14,37 +14,136 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Duration;
 
-use anyhow::Ok;
+use anyhow::{anyhow, Ok};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
-use clickhouse::Client;
+use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
+use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
-use risingwave_common::error::anyhow_error;
-use serde_derive::{Deserialize, Serialize};
+use risingwave_common::error::ErrorCode::InvalidParameterValue;
+use risingwave_common::error::{anyhow_error, RwError};
+use serde_derive::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
+use tempfile::NamedTempFile;
+use time::OffsetDateTime;
+use url::Url;
+use with_options::WithOptions;
 
-use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
-
+use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
 pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
 }
 
+use aws_config::default_provider::region::DefaultRegionChain;
+use aws_config::sts::AssumeRoleProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_types::region::Region;
+use aws_types::SdkConfig;
+
+/// A flatten config map for aws auth.
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct AwsAuthProps {
+    pub region: Option<String>,
+    #[serde(alias = "endpoint_url")]
+    pub endpoint: Option<String>,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub session_token: Option<String>,
+    pub arn: Option<String>,
+    /// This field was added for kinesis. Not sure if it's useful for other connectors.
+    /// Please ignore it in the documentation for now.
+    pub external_id: Option<String>,
+    pub profile: Option<String>,
+}
+
+impl AwsAuthProps {
+    async fn build_region(&self) -> anyhow::Result<Region> {
+        if let Some(region_name) = &self.region {
+            Ok(Region::new(region_name.clone()))
+        } else {
+            let mut region_chain = DefaultRegionChain::builder();
+            if let Some(profile_name) = &self.profile {
+                region_chain = region_chain.profile_name(profile_name);
+            }
+
+            Ok(region_chain
+                .build()
+                .region()
+                .await
+                .ok_or_else(|| anyhow::format_err!("region should be provided"))?)
+        }
+    }
+
+    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+        if self.access_key.is_some() && self.secret_key.is_some() {
+            Ok(SharedCredentialsProvider::new(
+                aws_credential_types::Credentials::from_keys(
+                    self.access_key.as_ref().unwrap(),
+                    self.secret_key.as_ref().unwrap(),
+                    self.session_token.clone(),
+                ),
+            ))
+        } else {
+            Err(anyhow!(
+                "Both \"access_key\" and \"secret_access\" are required."
+            ))
+        }
+    }
+
+    async fn with_role_provider(
+        &self,
+        credential: SharedCredentialsProvider,
+    ) -> anyhow::Result<SharedCredentialsProvider> {
+        if let Some(role_name) = &self.arn {
+            let region = self.build_region().await?;
+            let mut role = AssumeRoleProvider::builder(role_name)
+                .session_name("RisingWave")
+                .region(region);
+            if let Some(id) = &self.external_id {
+                role = role.external_id(id);
+            }
+            let provider = role.build_from_provider(credential).await;
+            Ok(SharedCredentialsProvider::new(provider))
+        } else {
+            Ok(credential)
+        }
+    }
+
+    pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
+        let region = self.build_region().await?;
+        let credentials_provider = self
+            .with_role_provider(self.build_credential_provider()?)
+            .await?;
+        let mut config_loader = aws_config::from_env()
+            .region(region)
+            .credentials_provider(credentials_provider);
+
+        if let Some(endpoint) = self.endpoint.as_ref() {
+            config_loader = config_loader.endpoint_url(endpoint);
+        }
+
+        Ok(config_loader.load().await)
+    }
+}
+
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -130,7 +229,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -244,7 +343,98 @@ impl KafkaCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct PulsarCommon {
+    #[serde(rename = "topic", alias = "pulsar.topic")]
+    pub topic: String,
+
+    #[serde(rename = "service.url", alias = "pulsar.service.url")]
+    pub service_url: String,
+
+    #[serde(rename = "auth.token")]
+    pub auth_token: Option<String>,
+
+    #[serde(flatten)]
+    pub oauth: Option<PulsarOauthCommon>,
+}
+
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct PulsarOauthCommon {
+    #[serde(rename = "oauth.issuer.url")]
+    pub issuer_url: String,
+
+    #[serde(rename = "oauth.credentials.url")]
+    pub credentials_url: String,
+
+    #[serde(rename = "oauth.audience")]
+    pub audience: String,
+
+    #[serde(rename = "oauth.scope")]
+    pub scope: Option<String>,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+}
+
+impl PulsarCommon {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+        let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
+        let mut temp_file = None;
+        if let Some(oauth) = &self.oauth {
+            let url = Url::parse(&oauth.credentials_url)?;
+            match url.scheme() {
+                "s3" => {
+                    let credentials =
+                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
+                    let mut f = NamedTempFile::new()?;
+                    f.write_all(&credentials)?;
+                    f.as_file().sync_all()?;
+                    temp_file = Some(f);
+                }
+                "file" => {}
+                _ => {
+                    return Err(RwError::from(InvalidParameterValue(String::from(
+                        "invalid credentials_url, only file url and s3 url are supported",
+                    )))
+                    .into());
+                }
+            }
+
+            let auth_params = OAuth2Params {
+                issuer_url: oauth.issuer_url.clone(),
+                credentials_url: if temp_file.is_none() {
+                    oauth.credentials_url.clone()
+                } else {
+                    let mut raw_path = temp_file
+                        .as_ref()
+                        .unwrap()
+                        .path()
+                        .to_str()
+                        .unwrap()
+                        .to_string();
+                    raw_path.insert_str(0, "file://");
+                    raw_path
+                },
+                audience: Some(oauth.audience.clone()),
+                scope: oauth.scope.clone(),
+            };
+
+            pulsar_builder = pulsar_builder
+                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
+        } else if let Some(auth_token) = &self.auth_token {
+            pulsar_builder = pulsar_builder.with_auth(Authentication {
+                name: "token".to_string(),
+                data: Vec::from(auth_token.as_str()),
+            });
+        }
+
+        let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
+        drop(temp_file);
+        Ok(res)
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -296,42 +486,7 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ClickHouseCommon {
-    #[serde(rename = "clickhouse.url")]
-    pub url: String,
-    #[serde(rename = "clickhouse.user")]
-    pub user: String,
-    #[serde(rename = "clickhouse.password")]
-    pub password: String,
-    #[serde(rename = "clickhouse.database")]
-    pub database: String,
-    #[serde(rename = "clickhouse.table")]
-    pub table: String,
-}
-
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
-impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = Client::with_http_client(client)
-            .with_url(&self.url)
-            .with_user(&self.user)
-            .with_password(&self.password)
-            .with_database(&self.database);
-        Ok(client)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
@@ -340,29 +495,35 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
-    #[serde(rename = "nats.server_url")]
+    #[serde(rename = "server_url")]
     pub server_url: String,
-    #[serde(rename = "nats.subject")]
+    #[serde(rename = "subject")]
     pub subject: String,
-    #[serde(rename = "nats.user")]
+    #[serde(rename = "connect_mode")]
+    pub connect_mode: String,
+    #[serde(rename = "username")]
     pub user: Option<String>,
-    #[serde(rename = "nats.password")]
+    #[serde(rename = "password")]
     pub password: Option<String>,
-    #[serde(rename = "nats.max_bytes")]
+    #[serde(rename = "jwt")]
+    pub jwt: Option<String>,
+    #[serde(rename = "nkey")]
+    pub nkey: Option<String>,
+    #[serde(rename = "max_bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
-    #[serde(rename = "nats.max_messages")]
+    #[serde(rename = "max_messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages: Option<i64>,
-    #[serde(rename = "nats.max_messages_per_subject")]
+    #[serde(rename = "max_messages_per_subject")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages_per_subject: Option<i64>,
-    #[serde(rename = "nats.max_consumers")]
+    #[serde(rename = "max_consumers")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_consumers: Option<i32>,
-    #[serde(rename = "nats.max_message_size")]
+    #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
 }
@@ -370,9 +531,39 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
-            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
-        }
+        match self.connect_mode.as_str() {
+            "user_and_password" => {
+                if let (Some(v_user), Some(v_password)) =
+                    (self.user.as_ref(), self.password.as_ref())
+                {
+                    connect_options =
+                        connect_options.user_and_password(v_user.into(), v_password.into())
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is user_and_password, but user or password is empty"
+                    ));
+                }
+            }
+
+            "credential" => {
+                if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
+                    connect_options = connect_options
+                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
+                        .expect("failed to parse static creds")
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is credential, but nkey or jwt is empty"
+                    ));
+                }
+            }
+            "plain" => {}
+            _ => {
+                return Err(anyhow_error!(
+                    "nats connect mode only accept user_and_password/credential/plain"
+                ));
+            }
+        };
+
         let servers = self.server_url.split(',').collect::<Vec<&str>>();
         let client = connect_options
             .connect(
@@ -394,44 +585,57 @@ impl NatsCommon {
 
     pub(crate) async fn build_consumer(
         &self,
-        split_id: i32,
-        start_sequence: Option<u64>,
+        stream: String,
+        split_id: String,
+        start_sequence: NatsOffset,
     ) -> anyhow::Result<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
         let context = self.build_context().await?;
-        let stream = self.build_or_get_stream(context.clone()).await?;
-        let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
+        let stream = self.build_or_get_stream(context.clone(), stream).await?;
+        let subject_name = self
+            .subject
+            .replace(',', "-")
+            .replace(['.', '>', '*', ' ', '\t'], "_");
+        let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
         let mut config = jetstream::consumer::pull::Config {
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
         };
-        match start_sequence {
-            Some(v) => {
-                let consumer = stream
-                    .get_or_create_consumer(&name, {
-                        config.deliver_policy = DeliverPolicy::ByStartSequence {
-                            start_sequence: v + 1,
-                        };
-                        config
-                    })
-                    .await?;
-                Ok(consumer)
+
+        let deliver_policy = match start_sequence {
+            NatsOffset::Earliest => DeliverPolicy::All,
+            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::SequenceNumber(v) => {
+                let parsed = v.parse::<u64>()?;
+                DeliverPolicy::ByStartSequence {
+                    start_sequence: 1 + parsed,
+                }
             }
-            None => {
-                let consumer = stream.get_or_create_consumer(&name, config).await?;
-                Ok(consumer)
-            }
-        }
+            NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)?,
+            },
+            NatsOffset::None => DeliverPolicy::All,
+        };
+        let consumer = stream
+            .get_or_create_consumer(&name, {
+                config.deliver_policy = deliver_policy;
+                config
+            })
+            .await?;
+        Ok(consumer)
     }
 
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,
+        stream: String,
     ) -> anyhow::Result<jetstream::stream::Stream> {
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
-            // the subject default use name value
-            name: self.subject.clone(),
+            name: stream,
+            max_bytes: 1000000,
+            subjects,
             ..Default::default()
         };
         if let Some(v) = self.max_bytes {
@@ -451,5 +655,18 @@ impl NatsCommon {
         }
         let stream = jetstream.get_or_create_stream(config).await?;
         Ok(stream)
+    }
+
+    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+        let creds = format!(
+            "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
+                         ************************* IMPORTANT *************************\n\
+                         NKEY Seed printed below can be used to sign and prove identity.\n\
+                         NKEYs are sensitive and should be treated as secrets.\n\n\
+                         -----BEGIN USER NKEY SEED-----\n{}\n------END USER NKEY SEED------\n\n\
+                         *************************************************************",
+            jwt, seed
+        );
+        Ok(creds)
     }
 }

@@ -29,7 +29,6 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -46,9 +45,10 @@ use crate::MetaResult;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 
 pub struct SourceManager {
-    pub(crate) paused: Mutex<()>,
+    pub paused: Mutex<()>,
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
@@ -77,30 +77,7 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 
 fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-    if properties.is_cdc_connector() {
-        let pk_indices = source
-            .pk_column_ids
-            .iter()
-            .map(|&id| {
-                source
-                    .columns
-                    .iter()
-                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
-        let table_schema = PbTableSchema {
-            columns: source
-                .columns
-                .iter()
-                .flat_map(|col| &col.column_desc)
-                .cloned()
-                .collect(),
-            pk_indices,
-        };
-        properties.init_cdc_properties(table_schema);
-    }
+    properties.init_from_pb_source(source);
     Ok(properties)
 }
 
@@ -216,6 +193,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    enable_scale_in: bool,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -307,7 +285,9 @@ impl SourceManagerCore {
                         *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
-                        SplitDiffOptions::default(),
+                        SplitDiffOptions {
+                            enable_scale_in: handle.enable_scale_in,
+                        },
                     ) {
                         split_assignment.insert(*fragment_id, change);
                     }
@@ -627,6 +607,7 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
+            // pre-allocate splits is the first time getting splits and it does not have scale in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
@@ -725,7 +706,7 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_source(&source)?;
-
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -763,6 +744,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
         Ok(())
@@ -777,6 +759,7 @@ impl SourceManager {
     ) -> MetaResult<()> {
         let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let connector_properties = extract_prop_from_source(source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {
             let mut worker = ConnectorSourceWorker::create(
@@ -818,6 +801,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
 
@@ -935,6 +919,10 @@ mod tests {
 
         fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
             serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        }
+
+        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 

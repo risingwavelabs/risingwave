@@ -16,9 +16,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -26,7 +27,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     no_shuffle: bool,
 }
@@ -37,7 +38,7 @@ impl StreamExchange {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
@@ -53,12 +54,11 @@ impl StreamExchange {
 
     pub fn new_no_shuffle(input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let pk_indices = input.logical_pk().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
-            pk_indices,
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
@@ -80,7 +80,7 @@ impl StreamExchange {
 impl Distill for StreamExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let distribution_display = DistributionDisplay {
-            distribution: &self.base.dist,
+            distribution: self.base.distribution(),
             input_schema: self.input.schema(),
         };
         childless_record(
@@ -119,13 +119,13 @@ impl StreamNode for StreamExchange {
                 })
             } else {
                 Some(DispatchStrategy {
-                    r#type: match &self.base.dist {
+                    r#type: match &self.base.distribution() {
                         Distribution::HashShard(_) => DispatcherType::Hash,
                         Distribution::Single => DispatcherType::Simple,
                         Distribution::Broadcast => DispatcherType::Broadcast,
                         _ => panic!("Do not allow Any or AnyShard in serialization process"),
                     } as i32,
-                    dist_key_indices: match &self.base.dist {
+                    dist_key_indices: match &self.base.distribution() {
                         Distribution::HashShard(keys) => {
                             keys.iter().map(|num| *num as u32).collect()
                         }
@@ -139,3 +139,5 @@ impl StreamNode for StreamExchange {
 }
 
 impl ExprRewritable for StreamExchange {}
+
+impl ExprVisitable for StreamExchange {}

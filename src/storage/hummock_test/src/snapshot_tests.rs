@@ -17,13 +17,15 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
+    WriteOptions,
 };
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
@@ -39,10 +41,10 @@ macro_rules! assert_count_range_scan {
         );
         let it = $storage
             .iter(
-                bounds,
+                map_table_key_range(bounds),
                 $epoch,
                 ReadOptions {
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::new_for_large_range_scan(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -110,8 +112,8 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -122,7 +124,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch2 = epoch1 + 1;
-    local.seal_current_epoch(epoch2);
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch1)
@@ -145,9 +147,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -158,7 +160,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch3 = epoch2 + 1;
-    local.seal_current_epoch(epoch3);
+    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch2)
@@ -182,9 +184,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_delete()),
-                (Bytes::from("4"), StorageValue::new_delete()),
+                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -194,7 +196,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX);
+    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch3)
@@ -232,10 +234,10 @@ async fn test_snapshot_range_scan_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -245,7 +247,7 @@ async fn test_snapshot_range_scan_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX);
+    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch)

@@ -78,7 +78,7 @@ public class JniDbzSourceHandler {
                             config.getSourceType().toString(),
                             String.valueOf(config.getSourceId()),
                             resp.getEventsCount());
-                    LOG.info(
+                    LOG.debug(
                             "Engine#{}: emit one chunk {} events to network ",
                             config.getSourceId(),
                             resp.getEventsCount());

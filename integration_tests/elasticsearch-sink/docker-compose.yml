@@ -7,20 +7,24 @@ services:
       - xpack.security.enabled=true
       - discovery.type=single-node
       - ELASTIC_PASSWORD=risingwave
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     ports:
       - 9200:9200
-    profiles:
-      - es7
   elasticsearch8:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
     environment:
       - xpack.security.enabled=true
       - discovery.type=single-node
       - ELASTIC_PASSWORD=risingwave
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     ports:
-      - 9200:9200
-    profiles:
-      - es8
+      - 9201:9200
   compactor-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -45,10 +49,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: meta-node-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml

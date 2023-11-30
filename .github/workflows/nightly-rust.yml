@@ -19,7 +19,16 @@ jobs:
            remove-haskell: 'true'
            remove-codeql: 'true'
            remove-docker-images: 'true'
+           root-reserve-mb: 2048
+           swap-size-mb: 8192
       - uses: actions/checkout@v3
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          # For daily scheduled run, we use a fixed branch, so that we can apply patches to fix compile errors earlier.
+          # We can also ensure the regression is due to new rust instead of new RisingWave code.
+          ref: xxchan/latest-nightly-rust
+      - uses: actions/checkout@v3
+        if: ${{ !(github.event_name == 'schedule') }}
       - name: Setup Rust toolchain
         run: |
           rustup override set nightly

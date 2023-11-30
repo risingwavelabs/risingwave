@@ -62,16 +62,14 @@ echo "--- Starting standalone cluster"
 ./risedev standalone-demo-full >"$LOG_PREFIX"/standalone.log 2>&1 &
 STANDALONE_PID=$!
 
-# Wait for rw cluster to finish startup
-sleep 10
+sleep 15
 
-# Make sure the env file is present
-set +e
-while [ ! -f "$RW_PREFIX"/config/risedev-env ]; do
-  echo "Waiting for risedev-env to be configured."
-  sleep 1
-done
-set -e
+# FIXME: Integrate standalone into risedev, so we can reuse risedev-env functionality here.
+cat << EOF > "$RW_PREFIX"/config/risedev-env
+RW_META_ADDR="http://0.0.0.0:5690"
+RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
+RW_FRONTEND_PORT="4566"
+EOF
 
 echo "--- Setting up table"
 ./risedev psql -c "
