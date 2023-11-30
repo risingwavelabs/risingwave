@@ -46,13 +46,16 @@ public class JniDbzSourceHandler {
         // userProps extracted from request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
+        var commonParam = request.getCommonParam();
+        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
         var config =
                 new DbzConnectorConfig(
                         SourceTypeE.valueOf(request.getSourceType()),
                         request.getSourceId(),
                         request.getStartOffset(),
                         mutableUserProps,
-                        request.getSnapshotDone());
+                        request.getSnapshotDone(),
+                        isMultiTableShared);
         JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
         handler.start(channelPtr);
     }
