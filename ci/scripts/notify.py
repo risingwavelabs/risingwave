@@ -68,7 +68,7 @@ def generate_test_status_message(failed_test_map):
     for test, users in failed_test_map.items():
         users = " ".join(map(lambda user: f"<@{user}>", users))
         messages.append(f"Test {test} failed {users}")
-    message = "\\n".join(messages)
+    message = "\n            ".join(messages)
     return message
 
 def get_buildkite_test_status(test):
@@ -79,9 +79,13 @@ def get_buildkite_test_status(test):
 def get_mock_test_status(test):
     mock_test_map = {
         "test-notify": "hard_failed",
+        "backfill-tests": "",
+        "backwards-compat-tests": "",
+        "fuzz-test": "",
+        "e2e-test-release": "",
         "e2e-iceberg-sink-tests": "passed",
         "e2e-java-binding-tests": "soft_failed",
-        "e2e-clickhouse-sink-tests": "",
+        "e2e-clickhouse-sink-tests": "hard_failed",
         "e2e-pulsar-sink-tests": "",
         "s3-source-test-for-opendal-fs-engine": "",
         "pulsar-source-tests": "",
@@ -112,7 +116,8 @@ steps:
       - slack:
           channels:
             - "#notification-buildkite"
-          message: {messages}
+          message: |
+            {messages}
 YAML
         """
     return cmd
