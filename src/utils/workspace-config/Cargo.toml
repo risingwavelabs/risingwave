@@ -26,7 +26,7 @@ zstd-sys = { version = "2", optional = true, default-features = false, features 
 # FIXME(xxchan): This is a temporary fix due to how cargo and hakari works. See related PR for more details.
 # We will revisit how to handle workspace-hack and build-dependency issues later.
 [build-dependencies]
-openssl-sys = { version = "=0.9.92", optional = true, features = ["vendored"] }
+openssl-sys = { version = "0.9.96", optional = true, features = ["vendored"] }
 
 [lints]
 workspace = true
