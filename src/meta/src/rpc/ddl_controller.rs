@@ -534,6 +534,7 @@ impl DdlController {
         }
     }
 
+    // validate the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     async fn validate_cdc_table(table: &Table, table_fragments: &TableFragments) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments

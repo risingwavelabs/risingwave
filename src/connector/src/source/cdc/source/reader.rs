@@ -69,7 +69,6 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        // rewrite the hostname and port for the split
         let mut properties = conn_props.properties.clone();
 
         // For citus, we need to rewrite the `table.name` to capture sharding tables

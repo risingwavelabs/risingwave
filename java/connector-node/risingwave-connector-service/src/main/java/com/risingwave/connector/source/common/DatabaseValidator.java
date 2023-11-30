@@ -16,10 +16,12 @@ package com.risingwave.connector.source.common;
 
 public abstract class DatabaseValidator {
 
-    public void validateAll(boolean isSharingMode) {
+    public void validateAll(boolean isMultiTableShared) {
         validateDbConfig();
         validateUserPrivilege();
-        if (!isSharingMode) {
+        // If the source connector is shared by multiple tables, it will capture events from
+        // multiple tables, skip validate its schema
+        if (!isMultiTableShared) {
             validateTable();
         }
     }

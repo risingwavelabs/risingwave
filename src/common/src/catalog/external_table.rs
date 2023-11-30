@@ -79,21 +79,3 @@ impl CdcTableDesc {
         id_to_idx
     }
 }
-
-impl From<ExternalTableDesc> for CdcTableDesc {
-    fn from(desc: ExternalTableDesc) -> Self {
-        let columns = desc.columns.into_iter().map(ColumnDesc::from).collect();
-        let pk = desc.pk.iter().map(ColumnOrder::from_protobuf).collect();
-        let stream_key = desc.stream_key.into_iter().map(|k| k as _).collect();
-        Self {
-            table_id: desc.table_id.into(),
-            source_id: desc.source_id.into(),
-            external_table_name: desc.table_name,
-            columns,
-            pk,
-            stream_key,
-            value_indices: vec![],
-            connect_properties: desc.connect_properties,
-        }
-    }
-}
