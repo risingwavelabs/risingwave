@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use tracing::info;
+use tracing::{info, info_span};
 
 macro_rules! my_info {
     ($($tt:tt)*) => {
@@ -36,6 +36,8 @@ fn main() {
 
     info!(%err, "233");
     info!(?err, "233");
+    info!(%err, "{}", err);
+    let _ = info_span!("span", %err);
 
     let _ = format!(
         "this is a really long message, test lint span: {} {} {} ",

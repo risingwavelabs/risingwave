@@ -49,6 +49,7 @@ const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+        // `%err`, `?err` in tracing events and spans.
         if let Some(args) = match_function_call(cx, expr, &TRACING_FIELD_DEBUG)
             .or_else(|| match_function_call(cx, expr, &TRACING_FIELD_DISPLAY))
             && let [arg_expr, ..] = args
@@ -84,6 +85,7 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
         if let Some(span) = core::iter::successors(Some(arg_expr.span), |s| s.parent_callsite())
             .find(|s| s.can_be_used_for_suggestions())
         {
+            // TODO: suggest `err.as_report()`
             span_lint(cx, FORMAT_ERROR, span, "should not format error directly");
         }
     }
