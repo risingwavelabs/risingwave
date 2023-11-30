@@ -1165,13 +1165,11 @@ where
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
 
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
         let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
@@ -1186,13 +1184,15 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 
         trace!(
             table_id = %self.table_id(),
-            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?prefix_hint, ?pk_prefix,
              ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
@@ -1265,7 +1265,9 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 

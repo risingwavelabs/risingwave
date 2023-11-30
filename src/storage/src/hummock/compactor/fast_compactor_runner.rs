@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -39,7 +39,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
     CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    StreamingSstableWriterFactory, TableHolder,
+    TableHolder, UnifiedSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -279,7 +279,7 @@ pub struct CompactorRunner {
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
-        RemoteBuilderFactory<StreamingSstableWriterFactory, BlockedXor16FilterBuilder>,
+        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
     >,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
@@ -312,7 +312,8 @@ impl CompactorRunner {
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
         };
-        let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
+        let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
+
         let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
@@ -330,7 +331,14 @@ impl CompactorRunner {
             task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
         );
-        assert_eq!(task.input_ssts.len(), 2);
+        assert_eq!(
+            task.input_ssts.len(),
+            2,
+            "TaskId {} target_level {:?} task {:?}",
+            task.task_id,
+            task.target_level,
+            compact_task_to_string(&task)
+        );
         let left = Box::new(ConcatSstableIterator::new(
             task.input_ssts[0].table_infos.clone(),
             context.sstable_store.clone(),
@@ -368,7 +376,11 @@ impl CompactorRunner {
             } else {
                 (&mut self.right, &mut self.left)
             };
-            assert!(ret != Ordering::Equal);
+            assert!(
+                ret != Ordering::Equal,
+                "sst range overlap equal_key {:?}",
+                self.left.current_sstable().key()
+            );
             if first.current_sstable().iter.is_none() {
                 let right_key = second.current_sstable().key();
                 while first.current_sstable().is_valid() {
@@ -450,7 +462,11 @@ impl CompactorRunner {
             let target_key = FullKey::decode(&sstable_iter.sstable.value().meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
                 self.executor.run(iter, target_key).await?;
-                assert!(!iter.is_valid());
+                assert!(
+                    !iter.is_valid(),
+                    "iter should not be valid key {:?}",
+                    iter.key()
+                );
             }
             sstable_iter.iter.take();
         }

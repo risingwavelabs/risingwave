@@ -503,8 +503,10 @@ struct FunctionAttr {
     generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
-    /// Whether the function is deprecated.
+    /// If true, the function is unavailable on the frontend.
     deprecated: bool,
+    /// If true, the function is not implemented on the backend, but its signature is defined.
+    rewritten: bool,
 }
 
 /// Attributes from function signature `fn(..)`

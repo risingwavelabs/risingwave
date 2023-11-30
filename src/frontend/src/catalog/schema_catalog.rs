@@ -37,8 +37,8 @@ use crate::user::UserId;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
-    name: String,
-    database_id: DatabaseId,
+    pub name: String,
+    pub database_id: DatabaseId,
     table_by_name: HashMap<String, Arc<TableCatalog>>,
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     source_by_name: HashMap<String, Arc<SourceCatalog>>,
@@ -61,7 +61,7 @@ pub struct SchemaCatalog {
     connection_sink_ref: HashMap<ConnectionId, Vec<SinkId>>,
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, Arc<SystemTableCatalog>>,
-    owner: u32,
+    pub owner: u32,
 }
 
 impl SchemaCatalog {
@@ -91,13 +91,6 @@ impl SchemaCatalog {
         self.view_by_id
             .try_insert(sys_view.id, sys_view.clone())
             .unwrap();
-    }
-
-    pub fn update_self(&mut self, prost: &PbSchema) {
-        self.id = prost.id;
-        self.database_id = prost.database_id;
-        self.name = prost.name.clone();
-        self.owner = prost.owner;
     }
 
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {

@@ -23,11 +23,10 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
@@ -249,7 +248,7 @@ async fn compact_shared_buffer(
             Box::new(sstable_object_id_manager.clone()),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
-        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
         for imm in &payload {
             forward_iters.push(imm.clone().into_forward_iter());
             del_iter.add_batch_iter(imm.delete_range_iter());
@@ -330,7 +329,7 @@ pub async fn merge_imms_in_memory(
     let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
-    let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
+    let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
     for imm in imms {
         assert!(
             imm.kv_count() > 0 || imm.has_range_tombstone(),
@@ -402,14 +401,14 @@ pub async fn merge_imms_in_memory(
 
     let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-    let mut pivot_last_delete_epoch = MAX_EPOCH;
+    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
 
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
         if key != pivot {
             merged_payload.push((pivot, versions));
             pivot = key;
-            pivot_last_delete_epoch = MAX_EPOCH;
+            pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
             let target_extended_user_key =
                 PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
