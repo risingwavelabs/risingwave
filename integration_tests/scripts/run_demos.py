@@ -348,16 +348,96 @@ def run_bigquery_demo():
         if len(failed_cases) != 0:
             raise Exception("Data check failed for case {}".format(failed_cases))
 
-arg_parser = argparse.ArgumentParser(description='Run the demo')
-arg_parser.add_argument('--format',
-                        metavar='format',
-                        type=str,
-                        help='the format of output data',
-                        default='json')
-arg_parser.add_argument('--case',
-                        metavar='case',
-                        type=str,
-                        help='the test case')
+
+def run_mindsdb_demo():
+    def run_sql_file_on_mindsdb(f: str, dir: str):
+        print("Running SQL file: {} on mindsdb".format(f))
+        proc = subprocess.run(
+            [
+                "psql",
+                "-h",
+                "localhost",
+                "-p",
+                "55432",
+                "-d",
+                "mindsdb",
+                "-U",
+                "mindsdb",
+                "-f",
+                f,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-P",
+                "pager=off",
+            ],
+            check=True,
+            cwd=dir,
+        )
+        if proc.returncode != 0:
+            sys.exit(1)
+
+    demo = "mindsdb"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(
+        ["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True
+    )
+    sleep(40)
+
+    sql_files = ["restore.sql"]
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir, fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+    sleep(20)
+
+    sql_files = ["create_database.sql", "create_model.sql"]
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir, fname)
+        print("executing sql on mindsdb: ", open(sql_file).read())
+        run_sql_file_on_mindsdb(sql_file, demo_dir)
+        sleep(10)
+
+    sleep(40)
+    query = "query.sql"
+    print("Running query: query on mindsdb: {}".format(query))
+    output = subprocess.Popen(
+        [
+            "psql",
+            "-h",
+            "localhost",
+            "-p",
+            "55432",
+            "-d",
+            "mindsdb",
+            "-U",
+            "mindsdb",
+            "-f",
+            query,
+        ],
+        cwd=demo_dir,
+        stdout=subprocess.PIPE,
+    )
+    rows = subprocess.check_output(["wc", "-l"], cwd=demo_dir, stdin=output.stdout)
+    output.stdout.close()
+    output.wait()
+    rows = int(rows.decode("utf8").strip())
+    if rows < 1:
+        raise Exception("Data check failed for case {}".format(query))
+
+arg_parser = argparse.ArgumentParser(description="Run the demo")
+arg_parser.add_argument(
+    "--format",
+    metavar="format",
+    type=str,
+    help="the format of output data",
+    default="json",
+)
+
+arg_parser.add_argument("--case", metavar="case", type=str, help="the test case")
 args = arg_parser.parse_args()
 
 # disable telemetry in env
@@ -382,5 +462,7 @@ elif args.case == "redis-sink":
     run_redis_demo()
 elif args.case == "big-query-sink":
     run_bigquery_demo()
+elif args.case == "mindsdb":
+    run_mindsdb_demo()
 else:
     run_demo(args.case, args.format)
