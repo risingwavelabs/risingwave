@@ -1091,7 +1091,6 @@ impl CatalogController {
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
             name: Set(name.to_string()),
-            ..Default::default()
         };
         let database = active_model.update(&txn).await?;
 
@@ -1128,7 +1127,6 @@ impl CatalogController {
         let active_model = schema::ActiveModel {
             schema_id: Set(schema_id),
             name: Set(name.to_string()),
-            ..Default::default()
         };
         let schema = active_model.update(&txn).await?;
 
