@@ -271,7 +271,7 @@ impl PbTableWatermarks {
         assert!(result_epoch_watermark.is_sorted_by(|first, second| {
             let ret = second.epoch.cmp(&first.epoch);
             assert_ne!(ret, Ordering::Equal);
-            ret
+            Some(ret)
         }));
         *self = PbTableWatermarks {
             epoch_watermarks: result_epoch_watermark,
