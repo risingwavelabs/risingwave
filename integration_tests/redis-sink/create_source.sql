@@ -2,7 +2,6 @@ CREATE table user_behaviors (
     user_id INT,
     target_id VARCHAR,
     target_type VARCHAR,
-    event_timestamp TIMESTAMPTZ,
     behavior_type VARCHAR,
     parent_target_type VARCHAR,
     parent_target_id VARCHAR,
