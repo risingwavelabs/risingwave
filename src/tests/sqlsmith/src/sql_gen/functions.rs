@@ -123,7 +123,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_decode(&mut self, context: SqlGeneratorContext) -> Expr {
-        let input_string = self.gen_expr(&DataType::Varchar, context);
+        let input_string = self.gen_expr(&DataType::Bytea, context);
         let encoding = &["base64", "hex", "escape"].choose(&mut self.rng).unwrap();
         let args = vec![
             input_string,
