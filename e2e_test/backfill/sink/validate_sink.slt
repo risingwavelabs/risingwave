@@ -1,0 +1,6 @@
+query B
+SELECT *
+FROM t
+FULL OUTER JOIN table_kafka ON t.v1 = table_kafka.v1
+WHERE t.v1 IS NULL OR table_kafka.v1 IS NULL;
+----

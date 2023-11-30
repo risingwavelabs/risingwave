@@ -17,7 +17,7 @@ use std::hash::Hash;
 use postgres_types::{ToSql as _, Type};
 use serde::{Serialize, Serializer};
 
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 use crate::util::row_id::RowId;
 
 // Serial is an alias for i64
@@ -30,11 +30,7 @@ impl From<i64> for Serial {
     }
 }
 
-impl EstimateSize for Serial {
-    fn estimated_heap_size(&self) -> usize {
-        0
-    }
-}
+impl ZeroHeapSize for Serial {}
 
 impl Serial {
     #[inline]

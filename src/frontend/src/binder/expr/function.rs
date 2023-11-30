@@ -888,6 +888,7 @@ impl Binder {
                 })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 ("jsonb_contains", raw_call(ExprType::JsonbContains)),
@@ -966,12 +967,12 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(Some(schema_name.into()));
+                            schema_names.push(schema_name.as_str());
                         }
                     }
 
                     Ok(ExprImpl::literal_list(
-                        ListValue::new(schema_names),
+                        ListValue::from_iter(schema_names),
                         DataType::Varchar,
                     ))
                 })),
