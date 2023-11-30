@@ -172,9 +172,6 @@ test_sink_backfill_recovery() {
   )
   FORMAT DEBEZIUM ENCODE JSON;"
 
-  # Let backfill progress a little.
-  sleep 3
-
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
 
