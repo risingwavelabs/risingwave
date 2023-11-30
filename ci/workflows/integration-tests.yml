@@ -5,96 +5,22 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
-  # We ingest both json and protobuf data for a few demos.
-  # For rest of demos, we run only one format (json).
-  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "livestream"
-          - "twitter"
-        format:
-          - "json"
-          - "protobuf"
+  - label: "gen and upload integration test pipeline"
+    command: "ci/scripts/gen-integration-test-yaml.py"
 
-  - label: "Run Demos {{matrix.testcase}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f json"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "ad-click"
-          - "ad-ctr"
-          - "cdn-metrics"
-          - "clickstream"
-          - "livestream"
-          - "prometheus"
-          - "schema-registry"
-          - "mysql-cdc"
-          - "postgres-cdc"
-          - "mysql-sink"
-          - "postgres-sink"
-          - "iceberg-cdc"
-          # - "iceberg-sink"
-          - "debezium-mysql"
+  # Notification test.
+  - key: "test-notify"
+    if: build.message =~ /test-notify/i
+    command: |
+      bash -c 'echo test && exit -1'
 
-  # NOTE: buildkite matrix-limits
-  # Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
-  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f json"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "twitter"
-          - "twitter-pulsar"
-          # - "debezium-mongo"
-          - "debezium-postgres"
-          - "tidb-cdc-sink"
-          - "debezium-sqlserver"
-          - "citus-cdc"
-          - "kinesis-s3-source"
-          - "clickhouse-sink"
-          - "cockroach-sink"
-          - "kafka-cdc-sink"
-          - "cassandra-and-scylladb-sink"
-          - "elasticsearch-sink"
-          - "redis-sink"
+  - wait: true
+    continue_on_failure: true
+    allow_dependency_failure: true
 
-  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f json"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "vector"
+  # Notifies on test failure for certain tests.
+  # You may update `notify.py` to add tests and people to notify.
+  # This should be the LAST part of this file.
+  - label: "trigger failed test notification"
+    if: build.source == "schedule"
+    command: "ci/scripts/notify.py"

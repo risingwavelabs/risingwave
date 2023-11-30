@@ -663,9 +663,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
-    pub reclaim_rate_limit_mb: usize,
-
     #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
     pub ring_buffer_capacity_mb: usize,
 
@@ -767,6 +764,13 @@ pub struct StreamingDeveloperConfig {
     /// The maximum number of concurrent barriers in an exchange channel.
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
     pub exchange_concurrent_barriers: usize,
+
+    /// The concurrency for dispatching messages to different downstream jobs.
+    ///
+    /// - `1` means no concurrency, i.e., dispatch messages to downstream jobs one by one.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
+    pub exchange_concurrent_dispatchers: usize,
 
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
@@ -1199,10 +1203,6 @@ pub mod default {
             0
         }
 
-        pub fn reclaim_rate_limit_mb() -> usize {
-            0
-        }
-
         pub fn ring_buffer_capacity_mb() -> usize {
             256
         }
@@ -1296,6 +1296,10 @@ pub mod default {
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
             1
+        }
+
+        pub fn stream_exchange_concurrent_dispatchers() -> usize {
+            0
         }
 
         pub fn stream_dml_channel_initial_permits() -> usize {

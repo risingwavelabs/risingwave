@@ -190,6 +190,16 @@ public class UdfExample {
             public String str;
             public byte[] bytes;
             public @DataTypeHint("JSONB") String jsonb;
+            public Struct struct;
+        }
+
+        public static class Struct {
+            public Integer f1;
+            public Integer f2;
+
+            public String toString() {
+                return String.format("(%d, %d)", f1, f2);
+            }
         }
 
         public Row eval(
@@ -206,7 +216,8 @@ public class UdfExample {
                 PeriodDuration interval,
                 String str,
                 byte[] bytes,
-                @DataTypeHint("JSONB") String jsonb) {
+                @DataTypeHint("JSONB") String jsonb,
+                Struct struct) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -222,6 +233,7 @@ public class UdfExample {
             row.str = str;
             row.bytes = bytes;
             row.jsonb = jsonb;
+            row.struct = struct;
             return row;
         }
     }
@@ -242,6 +254,16 @@ public class UdfExample {
             public String[] str;
             public byte[][] bytes;
             public @DataTypeHint("JSONB[]") String[] jsonb;
+            public Struct[] struct;
+        }
+
+        public static class Struct {
+            public Integer f1;
+            public Integer f2;
+
+            public String toString() {
+                return String.format("(%d, %d)", f1, f2);
+            }
         }
 
         public Row eval(
@@ -258,7 +280,8 @@ public class UdfExample {
                 PeriodDuration[] interval,
                 String[] str,
                 byte[][] bytes,
-                @DataTypeHint("JSONB[]") String[] jsonb) {
+                @DataTypeHint("JSONB[]") String[] jsonb,
+                Struct[] struct) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -274,6 +297,7 @@ public class UdfExample {
             row.str = str;
             row.bytes = bytes;
             row.jsonb = jsonb;
+            row.struct = struct;
             return row;
         }
     }
