@@ -49,7 +49,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
-use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
@@ -743,7 +743,20 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
+    // todo: handle pk carefully, revisit logic later
+
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
+    let key_column_name: Option<String> = {
+        // iter columns to check if contains additional columns from key part
+        // return the key column names if exists
+        columns.iter().find_map(|catalog| {
+            if catalog.column_desc.additional_column_type == AdditionalColumnType::Key {
+                Some(catalog.name().to_string())
+            } else {
+                None
+            }
+        })
+    };
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
@@ -756,14 +769,38 @@ pub(crate) async fn bind_source_pk(
             sql_defined_pk_names
         }
         (Format::Upsert, Encode::Json) => {
-            if sql_defined_pk {
+            if let Some(ref key_column_name) = key_column_name && sql_defined_pk {
+                if sql_defined_pk_names.len() != 1 {
+                    return Err(RwError::from(ProtocolError(
+                        format!("upsert json supports only one primary key column ({}).", key_column_name)
+                    )));
+                }
+                // the column name have been converted to real value in `handle_addition_columns`
+                // so we don't ignore ascii case here
+                if key_column_name.eq(sql_defined_pk_names[0].as_str()) {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "upsert json's key column {} not match with sql defined primary key {}",
+                        key_column_name, sql_defined_pk_names[0]
+                    ))));
+                }
                 sql_defined_pk_names
             } else {
-                add_default_key_column(columns);
-                vec![DEFAULT_KEY_COLUMN_NAME.into()]
+                return if key_column_name.is_none() {
+                    Err(
+                        RwError::from(ProtocolError("INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE JSON".to_string()))
+                    )
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE JSON",
+                        key_column_name.unwrap()))))
+                }
             }
         }
         (Format::Upsert, Encode::Avro) => {
+            // todo: check logic here:
+            // * if defined pk, it must be the same as key column
+            // * if not defined pk, extract pk from schema but put a mark on the columns
+            // * if no pk in schema, use the key column as primary key
             if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
@@ -783,6 +820,11 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Debezium, Encode::Json) => {
+            if key_column_name.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "INCLUDE KEY clause cannot be set for FORMAT DEBEZIUM ENCODE JSON".to_string(),
+                )));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with FORMAT DEBEZIUM."
