@@ -301,7 +301,7 @@ async fn test_foreground_index_cancel() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_foreground_sink_cancel() -> Result<()> {
+async fn test_sink_create() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -312,24 +312,18 @@ async fn test_foreground_sink_cancel() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = session2
+        session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-            .await;
-        assert!(result.is_err());
+            .await
+            .expect("create sink should succeed");
     });
 
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    // Kill CN should stop the job
-    cancel_stream_jobs(&mut session).await?;
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
 
-    // Create MV should succeed, since the previous foreground job should be cancelled.
-    session.run(SET_RATE_LIMIT_2).await?;
-    session
-        .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-        .await?;
-
+    // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
     session.run(DROP_TABLE).await?;
 

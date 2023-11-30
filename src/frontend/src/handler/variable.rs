@@ -45,9 +45,7 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_val = set_var_to_param_str(&value).ok_or(ErrorCode::InternalError(
-        "SET TO DEFAULT is not supported yet".to_string(),
-    ))?;
+    let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 

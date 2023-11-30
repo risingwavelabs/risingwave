@@ -294,15 +294,27 @@ impl Catalog {
     }
 
     pub fn update_database(&mut self, proto: &PbDatabase) {
-        self.get_database_mut(proto.id).unwrap().update_self(proto);
+        let id = proto.id;
+        let name = proto.name.clone();
+
+        let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
+        if old_database_name != name {
+            let mut database = self.database_by_name.remove(&old_database_name).unwrap();
+            database.name = name.clone();
+            database.owner = proto.owner;
+            self.database_by_name.insert(name.clone(), database);
+            self.db_name_by_id.insert(id, name);
+        } else {
+            let database = self.get_database_mut(id).unwrap();
+            database.name = name;
+            database.owner = proto.owner;
+        }
     }
 
     pub fn update_schema(&mut self, proto: &PbSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
-            .get_schema_mut(proto.id)
-            .unwrap()
-            .update_self(proto);
+            .update_schema(proto);
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
