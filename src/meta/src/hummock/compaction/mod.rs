@@ -17,7 +17,6 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 
@@ -29,7 +28,9 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
+use risingwave_hummock_sdk::{
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
@@ -130,7 +131,7 @@ impl CompactStatus {
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
             splits: vec![KeyRange::inf()],
-            watermark: MAX_EPOCH,
+            watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,
             target_level: target_level_id as u32,

@@ -273,6 +273,17 @@ impl ListArray {
             value: Box::new(new_value),
         })
     }
+
+    /// Returns the offsets of this list.
+    ///
+    /// # Example
+    /// ```text
+    /// list    = [[a, b, c], [], NULL, [d], [NULL, f]]
+    /// offsets = [0, 3, 3, 3, 4, 6]
+    /// ```
+    pub fn offsets(&self) -> &[u32] {
+        &self.offsets
+    }
 }
 
 impl<T, L> FromIterator<Option<L>> for ListArray

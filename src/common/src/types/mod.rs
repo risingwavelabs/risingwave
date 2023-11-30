@@ -457,6 +457,7 @@ impl DataType {
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
             _ => self == other,
         }
     }
