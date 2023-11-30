@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -253,16 +254,25 @@ impl PbTableWatermarks {
                 }
             }
             if !new_vnode_watermarks.is_empty() {
-                result_epoch_watermark.push(PbEpochNewWatermarks {
-                    watermarks: new_vnode_watermarks,
-                    // set epoch as safe epoch
-                    epoch: safe_epoch,
-                })
+                if let Some(last_epoch_watermark) = result_epoch_watermark.last_mut() && last_epoch_watermark.epoch == safe_epoch {
+                    last_epoch_watermark.watermarks.extend(new_vnode_watermarks);
+                } else {
+                    result_epoch_watermark.push(PbEpochNewWatermarks {
+                        watermarks: new_vnode_watermarks,
+                        // set epoch as safe epoch
+                        epoch: safe_epoch,
+                    })
+                }
             }
         }
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
+        assert!(result_epoch_watermark.is_sorted_by(|first, second| {
+            let ret = second.epoch.cmp(&first.epoch);
+            assert_ne!(ret, Ordering::Equal);
+            ret
+        }));
         *self = PbTableWatermarks {
             epoch_watermarks: result_epoch_watermark,
             is_ascending: self.is_ascending,
