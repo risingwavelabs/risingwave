@@ -34,21 +34,19 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final CdcEngine engine;
+    private final CountDownLatch startSignal;
 
-    private static final CountDownLatch startSignal = new CountDownLatch(1);
-    private static final DebeziumEngine.ConnectorCallback connectorCallback =
-            new DebeziumEngine.ConnectorCallback() {
-                @Override
-                public void taskStarted() {
-                    startSignal.countDown();
-                }
-            };
+    static class DbzConnectorCallback implements DebeziumEngine.ConnectorCallback {
+        private final CountDownLatch signalLatch;
 
-    private DbzCdcEngineRunner(CdcEngine engine) {
-        this.executor =
-                Executors.newSingleThreadExecutor(
-                        r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
-        this.engine = engine;
+        public DbzConnectorCallback(CountDownLatch signalLatch) {
+            this.signalLatch = signalLatch;
+        }
+
+        @Override
+        public void taskStarted() {
+            signalLatch.countDown();
+        }
     }
 
     public static CdcEngineRunner newCdcEngineRunner(
@@ -56,11 +54,13 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
+            var startSignal = new CountDownLatch(1);
+            var dbzConnectorCallback = new DbzConnectorCallback(startSignal);
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            connectorCallback,
+                            dbzConnectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     responseObserver.onError(error);
@@ -75,7 +75,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine);
+            runner = new DbzCdcEngineRunner(engine, startSignal);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }
@@ -86,11 +86,13 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
+            var startSignal = new CountDownLatch(1);
+            var dbzConnectorCallback = new DbzConnectorCallback(startSignal);
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            connectorCallback,
+                            dbzConnectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -103,11 +105,20 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine);
+            runner = new DbzCdcEngineRunner(engine, startSignal);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }
         return runner;
+    }
+
+    // private constructor
+    private DbzCdcEngineRunner(CdcEngine engine, CountDownLatch startSignal) {
+        this.executor =
+                Executors.newSingleThreadExecutor(
+                        r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
+        this.engine = engine;
+        this.startSignal = startSignal;
     }
 
     /** Start to run the cdc engine */
@@ -131,12 +142,8 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 .setSourceId(engine.getId())
                                 .setControl(controlInfo)
                                 .build());
-        if (startOk) {
-            running.set(true);
-            LOG.info("engine#{} started", engine.getId());
-        } else {
-            LOG.error("engine#{} failed to start", engine.getId());
-        }
+        running.set(true);
+        LOG.info("engine#{} started", engine.getId());
     }
 
     public void stop() throws Exception {
