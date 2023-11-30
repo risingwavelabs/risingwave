@@ -20,6 +20,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
@@ -164,7 +165,7 @@ pub async fn handle_create_mv(
         return Ok(resp);
     }
 
-    let (mut table, graph) = {
+    let (mut table, graph, can_run_in_background) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         if !context.with_options().is_empty() {
             // get other useful fields by `remove`, the logic here is to reject unknown options.
@@ -183,6 +184,20 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
+        // All leaf nodes must be stream table scan, no other scan operators support recovery.
+        fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+            if plan.inputs().is_empty() {
+                if let Some(scan) = plan.as_stream_table_scan() {
+                    scan.stream_scan_type() == StreamScanType::Backfill
+                } else {
+                    false
+                }
+            } else {
+                assert!(!plan.inputs().is_empty());
+                plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+            }
+        }
+        let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
         let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
         graph.parallelism =
@@ -196,7 +211,7 @@ It only indicates the physical clustering of the data, which may improve the per
         let env = graph.env.as_mut().unwrap();
         env.timezone = context.get_session_timezone();
 
-        (table, graph)
+        (table, graph, can_run_in_background)
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -212,7 +227,7 @@ It only indicates the physical clustering of the data, which may improve the per
             ));
 
     let run_in_background = session.config().background_ddl();
-    let create_type = if run_in_background {
+    let create_type = if run_in_background && can_run_in_background {
         CreateType::Background
     } else {
         CreateType::Foreground

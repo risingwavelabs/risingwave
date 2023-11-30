@@ -9,6 +9,8 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: compute-node-0
+    volumes:
+      - "../../gcp-rwctest.json:/gcp-rwctest.json"
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -25,6 +27,8 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: meta-node-0
+    volumes:
+      - "../../gcp-rwctest.json:/gcp-rwctest.json"
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -33,6 +37,12 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
+  gcloud-cli:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine
+    command: tail -f /dev/null
+    volumes:
+      - "../../gcp-rwctest.json:/gcp-rwctest.json"
+
 volumes:
   compute-node-0:
     external: false

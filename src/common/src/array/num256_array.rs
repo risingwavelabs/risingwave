@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::io::{Cursor, Read};
-use std::mem::size_of;
 
 use ethnum::I256;
 use risingwave_pb::common::buffer::CompressionType;
@@ -22,20 +21,22 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::{EstimateSize, ZeroHeapSize};
 use crate::types::{DataType, Int256, Int256Ref, Scalar};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct Int256ArrayBuilder {
     bitmap: BitmapBuilder,
     data: Vec<I256>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, EstimateSize)]
 pub struct Int256Array {
     bitmap: Bitmap,
-    data: Vec<I256>,
+    data: Box<[I256]>,
 }
+
+impl ZeroHeapSize for I256 {}
 
 #[rustfmt::skip]
 macro_rules! impl_array_for_num256 {
@@ -149,7 +150,7 @@ macro_rules! impl_array_for_num256 {
             fn finish(self) -> Self::ArrayType {
                 Self::ArrayType {
                     bitmap: self.bitmap.finish(),
-                    data: self.data,
+                    data: self.data.into(),
                 }
             }
         }
@@ -204,15 +205,9 @@ impl_array_for_num256!(
     Int256
 );
 
-impl EstimateSize for Int256Array {
-    fn estimated_heap_size(&self) -> usize {
-        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<I256>()
-    }
-}
-
 impl FromIterator<Int256> for Int256Array {
     fn from_iter<I: IntoIterator<Item = Int256>>(iter: I) -> Self {
-        let data: Vec<I256> = iter.into_iter().map(|i| *i.0).collect();
+        let data: Box<[I256]> = iter.into_iter().map(|i| *i.0).collect();
         Int256Array {
             bitmap: Bitmap::ones(data.len()),
             data,
