@@ -12,4 +12,4 @@ FROM
     primary_key = 'user_id',
     connector = 'redis',
     redis.url= 'redis://redis:6379/',
-)FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'UserID:{user_id}', value_format = 'TargetID:{target_id},TargetType{target_type}');
+)FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'UserID:{user_id}', value_format = 'TargetID:{target_id},EventTimestamp{event_timestamp}');
