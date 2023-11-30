@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use itertools::Itertools;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::{AdditionalColumnType, PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
@@ -101,6 +101,7 @@ pub struct ColumnDesc {
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
+    pub additional_column_type: AdditionalColumnType,
 }
 
 impl ColumnDesc {
@@ -113,6 +114,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
+            additional_column_type: AdditionalColumnType::Unspecified,
         }
     }
 
@@ -125,6 +127,25 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
+            additional_column_type: AdditionalColumnType::Unspecified,
+        }
+    }
+
+    pub fn named_with_additional_column(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        additional_column_type: AdditionalColumnType,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
+            additional_column_type,
         }
     }
 
@@ -143,6 +164,7 @@ impl ColumnDesc {
             type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
+            additional_column_type: self.additional_column_type as i32,
         }
     }
 
@@ -169,6 +191,7 @@ impl ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
+            additional_column_type: AdditionalColumnType::Unspecified,
         }
     }
 
@@ -190,6 +213,7 @@ impl ColumnDesc {
             type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
+            additional_column_type: AdditionalColumnType::Unspecified,
         }
     }
 
@@ -206,6 +230,7 @@ impl ColumnDesc {
             type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
+            additional_column_type: AdditionalColumnType::Unspecified,
         }
     }
 
@@ -230,6 +255,7 @@ impl ColumnDesc {
 
 impl From<PbColumnDesc> for ColumnDesc {
     fn from(prost: PbColumnDesc) -> Self {
+        let additional_column_type = prost.additional_column_type();
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
             .into_iter()
@@ -243,6 +269,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
+            additional_column_type,
         }
     }
 }
@@ -263,6 +290,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
+            additional_column_type: c.additional_column_type as i32,
         }
     }
 }

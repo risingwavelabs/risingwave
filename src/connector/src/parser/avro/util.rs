@@ -15,7 +15,7 @@
 use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
 use itertools::Itertools;
 use risingwave_common::types::{DataType, Decimal};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc};
 
 pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<ColumnDesc>> {
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
@@ -58,6 +58,7 @@ fn avro_field_to_column_desc(
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Unspecified as i32,
             })
         }
         _ => {

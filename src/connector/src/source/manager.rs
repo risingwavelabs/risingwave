@@ -19,6 +19,7 @@ use risingwave_common::catalog::{
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
+use risingwave_pb::plan_common::AdditionalColumnType;
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
 /// counterpart in `StreamScan`
@@ -32,6 +33,7 @@ pub struct SourceColumnDesc {
 
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
+    pub additional_column_type: AdditionalColumnType,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -81,6 +83,7 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
+            additional_column_type: AdditionalColumnType::Unspecified,
         }
     }
 
@@ -112,6 +115,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
+            additional_column_type: c.additional_column_type,
         }
     }
 }
@@ -126,6 +130,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
+            additional_column_type: s.additional_column_type,
         }
     }
 }

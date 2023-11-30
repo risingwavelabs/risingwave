@@ -37,7 +37,7 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
+use risingwave_pb::plan_common::{AdditionalColumnType, DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, Ident,
@@ -207,6 +207,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Unspecified,
             },
             is_hidden: false,
         });

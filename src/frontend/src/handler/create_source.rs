@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::additional_columns::CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS;
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
@@ -912,121 +913,6 @@ pub(super) fn bind_source_watermark(
         .try_collect()?;
     Ok(watermark_descs)
 }
-
-type CompatibleAdditionalColumnsFn =
-    Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>;
-
-static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
-    HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>>,
-> = LazyLock::new(|| {
-    let mut res: HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>> =
-        HashMap::new();
-
-    res.insert(
-        KAFKA_CONNECTOR.to_string(),
-        vec![
-            (
-                "key",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named(name, id, DataType::Bytea),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "timestamp",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named(name, id, DataType::Timestamptz),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "partition",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named(name, id, DataType::Int64),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "offset",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named(name, id, DataType::Int64),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            // Todo(tabVersion): add header column desc
-            // (
-            //     "header",
-            //     Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            //         ColumnCatalog {
-            //             column_desc: ColumnDesc::named(name, id, DataType::List(
-            //
-            //             )),
-            //             is_hidden: false,
-            //         }
-            //     }),
-            // ),
-        ],
-    );
-    res.insert(
-        PULSAR_CONNECTOR.to_string(),
-        vec![(
-            "key",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named(name, id, DataType::Bytea),
-                    is_hidden: false,
-                }
-            }),
-        )],
-    );
-    res.insert(
-        KINESIS_CONNECTOR.to_string(),
-        vec![(
-            "key",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
-                    is_hidden: false,
-                }
-            }),
-        )],
-    );
-    res.insert(
-        S3_CONNECTOR.to_string(),
-        vec![(
-            "file",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
-                    is_hidden: false,
-                }
-            }),
-        )],
-    );
-    res.insert(
-        // TODO(tabVersion): change to Opendal S3 and GCS
-        S3_V2_CONNECTOR.to_string(),
-        vec![(
-            "file",
-            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                ColumnCatalog {
-                    column_desc: ColumnDesc::named(name, id, DataType::Varchar),
-                    is_hidden: false,
-                }
-            }),
-        )],
-    );
-
-    res
-});
 
 // TODO: Better design if we want to support ENCODE KEY where we will have 4 dimensional array
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =

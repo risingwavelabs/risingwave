@@ -25,7 +25,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc};
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -213,6 +213,7 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Unspecified as i32,
             })
         } else {
             *index += 1;
