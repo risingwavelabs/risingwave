@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::cmp::{min, Ordering};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::iter::repeat;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1830,39 +1832,44 @@ impl ScaleController {
             }
 
             match fragment_parallelism.get(&fragment_id) {
-                None => {}
+                None => unreachable!(),
                 Some(TableFragmentsParallelism::Fixed(target)) => {
                     if no_shuffle_target_fragment_ids.contains(&fragment_id) {
                         continue;
                     }
 
-                    match fragment.get_distribution_type().unwrap() {
-                        FragmentDistributionType::Hash => {
-                            // we use all available parallell units
-                            let available_parallel_unit_ids: BTreeMap<_, BTreeSet<_>> =
-                                worker_parallel_units
-                                    .into_iter()
-                                    .filter(|&(id, _)| !unschedulable_worker_ids.contains(&id))
-                                    .filter(|&(id, _)| !exclude_worker_ids.contains(&id))
-                                    .map(|(id, units)| (id, units.into_iter().collect()))
-                                    .collect();
-
-                            let result =
-                                rebalance_units(available_parallel_unit_ids, *target as usize)?;
-
-                            let target_parallel_unit_ids = result.into_values().flatten().collect();
-
-                            let reschedule = Self::diff_parallel_unit_change(
-                                &fragment_parallel_unit_ids,
-                                &target_parallel_unit_ids,
-                            );
-
-                            target_plan.insert(fragment_id, reschedule);
+                    let target = match fragment.get_distribution_type().unwrap() {
+                        FragmentDistributionType::Unspecified => unreachable!(),
+                        FragmentDistributionType::Single => {
+                            assert_eq!(*target, 1);
+                            *target
                         }
+                        FragmentDistributionType::Hash => *target,
+                    };
 
-                        _ => todo!(),
-                    }
-                    todo!()
+                    // we use all available parallel units
+                    let available_parallel_unit_ids: BTreeMap<_, BTreeSet<_>> =
+                        worker_parallel_units
+                            .clone()
+                            .into_iter()
+                            .filter(|&(id, _)| !unschedulable_worker_ids.contains(&id))
+                            .filter(|&(id, _)| !exclude_worker_ids.contains(&id))
+                            .map(|(id, units)| (id, units.into_iter().collect()))
+                            .collect();
+
+                    let target_distribution =
+                        rebalance_units(available_parallel_unit_ids, target as usize)?;
+
+                    let target_parallel_unit_ids =
+                        target_distribution.into_values().flatten().collect();
+
+                    target_plan.insert(
+                        fragment_id,
+                        Self::diff_parallel_unit_change(
+                            &fragment_parallel_unit_ids,
+                            &target_parallel_unit_ids,
+                        ),
+                    );
                 }
                 Some(TableFragmentsParallelism::Adaptive) => {
                     match fragment.get_distribution_type().unwrap() {
@@ -1959,12 +1966,13 @@ impl ScaleController {
                                 _ => {}
                             }
 
-                            let reschedule = Self::diff_parallel_unit_change(
-                                &fragment_parallel_unit_ids,
-                                &target_parallel_unit_ids,
+                            target_plan.insert(
+                                fragment_id,
+                                Self::diff_parallel_unit_change(
+                                    &fragment_parallel_unit_ids,
+                                    &target_parallel_unit_ids,
+                                ),
                             );
-
-                            target_plan.insert(fragment_id, reschedule);
                         }
                     }
                 }
@@ -2316,164 +2324,177 @@ fn rebalance_units(
     slots: BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,
 ) -> MetaResult<HashMap<WorkerId, BTreeSet<ParallelUnitId>>> {
-    let mut slots = slots;
-    let total_weights: usize = slots.values().map(|units| units.len()).sum();
-    if total_weights == 0 {
-        bail!("No parallel units available");
+    let mut ch = ConsistentHash::new(10);
+
+    for (worker_id, parallel_unit_ids) in &slots {
+        ch.add_worker(*worker_id, parallel_unit_ids.len() as u32);
     }
 
-    let available_slots = slots.values().map(|slot| slot.len()).sum::<usize>();
-    if available_slots < total_unit_size {
-        bail!(
-            "Insufficient parallel units: {} < {}",
-            available_slots,
-            total_unit_size
-        );
-    }
+    let target_distribution = ch.distribute_tasks(total_unit_size as u32)?;
 
-    let target_weights: HashMap<_, _> = slots
-        .iter()
-        .map(|(worker_id, units)| (*worker_id, (units.len() as f32 / total_weights as f32)))
-        .collect();
+    Ok(slots
+        .into_iter()
+        .map(|(worker_id, parallel_unit_ids)| {
+            (
+                worker_id,
+                parallel_unit_ids
+                    .into_iter()
+                    .take(*target_distribution.get(&worker_id).unwrap() as usize)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect())
+}
 
-    let mut allocated = HashMap::new();
-    let mut rest = vec![];
-    for (worker_id, target_weight) in &target_weights {
-        let mut iter = slots.remove(worker_id).unwrap_or_default().into_iter();
-        let target_unit_size = (*target_weight * total_unit_size as f32).floor() as usize;
-        allocated.insert(*worker_id, iter.by_ref().take(target_unit_size).collect());
-        rest.push((*worker_id, iter.collect::<VecDeque<_>>()));
-    }
+struct ConsistentHash {
+    ring: BTreeMap<u64, u32>,
+    weights: BTreeMap<u32, u32>,
+    virtual_nodes: u32,
+}
 
-    let mut remaining_units = total_unit_size
-        - allocated
-            .values()
-            .map(|units: &BTreeSet<_>| units.len())
-            .sum::<usize>();
-
-    rest.sort_by(|(id_a, units_a), (id_b, units_b)| {
-        units_a
-            .len()
-            .cmp(&units_b.len())
-            .reverse()
-            .then(id_a.cmp(id_b))
-    });
-
-    while remaining_units > 0 {
-        for (worker_id, rest_slots) in &mut rest {
-            let weight = target_weights.get(worker_id).unwrap();
-
-            let n = min(
-                std::cmp::max((remaining_units as f32 * *weight).floor() as usize, 1),
-                rest_slots.len(),
-            );
-
-            assert!(remaining_units >= n);
-
-            allocated
-                .entry(*worker_id)
-                .or_default()
-                .extend((0..n).flat_map(|_| rest_slots.pop_front()));
-
-            remaining_units -= n;
-
-            if remaining_units == 0 {
-                break;
-            }
+impl ConsistentHash {
+    fn new(virtual_nodes: u32) -> Self {
+        ConsistentHash {
+            ring: BTreeMap::new(),
+            weights: BTreeMap::new(),
+            virtual_nodes,
         }
     }
 
-    Ok(allocated)
+    fn hash<T: Hash>(t: &T) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        t.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn add_worker(&mut self, id: u32, capacity: u32) {
+        let virtual_nodes_count = self.virtual_nodes;
+
+        for i in 0..virtual_nodes_count {
+            let virtual_node_key = (id, i);
+            let hash = Self::hash(&virtual_node_key);
+            self.ring.insert(hash, id);
+        }
+
+        self.weights.insert(id, capacity);
+    }
+
+    fn distribute_tasks(&self, total_tasks: u32) -> MetaResult<BTreeMap<u32, u32>> {
+        if self.weights.values().sum::<u32>() < total_tasks {
+            bail!("Total tasks exceed the total weight of all workers.");
+        }
+
+        let mut task_distribution: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut task_hashes = (0..total_tasks).map(|x| Self::hash(&x)).collect::<Vec<_>>();
+
+        // Sort task hashes to disperse them around the hash ring
+        task_hashes.sort();
+
+        for task_hash in task_hashes {
+            let mut assigned = false;
+
+            // Iterator that starts from the current task_hash or the next node in the ring
+            let ring_range = self.ring.range(task_hash..).chain(self.ring.iter());
+
+            for (_, &worker_id) in ring_range {
+                if let Some(worker_weight) = self.weights.get(&worker_id) {
+                    let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
+
+                    if *worker_task_count < *worker_weight {
+                        *worker_task_count += 1;
+                        assigned = true;
+                        break;
+                    }
+                }
+            }
+
+            if !assigned {
+                bail!("Could not distribute tasks due to capacity constraints.");
+            }
+        }
+
+        Ok(task_distribution)
+    }
 }
 
 #[cfg(test)]
-mod test {
-    use std::cmp::min;
-    use std::collections::{BTreeMap, BTreeSet, HashMap};
+mod tests {
+    use super::*;
 
-    use maplit::{btreeset};
-    use rand::random;
-    
+    #[test]
+    fn test_single_worker_capacity() {
+        let mut ch = ConsistentHash::new(5);
+        ch.add_worker(1, 10);
 
-    use crate::stream::scale::rebalance_units;
+        let total_tasks = 5;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
 
-    fn rand_slots(n: usize) -> BTreeMap<u32, BTreeSet<u32>> {
-        let mut slots = BTreeMap::new();
-        for i in 0..n as u32 {
-            let v = (i * 100..(i + 1) * 100).collect::<Vec<_>>();
-            slots.insert(
-                i,
-                v.into_iter()
-                    .take(random::<usize>() % 100)
-                    .collect::<BTreeSet<_>>(),
-            );
-        }
-        slots
+        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 5);
     }
 
     #[test]
-    fn test_rebalance_stability_with_complex_scenario() {
-        let slots = rand_slots(10);
-        let total_unit_size = min(256, slots.values().map(|v| v.len()).sum()); // 指定的目标分配单元大小
-        for _ in 1..total_unit_size {
-            let first_run_result =
-                rebalance_units(slots.clone(), total_unit_size).expect("First call failed");
-            let subsequent_run_result =
-                rebalance_units(slots.clone(), total_unit_size).expect("Subsequent call failed");
+    fn test_multiple_workers_even_distribution() {
+        let mut ch = ConsistentHash::new(10);
 
-            assert_eq!(
-                first_run_result, subsequent_run_result,
-                "The rebalance results should be stable and identical across runs"
-            );
+        ch.add_worker(1, 1);
+        ch.add_worker(2, 1);
+        ch.add_worker(3, 1);
+
+        let total_tasks = 3;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+        for id in 1..=3 {
+            assert_eq!(task_distribution.get(&id).cloned().unwrap_or(0), 1);
         }
     }
 
     #[test]
-    fn test_rebalance_with_insufficient_units() {
-        let mut slots = BTreeMap::new();
-        slots.insert(1, btreeset![1, 2, 3]);
-        slots.insert(2, btreeset![4, 5, 6]);
-        let total_unit_size = 10;
-        assert!(rebalance_units(slots, total_unit_size).is_err());
+    fn test_weighted_distribution() {
+        let mut ch = ConsistentHash::new(10);
+
+        ch.add_worker(1, 2);
+        ch.add_worker(2, 3);
+        ch.add_worker(3, 5);
+
+        let total_tasks = 10;
+        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 2);
+        assert_eq!(task_distribution.get(&2).cloned().unwrap_or(0), 3);
+        assert_eq!(task_distribution.get(&3).cloned().unwrap_or(0), 5);
     }
 
     #[test]
-    fn test_rebalance_with_remaining_units() {
-        let mut slots = BTreeMap::new();
-        slots.insert(1, btreeset![1, 2, 3]);
-        slots.insert(2, btreeset![4, 5, 6, 7, 8, 9]);
-        let total_unit_size = 6;
-        let allocations = rebalance_units(slots, total_unit_size).unwrap();
+    fn test_over_capacity() {
+        let mut ch = ConsistentHash::new(10);
 
-        let expected_distribution =
-            HashMap::from([(1, btreeset![1, 2]), (2, btreeset![4, 5, 6, 7])]);
+        ch.add_worker(1, 1);
+        ch.add_worker(2, 2);
+        ch.add_worker(3, 3);
 
-        assert_eq!(allocations, expected_distribution);
+        let total_tasks = 10; // More tasks than the total weight
+        let task_distribution = ch.distribute_tasks(total_tasks);
 
-        let total_allocated_units: usize = allocations.values().map(|units| units.len()).sum();
-        assert_eq!(total_allocated_units, total_unit_size);
+        assert!(task_distribution.is_err());
     }
 
     #[test]
-    fn test_rebalance_with_nonexistent_workers() {
-        let mut slots = BTreeMap::new();
-        slots.insert(1, btreeset![1, 2, 3, 4, 5]);
-        let total_unit_size = 5;
-        let allocations =
-            rebalance_units(slots, total_unit_size).expect("Should successfully rebalance");
+    fn test_balance_distribution() {
+        for worker_capacity in 1..10 {
+            for workers in 3..10 {
+                let mut ch = ConsistentHash::new(100);
 
-        assert!(allocations.get(&1).is_some());
-        assert!(!allocations.contains_key(&2));
+                for worker_id in 0..workers {
+                    ch.add_worker(worker_id, worker_capacity);
+                }
 
-        let total_allocated_units: usize = allocations.values().map(|units| units.len()).sum();
-        assert_eq!(total_allocated_units, total_unit_size);
-    }
+                let total_tasks = worker_capacity * workers;
+                let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
 
-    #[test]
-    fn test_rebalance_with_zero_unit_count() {
-        let slots = BTreeMap::new();
-        let total_unit_size = 0;
-        let allocation_result = rebalance_units(slots, total_unit_size);
-        assert!(allocation_result.is_err());
+                for (_, v) in task_distribution {
+                    assert_eq!(v, worker_capacity);
+                }
+            }
+        }
     }
 }
