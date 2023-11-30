@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_expr::{define_context, Result as ExprResult};
-use risingwave_pb::stream_plan::CapturedExecutionContext;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 
 // For all execution mode.
 define_context! {

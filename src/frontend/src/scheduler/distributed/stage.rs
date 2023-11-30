@@ -43,7 +43,7 @@ use risingwave_pb::batch_plan::{
     PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
-use risingwave_pb::stream_plan::CapturedExecutionContext;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;

@@ -31,7 +31,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
-use risingwave_pb::stream_plan::CapturedExecutionContext;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
