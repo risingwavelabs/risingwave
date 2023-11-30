@@ -10,6 +10,7 @@ import sys
 # I use `slack_username` since it is more readable, but not officially supported in the docs.
 MAIN_CRON_TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
+    "test-notify-2": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
     "backwards-compat-tests": ["noelkwan"],
     "fuzz-test": ["noelkwan"],
@@ -79,6 +80,7 @@ def get_buildkite_test_status(test):
 def get_mock_test_status(test):
     mock_test_map = {
         "test-notify": "hard_failed",
+        "test-notify-2": "hard_failed",
         "backfill-tests": "",
         "backwards-compat-tests": "",
         "fuzz-test": "",
@@ -86,19 +88,6 @@ def get_mock_test_status(test):
         "e2e-iceberg-sink-tests": "passed",
         "e2e-java-binding-tests": "soft_failed",
         "e2e-clickhouse-sink-tests": "hard_failed",
-        "e2e-pulsar-sink-tests": "",
-        "s3-source-test-for-opendal-fs-engine": "",
-        "pulsar-source-tests": "",
-        "connector-node-integration-test": ""
-    }
-    return mock_test_map[test]
-
-def get_mock_test_status_all_pass(test):
-    mock_test_map = {
-        "test-notify": "hard_failed",
-        "e2e-iceberg-sink-tests": "passed",
-        "e2e-java-binding-tests": "soft_failed",
-        "e2e-clickhouse-sink-tests": "",
         "e2e-pulsar-sink-tests": "",
         "s3-source-test-for-opendal-fs-engine": "",
         "pulsar-source-tests": "",
