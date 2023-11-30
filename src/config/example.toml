@@ -83,6 +83,7 @@ stream_chunk_size = 256
 stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
+stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
 stream_hash_agg_max_dirty_groups_heap_size = 67108864
 
@@ -102,16 +103,6 @@ max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
 max_version_pinning_duration_sec = 10800
-object_store_streaming_read_timeout_ms = 600000
-object_store_streaming_upload_timeout_ms = 600000
-object_store_upload_timeout_ms = 3600000
-object_store_read_timeout_ms = 3600000
-object_store_keepalive_ms = 600000
-object_store_recv_buffer_size = 2097152
-object_store_nodelay = true
-object_store_req_retry_interval_ms = 20
-object_store_req_retry_max_delay_ms = 10000
-object_store_req_retry_max_attempts = 8
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
@@ -161,6 +152,20 @@ unit = 64
 threshold = 0.5
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
+
+[storage.object_store]
+object_store_streaming_read_timeout_ms = 600000
+object_store_streaming_upload_timeout_ms = 600000
+object_store_upload_timeout_ms = 3600000
+object_store_read_timeout_ms = 3600000
+
+[storage.object_store.s3]
+object_store_keepalive_ms = 600000
+object_store_recv_buffer_size = 2097152
+object_store_nodelay = true
+object_store_req_retry_interval_ms = 20
+object_store_req_retry_max_delay_ms = 10000
+object_store_req_retry_max_attempts = 8
 
 [system]
 barrier_interval_ms = 1000

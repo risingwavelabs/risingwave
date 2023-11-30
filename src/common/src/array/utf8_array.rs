@@ -119,7 +119,7 @@ impl Utf8Array {
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct Utf8ArrayBuilder {
     bytes: BytesArrayBuilder,
 }

@@ -622,23 +622,7 @@ impl Condition {
                         op,
                     ) {
                         Ok(ResultForCmp::Success(expr)) => expr,
-                        Ok(ResultForCmp::OutUpperBound) => {
-                            if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == < and <= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Ok(ResultForCmp::OutLowerBound) => {
-                            if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
-                                return Ok(None);
-                            }
-                            // op == > and >= means result is always true, don't need any extra
-                            // work.
-                            continue;
-                        }
-                        Err(_) => {
+                        _ => {
                             other_conds.push(expr);
                             continue;
                         }
