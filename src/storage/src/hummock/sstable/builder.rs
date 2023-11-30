@@ -258,8 +258,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 while iter.is_valid() {
                     let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
                         panic!(
-                            "decode failed for fast compact last_table_id {:?}",
-                            self.last_table_id
+                            "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?}",
+                            self.sstable_id, self.block_metas.len(), self.last_table_id
                         )
                     });
                     self.add_impl(iter.key(), value, false).await?;
@@ -336,8 +336,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if is_new_table {
             assert!(
                 could_switch_block,
-                "is_new_user_key {} table_id {} last_table_id {:?} full_key {:?}",
-                is_new_user_key, table_id, self.last_table_id, full_key
+                "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
+                is_new_user_key, self.sstable_id, self.block_metas.len(), table_id, self.last_table_id, full_key
             );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
@@ -359,8 +359,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.block_metas.push(BlockMeta {
                 offset: utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
                     panic!(
-                        "WARN overflow can't convert writer_data_len {} into u32 tables {:?}",
+                        "WARN overflow can't convert writer_data_len {} into u32 sst_id {} block_idx {} tables {:?}",
                         self.writer.data_len(),
+                        self.sstable_id,
+                        self.block_metas.len(),
                         self.table_ids,
                     )
                 }),
@@ -421,16 +423,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         assert_ne!(
             1,
             self.monotonic_deletes.len(),
-            "delete_event {:?} table_ids {:?}",
+            "delete_event {:?} table_id {:?} table_ids {:?}",
             self.monotonic_deletes.first().unwrap(),
-            self.table_ids
+            self.last_table_id,
+            self.table_ids,
         );
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
             assert_eq!(
                 monotonic_delete.new_epoch, MAX_EPOCH,
-                "delete_event {:?} table_ids {:?}",
-                monotonic_delete, self.table_ids
+                "delete_event {:?} table_id {:?} table_ids {:?}",
+                monotonic_delete, self.last_table_id, self.table_ids
             );
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
@@ -465,8 +468,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
             assert_ne!(
                 monotonic_delete.new_epoch, MAX_EPOCH,
-                "delete_event {:?} table_ids {:?}",
-                monotonic_delete, self.table_ids
+                "delete_event {:?} table_ids {:?} table_ids {:?}",
+                monotonic_delete, self.last_table_id, self.table_ids
             );
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
@@ -543,8 +546,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .checked_add(meta_offset_u32)
             .unwrap_or_else(|| {
                 panic!(
-                    "WARN overflow encoded_size_u32 {} meta_offset_u32 {} table_ids {:?}",
-                    encoded_size_u32, meta_offset_u32, self.table_ids
+                    "WARN overflow encoded_size_u32 {} meta_offset_u32 {} table_id {:?} table_ids {:?}",
+                    encoded_size_u32, meta_offset_u32, self.last_table_id, self.table_ids
                 )
             });
 
