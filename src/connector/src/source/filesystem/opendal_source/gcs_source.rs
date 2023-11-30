@@ -39,6 +39,10 @@ where
         if let Some(cred) = cred {
             builder.credential(&cred);
         }
+
+        if let Some(service_account) = gcs_properties.service_account {
+            builder.service_account(&service_account);
+        }
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

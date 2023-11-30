@@ -101,7 +101,7 @@ impl ConnectorSource {
             }
             ConnectorProperties::OpenDalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3Properties> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties)?;
+                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
             other => Err(internal_error(format!("Unsupported source: {:?}", other))),

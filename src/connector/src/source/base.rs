@@ -393,9 +393,11 @@ impl ConnectorProperties {
                 .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
             match connector.as_str() {
                 "s3_v2" => {
+                    let assume_role = props.get("s3.assume_role").cloned();
                     return Ok(ConnectorProperties::OpenDalS3(Box::new(
                         OpendalS3Properties {
                             s3_properties: S3Properties::try_from_hashmap(props)?,
+                            assume_role,
                         },
                     )));
                 }

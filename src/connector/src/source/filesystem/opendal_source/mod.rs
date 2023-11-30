@@ -36,6 +36,8 @@ pub struct GcsProperties {
     pub bucket_name: String,
     #[serde(rename = "gcs.credential")]
     pub credential: Option<String>,
+    #[serde(rename = "gcs.service_account", default)]
+    pub service_account: Option<String>,
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 }
@@ -53,6 +55,8 @@ impl SourceProperties for GcsProperties {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct OpendalS3Properties {
     pub s3_properties: S3Properties,
+    #[serde(rename = "s3.assume_role", default)]
+    pub assume_role: Option<String>,
 }
 
 impl SourceProperties for OpendalS3Properties {
@@ -77,6 +81,6 @@ impl OpenDalSourceProperties for GcsProperties {
 
 impl OpenDalSourceProperties for OpendalS3Properties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_s3_source(properties.s3_properties)
+        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
     }
 }

@@ -29,7 +29,10 @@ where
     C: Sized + Send + Clone + PartialEq + 'static + Sync,
 {
     /// create opendal s3 source.
-    pub fn new_s3_source(s3_properties: S3Properties) -> anyhow::Result<Self> {
+    pub fn new_s3_source(
+        s3_properties: S3Properties,
+        assume_role: Option<String>,
+    ) -> anyhow::Result<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&s3_properties.bucket_name);
@@ -45,6 +48,10 @@ where
 
         if let Some(secret) = s3_properties.secret {
             builder.secret_access_key(&secret);
+        }
+
+        if let Some(assume_role) = assume_role {
+            builder.role_arn(&assume_role);
         }
 
         builder.disable_config_load();
