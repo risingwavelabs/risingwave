@@ -20,9 +20,9 @@ use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, function, index, object, object_dependency, schema, sink, source,
-    table, user, user_privilege, view, worker_property, ActorId, DataTypeArray, DatabaseId,
-    I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
+    actor_dispatcher, connection, database, function, index, object, object_dependency, schema,
+    sink, source, table, user, user_privilege, view, worker_property, ActorId, DataTypeArray,
+    DatabaseId, I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
@@ -169,6 +169,22 @@ where
     let count = User::find_by_id(user_id).count(db).await?;
     if count == 0 {
         return Err(anyhow!("user {} was concurrently dropped", user_id).into());
+    }
+    Ok(())
+}
+
+/// `check_database_name_duplicate` checks whether the database name is already used in the cluster.
+pub async fn check_database_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Database::find()
+        .filter(database::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("database", name));
     }
     Ok(())
 }
