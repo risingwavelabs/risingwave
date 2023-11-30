@@ -16,7 +16,7 @@ tar -xf llvmorg-17.0.6.tar.gz
 mkdir build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=lld -DCMAKE_INSTALL_PREFIX=/usr/local ../llvm-project-llvmorg-17.0.6/llvm
-make install
+make install -j
 
 ld.lld --version
 
