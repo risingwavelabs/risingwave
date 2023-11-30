@@ -16,7 +16,7 @@ unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Install lld"
 aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_x86_64.tar.gz .
-tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz /usr/local
+tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz --directory=/usr/local
 ld.lld --version
 
 echo "--- Install java and maven"
