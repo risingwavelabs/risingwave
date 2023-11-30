@@ -471,7 +471,7 @@ impl PbTableWatermarks {
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
         assert!(result_epoch_watermark.is_sorted_by(|first, second| {
-            let ret = second.epoch.cmp(&first.epoch);
+            let ret = first.epoch.cmp(&second.epoch);
             assert_ne!(ret, Ordering::Equal);
             Some(ret)
         }));
