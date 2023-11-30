@@ -183,7 +183,14 @@ pub struct MetaOpts {
     pub cut_table_size_limit: u64,
 
     /// hybird compaction group config
+    ///
+    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// - Tables with high write throughput will be split at vnode granularity
+    /// - Tables with high size tables will be split by table granularity
+    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
     pub hybird_partition_vnode_count: u32,
+
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,

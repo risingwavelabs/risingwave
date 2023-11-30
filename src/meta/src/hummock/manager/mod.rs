@@ -148,10 +148,15 @@ pub struct HummockManager {
     pub compaction_state: CompactionState,
 
     // Record the partition corresponding to the table in each group (accepting delays)
+    // The compactor will refer to this structure to determine how to cut the boundaries of sst.
     // Currently, we update it in a couple of scenarios
     // 1. throughput and size are checked periodically and calculated according to the rules
     // 2. A new group is created (split)
     // 3. split_weight_by_vnode is modified for an existing group. (not supported yet)
+    // Tips:
+    // 1. When table_id does not exist in the current structure, compactor will not cut the boundary
+    // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
+    // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
     group_to_table_vnode_partition:
         parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
 }
