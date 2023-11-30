@@ -92,7 +92,7 @@ where
         Self {
             name: value.key().unwrap().to_owned(),
             offset: 0,
-            size: value.size() as usize,
+            size: value.size().unwrap_or_default() as usize,
             marker: PhantomData,
         }
     }
