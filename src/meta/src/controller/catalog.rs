@@ -1073,7 +1073,7 @@ impl CatalogController {
         ))
     }
 
-    pub async fn alter_relation_name(
+    pub async fn alter_name(
         &self,
         object_type: ObjectType,
         object_id: ObjectId,
@@ -1391,8 +1391,7 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_relation_name(ObjectType::Source, source_id, "s2")
-            .await?;
+        mgr.alter_name(ObjectType::Source, source_id, "s2").await?;
         let source = Source::find_by_id(source_id)
             .one(&mgr.inner.read().await.db)
             .await?

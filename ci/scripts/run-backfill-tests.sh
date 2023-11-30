@@ -151,31 +151,11 @@ test_backfill_tombstone() {
 
 # Test sink backfill recovery
 test_sink_backfill_recovery() {
-  total_records=100000
   echo "--- e2e, test_sink_backfill_recovery"
   cargo make ci-start $CLUSTER_PROFILE
-  run_sql "create table t (v1 int);"
-  run_sql "insert into t select * from generate_series(1, $total_records);"
-  run_sql "flush;"
-  run_sql "SET STREAMING_RATE_LIMIT = 2000;"
-
-  run_sql "
-  create sink s as select x.v1 as v1
-    from t x join t y
-      on x.v1 = y.v1
-  with (
-     connector='kafka',
-     properties.bootstrap.server='localhost:29092',
-     topic='s_kafka',
-     primary_key='v1',
-     allow.auto.create.topics=true,
-  )
-  FORMAT DEBEZIUM ENCODE JSON;"
-
-  # Let backfill progress a little.
-  sleep 3
 
   # Check progress
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
 
   # Restart
@@ -194,7 +174,7 @@ test_sink_backfill_recovery() {
       properties.bootstrap.server = 'localhost:29092',
   ) FORMAT DEBEZIUM ENCODE JSON;"
 
-  sleep 20
+  sleep 10
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'

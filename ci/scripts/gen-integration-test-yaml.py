@@ -29,6 +29,7 @@ CASES_MAP = {
     'cassandra-and-scylladb-sink': ['json'],
     'elasticsearch-sink': ['json'],
     'redis-sink': ['json'],
+    'big-query-sink': ['json'],
 }
 
 def gen_pipeline_steps():
