@@ -39,6 +39,9 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
+echo "--- Install dependencies for openssl"
+yum install -y perl-core
+
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
