@@ -1407,7 +1407,7 @@ pub(crate) mod tests {
                 InputLevel {
                     level_idx: 5,
                     level_type: 1,
-                    table_infos: ssts.drain(..select_file_count).into_iter().collect_vec(),
+                    table_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
