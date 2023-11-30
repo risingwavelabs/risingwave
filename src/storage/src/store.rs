@@ -164,7 +164,7 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    pub watermarks: HashMap<TableId, TableWatermarks>,
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {

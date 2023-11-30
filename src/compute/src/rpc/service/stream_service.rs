@@ -220,7 +220,7 @@ impl StreamService for StreamServiceImpl {
                     .instrument(span)
                     .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
                     .await?;
-                (sync_result.uncommitted_ssts, sync_result.watermarks)
+                (sync_result.uncommitted_ssts, sync_result.table_watermarks)
             }
         };
 

@@ -587,7 +587,7 @@ impl HummockEventHandler {
             } => {
                 if let Some((direction, watermarks)) = opts.table_watermarks {
                     self.uploader
-                        .add_watermark(epoch, table_id, watermarks, direction)
+                        .add_table_watermarks(epoch, table_id, watermarks, direction)
                 }
             }
 
@@ -709,7 +709,7 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
-                watermarks: sync_data.watermarks.clone(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),
