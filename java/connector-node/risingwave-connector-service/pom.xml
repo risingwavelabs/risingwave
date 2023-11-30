@@ -107,8 +107,8 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-dynamic</artifactId>
+            <groupId>org.example</groupId>
+            <artifactId>risingwave-sink-dynamic-service</artifactId>
             <version>0.1.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
