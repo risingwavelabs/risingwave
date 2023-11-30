@@ -10,14 +10,13 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
   exit 0
 fi
 
-echo "--- Install lld"
-curl -LO https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-17.0.6.tar.gz
-tar -xf llvmorg-17.0.6.tar.gz
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=lld -DCMAKE_INSTALL_PREFIX=/usr/local ../llvm-project-llvmorg-17.0.6/llvm
-make install -j
+echo "--- Install aws cli"
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
+echo "--- Install lld"
+aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_x86_64.tar.gz .
+tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz /usr/local
 ld.lld --version
 
 echo "--- Install java and maven"
@@ -39,10 +38,6 @@ curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/p
 unzip -o protoc-3.15.8-linux-x86_64.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
-
-echo "--- Install aws cli"
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
