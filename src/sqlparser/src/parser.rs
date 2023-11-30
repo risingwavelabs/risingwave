@@ -2824,6 +2824,13 @@ impl Parser {
             AlterDatabaseOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let database_name = self.parse_object_name()?;
+                AlterDatabaseOperation::RenameDatabase { database_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
         } else {
             return self.expected("OWNER TO after ALTER DATABASE", self.peek_token());
         };
@@ -2841,8 +2848,15 @@ impl Parser {
             AlterSchemaOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let schema_name = self.parse_object_name()?;
+                AlterSchemaOperation::RenameSchema { schema_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
         } else {
-            return self.expected("OWNER TO after ALTER SCHEMA", self.peek_token());
+            return self.expected("RENAME OR OWNER TO after ALTER SCHEMA", self.peek_token());
         };
 
         Ok(Statement::AlterSchema {

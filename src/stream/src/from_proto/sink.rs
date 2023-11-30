@@ -119,6 +119,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_metrics,
         };
 
+        let log_store_identity = format!(
+            "sink[{}]-[{}]-executor[{}]",
+            connector, sink_id.sink_id, params.executor_id
+        );
+
         match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
@@ -152,6 +157,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         params.vnode_bitmap.clone().map(Arc::new),
                         65536,
                         metrics,
+                        log_store_identity,
                     );
 
                     Ok(Box::new(

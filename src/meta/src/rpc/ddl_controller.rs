@@ -33,8 +33,9 @@ use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::{alter_set_schema_request, DdlProgress, TableJobType};
+use risingwave_pb::ddl_service::{
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
@@ -109,7 +110,7 @@ pub enum DdlCommand {
     CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
-    AlterRelationName(Relation, String),
+    AlterName(alter_name_request::Object, String),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
@@ -263,9 +264,7 @@ impl DdlController {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
-                DdlCommand::AlterRelationName(relation, name) => {
-                    ctrl.alter_relation_name(relation, &name).await
-                }
+                DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterTableOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
                 }
@@ -792,6 +791,7 @@ impl DdlController {
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
+            ddl_type: stream_job.into(),
         };
 
         // 4. Mark creating tables, including internal tables and the table of the stream job.
@@ -1161,35 +1161,45 @@ impl DdlController {
             .await
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        relation: Relation,
+        relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
         match relation {
-            Relation::TableId(table_id) => {
+            alter_name_request::Object::TableId(table_id) => {
                 self.catalog_manager
                     .alter_table_name(table_id, new_name)
                     .await
             }
-            Relation::ViewId(view_id) => {
+            alter_name_request::Object::ViewId(view_id) => {
                 self.catalog_manager
                     .alter_view_name(view_id, new_name)
                     .await
             }
-            Relation::IndexId(index_id) => {
+            alter_name_request::Object::IndexId(index_id) => {
                 self.catalog_manager
                     .alter_index_name(index_id, new_name)
                     .await
             }
-            Relation::SinkId(sink_id) => {
+            alter_name_request::Object::SinkId(sink_id) => {
                 self.catalog_manager
                     .alter_sink_name(sink_id, new_name)
                     .await
             }
-            Relation::SourceId(source_id) => {
+            alter_name_request::Object::SourceId(source_id) => {
                 self.catalog_manager
                     .alter_source_name(source_id, new_name)
+                    .await
+            }
+            alter_name_request::Object::SchemaId(schema_id) => {
+                self.catalog_manager
+                    .alter_schema_name(schema_id, new_name)
+                    .await
+            }
+            alter_name_request::Object::DatabaseId(database_id) => {
+                self.catalog_manager
+                    .alter_database_name(database_id, new_name)
                     .await
             }
         }
