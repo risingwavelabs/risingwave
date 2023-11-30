@@ -52,7 +52,7 @@ macro_rules! iter_fields_ref {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
@@ -111,7 +111,11 @@ impl ArrayBuilder for StructArrayBuilder {
 
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
-        for (a, o) in self.children_array.iter_mut().zip_eq_fast(&other.children) {
+        for (a, o) in self
+            .children_array
+            .iter_mut()
+            .zip_eq_fast(other.children.iter())
+        {
             a.append_array(o);
         }
         self.len += other.len();
@@ -144,10 +148,21 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
+impl EstimateSize for StructArrayBuilder {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self
+                .children_array
+                .iter()
+                .map(|a| a.estimated_heap_size())
+                .sum::<usize>()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructArray {
     bitmap: Bitmap,
-    children: Vec<ArrayRef>,
+    children: Box<[ArrayRef]>,
     type_: StructType,
     heap_size: usize,
 }
@@ -207,7 +222,7 @@ impl StructArray {
 
         Self {
             bitmap,
-            children,
+            children: children.into(),
             type_,
             heap_size,
         }

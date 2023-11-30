@@ -44,7 +44,7 @@ use risingwave_pb::common::PbBuffer;
 
 use crate::estimate_size::EstimateSize;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, EstimateSize)]
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<usize>,
