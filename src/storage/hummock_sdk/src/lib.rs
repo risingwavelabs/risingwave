@@ -279,8 +279,9 @@ pub struct EpochWithGap(u64);
 impl EpochWithGap {
     #[allow(unused_variables)]
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
-        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch, we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
-        //  So for compatibility, we must skip checking it for u64::MAX.
+        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
+        // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
+        //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
         #[cfg(not(feature = "enable_test_epoch"))]
         {
             debug_assert!(

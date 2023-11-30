@@ -213,6 +213,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         if is_compatibility_max_epoch(event.new_epoch) {
             // It is dangerous to mix two different max value in data, so rewrite it to keep same format with main branch.
+            // See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
             event.new_epoch = HummockEpoch::MAX;
         }
         self.range_tombstone_size += event.encoded_size();
