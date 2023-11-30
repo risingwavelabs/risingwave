@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clippy_utils::diagnostics::span_lint;
+use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
@@ -99,8 +99,15 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
         if let Some(span) = core::iter::successors(Some(arg_expr.span), |s| s.parent_callsite())
             .find(|s| s.can_be_used_for_suggestions())
         {
-            // TODO: suggest `err.as_report()`
-            span_lint(cx, FORMAT_ERROR, span, "should not format error directly");
+            // TODO: applicable suggestions
+            span_lint_and_help(
+                cx,
+                FORMAT_ERROR,
+                span,
+                "should not format error directly",
+                None,
+                "consider importing `thiserror_ext::AsReport` and using `.as_report()` instead",
+            );
         }
     }
 }
