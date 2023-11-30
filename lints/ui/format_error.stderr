@@ -1,0 +1,143 @@
+error: should not format error directly
+  --> $DIR/format_error.rs:13:23
+   |
+LL |     let _ = format!("{err}");
+   |                       ^^^
+   |
+   = note: `-D rw::format-error` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(rw::format_error)]`
+
+error: should not format error directly
+  --> $DIR/format_error.rs:14:27
+   |
+LL |     let _ = format!("{}", err);
+   |                           ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:15:29
+   |
+LL |     let _ = format!("{:#}", err);
+   |                             ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:16:29
+   |
+LL |     let _ = format!("{:?}", err);
+   |                             ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:17:32
+   |
+LL |     let _ = format!("{e}", e = err);
+   |                                ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:18:28
+   |
+LL |     let _ = format!("{0}", err);
+   |                            ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:20:27
+   |
+LL |     let _ = format!("{}", &err);
+   |                           ^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:21:27
+   |
+LL |     let _ = format!("{}", &&err);
+   |                           ^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:22:27
+   |
+LL |     let _ = format!("{}", err.source().unwrap());
+   |                           ^^^^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:24:27
+   |
+LL |     let _ = format!("{}", &err as &dyn Error);
+   |                           ^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:25:27
+   |
+LL |     let _ = format!("{}", &err as &(dyn Error + Send));
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:26:27
+   |
+LL |     let _ = format!("{}", Box::new(&err));
+   |                           ^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:27:27
+   |
+LL |     let _ = format!("{}", Box::new(err.clone()));
+   |                           ^^^^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:29:20
+   |
+LL |     println!("{}", err);
+   |                    ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:30:17
+   |
+LL |     info!("{}", err);
+   |                 ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:31:20
+   |
+LL |     my_info!("{}", err);
+   |                    ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:33:29
+   |
+LL |     tracing::field::display(&err);
+   |                             ^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:34:27
+   |
+LL |     tracing::field::debug(err.clone());
+   |                           ^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:36:5
+   |
+LL |     info!(%err, "233");
+   |     ^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:37:5
+   |
+LL |     info!(?err, "233");
+   |     ^^^^^^^^^^^^^^^^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:41:9
+   |
+LL |         err, err, err
+   |         ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:41:14
+   |
+LL |         err, err, err
+   |              ^^^
+
+error: should not format error directly
+  --> $DIR/format_error.rs:41:19
+   |
+LL |         err, err, err
+   |                   ^^^
+
+error: aborting due to 23 previous errors
+
