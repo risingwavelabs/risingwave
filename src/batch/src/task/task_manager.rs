@@ -157,7 +157,9 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
-            CapturedExecutionContext::default(),
+            CapturedExecutionContext {
+                time_zone: "UTC".to_string(),
+            },
         )
         .await
     }

@@ -21,8 +21,6 @@ define_context! {
 }
 
 pub fn capture_execution_context() -> ExprResult<CapturedExecutionContext> {
-    let ctx = TIME_ZONE::try_with(|time_zone| CapturedExecutionContext {
-        time_zone: time_zone.to_owned(),
-    })?;
-    Ok(ctx)
+    let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
+    Ok(CapturedExecutionContext { time_zone })
 }
