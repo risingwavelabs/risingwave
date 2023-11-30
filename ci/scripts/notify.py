@@ -10,6 +10,7 @@ import sys
 # I use `slack_username` since it is more readable, but not officially supported in the docs.
 MAIN_CRON_TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
+    "test-notify-2": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
     "backwards-compat-tests": ["noelkwan"],
     "fuzz-test": ["noelkwan"],
@@ -53,6 +54,7 @@ INTEGRATION_TEST_MAP = {
     "cassandra-and-scylladb-sink-json": ["xinhao"],
     "elasticsearch-sink-json": ["xinhao"],
     "redis-sink-json": ["xinhao"],
+    "big-query-sink-json": ["xinhao"],
 }
 
 def get_failed_tests(get_test_status, test_map):
@@ -68,7 +70,7 @@ def generate_test_status_message(failed_test_map):
     for test, users in failed_test_map.items():
         users = " ".join(map(lambda user: f"<@{user}>", users))
         messages.append(f"Test {test} failed {users}")
-    message = "\\n".join(messages)
+    message = "\n            ".join(messages)
     return message
 
 def get_buildkite_test_status(test):
@@ -79,22 +81,14 @@ def get_buildkite_test_status(test):
 def get_mock_test_status(test):
     mock_test_map = {
         "test-notify": "hard_failed",
+        "test-notify-2": "hard_failed",
+        "backfill-tests": "",
+        "backwards-compat-tests": "",
+        "fuzz-test": "",
+        "e2e-test-release": "",
         "e2e-iceberg-sink-tests": "passed",
         "e2e-java-binding-tests": "soft_failed",
-        "e2e-clickhouse-sink-tests": "",
-        "e2e-pulsar-sink-tests": "",
-        "s3-source-test-for-opendal-fs-engine": "",
-        "pulsar-source-tests": "",
-        "connector-node-integration-test": ""
-    }
-    return mock_test_map[test]
-
-def get_mock_test_status_all_pass(test):
-    mock_test_map = {
-        "test-notify": "hard_failed",
-        "e2e-iceberg-sink-tests": "passed",
-        "e2e-java-binding-tests": "soft_failed",
-        "e2e-clickhouse-sink-tests": "",
+        "e2e-clickhouse-sink-tests": "hard_failed",
         "e2e-pulsar-sink-tests": "",
         "s3-source-test-for-opendal-fs-engine": "",
         "pulsar-source-tests": "",
@@ -112,7 +106,8 @@ steps:
       - slack:
           channels:
             - "#notification-buildkite"
-          message: {messages}
+          message: |
+            {messages}
 YAML
         """
     return cmd
