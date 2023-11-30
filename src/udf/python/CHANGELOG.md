@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2023-11-28
+
+### Changed
+
+- Change the default struct field name to `f{i}`.
+
+### Fixed
+
+- Fix parsing nested struct type.
+
+
 ## [0.0.11] - 2023-11-06
 
 ### Fixed

@@ -118,11 +118,7 @@ impl<T: Float> AsMut<T> for OrderedFloat<T> {
     }
 }
 
-impl<T: Float> EstimateSize for OrderedFloat<T> {
-    fn estimated_heap_size(&self) -> usize {
-        0
-    }
-}
+impl<T: Float> ZeroHeapSize for OrderedFloat<T> {}
 
 impl<'a, T: Float> From<&'a T> for &'a OrderedFloat<T> {
     #[inline]
@@ -988,7 +984,7 @@ mod impl_into_ordered {
 pub use impl_into_ordered::IntoOrdered;
 use serde::Serialize;
 
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 
 #[cfg(test)]
 mod tests {

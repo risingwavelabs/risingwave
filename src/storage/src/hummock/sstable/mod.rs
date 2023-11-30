@@ -145,7 +145,7 @@ impl DeleteRangeTombstone {
 /// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
 /// next event key wmk2 (7) (not inclusive).
 /// If there is no range deletes between current event key and next event key, `new_epoch` will be
-/// `MAX_EPOCH`.
+/// `HummockEpoch::MAX`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: PointRange<Vec<u8>>,
@@ -356,7 +356,7 @@ pub struct SstableMeta {
     /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `MAX_EPOCH`.
+    /// be `HummockEpoch::MAX`.
     pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,

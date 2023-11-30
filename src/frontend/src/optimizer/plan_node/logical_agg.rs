@@ -19,6 +19,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -490,8 +491,9 @@ impl LogicalAggBuilder {
             AggKind::Avg => {
                 assert_eq!(inputs.len(), 1);
 
-                let left_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                let left_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[inputs[0].return_type()])
+                    .unwrap();
                 let left_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: left_return_type,
@@ -503,8 +505,9 @@ impl LogicalAggBuilder {
                 });
                 let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
-                let right_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[inputs[0].return_type()]).unwrap();
+                let right_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[inputs[0].return_type()])
+                    .unwrap();
                 let right_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,
                     return_type: right_return_type,
@@ -546,9 +549,9 @@ impl LogicalAggBuilder {
                     .add_expr(&squared_input_expr)
                     .unwrap();
 
-                let sum_of_squares_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
-                        .unwrap();
+                let sum_of_squares_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
+                    .unwrap();
 
                 let sum_of_squares_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -566,8 +569,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // after that, we compute sum
-                let sum_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[input.return_type()]).unwrap();
+                let sum_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[input.return_type()])
+                    .unwrap();
 
                 let sum_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -582,8 +586,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // then, we compute count
-                let count_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[input.return_type()]).unwrap();
+                let count_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[input.return_type()])
+                    .unwrap();
 
                 let count_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,

@@ -1099,6 +1099,7 @@ impl GlobalBarrierManager {
                     let mut commands = vec![];
                     let version_stats = self.hummock_manager.get_version_stats().await;
                     let mut tracker = self.tracker.lock().await;
+                    // Add the command to tracker.
                     if let Some(command) = tracker.add(
                         TrackingCommand {
                             context: node.command_ctx.clone(),
@@ -1106,13 +1107,17 @@ impl GlobalBarrierManager {
                         },
                         &version_stats,
                     ) {
+                        // Those with no actors to track can be finished immediately.
                         commands.push(command);
                     }
+                    // Update the progress of all commands.
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                        tracing::trace!(?progress, "update progress");
-                        if let Some(command) = tracker.update(progress, &version_stats) {
-                            tracing::trace!(?progress, "update progress");
+                        // Those with actors complete can be finished immediately.
+                        if let Some(command) = tracker.update(progress, &version_stats) && !command.tracks_sink() {
+                            tracing::trace!(?progress, "finish progress");
                             commands.push(command);
+                        } else {
+                            tracing::trace!(?progress, "update progress");
                         }
                     }
                     commands
