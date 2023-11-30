@@ -25,19 +25,11 @@ use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct BytesArray {
-    offset: Vec<u32>,
+    offset: Box<[u32]>,
     bitmap: Bitmap,
-    data: Vec<u8>,
-}
-
-impl EstimateSize for BytesArray {
-    fn estimated_heap_size(&self) -> usize {
-        self.offset.capacity() * size_of::<u32>()
-            + self.bitmap.estimated_heap_size()
-            + self.data.capacity()
-    }
+    data: Box<[u8]>,
 }
 
 impl Array for BytesArray {
@@ -86,7 +78,7 @@ impl Array for BytesArray {
             },
             Buffer {
                 compression: CompressionType::None as i32,
-                body: data_buffer,
+                body: data_buffer.into(),
             },
         ];
         let null_bitmap = self.null_bitmap().to_protobuf();
@@ -146,7 +138,7 @@ impl<'a> FromIterator<&'a [u8]> for BytesArray {
 }
 
 /// `BytesArrayBuilder` use `&[u8]` to build an `BytesArray`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BytesArrayBuilder {
     offset: Vec<u32>,
     bitmap: BitmapBuilder,
@@ -221,9 +213,9 @@ impl ArrayBuilder for BytesArrayBuilder {
 
     fn finish(self) -> BytesArray {
         BytesArray {
-            bitmap: (self.bitmap).finish(),
-            data: self.data,
-            offset: self.offset,
+            bitmap: self.bitmap.finish(),
+            data: self.data.into(),
+            offset: self.offset.into(),
         }
     }
 }
