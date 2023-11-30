@@ -16,12 +16,12 @@ package com.risingwave.java.binding;
 
 public class StreamChunk implements AutoCloseable {
     private final long pointer;
-    private final boolean ownedChunk;
+    private final boolean isOwnedChunk;
     private boolean isClosed;
 
-    StreamChunk(long pointer, boolean ownedChunk) {
+    StreamChunk(long pointer, boolean isOwnedChunk) {
         this.pointer = pointer;
-        this.ownedChunk = ownedChunk;
+        this.isOwnedChunk = isOwnedChunk;
         this.isClosed = false;
     }
 
@@ -50,7 +50,7 @@ public class StreamChunk implements AutoCloseable {
     @Override
     public void close() {
         if (!isClosed) {
-            if (this.ownedChunk) {
+            if (this.isOwnedChunk) {
                 Binding.streamChunkClose(pointer);
             }
             this.isClosed = true;
