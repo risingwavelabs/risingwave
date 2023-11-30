@@ -10,6 +10,16 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
   exit 0
 fi
 
+echo "--- Install lld"
+curl -LO https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-17.0.6.tar.gz
+tar -xf llvmorg-17.0.6.tar.gz
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=lld -DCMAKE_INSTALL_PREFIX=/usr/local ../llvm-project-llvmorg-17.0.6/llvm
+make install
+
+ld.lld --version
+
 echo "--- Install java and maven"
 yum install -y java-11-openjdk java-11-openjdk-devel wget python3 cyrus-sasl-devel
 pip3 install toml-cli
@@ -30,17 +40,9 @@ unzip -o protoc-3.15.8-linux-x86_64.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
 
-echo "--- Install lld"
-yum install -y centos-release-scl-rh
-yum install -y llvm-toolset-7.0-lld
-source /opt/rh/llvm-toolset-7.0/enable
-
 echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
-
-echo "--- Install dependencies for openssl"
-yum install -y perl-core
 
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
