@@ -306,6 +306,48 @@ def run_redis_demo():
         if len(failed_cases) != 0:
             raise Exception("Data check failed for case {}".format(failed_cases))
 
+def run_bigquery_demo():
+    demo = "big-query-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "gcloud", "auth", "login", "--cred-file=/gcp-rwctest.json"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "gcloud", "config", "set", "project", "rwctest"], cwd=demo_dir, check=True)
+
+    bq_prepare_file = os.path.join(demo_dir, 'bq_prepare.sql')
+    bq_prepare_content = open(bq_prepare_file).read().strip()
+    subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", bq_prepare_content], cwd=demo_dir, check=True)
+    sleep(30)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir, "append-only-sql/"+fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    sleep(30)
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            sql = "SELECT COUNT(*) AS count FROM `{}`".format(rel)
+            print("run sql {} on Bigquery".format(sql))
+            rows = subprocess.check_output(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", sql], cwd=demo_dir)
+            rows = int(json.loads(rows.decode("utf-8").strip())[0]['count'])
+            print("{} rows in {}".format(rows, rel))
+            if rows < 1:
+                failed_cases.append(rel)
+
+            drop_sql = "DROP TABLE IF EXISTS `{}`".format(rel)
+            subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", drop_sql], cwd=demo_dir, check=True)
+
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
                         metavar='format',
@@ -338,5 +380,7 @@ elif args.case == "elasticsearch-sink":
     run_elasticsearch_sink_demo()
 elif args.case == "redis-sink":
     run_redis_demo()
+elif args.case == "big-query-sink":
+    run_bigquery_demo()
 else:
     run_demo(args.case, args.format)

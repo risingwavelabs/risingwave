@@ -53,6 +53,7 @@ INTEGRATION_TEST_MAP = {
     "cassandra-and-scylladb-sink-json": ["xinhao"],
     "elasticsearch-sink-json": ["xinhao"],
     "redis-sink-json": ["xinhao"],
+    "big-query-sink-json": ["xinhao"],
 }
 
 def get_failed_tests(get_test_status, test_map):
