@@ -227,16 +227,11 @@ impl TryFrom<&Statement> for WithOptions {
                 stmt:
                     CreateSourceStatement {
                         with_properties,
-                        source_schema,
                         ..
                     },
                 ..
             } => {
-                let mut options = with_properties.0.clone();
-                if let CompatibleSourceSchema::V2(source_schema) = source_schema {
-                    options.extend_from_slice(source_schema.row_options());
-                }
-                Self::try_from(options.as_slice())
+                Self::try_from(with_properties.0.as_slice())
             }
             Statement::CreateTable {
                 with_options,
