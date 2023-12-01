@@ -379,7 +379,7 @@ impl HummockManager {
     pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
         self.unregister_table_ids(table_ids)
             .await
-            .unwrap_or_else(|e| panic!("unregister table ids {e}"));
+            .unwrap_or_else(|e| panic!("unregister table ids fail: {table_ids:?} {e}"));
     }
 
     pub async fn update_compaction_config(
