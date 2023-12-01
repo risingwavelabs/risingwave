@@ -42,13 +42,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
-sql-json-path = { git = "https://github.com/risingwavelabs/sql-json-path.git", rev = "95a06aa", features = [
-    "jsonbb",
-] }
+sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 tracing = "0.1"
-# sql-json-path = { path = "../../../../sql-json-path", features = ["jsonbb"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -9740,7 +9740,8 @@ dependencies = [
 [[package]]
 name = "sql-json-path"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/sql-json-path.git?rev=95a06aa#95a06aa6e19df7c39687a259b3e21fb2b2cd2c8c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06d900e5c1db024a5bd4535916f1779f104562a7357ff4280e8136eb50b04f35"
 dependencies = [
  "jsonbb",
  "nom",
