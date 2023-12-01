@@ -2,6 +2,6 @@ CREATE MATERIALIZED VIEW bhv_mv AS
 SELECT
     user_id,
     target_id,
-    target_type
+    event_timestamp
 FROM
     user_behaviors;

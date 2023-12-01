@@ -3,5 +3,5 @@ use demo;
 CREATE table demo_bhv_table(
     user_id int primary key,
     target_id text,
-    target_type text,
+    event_timestamp timestamp,
 );
