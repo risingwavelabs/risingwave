@@ -59,10 +59,12 @@ public class DbzSourceUtils {
         return true;
     }
 
-    // copy from debezium embedded engine test suite
+    // Copy from debezium test suite: io.debezium.embedded.AbstractConnectorTest
+    // Notes: although this method is recommends by the community, but it is not solid enough. As
+    // the jmx bean metric is marked as true before starting the binlog client, which may fail to
+    // connect the upstream database.
     private static boolean isStreamingRunning(String connector, String server, String contextName) {
         final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
-
         try {
             return (boolean)
                     mbeanServer.getAttribute(
