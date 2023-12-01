@@ -346,7 +346,7 @@ impl GlobalStreamManager {
                                 tracing::warn!("failed to notify cancelled: {table_id}")
                             });
                             self.creating_job_info.delete_job(table_id).await;
-                            return Err(MetaError::cancelled("create".into()));
+                            return Err(MetaError::cancelled("create"));
                         }
                     }
                     CreatingState::Created => {
