@@ -16,9 +16,14 @@
 
 package com.risingwave.connector.sinkwriter;
 
+import com.risingwave.connector.RowDataImpl;
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.connector.context.SinkWriterContext;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import org.apache.flink.api.connector.sink.Committer;
@@ -28,46 +33,33 @@ import org.apache.flink.table.data.RowData;
 /*
  * The Sink-type sink will invoke this class to write RW data to the downstream.
  */
-public class SinkWriterImpl<CommT> implements SinkWriterAdapter {
+public class SinkWriterImpl<CommT> extends SinkWriterBase {
     Sink<RowData, CommT, ?, ?> sink;
     org.apache.flink.api.connector.sink.SinkWriter<RowData, CommT, ?> writer;
 
-    public SinkWriterImpl(Sink<RowData, CommT, ?, ?> sink) {
+    Optional<? extends Committer<CommT>> committer;
+
+    public SinkWriterImpl(TableSchema tableSchema, Sink<RowData, CommT, ?, ?> sink) {
+        super(tableSchema);
         try {
             this.sink = sink;
             this.writer = sink.createWriter(new SinkWriterContext(), Collections.emptyList());
+            this.committer = sink.createCommitter();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     @Override
-    public void commit() {
-        try {
-            if (writer == null) {
-                return;
-            }
-            Optional<? extends Committer<CommT>> committer = sink.createCommitter();
-            if (committer.isEmpty()) {
-                return;
-            } else {
-                List<CommT> objects = writer.prepareCommit(true);
-                committer.get().commit(objects);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        } finally {
-            closeWriter();
-            this.writer = null;
+    public void write(Iterator<SinkRow> rows) {
+        while (rows.hasNext()) {
+            SinkRow row = rows.next();
+            writeRow(new RowDataImpl(row, getTableSchema().getNumColumns()));
         }
     }
 
-    @Override
-    public void write(RowData rowData) {
+    private void writeRow(RowData rowData) {
         try {
-            if (writer == null) {
-                this.writer = sink.createWriter(new SinkWriterContext(), Collections.emptyList());
-            }
             writer.write(
                     rowData,
                     new org.apache.flink.api.connector.sink.SinkWriter.Context() {
@@ -82,23 +74,21 @@ public class SinkWriterImpl<CommT> implements SinkWriterAdapter {
                         }
                     });
         } catch (IOException e) {
-            closeWriter();
             throw new RuntimeException(e);
         } catch (InterruptedException e) {
-            closeWriter();
             throw new RuntimeException(e);
         }
     }
 
     @Override
-    public void abort() {}
-
-    private void closeWriter() {
-        if (writer == null) {
-            return;
-        }
+    public void sync() {
         try {
-            writer.close();
+            if (committer.isEmpty()) {
+                return;
+            } else {
+                List<CommT> objects = writer.prepareCommit(true);
+                committer.get().commit(objects);
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -106,6 +96,10 @@ public class SinkWriterImpl<CommT> implements SinkWriterAdapter {
 
     @Override
     public void drop() {
-        closeWriter();
+        try {
+            writer.close();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

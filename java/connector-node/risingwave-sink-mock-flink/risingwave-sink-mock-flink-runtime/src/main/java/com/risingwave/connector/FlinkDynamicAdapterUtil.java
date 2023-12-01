@@ -24,15 +24,6 @@ import org.apache.flink.table.catalog.Column;
 
 public class FlinkDynamicAdapterUtil {
 
-    /** Discover FlinkSinkTableSchemaFinder with sink name. */
-    public static FlinkSinkValidateAndWriterFactory discoverFlinkSinkFinderAndSinkFactory(
-            String connectorName) {
-        if (connectorName.equals("http")) {
-            return new HttpFlinkSinkValidateAndWriterFactory();
-        }
-        throw new RuntimeException("Cannot support connector" + connectorName);
-    }
-
     /** Converting RW's schema to Flink's schema */
     public static List<Column> getFlinkColumnsFromSchema(TableSchema tableSchema) {
         List<Column> columns = new ArrayList<>();

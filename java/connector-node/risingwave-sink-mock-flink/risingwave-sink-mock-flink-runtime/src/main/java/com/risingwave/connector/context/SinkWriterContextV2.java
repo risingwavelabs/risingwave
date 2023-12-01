@@ -127,6 +127,6 @@ public class SinkWriterContextV2 implements Sink.InitContext {
 
     @Override
     public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
-        return null;
+        throw new UnsupportedOperationException();
     }
 }

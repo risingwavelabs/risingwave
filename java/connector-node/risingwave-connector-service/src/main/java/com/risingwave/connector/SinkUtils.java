@@ -46,7 +46,7 @@ public class SinkUtils {
             case "cassandra":
                 return new CassandraFactory();
             case "http":
-                return new FlinkDynamicAdapterFactory();
+                return new FlinkDynamicAdapterFactory(new HttpFlinkSinkValidateAndWriterFactory());
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkName)

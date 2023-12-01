@@ -9,7 +9,7 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <groupId>org.example</groupId>
+    <groupId>com.risingwave.mock.flink.sink</groupId>
     <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
 
     <properties>
@@ -19,7 +19,7 @@
     </properties>
     <dependencies>
         <dependency>
-            <groupId>org.example</groupId>
+            <groupId>com.risingwave.mock.flink.sink</groupId>
             <artifactId>risingwave-sink-mock-flink-common</artifactId>
             <version>0.1.0-SNAPSHOT</version>
         </dependency>

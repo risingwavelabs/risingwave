@@ -39,12 +39,12 @@ import org.apache.flink.table.types.DataType;
 public abstract class DefaultFlinkSinkValidateAndWriterFactory
         implements FlinkSinkValidateAndWriterFactory {
 
+    public abstract CatalogFactory getCatalogFactory();
+
     private List<Column> getColumns(TableSchema tableSchema, FlinkDynamicAdapterConfig config) {
+        CatalogFactory catalogFactory = getCatalogFactory();
         Configuration configuration = new Configuration();
         ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
-        CatalogFactory catalogFactory =
-                FactoryUtil.discoverFactory(
-                        contextClassLoader, CatalogFactory.class, config.getConnector());
         Set<ConfigOption<?>> configOptions = catalogFactory.requiredOptions();
         configOptions.addAll(catalogFactory.optionalOptions());
         config.processOption(configOptions);

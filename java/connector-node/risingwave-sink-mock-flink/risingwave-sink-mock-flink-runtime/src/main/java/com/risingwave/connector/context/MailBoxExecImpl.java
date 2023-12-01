@@ -77,15 +77,15 @@ public class MailBoxExecImpl implements MailboxExecutor {
         Mail headMail;
         while (true) {
             if ((headMail = queue.poll(1, TimeUnit.SECONDS)) != null) {
-                try {
-                    headMail.command.run();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-                return;
+                break;
             } else {
-                LOG.debug("Query mail queue wait timeout, will continue to wait");
+                LOG.warn("Query mail queue wait timeout, will continue to wait");
             }
+        }
+        try {
+            headMail.command.run();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

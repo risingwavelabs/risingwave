@@ -107,7 +107,7 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>org.example</groupId>
+            <groupId>com.risingwave.mock.flink.sink</groupId>
             <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
             <version>0.1.0-SNAPSHOT</version>
             <scope>compile</scope>
