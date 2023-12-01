@@ -627,14 +627,25 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn rise_ctl_list_compact_task_assignment(
+    async fn list_compact_task_assignment(
         &self,
-        _request: Request<RiseCtlListCompactTaskAssignmentRequest>,
-    ) -> Result<Response<RiseCtlListCompactTaskAssignmentResponse>, Status> {
+        _request: Request<ListCompactTaskAssignmentRequest>,
+    ) -> Result<Response<ListCompactTaskAssignmentResponse>, Status> {
         let (_compaction_statuses, task_assignment) =
             self.hummock_manager.list_compaction_status().await;
-        Ok(Response::new(RiseCtlListCompactTaskAssignmentResponse {
+        Ok(Response::new(ListCompactTaskAssignmentResponse {
             task_assignment,
+        }))
+    }
+
+    async fn list_compact_task_progress(
+        &self,
+        _request: Request<ListCompactTaskProgressRequest>,
+    ) -> Result<Response<ListCompactTaskProgressResponse>, Status> {
+        let task_progress = self.hummock_manager.compactor_manager.get_progress();
+
+        Ok(Response::new(ListCompactTaskProgressResponse {
+            task_progress,
         }))
     }
 }

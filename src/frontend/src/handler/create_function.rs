@@ -39,18 +39,10 @@ pub async fn handle_create_function(
     params: CreateFunctionBody,
 ) -> Result<RwPgResponse> {
     if or_replace {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE OR REPLACE FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE OR REPLACE FUNCTION");
     }
     if temporary {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE TEMPORARY FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
     let language = match params.language {
         Some(lang) => {

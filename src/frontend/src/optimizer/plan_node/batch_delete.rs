@@ -21,6 +21,7 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -83,3 +84,5 @@ impl ToLocalBatch for BatchDelete {
 }
 
 impl ExprRewritable for BatchDelete {}
+
+impl ExprVisitable for BatchDelete {}

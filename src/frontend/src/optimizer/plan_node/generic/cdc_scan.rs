@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -43,6 +43,8 @@ pub struct CdcScan {
 
 impl CdcScan {
     pub fn rewrite_exprs(&self, _rewriter: &mut dyn ExprRewriter) {}
+
+    pub fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 
     /// Get the ids of the output columns.
     pub fn output_column_ids(&self) -> Vec<ColumnId> {

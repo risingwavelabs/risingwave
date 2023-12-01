@@ -82,12 +82,8 @@ impl SysCatalogReaderImpl {
                                     .to_uppercase()
                                     .into(),
                             )),
-                            Some(ScalarImpl::List(ListValue::new(
-                                source
-                                    .columns
-                                    .iter()
-                                    .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
-                                    .collect_vec(),
+                            Some(ScalarImpl::List(ListValue::from_iter(
+                                source.columns.iter().map(|c| c.name()),
                             ))),
                             source
                                 .info

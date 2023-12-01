@@ -39,7 +39,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
@@ -862,6 +862,29 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
+        // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
+        // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
+        let event_logs = tables_to_clean
+            .iter()
+            .filter_map(|t| {
+                if t.table_type == TableType::Internal as i32 {
+                    return None;
+                }
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: t.id,
+                    name: t.name.to_owned(),
+                    definition: t.definition.to_owned(),
+                    error: "clear during recovery".to_string(),
+                };
+                Some(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ))
+            })
+            .collect_vec();
+        if !event_logs.is_empty() {
+            self.env.event_log_manager_ref().add_event_logs(event_logs);
+        }
+
         database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
@@ -926,11 +949,13 @@ impl CatalogManager {
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
     /// and we still need some way to cleanup the state.
+    ///
+    /// Returns false if `table_id` is not found.
     pub async fn cancel_create_table_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<bool> {
         let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
@@ -940,7 +965,7 @@ impl CatalogManager {
                     "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
                 );
-                return Ok(());
+                return Ok(false);
             };
             // `Unspecified` maps to Created state, due to backwards compatibility.
             // `Created` states should not be cancelled.
@@ -984,7 +1009,7 @@ impl CatalogManager {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1282,7 +1307,9 @@ impl CatalogManager {
                     }
 
                     // cdc source streaming job
-                    if let Some(info) = source.info && info.cdc_source_job {
+                    if let Some(info) = source.info
+                        && info.cdc_source_job
+                    {
                         all_cdc_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
@@ -1755,6 +1782,63 @@ impl CatalogManager {
         .await
     }
 
+    pub async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        schema_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_schema_id(schema_id)?;
+
+        // 1. validate new schema name.
+        let mut schema = database_core.schemas.get(&schema_id).unwrap().clone();
+        database_core.check_schema_duplicated(&(schema.database_id, schema_name.to_string()))?;
+
+        // 2. rename schema.
+        schema.name = schema_name.to_string();
+
+        // 3. update, commit and notify.
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        schemas.insert(schema_id, schema.clone());
+        commit_meta!(self, schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Schema(schema))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_database_name(
+        &self,
+        database_id: SchemaId,
+        database_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(database_id)?;
+
+        // 1. validate new database name.
+        let database_name = database_name.to_string();
+        let mut database = database_core.databases.get(&database_id).unwrap().clone();
+        database_core.check_database_duplicated(&database_name)?;
+
+        // 2. rename database.
+        database.name = database_name;
+
+        // 3. update, commit and notify.
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        databases.insert(database_id, database.clone());
+        commit_meta!(self, databases)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Database(database))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
         let source_id = source.get_id();
         let core = &mut *self.core.lock().await;
@@ -1787,7 +1871,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let user_core = &mut core.user;
 
-        let notify_info;
+        let relation_info;
         match object {
             alter_owner_request::Object::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
@@ -1871,7 +1955,7 @@ impl CatalogManager {
                     + to_update_source_id.map_or(0, |_| 1);
                 user_core.decrease_ref_count(old_owner_id, count);
                 user_core.increase_ref_count(owner_id, count);
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
             }
             alter_owner_request::Object::ViewId(view_id) => {
                 database_core.ensure_view_id(view_id)?;
@@ -1882,7 +1966,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 view.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::View(view.clone())),
                     }],
@@ -1900,7 +1984,7 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 source.owner = owner_id;
-                notify_info = Info::RelationGroup(RelationGroup {
+                relation_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: Some(RelationInfo::Source(source.clone())),
                     }],
@@ -1938,7 +2022,7 @@ impl CatalogManager {
                     });
                 }
 
-                notify_info = Info::RelationGroup(RelationGroup { relations });
+                relation_info = Info::RelationGroup(RelationGroup { relations });
                 commit_meta!(self, sinks, tables)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
@@ -1952,10 +2036,35 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 database.owner = owner_id;
-                notify_info = Info::Database(database.clone());
-                commit_meta!(self, databases)?;
+                relation_info = Info::Database(database.clone());
+                let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+                let mut user = users.get_mut(owner_id).unwrap();
+                let new_grant_privilege = GrantPrivilege {
+                    object: Some(Object::DatabaseId(database_id)),
+                    action_with_opts: vec![{
+                        ActionWithGrantOption {
+                            action: Action::Connect as _,
+                            with_grant_option: false,
+                            granted_by: old_owner_id,
+                        }
+                    }],
+                };
+                if let Some(privilege) = user
+                    .grant_privileges
+                    .iter_mut()
+                    .find(|p| p.object == new_grant_privilege.object)
+                {
+                    Self::merge_privilege(privilege, &new_grant_privilege);
+                } else {
+                    user.grant_privileges.push(new_grant_privilege.clone());
+                }
+                let user_info = Info::User(user.clone());
+                commit_meta!(self, databases, users)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
+                self.notify_frontend(Operation::Update, user_info).await;
+                let version = self.notify_frontend(Operation::Update, relation_info).await;
+                return Ok(version);
             }
             alter_owner_request::Object::SchemaId(schema_id) => {
                 database_core.ensure_schema_id(schema_id)?;
@@ -1966,14 +2075,14 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
                 schema.owner = owner_id;
-                notify_info = Info::Schema(schema.clone());
+                relation_info = Info::Schema(schema.clone());
                 commit_meta!(self, schemas)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
         };
 
-        let version = self.notify_frontend(Operation::Update, notify_info).await;
+        let version = self.notify_frontend(Operation::Update, relation_info).await;
 
         Ok(version)
     }

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -182,7 +183,7 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0)
+            let group_key = if let Some(field) = fields.first()
                 && field.name == "projected_row_id"
             {
                 // Do not group by projected_row_id hidden column.
@@ -297,13 +298,7 @@ impl Planner {
                 let right_expr = InputRef::new(input.schema().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
-            kind => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("Not supported subquery kind: {:?}", kind),
-                    1343.into(),
-                )
-                .into())
-            }
+            kind => bail_not_implemented!(issue = 1343, "Not supported subquery kind: {:?}", kind),
         };
         *input = Self::create_apply(
             correlated_id,
@@ -378,13 +373,7 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
-                }
+                _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             }
 
             root = Self::create_apply(

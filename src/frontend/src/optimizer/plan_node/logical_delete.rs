@@ -21,6 +21,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -90,6 +91,8 @@ impl ColPrunable for LogicalDelete {
 }
 
 impl ExprRewritable for LogicalDelete {}
+
+impl ExprVisitable for LogicalDelete {}
 
 impl PredicatePushdown for LogicalDelete {
     fn predicate_pushdown(

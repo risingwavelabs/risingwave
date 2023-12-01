@@ -64,7 +64,6 @@ where
     pub device_io_size: usize,
     pub flushers: usize,
     pub reclaimers: usize,
-    pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
@@ -91,7 +90,6 @@ where
             device_io_size: self.device_io_size,
             flushers: self.flushers,
             reclaimers: self.reclaimers,
-            reclaim_rate_limit: self.reclaim_rate_limit,
             recover_concurrency: self.recover_concurrency,
             lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
             lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
@@ -279,7 +277,6 @@ where
                 flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 reclaimers: config.reclaimers,
-                reclaim_rate_limit: config.reclaim_rate_limit,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,
                 recover_concurrency: config.recover_concurrency,
                 compression: config.compression,

@@ -2824,6 +2824,13 @@ impl Parser {
             AlterDatabaseOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let database_name = self.parse_object_name()?;
+                AlterDatabaseOperation::RenameDatabase { database_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
         } else {
             return self.expected("OWNER TO after ALTER DATABASE", self.peek_token());
         };
@@ -2841,8 +2848,15 @@ impl Parser {
             AlterSchemaOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let schema_name = self.parse_object_name()?;
+                AlterSchemaOperation::RenameSchema { schema_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
         } else {
-            return self.expected("OWNER TO after ALTER SCHEMA", self.peek_token());
+            return self.expected("RENAME OR OWNER TO after ALTER SCHEMA", self.peek_token());
         };
 
         Ok(Statement::AlterSchema {
@@ -3224,19 +3238,37 @@ impl Parser {
     }
 
     fn parse_set_variable(&mut self) -> Result<SetVariableValue, ParserError> {
-        let token = self.peek_token();
-        match (self.parse_value(), token.token) {
-            (Ok(value), _) => Ok(SetVariableValue::Literal(value)),
-            (Err(_), Token::Word(w)) => {
-                if w.keyword == Keyword::DEFAULT {
-                    Ok(SetVariableValue::Default)
-                } else {
-                    Ok(SetVariableValue::Ident(w.to_ident()?))
+        let mut values = vec![];
+        loop {
+            let token = self.peek_token();
+            let value = match (self.parse_value(), token.token) {
+                (Ok(value), _) => SetVariableValueSingle::Literal(value),
+                (Err(_), Token::Word(w)) => {
+                    if w.keyword == Keyword::DEFAULT {
+                        if !values.is_empty() {
+                            self.expected(
+                                "parameter list value",
+                                Token::Word(w).with_location(token.location),
+                            )?
+                        }
+                        return Ok(SetVariableValue::Default);
+                    } else {
+                        SetVariableValueSingle::Ident(w.to_ident()?)
+                    }
                 }
+                (Err(_), unexpected) => {
+                    self.expected("parameter value", unexpected.with_location(token.location))?
+                }
+            };
+            values.push(value);
+            if !self.consume_token(&Token::Comma) {
+                break;
             }
-            (Err(_), unexpected) => {
-                self.expected("variable value", unexpected.with_location(token.location))
-            }
+        }
+        if values.len() == 1 {
+            Ok(SetVariableValue::Single(values[0].clone()))
+        } else {
+            Ok(SetVariableValue::List(values))
         }
     }
 
@@ -4015,19 +4047,12 @@ impl Parser {
         }
         let variable = self.parse_identifier()?;
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
-            let mut values = vec![];
-            loop {
-                let value = self.parse_set_variable()?;
-                values.push(value);
-                if self.consume_token(&Token::Comma) {
-                    continue;
-                }
-                return Ok(Statement::SetVariable {
-                    local: modifier == Some(Keyword::LOCAL),
-                    variable,
-                    value: values,
-                });
-            }
+            let value = self.parse_set_variable()?;
+            Ok(Statement::SetVariable {
+                local: modifier == Some(Keyword::LOCAL),
+                variable,
+                value,
+            })
         } else if variable.value == "CHARACTERISTICS" {
             self.expect_keywords(&[Keyword::AS, Keyword::TRANSACTION])?;
             Ok(Statement::SetTransaction {

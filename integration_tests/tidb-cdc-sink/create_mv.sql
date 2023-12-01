@@ -4,7 +4,7 @@
 CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
     SELECT
         unnest(regexp_matches(tweet.text, '#\w+', 'g')) AS hashtag,
-        tweet.created_at AS created_at
+        tweet.created_at AT TIME ZONE 'UTC' AS created_at
     FROM
         tweet JOIN user
     ON
