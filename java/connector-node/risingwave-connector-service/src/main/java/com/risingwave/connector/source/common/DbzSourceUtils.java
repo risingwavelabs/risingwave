@@ -60,9 +60,10 @@ public class DbzSourceUtils {
     }
 
     // Copy from debezium test suite: io.debezium.embedded.AbstractConnectorTest
-    // Notes: although this method is recommends by the community, but it is not solid enough. As
-    // the jmx bean metric is marked as true before starting the binlog client, which may fail to
-    // connect the upstream database.
+    // Notes: although this method is recommended by the community
+    // (https://debezium.zulipchat.com/#narrow/stream/302529-community-general/topic/.E2.9C.94.20Embedded.20engine.20has.20started.20StreamingChangeEventSource/near/405121659),
+    // but it is not solid enough. As the jmx bean metric is marked as true before starting the
+    // binlog client, which may fail to connect the upstream database.
     private static boolean isStreamingRunning(String connector, String server, String contextName) {
         final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
         try {
