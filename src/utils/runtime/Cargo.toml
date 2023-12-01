@@ -21,8 +21,8 @@ console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry-otlp = { version = "0.13" }
-opentelemetry-semantic-conventions = "0.12"
+opentelemetry-otlp = { version = "0.14" }
+opentelemetry-semantic-conventions = "0.13"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
