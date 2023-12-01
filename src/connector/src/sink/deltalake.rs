@@ -99,9 +99,9 @@ impl DeltaLakeCommon {
         } else if let Some(path) = path.strip_prefix("file://") {
             Ok(DeltaTableUrl::Local(path.to_string()))
         } else {
-            Err(SinkError::DeltaLake(
-                "path need to start with 's3://','s3a://'(s3) or file://(local)".to_string(),
-            ))
+            Err(SinkError::DeltaLake(anyhow!(
+                "path need to start with 's3://','s3a://'(s3) or file://(local)"
+            )))
         }
     }
 }
@@ -123,7 +123,7 @@ pub struct DeltaLakeConfig {
 impl DeltaLakeConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
-            serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.to_string()))?,
+            serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
@@ -198,7 +198,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
                 DeltaLakeDataType::Primitive(PrimitiveType::String)
             )
         }
-        DataType::Timestamp => {
+        DataType::Timestamptz => {
             matches!(
                 dl_data_type,
                 DeltaLakeDataType::Primitive(PrimitiveType::Timestamp)
@@ -229,7 +229,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
             }
         }
         _ => {
-            return Err(SinkError::DeltaLake(format!(
+            return Err(SinkError::DeltaLake(anyhow!(
                 "deltalake cannot support type {:?}",
                 rw_data_type.to_string()
             )))
@@ -249,7 +249,6 @@ impl Sink for DeltaLakeSink {
             self.config.clone(),
             self.param.schema().clone(),
             self.param.downstream_pk.clone(),
-            self.param.sink_type.is_append_only(),
         )
         .await?;
         Ok(CoordinatedSinkWriter::new(
@@ -286,7 +285,7 @@ impl Sink for DeltaLakeSink {
             .map(|f| (f.name(), f.data_type()))
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
-            return Err(SinkError::DeltaLake(format!(
+            return Err(SinkError::DeltaLake(anyhow!(
                 "column count not match, rw is {}, deltalake is {}",
                 self.param.schema().fields().len(),
                 deltalake_fields.len()
@@ -294,18 +293,20 @@ impl Sink for DeltaLakeSink {
         }
         for field in self.param.schema().fields() {
             if !deltalake_fields.contains_key(&field.name) {
-                return Err(SinkError::DeltaLake(format!(
+                return Err(SinkError::DeltaLake(anyhow!(
                     "column {} not found in deltalake table",
                     field.name
                 )));
             }
             let deltalake_field_type: &&DeltaLakeDataType = deltalake_fields
                 .get(&field.name)
-                .ok_or_else(|| SinkError::DeltaLake("cannot find field type".to_string()))?;
+                .ok_or_else(|| SinkError::DeltaLake(anyhow!("cannot find field type")))?;
             if !check_field_type(&field.data_type, deltalake_field_type)? {
-                return Err(SinkError::DeltaLake(format!(
+                return Err(SinkError::DeltaLake(anyhow!(
                     "column {} type is not match, deltalake is {:?}, rw is{:?}",
-                    field.name, deltalake_field_type, field.data_type
+                    field.name,
+                    deltalake_field_type,
+                    field.data_type
                 )));
             }
         }
@@ -333,7 +334,6 @@ pub struct DeltaLakeSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     writer: RecordBatchWriter,
-    is_append_only: bool,
     dl_schema: Arc<deltalake::arrow::datatypes::Schema>,
     dl_table: DeltaTable,
 }
@@ -343,7 +343,6 @@ impl DeltaLakeSinkWriter {
         config: DeltaLakeConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        is_append_only: bool,
     ) -> Result<Self> {
         let dl_table = config.common.create_deltalake_client().await?;
         let writer = RecordBatchWriter::for_table(&dl_table)?;
@@ -355,7 +354,6 @@ impl DeltaLakeSinkWriter {
             schema,
             pk_indices,
             writer,
-            is_append_only,
             dl_schema,
             dl_table,
         })
@@ -363,7 +361,7 @@ impl DeltaLakeSinkWriter {
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let a = to_deltalake_record_batch_with_schema(self.dl_schema.clone(), &chunk)
-            .map_err(|err| SinkError::DeltaLake(format!("convert record batch error: {}", err)))?;
+            .map_err(|err| SinkError::DeltaLake(anyhow!("convert record batch error: {}", err)))?;
         self.writer.write(a).await?;
         Ok(())
     }
@@ -375,7 +373,7 @@ fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Sc
         let dl_field = deltalake::arrow::datatypes::Field::new(
             field.name(),
             deltalake::arrow::datatypes::DataType::try_from(field.data_type())
-                .map_err(|err| SinkError::DeltaLake(format!("convert schema error: {}", err)))?,
+                .map_err(|err| SinkError::DeltaLake(anyhow!("convert schema error: {}", err)))?,
             field.is_nullable(),
         );
         builder.push(dl_field);
@@ -469,6 +467,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct DeltaLakeWriteResult {
     adds: Vec<Add>,
 }
@@ -477,20 +476,11 @@ impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
     type Error = SinkError;
 
     fn try_from(value: &'a DeltaLakeWriteResult) -> std::prelude::v1::Result<Self, Self::Error> {
-        let json_add = serde_json::Value::Array(
-            value
-                .adds
-                .iter()
-                .cloned()
-                .map(|add| serde_json::json!(add))
-                .collect(),
-        );
+        let metadata = serde_json::to_vec(&value.adds).map_err(|e| -> SinkError {
+            anyhow!("Can't serialized deltalake sink metadata: {}", e).into()
+        })?;
         Ok(SinkMetadata {
-            metadata: Some(Serialized(SerializedMetadata {
-                metadata: serde_json::to_vec(&json_add).map_err(|e| -> SinkError {
-                    anyhow!("Can't serialized deltalake sink metadata: {}", e).into()
-                })?,
-            })),
+            metadata: Some(Serialized(SerializedMetadata { metadata })),
         })
     }
 }
@@ -498,21 +488,10 @@ impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
 impl DeltaLakeWriteResult {
     fn try_from(value: &SinkMetadata) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
-            let values = if let serde_json::Value::Array(v) = serde_json::from_slice::<
-                serde_json::Value,
-            >(&v.metadata)
-            .map_err(|e| -> SinkError {
-                anyhow!("Can't parse deltalake sink metadata: {}", e).into()
-            })? {
-                v
-            } else {
-                return Err(anyhow!("deltalake sink metadata should be a object").into());
-            };
-            let adds = values
-                .into_iter()
-                .map(serde_json::from_value)
-                .collect::<std::result::Result<Vec<Add>, serde_json::Error>>()
-                .map_err(|e| SinkError::DeltaLake(e.to_string()))?;
+            let adds =
+                serde_json::from_slice::<Vec<Add>>(&v.metadata).map_err(|e| -> SinkError {
+                    anyhow!("Can't deserialize deltalake sink metadata: {}", e).into()
+                })?;
             Ok(DeltaLakeWriteResult { adds })
         } else {
             Err(anyhow!("Can't create deltalake sink write result from empty data!").into())

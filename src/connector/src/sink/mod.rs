@@ -430,7 +430,11 @@ pub enum SinkError {
     #[error("Doris error: {0}")]
     Doris(String),
     #[error("DeltaLake error: {0}")]
-    DeltaLake(String),
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Pulsar error: {0}")]
@@ -473,7 +477,7 @@ impl From<ClickHouseError> for SinkError {
 
 impl From<DeltaTableError> for SinkError {
     fn from(value: DeltaTableError) -> Self {
-        SinkError::DeltaLake(format!("{}", value))
+        SinkError::DeltaLake(anyhow_error!("{}", value))
     }
 }
 
