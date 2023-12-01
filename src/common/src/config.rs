@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config

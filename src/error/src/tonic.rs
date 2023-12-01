@@ -17,6 +17,7 @@ use std::error::Error;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tonic::metadata::{MetadataMap, MetadataValue};
 
 /// The key of the metadata field that contains the serialized error.
@@ -60,7 +61,7 @@ where
     let mut metadata = MetadataMap::new();
     metadata.insert_bin(ERROR_KEY, MetadataValue::from_bytes(&serialized));
 
-    let mut status = tonic::Status::with_metadata(code, error.to_string(), metadata);
+    let mut status = tonic::Status::with_metadata(code, error.to_report_string(), metadata);
     // Set the source of `tonic::Status`, though it's not likely to be used.
     // This is only available before serializing to the wire. That's why we need to manually embed it
     // into the `details` field.
@@ -134,6 +135,7 @@ impl From<tonic::Status> for TonicStatusWrapper {
     }
 }
 
+#[allow(rw::format_error)]
 impl std::fmt::Display for TonicStatusWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "gRPC request")?;

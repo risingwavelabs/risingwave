@@ -16,6 +16,8 @@
 #![expect(clippy::doc_markdown)]
 #![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 use std::str::FromStr;
 
@@ -157,6 +159,7 @@ pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
+        #[allow(rw::format_error, reason = "message is simple enough")]
         tonic::Status::new(tonic::Code::Internal, e.to_string())
     }
 }

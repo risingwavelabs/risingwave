@@ -45,15 +45,14 @@ pub fn to_record_batch_with_schema(
             if column.data_type() == field.data_type() {
                 Ok(column)
             } else {
-                cast(&column, field.data_type())
-                    .map_err(|err| ArrayError::FromArrow(err.to_string()))
+                cast(&column, field.data_type()).map_err(|err| ArrayError::from_arrow(err))
             }
         })
         .try_collect::<_, _, ArrayError>()?;
 
     let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
     arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-        .map_err(|err| ArrayError::ToArrow(err.to_string()))
+        .map_err(|err| ArrayError::to_arrow(err))
 }
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
@@ -84,7 +83,7 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
         arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-            .map_err(|err| ArrayError::ToArrow(err.to_string()))
+            .map_err(|err| ArrayError::to_arrow(err))
     }
 }
 
@@ -129,7 +128,7 @@ macro_rules! converts_generic {
                             .unwrap()
                             .try_into()?,
                     )),)*
-                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
+                    t => Err(ArrayError::from_arrow(format!("unsupported data type: {t:?}"))),
                 }
             }
         }
@@ -252,7 +251,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
                 datatype.as_ref().try_into()?,
                 true,
             )))),
-            DataType::Serial => Err(ArrayError::ToArrow(
+            DataType::Serial => Err(ArrayError::to_arrow(
                 "Serial type is not supported to convert to arrow".to_string(),
             )),
         }
@@ -521,7 +520,7 @@ impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
             .map(|o| {
                 o.map(|s| {
                     s.parse()
-                        .map_err(|_| ArrayError::FromArrow(format!("invalid json: {s}")))
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid json: {s}")))
                 })
                 .transpose()
             })

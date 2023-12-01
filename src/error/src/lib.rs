@@ -17,5 +17,7 @@
 //! This will eventually replace the `RwError` in `risingwave_common`.
 
 #![feature(error_generic_member_access)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 pub mod tonic;

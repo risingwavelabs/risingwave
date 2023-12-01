@@ -17,10 +17,11 @@ use std::convert::Infallible;
 pub use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::Construct;
 
-use crate::error::{ErrorCode, RwError};
+use crate::error::{BoxedError, ErrorCode, RwError};
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Construct)]
 pub enum ArrayError {
     #[error("Pb decode error: {0}")]
     PbDecode(#[from] prost::DecodeError),
@@ -36,10 +37,10 @@ pub enum ArrayError {
     ),
 
     #[error("Convert from arrow error: {0}")]
-    FromArrow(String),
+    FromArrow(BoxedError),
 
     #[error("Convert to arrow error: {0}")]
-    ToArrow(String),
+    ToArrow(BoxedError),
 }
 
 impl From<ArrayError> for RwError {

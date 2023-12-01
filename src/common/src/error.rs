@@ -288,10 +288,7 @@ impl From<ErrorCode> for RwError {
 
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
-        Self {
-            inner: Box::new(ErrorCode::InternalError(join_error.to_string())),
-            backtrace: Box::new(Backtrace::capture()),
-        }
+        anyhow::anyhow!(join_error).into()
     }
 }
 
@@ -315,7 +312,7 @@ impl From<std::io::Error> for RwError {
 
 impl From<std::net::AddrParseError> for RwError {
     fn from(addr_parse_error: std::net::AddrParseError) -> Self {
-        ErrorCode::InternalError(format!("failed to resolve address: {}", addr_parse_error)).into()
+        anyhow::anyhow!(addr_parse_error).into()
     }
 }
 
@@ -337,6 +334,7 @@ impl From<String> for RwError {
     }
 }
 
+#[allow(rw::format_error, reason = "to be removed soon")]
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -401,12 +399,14 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
     }
 }
 
+#[allow(rw::format_error, reason = "to be removed soon")]
 impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
     fn to_error_str(self) -> String {
         self.to_string()
     }
 }
 
+#[allow(rw::format_error, reason = "to be removed soon")]
 impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
     fn to_error_str(self) -> String {
         self.to_string()
