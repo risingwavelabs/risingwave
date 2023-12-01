@@ -484,9 +484,9 @@ impl TryFrom<&arrow_array::LargeBinaryArray> for DecimalArray {
             .map(|o| {
                 o.map(|s| {
                     let s = std::str::from_utf8(s)
-                        .map_err(|_| ArrayError::FromArrow(format!("invalid decimal: {s:?}")))?;
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid decimal: {s:?}")))?;
                     s.parse()
-                        .map_err(|_| ArrayError::FromArrow(format!("invalid decimal: {s:?}")))
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid decimal: {s:?}")))
                 })
                 .transpose()
             })
