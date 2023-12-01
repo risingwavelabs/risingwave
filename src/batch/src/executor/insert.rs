@@ -15,7 +15,7 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{

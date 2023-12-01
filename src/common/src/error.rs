@@ -30,6 +30,11 @@ use crate::array::ArrayError;
 use crate::session_config::SessionConfigError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
+/// Re-export `risingwave_error` for easy access.
+pub mod v2 {
+    pub use risingwave_error::*;
+}
+
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
 pub trait Error = std::error::Error + Send + Sync + 'static;

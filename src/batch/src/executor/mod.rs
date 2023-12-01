@@ -41,7 +41,7 @@ mod update;
 mod utils;
 mod values;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;

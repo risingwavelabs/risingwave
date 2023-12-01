@@ -142,6 +142,7 @@ impl StreamExecutorError {
     }
 }
 
+#[allow(rw::format_error, reason = "to be removed soon")]
 impl std::fmt::Debug for StreamExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;

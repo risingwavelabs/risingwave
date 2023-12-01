@@ -17,6 +17,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
@@ -120,7 +121,7 @@ impl From<ExprError> for RwError {
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
-        Self::Parse(e.to_string().into())
+        Self::Parse(e.to_report_string().into())
     }
 }
 

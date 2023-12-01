@@ -17,7 +17,6 @@ pub mod report;
 
 use std::time::SystemTime;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
 use thiserror_ext::AsReport;

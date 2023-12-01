@@ -15,7 +15,7 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_pb::common::PbHostAddress;
 
 /// General host address and port.

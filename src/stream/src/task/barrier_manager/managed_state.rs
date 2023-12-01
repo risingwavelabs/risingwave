@@ -20,6 +20,7 @@ use risingwave_common::bail;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::progress::BackfillState;
@@ -182,7 +183,7 @@ impl ManagedBarrierState {
                             .into()))
                             .is_err()
                     {
-                        warn!("failed to notify actor {} exit: {:?}", actor_id, err);
+                        warn!(error = %err.as_report(), actor_id, "failed to notify actor exiting");
                     }
                 }
                 _ => {}

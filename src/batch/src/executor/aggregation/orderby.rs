@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::{ExprError, Result};
+use risingwave_expr::Result;
 
 /// `ProjectionOrderBy` is a wrapper of `AggregateFunction` that sorts rows by given columns and
 /// then projects columns.
