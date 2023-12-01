@@ -33,7 +33,7 @@ use demo;
 CREATE table demo_bhv_table(
     user_id int,
     target_id text,
-    event_timestamp datetime
+    event_timestamp_local datetime
 ) UNIQUE KEY(`user_id`)
 DISTRIBUTED BY HASH(`user_id`) BUCKETS 1
 PROPERTIES (

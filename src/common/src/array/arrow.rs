@@ -23,7 +23,7 @@ use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
@@ -253,6 +253,17 @@ impl From<&arrow_schema::Fields> for StructType {
     }
 }
 
+impl TryFrom<&StructType> for arrow_schema::Fields {
+    type Error = ArrayError;
+
+    fn try_from(struct_type: &StructType) -> Result<Self, Self::Error> {
+        struct_type
+            .iter()
+            .map(|(name, ty)| Ok(arrow_schema::Field::new(name, ty.try_into()?, true)))
+            .try_collect()
+    }
+}
+
 impl From<arrow_schema::DataType> for DataType {
     fn from(value: arrow_schema::DataType) -> Self {
         (&value).into()
@@ -260,7 +271,7 @@ impl From<arrow_schema::DataType> for DataType {
 }
 
 impl TryFrom<&DataType> for arrow_schema::DataType {
-    type Error = String;
+    type Error = ArrayError;
 
     fn try_from(value: &DataType) -> Result<Self, Self::Error> {
         match value {
@@ -287,23 +298,31 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
                 struct_type
                     .iter()
                     .map(|(name, ty)| Ok(arrow_schema::Field::new(name, ty.try_into()?, true)))
-                    .try_collect::<_, _, String>()?,
+                    .try_collect::<_, _, ArrayError>()?,
             )),
             DataType::List(datatype) => Ok(Self::List(Arc::new(arrow_schema::Field::new(
                 "item",
                 datatype.as_ref().try_into()?,
                 true,
             )))),
-            DataType::Serial => Err("Serial type is not supported to convert to arrow".to_string()),
+            DataType::Serial => Err(ArrayError::ToArrow(
+                "Serial type is not supported to convert to arrow".to_string(),
+            )),
         }
     }
 }
 
 impl TryFrom<DataType> for arrow_schema::DataType {
-    type Error = String;
+    type Error = ArrayError;
 
     fn try_from(value: DataType) -> Result<Self, Self::Error> {
         (&value).try_into()
+    }
+}
+
+impl From<&Bitmap> for arrow_buffer::NullBuffer {
+    fn from(bitmap: &Bitmap) -> Self {
+        bitmap.iter().collect()
     }
 }
 
@@ -564,8 +583,10 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
-impl From<&ListArray> for arrow_array::ListArray {
-    fn from(array: &ListArray) -> Self {
+impl TryFrom<&ListArray> for arrow_array::ListArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &ListArray) -> Result<Self, Self::Error> {
         use arrow_array::builder::*;
         fn build<A, B, F>(
             array: &ListArray,
@@ -587,7 +608,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             }
             builder.finish()
         }
-        match &*array.value {
+        Ok(match &*array.value {
             ArrayImpl::Int16(a) => build(array, a, Int16Builder::with_capacity(a.len()), |b, v| {
                 b.append_option(v)
             }),
@@ -675,7 +696,21 @@ impl From<&ListArray> for arrow_array::ListArray {
                 |b, v| b.append_option(v.map(|j| j.to_string())),
             ),
             ArrayImpl::Serial(_) => todo!("list of serial"),
-            ArrayImpl::Struct(_) => todo!("list of struct"),
+            ArrayImpl::Struct(a) => {
+                let values = Arc::new(arrow_array::StructArray::try_from(a)?);
+                arrow_array::ListArray::new(
+                    Arc::new(arrow_schema::Field::new("item", a.data_type().try_into()?, true)),
+                    arrow_buffer::OffsetBuffer::new(arrow_buffer::ScalarBuffer::from(
+                        array
+                            .offsets()
+                            .iter()
+                            .map(|o| *o as i32)
+                            .collect::<Vec<i32>>(),
+                    )),
+                    values,
+                    Some(array.null_bitmap().into()),
+                )
+            }
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
                 array,
@@ -683,7 +718,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 BinaryBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
             ),
-        }
+        })
     }
 }
 
@@ -691,11 +726,15 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     type Error = ArrayError;
 
     fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
-        let iter: Vec<_> = array
-            .iter()
-            .map(|o| o.map(|a| ArrayImpl::try_from(&a)).transpose())
-            .try_collect()?;
-        Ok(ListArray::from_iter(iter, (&array.value_type()).into()))
+        use arrow_array::Array;
+        Ok(ListArray {
+            value: Box::new(ArrayImpl::try_from(array.values())?),
+            bitmap: match array.nulls() {
+                Some(nulls) => nulls.iter().collect(),
+                None => Bitmap::ones(array.len()),
+            },
+            offsets: array.offsets().iter().map(|o| *o as u32).collect(),
+        })
     }
 }
 
@@ -703,22 +742,14 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
-        let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
-            .fields()
-            .zip_eq_debug(array.data_type().as_struct().iter())
-            .map(|(arr, (name, ty))| {
-                Ok((
-                    arrow_schema::Field::new(
-                        name,
-                        ty.try_into().map_err(ArrayError::ToArrow)?,
-                        true,
-                    )
-                    .into(),
-                    arr.as_ref().try_into()?,
-                ))
-            })
-            .try_collect::<_, _, ArrayError>()?;
-        Ok(arrow_array::StructArray::from(struct_data_vector))
+        Ok(arrow_array::StructArray::new(
+            array.data_type().as_struct().try_into()?,
+            array
+                .fields()
+                .map(|arr| arr.as_ref().try_into())
+                .try_collect::<_, _, ArrayError>()?,
+            Some(array.null_bitmap().into()),
+        ))
     }
 }
 
@@ -945,16 +976,8 @@ mod tests {
 
     #[test]
     fn list() {
-        let array = ListArray::from_iter(
-            [
-                Some(I32Array::from_iter([None, Some(-7), Some(25)]).into()),
-                None,
-                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
-                Some(I32Array::from_iter([0; 0]).into()),
-            ],
-            DataType::Int32,
-        );
-        let arrow = arrow_array::ListArray::from(&array);
+        let array = ListArray::from_iter([None, Some(vec![0, -127, 127, 50]), Some(vec![0; 0])]);
+        let arrow = arrow_array::ListArray::try_from(&array).unwrap();
         assert_eq!(ListArray::try_from(&arrow).unwrap(), array);
     }
 }

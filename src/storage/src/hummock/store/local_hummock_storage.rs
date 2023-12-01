@@ -20,7 +20,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
@@ -187,7 +187,7 @@ impl LocalHummockStorage {
         }
 
         let read_snapshot = read_filter_for_local(
-            MAX_EPOCH, // Use MAX epoch to make sure we read from latest
+            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
             &key_range,
             self.read_version.clone(),

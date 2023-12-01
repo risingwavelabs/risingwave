@@ -324,7 +324,7 @@ impl<A: Array> CompactableArray for A {
 macro_rules! array_impl_enum {
     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayImpl {
             $( $variant_name($array) ),*
         }
@@ -441,7 +441,7 @@ for_all_array_variants! { impl_convert }
 macro_rules! array_builder_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayBuilderImpl` embeds all possible array in `array` module.
-        #[derive(Debug)]
+        #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayBuilderImpl {
             $( $variant_name($builder) ),*
         }
@@ -613,12 +613,6 @@ impl ArrayImpl {
     }
 }
 
-impl EstimateSize for ArrayImpl {
-    fn estimated_heap_size(&self) -> usize {
-        dispatch_array_variants!(self, inner, { inner.estimated_heap_size() })
-    }
-}
-
 pub type ArrayRef = Arc<ArrayImpl>;
 
 impl PartialEq for ArrayImpl {
@@ -626,6 +620,8 @@ impl PartialEq for ArrayImpl {
         self.iter().eq(other.iter())
     }
 }
+
+impl Eq for ArrayImpl {}
 
 #[cfg(test)]
 mod tests {
