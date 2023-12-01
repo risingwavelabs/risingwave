@@ -20,7 +20,9 @@ use std::sync::Arc;
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
+// This is important because we want to use the arrow version specified by the outer mod.
 use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+// Other import should always use the absolute path.
 use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::types::*;
@@ -776,6 +778,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 
 #[cfg(test)]
 mod tests {
+    use super::arrow_array::Array as _;
     use super::*;
 
     #[test]
@@ -905,8 +908,6 @@ mod tests {
 
     #[test]
     fn struct_array() {
-        use super::arrow_array::Array as _;
-
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         assert_eq!(
