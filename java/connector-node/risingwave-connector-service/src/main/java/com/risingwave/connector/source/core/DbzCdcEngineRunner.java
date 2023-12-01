@@ -16,13 +16,11 @@ package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import io.debezium.engine.DebeziumEngine;
 import io.grpc.stub.StreamObserver;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,33 +32,17 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final CdcEngine engine;
-    private final CountDownLatch startSignal;
-
-    static class DbzConnectorCallback implements DebeziumEngine.ConnectorCallback {
-        private final CountDownLatch signalLatch;
-
-        public DbzConnectorCallback(CountDownLatch signalLatch) {
-            this.signalLatch = signalLatch;
-        }
-
-        @Override
-        public void taskStarted() {
-            signalLatch.countDown();
-        }
-    }
+    private final DbzConnectorConfig config;
 
     public static CdcEngineRunner newCdcEngineRunner(
             DbzConnectorConfig config, StreamObserver<GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
-            var startSignal = new CountDownLatch(1);
-            var dbzConnectorCallback = new DbzConnectorCallback(startSignal);
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            dbzConnectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     responseObserver.onError(error);
@@ -75,7 +57,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine, startSignal);
+            runner = new DbzCdcEngineRunner(engine, config);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }
@@ -86,13 +68,10 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
-            var startSignal = new CountDownLatch(1);
-            var dbzConnectorCallback = new DbzConnectorCallback(startSignal);
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            dbzConnectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -105,7 +84,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine, startSignal);
+            runner = new DbzCdcEngineRunner(engine, config);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }
@@ -113,37 +92,36 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     }
 
     // private constructor
-    private DbzCdcEngineRunner(CdcEngine engine, CountDownLatch startSignal) {
+    private DbzCdcEngineRunner(CdcEngine engine, DbzConnectorConfig config) {
         this.executor =
                 Executors.newSingleThreadExecutor(
                         r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
         this.engine = engine;
-        this.startSignal = startSignal;
+        this.config = config;
     }
 
     /** Start to run the cdc engine */
-    public void start() throws InterruptedException {
+    public boolean start() throws InterruptedException {
         if (isRunning()) {
             LOG.info("engine#{} already started", engine.getId());
-            return;
+            return true;
         }
 
         executor.execute(engine);
-        // wait for start of the connector task
-        boolean startOk = startSignal.await(5, TimeUnit.SECONDS);
-        // put a handshake message to notify the Source executor
-        // if the handshake is not successful, the split reader will return an error to source
-        // executor
-        var controlInfo =
-                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
-        engine.getOutputChannel()
-                .put(
-                        GetEventStreamResponse.newBuilder()
-                                .setSourceId(engine.getId())
-                                .setControl(controlInfo)
-                                .build());
+
+        boolean startOk = true;
+        // For backfill source, we need to wait for the streaming source to start before proceeding
+        if (config.isBackfillSource()) {
+            var databaseServerName =
+                    config.getResolvedDebeziumProps().getProperty("database.server.name");
+            startOk =
+                    DbzSourceUtils.waitForStreamingRunning(
+                            config.getSourceType(), databaseServerName);
+        }
+
         running.set(true);
         LOG.info("engine#{} started", engine.getId());
+        return startOk;
     }
 
     public void stop() throws Exception {

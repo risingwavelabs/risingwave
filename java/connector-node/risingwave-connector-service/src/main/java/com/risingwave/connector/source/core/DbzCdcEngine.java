@@ -34,7 +34,6 @@ public class DbzCdcEngine implements CdcEngine {
     public DbzCdcEngine(
             long sourceId,
             Properties config,
-            DebeziumEngine.ConnectorCallback connectorCallback,
             DebeziumEngine.CompletionCallback completionCallback) {
         var dbzHeartbeatPrefix = config.getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
         var consumer =
@@ -50,7 +49,6 @@ public class DbzCdcEngine implements CdcEngine {
                 DebeziumEngine.create(Connect.class)
                         .using(config)
                         .using(completionCallback)
-                        .using(connectorCallback)
                         .notifying(consumer)
                         .build();
     }
