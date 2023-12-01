@@ -29,7 +29,7 @@ pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 /// The error type for streaming executors.
 #[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
-#[thiserror_ext(type = StreamExecutorError, backtrace)]
+#[thiserror_ext(newtype(name = StreamExecutorError, backtrace, report_debug))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(

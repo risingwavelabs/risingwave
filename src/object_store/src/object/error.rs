@@ -25,7 +25,7 @@ use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
-#[thiserror_ext(type = ObjectError, backtrace)]
+#[thiserror_ext(newtype(name = ObjectError, backtrace, report_debug))]
 pub enum ObjectErrorInner {
     #[error("s3 error: {}", DisplayErrorContext(&**.0))]
     S3(#[source] BoxedError),

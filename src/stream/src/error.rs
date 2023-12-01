@@ -27,7 +27,7 @@ pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// The error type for streaming tasks.
 #[derive(thiserror::Error, Debug, thiserror_ext::Box)]
-#[thiserror_ext(type = StreamError, backtrace)]
+#[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(

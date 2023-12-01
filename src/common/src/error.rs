@@ -80,7 +80,7 @@ pub struct NotImplemented {
 }
 
 #[derive(Error, Debug, Box)]
-#[thiserror_ext(type = RwError, backtrace)]
+#[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
