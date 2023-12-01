@@ -57,6 +57,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+exclude = ["lints"]
 resolver = "2"
 
 [workspace.package]
@@ -255,3 +256,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+[workspace.metadata.dylint]
+libraries = [{ path = "./lints" }]

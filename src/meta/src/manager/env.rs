@@ -178,6 +178,19 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+
+    /// The size limit to split a state-table to independent sstable.
+    pub cut_table_size_limit: u64,
+
+    /// hybird compaction group config
+    ///
+    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// - Tables with high write throughput will be split at vnode granularity
+    /// - Tables with high size tables will be split by table granularity
+    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
+    pub hybird_partition_vnode_count: u32,
+
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
@@ -223,6 +236,8 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            cut_table_size_limit: 1024 * 1024 * 1024,
+            hybird_partition_vnode_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),

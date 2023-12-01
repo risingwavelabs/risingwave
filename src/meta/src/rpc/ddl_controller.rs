@@ -18,19 +18,28 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::source::{
+    ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
+};
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::{alter_set_schema_request, DdlProgress};
-use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use risingwave_pb::ddl_service::{
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
+};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{
+    FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
+};
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
@@ -101,13 +110,29 @@ pub enum DdlCommand {
     CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
-    AlterRelationName(Relation, String),
+    AlterName(alter_name_request::Object, String),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
+}
+
+impl DdlCommand {
+    fn allow_in_recovery(&self) -> bool {
+        match self {
+            DdlCommand::DropDatabase(_)
+            | DdlCommand::DropSchema(_)
+            | DdlCommand::DropSource(_, _)
+            | DdlCommand::DropFunction(_)
+            | DdlCommand::DropView(_, _)
+            | DdlCommand::DropStreamingJob(_, _)
+            | DdlCommand::DropConnection(_) => true,
+            // Simply ban all other commands in recovery.
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -226,7 +251,9 @@ impl DdlController {
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
-        self.check_barrier_manager_status().await?;
+        if !command.allow_in_recovery() {
+            self.check_barrier_manager_status().await?;
+        }
         let ctrl = self.clone();
         let fut = async move {
             match command {
@@ -255,9 +282,7 @@ impl DdlController {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
-                DdlCommand::AlterRelationName(relation, name) => {
-                    ctrl.alter_relation_name(relation, &name).await
-                }
+                DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterTableOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
                 }
@@ -466,6 +491,9 @@ impl DdlController {
             internal_tables = ctx.internal_tables();
 
             match stream_job {
+                StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
+                    Self::validate_cdc_table(table, &table_fragments).await?;
+                }
                 StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
@@ -522,6 +550,41 @@ impl DdlController {
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
+    }
+
+    // validate the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    async fn validate_cdc_table(table: &Table, table_fragments: &TableFragments) -> MetaResult<()> {
+        let stream_scan_fragment = table_fragments
+            .fragments
+            .values()
+            .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
+            .exactly_one()
+            .map_err(|err| {
+                anyhow!(format!(
+                    "expect exactly one stream scan fragment, got {}",
+                    err
+                ))
+            })?;
+
+        async fn new_enumerator_for_validate<P: SourceProperties>(
+            source_props: P,
+        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+            P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
+        }
+
+        for actor in &stream_scan_fragment.actors {
+            if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = actor.nodes.as_ref().unwrap().node_body && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc {
+                let properties: HashMap<String, String> = cdc_table_desc.connect_properties.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let mut props = ConnectorProperties::extract(properties)?;
+                props.init_from_pb_cdc_table_desc(cdc_table_desc);
+
+                dispatch_source_prop!(props, props, {
+                    new_enumerator_for_validate(*props).await?;
+                });
+                tracing::debug!(?table.id, "validate cdc table success");
+            }
+        }
+        Ok(())
     }
 
     // We persist table fragments at this step.
@@ -1117,35 +1180,45 @@ impl DdlController {
             .await
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        relation: Relation,
+        relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
         match relation {
-            Relation::TableId(table_id) => {
+            alter_name_request::Object::TableId(table_id) => {
                 self.catalog_manager
                     .alter_table_name(table_id, new_name)
                     .await
             }
-            Relation::ViewId(view_id) => {
+            alter_name_request::Object::ViewId(view_id) => {
                 self.catalog_manager
                     .alter_view_name(view_id, new_name)
                     .await
             }
-            Relation::IndexId(index_id) => {
+            alter_name_request::Object::IndexId(index_id) => {
                 self.catalog_manager
                     .alter_index_name(index_id, new_name)
                     .await
             }
-            Relation::SinkId(sink_id) => {
+            alter_name_request::Object::SinkId(sink_id) => {
                 self.catalog_manager
                     .alter_sink_name(sink_id, new_name)
                     .await
             }
-            Relation::SourceId(source_id) => {
+            alter_name_request::Object::SourceId(source_id) => {
                 self.catalog_manager
                     .alter_source_name(source_id, new_name)
+                    .await
+            }
+            alter_name_request::Object::SchemaId(schema_id) => {
+                self.catalog_manager
+                    .alter_schema_name(schema_id, new_name)
+                    .await
+            }
+            alter_name_request::Object::DatabaseId(database_id) => {
+                self.catalog_manager
+                    .alter_database_name(database_id, new_name)
                     .await
             }
         }

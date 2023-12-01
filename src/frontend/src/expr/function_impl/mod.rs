@@ -15,4 +15,3 @@
 mod cast_regclass;
 mod col_description;
 pub mod context;
-mod make_timestamptz;

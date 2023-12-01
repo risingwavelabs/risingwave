@@ -1,0 +1,26 @@
+[package]
+name = "lints"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[[example]]
+name = "format_error"
+path = "ui/format_error.rs"
+
+[dependencies]
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "a585cda701581a16894858dc088eacd5a02fc78b" } # should match the toolchain version
+dylint_linting = "2.5.0"
+itertools = "0.12"
+
+[dev-dependencies]
+dylint_testing = "2.5.0"
+
+# UI test dependencies
+tracing = "0.1"
+
+[package.metadata.rust-analyzer]
+rustc_private = true
