@@ -361,13 +361,7 @@ impl CacheRefillTask {
         }
 
         for psst in parent_ssts {
-            let mut idx = 0;
-            let mut pblk = 0;
-
-            while idx < units.len() && pblk < psst.block_count() {
-                let uleft = units[idx].smallest_key();
-                let uright = units[idx].largest_key();
-
+            for pblk in 0..psst.block_count() {
                 let pleft = &psst.meta.block_metas[pblk].smallest_key;
                 let pright = if pblk + 1 == psst.block_count() {
                     // `largest_key` can be included or excluded, both are treated as included here
@@ -376,32 +370,24 @@ impl CacheRefillTask {
                     &psst.meta.block_metas[pblk + 1].smallest_key
                 };
 
-                // uleft > pright
-                if KeyComparator::compare_encoded_full_key(uleft, pright)
-                    == std::cmp::Ordering::Greater
-                {
-                    pblk += 1;
-                    continue;
-                }
-                // pleft > uright
-                if KeyComparator::compare_encoded_full_key(pleft, uright)
-                    == std::cmp::Ordering::Greater
-                {
-                    idx += 1;
-                    continue;
-                }
+                // partition point: unit.right < pblk.left
+                let uleft = units.partition_point(|unit| {
+                    KeyComparator::compare_encoded_full_key(unit.largest_key(), pleft)
+                        == std::cmp::Ordering::Less
+                });
+                // partition point: unit.left <= pblk.right
+                let uright = units.partition_point(|unit| {
+                    KeyComparator::compare_encoded_full_key(unit.smallest_key(), pright)
+                        != std::cmp::Ordering::Greater
+                });
 
-                // uleft <= pright && uright >= pleft
-                if KeyComparator::compare_encoded_full_key(uleft, pright)
-                    != std::cmp::Ordering::Greater
-                    && KeyComparator::compare_encoded_full_key(uright, pleft)
-                        != std::cmp::Ordering::Less
-                {
+                // overlapping: uleft..uright
+                for u in units.iter().take(uright).skip(uleft) {
                     res.entry(SstableUnit {
-                        sst_obj_id: units[idx].sst.id,
+                        sst_obj_id: u.sst.id,
                         unit,
-                        uidx: units[idx].uidx,
-                        blks: units[idx].blks.clone(),
+                        uidx: u.uidx,
+                        blks: u.blks.clone(),
                     })
                     .or_default()
                     .push(SstableBlock {
@@ -409,8 +395,6 @@ impl CacheRefillTask {
                         blk_idx: pblk,
                     });
                 }
-
-                pblk += 1;
             }
         }
 
