@@ -11,8 +11,7 @@ cd java
 mvn -B package -Dmaven.test.skip=true
 mvn -B install -Dmaven.test.skip=true --pl java-binding-integration-test --am
 mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
-cd udf && mvn -B install && cd .. # don't skip test for udf
-cd udf-example && mvn -B package && cd ..
+mvn -B test --pl udf
 cd ..
 
 echo "--- Build rust binary for java binding integration test"
