@@ -193,7 +193,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        split_weight_by_vnode: 0,
         use_block_based_filter: true,
         ..Default::default()
     };

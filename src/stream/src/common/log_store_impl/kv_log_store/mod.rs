@@ -22,6 +22,7 @@ use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::NewLocalOptions;
 use risingwave_storage::StateStore;
+use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -177,6 +178,8 @@ pub struct KvLogStoreFactory<S: StateStore> {
     max_row_count: usize,
 
     metrics: KvLogStoreMetrics,
+
+    identity: String,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -186,6 +189,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         vnodes: Option<Arc<Bitmap>>,
         max_row_count: usize,
         metrics: KvLogStoreMetrics,
+        identity: impl Into<String>,
     ) -> Self {
         Self {
             state_store,
@@ -193,6 +197,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             vnodes,
             max_row_count,
             metrics,
+            identity: identity.into(),
         }
     }
 }
@@ -203,6 +208,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
+        let (pause_tx, pause_rx) = watch::channel(false);
         let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
         let local_state_store = self
             .state_store
@@ -226,9 +232,19 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             serde.clone(),
             rx,
             self.metrics.clone(),
+            pause_rx,
+            self.identity.clone(),
         );
 
-        let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx, self.metrics);
+        let writer = KvLogStoreWriter::new(
+            table_id,
+            local_state_store,
+            serde,
+            tx,
+            self.metrics,
+            pause_tx,
+            self.identity,
+        );
 
         (reader, writer)
     }
@@ -282,6 +298,7 @@ mod tests {
             Some(Arc::new(bitmap)),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -292,7 +309,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -375,6 +392,7 @@ mod tests {
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -385,7 +403,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -461,10 +479,11 @@ mod tests {
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
-            .init(EpochPair::new_test_epoch(epoch3))
+            .init(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
         reader.init().await.unwrap();
@@ -543,6 +562,7 @@ mod tests {
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -553,7 +573,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
@@ -653,11 +673,12 @@ mod tests {
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
         writer
-            .init(EpochPair::new_test_epoch(epoch3))
+            .init(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
 
@@ -744,6 +765,7 @@ mod tests {
             Some(vnodes1),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -751,6 +773,7 @@ mod tests {
             Some(vnodes2),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -762,11 +785,11 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer1
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer2
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         reader1.init().await.unwrap();
@@ -870,9 +893,13 @@ mod tests {
             Some(vnodes),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
-        writer.init(EpochPair::new(epoch3, epoch2)).await.unwrap();
+        writer
+            .init(EpochPair::new(epoch3, epoch2), false)
+            .await
+            .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
@@ -925,6 +952,7 @@ mod tests {
             Some(Arc::new(bitmap)),
             0,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -935,7 +963,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();

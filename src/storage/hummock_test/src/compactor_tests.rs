@@ -184,11 +184,11 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_impl(
-        options: Arc<StorageOpts>,
+        storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
         CompactorContext {
-            storage_opts: options,
+            storage_opts,
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
@@ -1358,12 +1358,7 @@ pub(crate) mod tests {
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
 
-    async fn test_fast_compact_impl(
-        data1: Vec<KeyValue>,
-        data2: Vec<KeyValue>,
-        data3: Vec<KeyValue>,
-        data4: Vec<KeyValue>,
-    ) {
+    async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -1383,31 +1378,41 @@ pub(crate) mod tests {
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
-        let mut options = SstableBuilderOptions {
+        let options = SstableBuilderOptions {
             capacity,
             block_capacity: 2048,
             restart_interval: 16,
             bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
         };
-        let sst1 = gen_test_sstable_info(options.clone(), 1, data1, sstable_store.clone()).await;
-        let sst2 = gen_test_sstable_info(options.clone(), 2, data2, sstable_store.clone()).await;
-        options.compression_algorithm = CompressionAlgorithm::Lz4;
-        let sst3 = gen_test_sstable_info(options.clone(), 3, data3, sstable_store.clone()).await;
-        let sst4 = gen_test_sstable_info(options, 4, data4, sstable_store.clone()).await;
+        let capacity = options.capacity as u64;
+        let mut ssts = vec![];
+        for (idx, sst_input) in data.into_iter().enumerate() {
+            let sst = gen_test_sstable_info(
+                options.clone(),
+                (idx + 1) as u64,
+                sst_input,
+                sstable_store.clone(),
+            )
+            .await;
+            println!("generate ssts size: {}", sst.file_size);
+            ssts.push(sst);
+        }
         let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let select_file_count = ssts.len() / 2;
 
         let task = CompactTask {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
                     level_type: 1,
-                    table_infos: vec![sst1, sst2],
+                    table_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: 1,
-                    table_infos: vec![sst3, sst4],
+                    table_infos: ssts,
                 },
             ],
             existing_table_ids: vec![1],
@@ -1416,7 +1421,7 @@ pub(crate) mod tests {
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
-            target_file_size: capacity as u64,
+            target_file_size: capacity,
             compression_algorithm: 1,
             gc_delete_keys: true,
             ..Default::default()
@@ -1429,7 +1434,7 @@ pub(crate) mod tests {
             compact_ctx.clone(),
             task.clone(),
             Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([5, 6, 7, 8, 9]),
+                VecDeque::from_iter([5, 6, 7, 8, 9, 10, 11, 12, 13]),
             )),
         );
         let fast_compact_runner = FastCompactorRunner::new(
@@ -1437,7 +1442,7 @@ pub(crate) mod tests {
             task.clone(),
             multi_filter_key_extractor.clone(),
             Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([10, 11, 12, 13, 14]),
+                VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
             )),
             Arc::new(TaskProgress::default()),
         );
@@ -1475,9 +1480,10 @@ pub(crate) mod tests {
                     .unwrap(),
             );
         }
+        assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
         println!(
-            "fast sstables {}.file size={}",
-            fast_ret[0].object_id, fast_ret[0].file_size,
+            "fast sstables file size: {:?}",
+            fast_ret.iter().map(|f| f.file_size).collect_vec(),
         );
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
@@ -1554,7 +1560,7 @@ pub(crate) mod tests {
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 3000, 400)
+                (last_k + 2000, 400)
             } else if rand_v < 5 {
                 (last_k, last_epoch - 1)
             } else {
@@ -1582,7 +1588,7 @@ pub(crate) mod tests {
         let max_epoch = std::cmp::min(300, last_epoch - 1);
         last_epoch = max_epoch;
 
-        for _ in 0..KEY_COUNT * 2 {
+        for _ in 0..KEY_COUNT * 4 {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
@@ -1602,6 +1608,41 @@ pub(crate) mod tests {
             last_epoch = epoch;
         }
         let data4 = data;
-        test_fast_compact_impl(data1, data2, data3, data4).await;
+        test_fast_compact_impl(vec![data1, data2, data3, data4]).await;
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_cut_file() {
+        const KEY_COUNT: usize = 20000;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
+        for start_idx in 0..3 {
+            let base = start_idx * KEY_COUNT;
+            for k in 0..KEY_COUNT / 3 {
+                let key = (k + base).to_be_bytes().to_vec();
+                let key = FullKey::new(TableId::new(1), TableKey(key), 400);
+                let rand_v = rng.next_u32() % 10;
+                let v = if rand_v == 1 {
+                    HummockValue::delete()
+                } else {
+                    HummockValue::put(format!("sst1-{}", 400).into_bytes())
+                };
+                data1.push((key, v));
+            }
+        }
+
+        let mut data2 = Vec::with_capacity(KEY_COUNT);
+        for k in 0..KEY_COUNT * 4 {
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), 300);
+            let v = HummockValue::put(format!("sst2-{}", 300).into_bytes());
+            data2.push((key, v));
+        }
+        test_fast_compact_impl(vec![data1, data2]).await;
     }
 }

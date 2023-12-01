@@ -16,7 +16,7 @@ use core::ops::Bound::Unbounded;
 
 use futures::StreamExt;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreRead};
 
@@ -32,8 +32,8 @@ pub async fn list_kv(
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
-    if epoch == MAX_EPOCH {
-        tracing::info!("using MAX_EPOCH as epoch");
+    if is_max_epoch(epoch) {
+        tracing::info!("using MAX EPOCH as epoch");
     }
     let range = (Unbounded, Unbounded);
     let mut scan_result = Box::pin(
