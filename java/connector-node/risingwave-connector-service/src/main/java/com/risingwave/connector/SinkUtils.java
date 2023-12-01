@@ -45,7 +45,7 @@ public class SinkUtils {
                 return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();
-            case "http-sink":
+            case "http":
                 return new FlinkDynamicAdapterFactory();
             default:
                 throw UNIMPLEMENTED

@@ -68,7 +68,7 @@ macro_rules! def_remote_sink {
             { Cassandra, CassandraSink, "cassandra" },
             { Jdbc, JdbcSink, "jdbc" },
             { DeltaLake, DeltaLakeSink, "deltalake" },
-            { HttpJava, HttpJavaSink, "http-sink" }
+            { HttpJava, HttpJavaSink, "http" }
         }
     };
     ($({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }),*) => {
