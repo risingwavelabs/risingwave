@@ -376,11 +376,17 @@ impl CacheRefillTask {
                     &psst.meta.block_metas[pblk + 1].smallest_key
                 };
 
-                if uleft > pright {
+                // uleft > pright
+                if KeyComparator::compare_encoded_full_key(uleft, pright)
+                    == std::cmp::Ordering::Greater
+                {
                     pblk += 1;
                     continue;
                 }
-                if pleft > uright {
+                // pleft > uright
+                if KeyComparator::compare_encoded_full_key(pleft, uright)
+                    == std::cmp::Ordering::Greater
+                {
                     idx += 1;
                     continue;
                 }
