@@ -8260,6 +8260,7 @@ dependencies = [
  "rustls",
  "spin 0.9.8",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
 ]
@@ -8578,6 +8579,7 @@ dependencies = [
  "sync-point",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
  "tracing-futures",
@@ -8640,6 +8642,7 @@ dependencies = [
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
+ "thiserror-ext",
  "tokio-metrics",
  "tokio-stream",
  "tracing",
@@ -10240,9 +10243,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.8"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b32ea5f1a980ddd27f9ad46dc18db583f508a4d148dd2cf1ee3d81bfd767cf"
+checksum = "778409884b05cc4a1b90b9c3a0f395a01c430355fe299d084152bdf50f3fa807"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10250,9 +10253,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.8"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cf8fd06431d331ee33484e2c83f0309dd2ad26606c3b639d5927665a1698043"
+checksum = "03162af1a5f99722388354158f3c5af20915d52a5d0d9bc4871d0fd7553e308f"
 dependencies = [
  "either",
  "proc-macro2",
