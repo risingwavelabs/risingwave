@@ -15,107 +15,17 @@
 //! Converts between arrays and Apache Arrow arrays.
 
 use std::fmt::Write;
+use std::sync::Arc;
 
-pub use arrow_common::to_record_batch_with_schema;
-pub use arrow_deltalake::to_record_batch_with_schema as to_deltalake_record_batch_with_schema;
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
-use super::*;
-use crate::types::{Int256, StructType};
+use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+use crate::array::*;
+use crate::buffer::Bitmap;
+use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 
-/// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
-macro_rules! converts_generic {
-    ($({ $ArrowType:ty, $ArrowPattern:pat, $ArrayImplPattern:path }),*) => {
-        // RisingWave array -> Arrow array
-        impl TryFrom<&ArrayImpl> for arrow_array::ArrayRef {
-            type Error = ArrayError;
-            fn try_from(array: &ArrayImpl) -> Result<Self, Self::Error> {
-                match array {
-                    $($ArrayImplPattern(a) => Ok(Arc::new(<$ArrowType>::try_from(a)?)),)*
-                    _ => todo!("unsupported array"),
-                }
-            }
-        }
-        // Arrow array -> RisingWave array
-        impl TryFrom<&arrow_array::ArrayRef> for ArrayImpl {
-            type Error = ArrayError;
-            fn try_from(array: &arrow_array::ArrayRef) -> Result<Self, Self::Error> {
-                use arrow_schema::DataType::*;
-                use arrow_schema::IntervalUnit::*;
-                use arrow_schema::TimeUnit::*;
-                match array.data_type() {
-                    $($ArrowPattern => Ok($ArrayImplPattern(
-                        array
-                            .as_any()
-                            .downcast_ref::<$ArrowType>()
-                            .unwrap()
-                            .try_into()?,
-                    )),)*
-                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
-                }
-            }
-        }
-    };
-}
-
-/// Implement bi-directional `From` between concrete array types.
-macro_rules! converts {
-    ($ArrayType:ty, $ArrowType:ty) => {
-        impl From<&$ArrayType> for $ArrowType {
-            fn from(array: &$ArrayType) -> Self {
-                array.iter().collect()
-            }
-        }
-        impl From<&$ArrowType> for $ArrayType {
-            fn from(array: &$ArrowType) -> Self {
-                array.iter().collect()
-            }
-        }
-        impl From<&[$ArrowType]> for $ArrayType {
-            fn from(arrays: &[$ArrowType]) -> Self {
-                arrays.iter().flat_map(|a| a.iter()).collect()
-            }
-        }
-    };
-    // convert values using FromIntoArrow
-    ($ArrayType:ty, $ArrowType:ty, @map) => {
-        impl From<&$ArrayType> for $ArrowType {
-            fn from(array: &$ArrayType) -> Self {
-                array.iter().map(|o| o.map(|v| v.into_arrow())).collect()
-            }
-        }
-        impl From<&$ArrowType> for $ArrayType {
-            fn from(array: &$ArrowType) -> Self {
-                array
-                    .iter()
-                    .map(|o| {
-                        o.map(|v| {
-                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
-                        })
-                    })
-                    .collect()
-            }
-        }
-        impl From<&[$ArrowType]> for $ArrayType {
-            fn from(arrays: &[$ArrowType]) -> Self {
-                arrays
-                    .iter()
-                    .flat_map(|a| a.iter())
-                    .map(|o| {
-                        o.map(|v| {
-                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
-                        })
-                    })
-                    .collect()
-            }
-        }
-    };
-}
-
-macro_rules! gen_code {
-    () => {
 /// Converts RisingWave array to Arrow array with the schema.
 /// This function will try to convert the array if the type is not same with the schema.
 pub fn to_record_batch_with_schema(
@@ -191,6 +101,40 @@ impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
     }
 }
 
+/// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
+macro_rules! converts_generic {
+    ($({ $ArrowType:ty, $ArrowPattern:pat, $ArrayImplPattern:path }),*) => {
+        // RisingWave array -> Arrow array
+        impl TryFrom<&ArrayImpl> for arrow_array::ArrayRef {
+            type Error = ArrayError;
+            fn try_from(array: &ArrayImpl) -> Result<Self, Self::Error> {
+                match array {
+                    $($ArrayImplPattern(a) => Ok(Arc::new(<$ArrowType>::try_from(a)?)),)*
+                    _ => todo!("unsupported array"),
+                }
+            }
+        }
+        // Arrow array -> RisingWave array
+        impl TryFrom<&arrow_array::ArrayRef> for ArrayImpl {
+            type Error = ArrayError;
+            fn try_from(array: &arrow_array::ArrayRef) -> Result<Self, Self::Error> {
+                use arrow_schema::DataType::*;
+                use arrow_schema::IntervalUnit::*;
+                use arrow_schema::TimeUnit::*;
+                match array.data_type() {
+                    $($ArrowPattern => Ok($ArrayImplPattern(
+                        array
+                            .as_any()
+                            .downcast_ref::<$ArrowType>()
+                            .unwrap()
+                            .try_into()?,
+                    )),)*
+                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
+                }
+            }
+        }
+    };
+}
 converts_generic! {
     { arrow_array::Int16Array, Int16, ArrayImpl::Int16 },
     { arrow_array::Int32Array, Int32, ArrayImpl::Int32 },
@@ -326,6 +270,59 @@ impl From<&Bitmap> for arrow_buffer::NullBuffer {
     }
 }
 
+/// Implement bi-directional `From` between concrete array types.
+macro_rules! converts {
+    ($ArrayType:ty, $ArrowType:ty) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                array.iter().collect()
+            }
+        }
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                array.iter().collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
+    };
+    // convert values using FromIntoArrow
+    ($ArrayType:ty, $ArrowType:ty, @map) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                array.iter().map(|o| o.map(|v| v.into_arrow())).collect()
+            }
+        }
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                array
+                    .iter()
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+    };
+}
 converts!(BoolArray, arrow_array::BooleanArray);
 converts!(I16Array, arrow_array::Int16Array);
 converts!(I32Array, arrow_array::Int32Array);
@@ -699,7 +696,11 @@ impl TryFrom<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Struct(a) => {
                 let values = Arc::new(arrow_array::StructArray::try_from(a)?);
                 arrow_array::ListArray::new(
-                    Arc::new(arrow_schema::Field::new("item", a.data_type().try_into()?, true)),
+                    Arc::new(arrow_schema::Field::new(
+                        "item",
+                        a.data_type().try_into()?,
+                        true,
+                    )),
                     arrow_buffer::OffsetBuffer::new(arrow_buffer::ScalarBuffer::from(
                         array
                             .offsets()
@@ -771,25 +772,6 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
             (0..array.len()).map(|i| !array.is_null(i)).collect(),
         ))
     }
-}
-    }
-}
-
-mod arrow_common {
-    use super::*;
-
-    gen_code!();
-}
-
-mod arrow_deltalake {
-    use {
-        arrow_array_deltalake as arrow_array, arrow_buffer_deltalake as arrow_buffer,
-        arrow_cast_deltalake as arrow_cast, arrow_schema_deltalake as arrow_schema,
-    };
-
-    use super::*;
-
-    gen_code!();
 }
 
 #[cfg(test)]
@@ -923,7 +905,7 @@ mod tests {
 
     #[test]
     fn struct_array() {
-        use arrow_array::Array as _;
+        use super::arrow_array::Array as _;
 
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
