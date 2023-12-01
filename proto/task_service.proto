@@ -82,7 +82,7 @@ message GetDataRequest {
 // The structure for permit-based back-pressure.
 message Permits {
   oneof value {
-    // The permits required for a chunk, i.e. the cardinality of the chunk.
+    // The permits required for a chunk, i.e. the total buffer size of the chunk.
     uint32 record = 1;
     // The permits required for a barrier, typically 1.
     uint32 barrier = 2;
