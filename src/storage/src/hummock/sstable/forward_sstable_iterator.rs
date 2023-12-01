@@ -19,9 +19,10 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
+use crate::hummock::block_stream::BlockStream;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BatchBlockStream, BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -40,7 +41,7 @@ pub struct SstableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    preload_stream: Option<BatchBlockStream>,
+    preload_stream: Option<Box<dyn BlockStream>>,
     /// Reference to the sst
     pub sst: TableHolder,
     preload_end_block_idx: usize,
@@ -126,14 +127,14 @@ impl SstableIterator {
             return Ok(());
         }
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
-            && self.options.prefetch_for_large_query
-            && let Ok(preload_stream) = self.sstable_store
-                .get_stream(self.sst.value(), idx, self.preload_end_block_idx)
-                .await
+        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx && let Ok(preload_stream) = self
+            .sstable_store
+            .get_stream(self.sst.value(), idx, self.preload_end_block_idx,
+                        self.options.prefetch_for_large_query).await
         {
-            self.preload_stream = preload_stream;
+            self.preload_stream = Some(preload_stream);
         }
+
         if self
             .preload_stream
             .as_ref()
@@ -152,8 +153,7 @@ impl SstableIterator {
                     match preload_stream.next_block().await {
                         Ok(Some(block)) => {
                             hit_cache = true;
-                            self.block_iter =
-                                Some(BlockIterator::new(BlockHolder::from_owned_block(block)));
+                            self.block_iter = Some(BlockIterator::new(block));
                             break;
                         }
                         Ok(None) => {
@@ -177,11 +177,16 @@ impl SstableIterator {
                     tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
                     match self
                         .sstable_store
-                        .get_stream(self.sst.value(), idx, self.preload_end_block_idx)
+                        .get_stream(
+                            self.sst.value(),
+                            idx,
+                            self.preload_end_block_idx,
+                            self.options.prefetch_for_large_query,
+                        )
                         .await
                     {
                         Ok(stream) => {
-                            self.preload_stream = stream;
+                            self.preload_stream = Some(stream);
                         }
                         Err(e) => {
                             tracing::error!("failed to recreate stream meet IO error: {:?}", e);
@@ -192,26 +197,15 @@ impl SstableIterator {
             }
         }
         if !hit_cache {
-            let block =
-                if idx + 1 < self.preload_end_block_idx && self.sstable_store.support_prefetch() {
-                    self.sstable_store
-                        .get_with_prefetch(
-                            self.sst.value(),
-                            idx,
-                            self.preload_end_block_idx - idx,
-                            &mut self.stats,
-                        )
-                        .await?
-                } else {
-                    self.sstable_store
-                        .get(
-                            self.sst.value(),
-                            idx,
-                            self.options.cache_policy,
-                            &mut self.stats,
-                        )
-                        .await?
-                };
+            let block = self
+                .sstable_store
+                .get(
+                    self.sst.value(),
+                    idx,
+                    self.options.cache_policy,
+                    &mut self.stats,
+                )
+                .await?;
             self.block_iter = Some(BlockIterator::new(block));
         };
         let block_iter = self.block_iter.as_mut().unwrap();
