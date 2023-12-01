@@ -44,8 +44,6 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
-#![feature(register_tool)]
-#![register_tool(rw)]
 
 #[macro_use]
 pub mod jemalloc;

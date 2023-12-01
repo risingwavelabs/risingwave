@@ -16,8 +16,6 @@
 #![expect(clippy::doc_markdown)]
 #![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
-#![feature(register_tool)]
-#![register_tool(rw)]
 
 use std::str::FromStr;
 

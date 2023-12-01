@@ -34,6 +34,8 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    "-Zcrate-attr=feature(register_tool)",
+    "-Zcrate-attr=register_tool(rw)",
     # uncomment the following two lines to enable `TaskLocalAlloc`
     # "--cfg",
     # "enable_task_local_alloc",
