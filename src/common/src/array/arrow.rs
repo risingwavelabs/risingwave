@@ -16,90 +16,14 @@
 
 use std::fmt::Write;
 
-use arrow_array::Array as ArrowArray;
-use arrow_cast::cast;
-use arrow_schema::{Field, Schema, SchemaRef, DECIMAL256_MAX_PRECISION};
+pub use arrow_common::to_record_batch_with_schema;
+pub use arrow_deltalake::to_record_batch_with_schema as to_deltalake_record_batch_with_schema;
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-
-/// Converts RisingWave array to Arrow array with the schema.
-/// This function will try to convert the array if the type is not same with the schema.
-pub fn to_record_batch_with_schema(
-    schema: SchemaRef,
-    chunk: &DataChunk,
-) -> Result<arrow_array::RecordBatch, ArrayError> {
-    if !chunk.is_compacted() {
-        let c = chunk.clone();
-        return to_record_batch_with_schema(schema, &c.compact());
-    }
-    let columns: Vec<_> = chunk
-        .columns()
-        .iter()
-        .zip_eq_fast(schema.fields().iter())
-        .map(|(column, field)| {
-            let column: arrow_array::ArrayRef = column.as_ref().try_into()?;
-            if column.data_type() == field.data_type() {
-                Ok(column)
-            } else {
-                cast(&column, field.data_type())
-                    .map_err(|err| ArrayError::FromArrow(err.to_string()))
-            }
-        })
-        .try_collect::<_, _, ArrayError>()?;
-
-    let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
-    arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-        .map_err(|err| ArrayError::ToArrow(err.to_string()))
-}
-
-// Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
-impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
-    type Error = ArrayError;
-
-    fn try_from(chunk: &DataChunk) -> Result<Self, Self::Error> {
-        if !chunk.is_compacted() {
-            let c = chunk.clone();
-            return Self::try_from(&c.compact());
-        }
-        let columns: Vec<_> = chunk
-            .columns()
-            .iter()
-            .map(|column| column.as_ref().try_into())
-            .try_collect::<_, _, Self::Error>()?;
-
-        let fields: Vec<_> = columns
-            .iter()
-            .map(|array: &Arc<dyn ArrowArray>| {
-                let nullable = array.null_count() > 0;
-                let data_type = array.data_type().clone();
-                Field::new("", data_type, nullable)
-            })
-            .collect();
-
-        let schema = Arc::new(Schema::new(fields));
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
-        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-            .map_err(|err| ArrayError::ToArrow(err.to_string()))
-    }
-}
-
-impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
-    type Error = ArrayError;
-
-    fn try_from(batch: &arrow_array::RecordBatch) -> Result<Self, Self::Error> {
-        let mut columns = Vec::with_capacity(batch.num_columns());
-        for array in batch.columns() {
-            let column = Arc::new(array.try_into()?);
-            columns.push(column);
-        }
-        Ok(DataChunk::new(columns, batch.num_rows()))
-    }
-}
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
@@ -135,6 +59,138 @@ macro_rules! converts_generic {
         }
     };
 }
+
+/// Implement bi-directional `From` between concrete array types.
+macro_rules! converts {
+    ($ArrayType:ty, $ArrowType:ty) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                array.iter().collect()
+            }
+        }
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                array.iter().collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays.iter().flat_map(|a| a.iter()).collect()
+            }
+        }
+    };
+    // convert values using FromIntoArrow
+    ($ArrayType:ty, $ArrowType:ty, @map) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                array.iter().map(|o| o.map(|v| v.into_arrow())).collect()
+            }
+        }
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                array
+                    .iter()
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+    };
+}
+
+macro_rules! gen_code {
+    () => {
+/// Converts RisingWave array to Arrow array with the schema.
+/// This function will try to convert the array if the type is not same with the schema.
+pub fn to_record_batch_with_schema(
+    schema: arrow_schema::SchemaRef,
+    chunk: &DataChunk,
+) -> Result<arrow_array::RecordBatch, ArrayError> {
+    if !chunk.is_compacted() {
+        let c = chunk.clone();
+        return to_record_batch_with_schema(schema, &c.compact());
+    }
+    let columns: Vec<_> = chunk
+        .columns()
+        .iter()
+        .zip_eq_fast(schema.fields().iter())
+        .map(|(column, field)| {
+            let column: arrow_array::ArrayRef = column.as_ref().try_into()?;
+            if column.data_type() == field.data_type() {
+                Ok(column)
+            } else {
+                arrow_cast::cast(&column, field.data_type())
+                    .map_err(|err| ArrayError::FromArrow(err.to_string()))
+            }
+        })
+        .try_collect::<_, _, ArrayError>()?;
+
+    let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+    arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
+        .map_err(|err| ArrayError::ToArrow(err.to_string()))
+}
+
+// Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
+impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
+    type Error = ArrayError;
+
+    fn try_from(chunk: &DataChunk) -> Result<Self, Self::Error> {
+        if !chunk.is_compacted() {
+            let c = chunk.clone();
+            return Self::try_from(&c.compact());
+        }
+        let columns: Vec<_> = chunk
+            .columns()
+            .iter()
+            .map(|column| column.as_ref().try_into())
+            .try_collect::<_, _, Self::Error>()?;
+
+        let fields: Vec<_> = columns
+            .iter()
+            .map(|array: &Arc<dyn arrow_array::Array>| {
+                let nullable = array.null_count() > 0;
+                let data_type = array.data_type().clone();
+                arrow_schema::Field::new("", data_type, nullable)
+            })
+            .collect();
+
+        let schema = Arc::new(arrow_schema::Schema::new(fields));
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
+            .map_err(|err| ArrayError::ToArrow(err.to_string()))
+    }
+}
+
+impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
+    type Error = ArrayError;
+
+    fn try_from(batch: &arrow_array::RecordBatch) -> Result<Self, Self::Error> {
+        let mut columns = Vec::with_capacity(batch.num_columns());
+        for array in batch.columns() {
+            let column = Arc::new(array.try_into()?);
+            columns.push(column);
+        }
+        Ok(DataChunk::new(columns, batch.num_rows()))
+    }
+}
+
 converts_generic! {
     { arrow_array::Int16Array, Int16, ArrayImpl::Int16 },
     { arrow_array::Int32Array, Int32, ArrayImpl::Int32 },
@@ -212,7 +268,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Int16 => Ok(Self::Int16),
             DataType::Int32 => Ok(Self::Int32),
             DataType::Int64 => Ok(Self::Int64),
-            DataType::Int256 => Ok(Self::Decimal256(DECIMAL256_MAX_PRECISION, 0)),
+            DataType::Int256 => Ok(Self::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)),
             DataType::Float32 => Ok(Self::Float32),
             DataType::Float64 => Ok(Self::Float64),
             DataType::Date => Ok(Self::Date32),
@@ -230,10 +286,10 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => Ok(Self::Struct(
                 struct_type
                     .iter()
-                    .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+                    .map(|(name, ty)| Ok(arrow_schema::Field::new(name, ty.try_into()?, true)))
                     .try_collect::<_, _, String>()?,
             )),
-            DataType::List(datatype) => Ok(Self::List(Arc::new(Field::new(
+            DataType::List(datatype) => Ok(Self::List(Arc::new(arrow_schema::Field::new(
                 "item",
                 datatype.as_ref().try_into()?,
                 true,
@@ -251,59 +307,6 @@ impl TryFrom<DataType> for arrow_schema::DataType {
     }
 }
 
-/// Implement bi-directional `From` between concrete array types.
-macro_rules! converts {
-    ($ArrayType:ty, $ArrowType:ty) => {
-        impl From<&$ArrayType> for $ArrowType {
-            fn from(array: &$ArrayType) -> Self {
-                array.iter().collect()
-            }
-        }
-        impl From<&$ArrowType> for $ArrayType {
-            fn from(array: &$ArrowType) -> Self {
-                array.iter().collect()
-            }
-        }
-        impl From<&[$ArrowType]> for $ArrayType {
-            fn from(arrays: &[$ArrowType]) -> Self {
-                arrays.iter().flat_map(|a| a.iter()).collect()
-            }
-        }
-    };
-    // convert values using FromIntoArrow
-    ($ArrayType:ty, $ArrowType:ty, @map) => {
-        impl From<&$ArrayType> for $ArrowType {
-            fn from(array: &$ArrayType) -> Self {
-                array.iter().map(|o| o.map(|v| v.into_arrow())).collect()
-            }
-        }
-        impl From<&$ArrowType> for $ArrayType {
-            fn from(array: &$ArrowType) -> Self {
-                array
-                    .iter()
-                    .map(|o| {
-                        o.map(|v| {
-                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
-                        })
-                    })
-                    .collect()
-            }
-        }
-        impl From<&[$ArrowType]> for $ArrayType {
-            fn from(arrays: &[$ArrowType]) -> Self {
-                arrays
-                    .iter()
-                    .flat_map(|a| a.iter())
-                    .map(|o| {
-                        o.map(|v| {
-                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
-                        })
-                    })
-                    .collect()
-            }
-        }
-    };
-}
 converts!(BoolArray, arrow_array::BooleanArray);
 converts!(I16Array, arrow_array::Int16Array);
 converts!(I32Array, arrow_array::Int32Array);
@@ -527,6 +530,20 @@ impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
     }
 }
 
+impl From<arrow_buffer::i256> for Int256 {
+    fn from(value: arrow_buffer::i256) -> Self {
+        let buffer = value.to_be_bytes();
+        Int256::from_be_bytes(buffer)
+    }
+}
+
+impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
+    fn from(val: Int256Ref<'a>) -> Self {
+        let buffer = val.to_be_bytes();
+        arrow_buffer::i256::from_be_bytes(buffer)
+    }
+}
+
 impl From<&Int256Array> for arrow_array::Decimal256Array {
     fn from(array: &Int256Array) -> Self {
         array
@@ -601,7 +618,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 array,
                 a,
                 Decimal256Builder::with_capacity(a.len()).with_data_type(
-                    arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
+                    arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0),
                 ),
                 |b, v| b.append_option(v.map(Into::into)),
             ),
@@ -691,7 +708,12 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
             .zip_eq_debug(array.data_type().as_struct().iter())
             .map(|(arr, (name, ty))| {
                 Ok((
-                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
+                    arrow_schema::Field::new(
+                        name,
+                        ty.try_into().map_err(ArrayError::ToArrow)?,
+                        true,
+                    )
+                    .into(),
                     arr.as_ref().try_into()?,
                 ))
             })
@@ -718,6 +740,25 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
             (0..array.len()).map(|i| !array.is_null(i)).collect(),
         ))
     }
+}
+    }
+}
+
+mod arrow_common {
+    use super::*;
+
+    gen_code!();
+}
+
+mod arrow_deltalake {
+    use {
+        arrow_array_deltalake as arrow_array, arrow_buffer_deltalake as arrow_buffer,
+        arrow_cast_deltalake as arrow_cast, arrow_schema_deltalake as arrow_schema,
+    };
+
+    use super::*;
+
+    gen_code!();
 }
 
 #[cfg(test)]
