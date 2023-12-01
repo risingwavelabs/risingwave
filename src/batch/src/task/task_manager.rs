@@ -25,6 +25,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
@@ -102,6 +103,7 @@ impl BatchManager {
         context: ComputeNodeContext,
         state_reporter: StateReporter,
         tracing_context: TracingContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -128,11 +130,15 @@ impl BatchManager {
                 task_id,
             );
         };
-        task.async_execute(Some(state_reporter), tracing_context)
-            .await
-            .inspect_err(|_| {
-                self.cancel_task(&task_id.to_prost());
-            })?;
+        task.async_execute(
+            Some(state_reporter),
+            tracing_context,
+            captured_execution_context,
+        )
+        .await
+        .inspect_err(|_| {
+            self.cancel_task(&task_id.to_prost());
+        })?;
         ret
     }
 
@@ -151,6 +157,9 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
+            CapturedExecutionContext {
+                time_zone: "UTC".to_string(),
+            },
         )
         .await
     }

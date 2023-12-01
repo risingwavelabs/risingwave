@@ -157,3 +157,8 @@ message Cardinality {
   // Unbounded if not set.
   optional uint64 hi = 2;
 }
+
+// Provide statement-local context, e.g. session info like time zone, for execution.
+message CapturedExecutionContext {
+  string time_zone = 1;
+}

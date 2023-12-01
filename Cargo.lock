@@ -7911,7 +7911,6 @@ dependencies = [
  "auto_impl",
  "bk-tree",
  "bytes",
- "chrono",
  "clap",
  "downcast-rs",
  "dyn-clone",

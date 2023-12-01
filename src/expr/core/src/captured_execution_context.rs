@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-pub mod context;
+use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_pb::plan_common::CapturedExecutionContext;
+
+// For all execution mode.
+define_context! {
+    pub TIME_ZONE: String,
+}
+
+pub fn capture_execution_context() -> ExprResult<CapturedExecutionContext> {
+    let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
+    Ok(CapturedExecutionContext { time_zone })
+}
