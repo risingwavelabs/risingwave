@@ -55,14 +55,13 @@ public class DbzConnectorConfig {
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     /* RisingWave configs */
-    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
-
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
+    private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
 
     private static Map<String, String> extractDebeziumProperties(
@@ -102,32 +101,51 @@ public class DbzConnectorConfig {
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
-            boolean snapshotDone) {
-        LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}",
-                source,
-                sourceId,
-                startOffset,
-                snapshotDone);
+            boolean snapshotDone,
+            boolean isMultiTableShared) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
+        var isCdcBackfill =
+                null != userProps.get(SNAPSHOT_MODE_KEY)
+                        && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
+
+        LOG.info(
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
+                source,
+                sourceId,
+                startOffset,
+                snapshotDone,
+                isCdcBackfill,
+                isMultiTableShared);
+
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
-            // if snapshot phase is finished and offset is specified, we will continue binlog
-            // reading from the given offset
-            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
-                // specified. It only snapshots the schemas, not the data, and continue binlog
-                // reading from the specified offset
-                mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
-                mysqlProps.setProperty(
-                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-            } else if (mysqlProps.getProperty("snapshot.mode").equals(SNAPSHOT_MODE_BACKFILL)) {
-                // only snapshot table schemas which is not required by the source parser
-                mysqlProps.setProperty("snapshot.mode", "schema_only");
+            if (isCdcBackfill) {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
+
+                // If cdc backfill enabled, the source only emit incremental changes, so we must
+                // rewind to the given offset and continue binlog reading from there
+                if (null != startOffset && !startOffset.isBlank()) {
+                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                } else {
+                    // read upstream table schemas and emit incremental changes only
+                    mysqlProps.setProperty("snapshot.mode", "schema_only");
+                }
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue binlog
+                // reading from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
+                    // specified. It only snapshots the schemas, not the data, and continue binlog
+                    // reading from the specified offset
+                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
             }
 
             dbzProps.putAll(mysqlProps);
@@ -165,7 +183,7 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
+        if (isMultiTableShared) {
             adjustConfigForSharedCdcStream(dbzProps);
         }
 

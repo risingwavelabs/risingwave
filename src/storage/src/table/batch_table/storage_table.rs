@@ -33,7 +33,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, TableKeyRange,
+    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -425,7 +425,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 // Otherwise, we need to access all vnodes of this table.
                 None => Either::Right(self.vnodes.iter_vnodes()),
             };
-            vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes()))
+            vnodes.map(|vnode| prefixed_range_with_vnode(encoded_key_range.clone(), vnode))
         };
 
         // For each key range, construct an iterator.

@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, user,
-    user_privilege, view, DataTypeArray, DatabaseId, ObjectId, PrivilegeId, SchemaId, UserId,
+    actor_dispatcher, connection, function, index, object, object_dependency, schema, sink, source,
+    table, user, user_privilege, view, worker_property, ActorId, DataTypeArray, DatabaseId,
+    I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -556,4 +561,58 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::FunctionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
+}
+
+// todo: deprecate parallel units and avoid this query.
+pub async fn get_parallel_unit_mapping<C>(db: &C) -> MetaResult<HashMap<u32, PbParallelUnit>>
+where
+    C: ConnectionTrait,
+{
+    let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
+        .select_only()
+        .columns([
+            worker_property::Column::WorkerId,
+            worker_property::Column::ParallelUnitIds,
+        ])
+        .into_tuple()
+        .all(db)
+        .await?;
+    let parallel_units_map = parallel_units
+        .into_iter()
+        .flat_map(|(worker_id, parallel_unit_ids)| {
+            parallel_unit_ids
+                .into_inner()
+                .into_iter()
+                .map(move |parallel_unit_id| {
+                    (
+                        parallel_unit_id as _,
+                        PbParallelUnit {
+                            id: parallel_unit_id as _,
+                            worker_node_id: worker_id as _,
+                        },
+                    )
+                })
+        })
+        .collect();
+    Ok(parallel_units_map)
+}
+
+pub async fn get_actor_dispatchers<C>(
+    db: &C,
+    actor_ids: Vec<ActorId>,
+) -> MetaResult<HashMap<ActorId, Vec<actor_dispatcher::Model>>>
+where
+    C: ConnectionTrait,
+{
+    let actor_dispatchers = ActorDispatcher::find()
+        .filter(actor_dispatcher::Column::ActorId.is_in(actor_ids))
+        .all(db)
+        .await?;
+
+    Ok(actor_dispatchers
+        .into_iter()
+        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
+        .into_iter()
+        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .collect())
 }

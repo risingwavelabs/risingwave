@@ -25,19 +25,18 @@ use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
 };
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    /// Input from upstream.
-    input: BoxedInput,
-
     /// Logical Operator Info
     info: ExecutorInfo,
+
+    /// Input from upstream.
+    input: BoxedInput,
 
     /// The context of the actor.
     actor_context: ActorContextRef,
@@ -67,9 +66,8 @@ impl std::fmt::Debug for ReceiverExecutor {
 impl ReceiverExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         input: BoxedInput,
@@ -79,11 +77,7 @@ impl ReceiverExecutor {
     ) -> Self {
         Self {
             input,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "ReceiverExecutor".to_string(),
-            },
+            info,
             actor_context: ctx,
             upstream_fragment_id,
             metrics,
@@ -99,9 +93,12 @@ impl ReceiverExecutor {
         use crate::executor::ActorContext;
 
         Self::new(
-            Schema::default(),
-            vec![],
             ActorContext::create(114),
+            ExecutorInfo {
+                schema: Schema::default(),
+                pk_indices: vec![],
+                identity: "ReceiverExecutor".to_string(),
+            },
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
@@ -272,10 +269,15 @@ mod tests {
         )
         .unwrap();
 
-        let receiver = ReceiverExecutor::new(
+        let info = ExecutorInfo {
             schema,
-            vec![],
+            pk_indices: vec![],
+            identity: "ReceiverExecutor".to_string(),
+        };
+
+        let receiver = ReceiverExecutor::new(
             ActorContext::create(actor_id),
+            info,
             fragment_id,
             upstream_fragment_id,
             input,

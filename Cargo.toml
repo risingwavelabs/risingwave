@@ -11,6 +11,7 @@ members = [
   "src/compute",
   "src/connector",
   "src/ctl",
+  "src/error",
   "src/expr/core",
   "src/expr/impl",
   "src/expr/macro",
@@ -38,6 +39,7 @@ members = [
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
   "src/stream",
+  "src/stream/spill_test",
   "src/test_runner",
   "src/tests/compaction_test",
   "src/tests/e2e_extended_mode",
@@ -67,37 +69,38 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.55", default-features = false, features = [
+aws-config = { version = "1", default-features = false, features = [
+  "behavior-version-latest",
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-credential-types = { version = "0.55", default-features = false, features = [
+aws-credential-types = { version = "1", default-features = false, features = [
   "hardcoded-credentials",
 ] }
-aws-sdk-kinesis = { version = "0.28", default-features = false, features = [
+aws-sdk-kinesis = { version = "1", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-s3 = { version = "0.28", default-features = false, features = [
+aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-ec2 = { version = "0.28", default-features = false, features = [
+aws-sdk-ec2 = { version = "1", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-sqs = { version = "0.28", default-features = false, features = [
+aws-sdk-sqs = { version = "1", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-smithy-client = { version = "0.55", default-features = false, features = [
-  "rt-tokio",
-  "native-tls",
+aws-smithy-http = "0.60"
+aws-smithy-runtime-api = "1"
+aws-smithy-runtime = "1"
+aws-smithy-types = { version = "1", default-features = false, features = [
+  "hyper-0-14-x",
 ] }
-aws-smithy-http = "0.55"
-aws-smithy-types = "0.55"
-aws-endpoint = "0.55"
-aws-types = "0.55"
+aws-endpoint = "0.60"
+aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
@@ -113,15 +116,19 @@ criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.0" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "5a5202d1f3502f0cf82041044b0427434da59adc" }
-arrow-array = "48"
-arrow-cast = "48"
-arrow-schema = "48"
-arrow-buffer = "48"
-arrow-flight = "48"
-arrow-select = "48"
-arrow-ord = "48"
-thiserror-ext = "0.0.1"
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
+  "prometheus",
+] }
+arrow-array = "49"
+arrow-arith = "49"
+arrow-cast = "49"
+arrow-schema = "49"
+arrow-buffer = "49"
+arrow-flight = "49"
+arrow-select = "49"
+arrow-ord = "49"
+arrow-row = "49"
+thiserror-ext = "0.0.8"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
@@ -138,12 +145,14 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
+risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_service = { path = "./src/meta/service" }
 risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
@@ -239,7 +248,7 @@ debug = 1
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }

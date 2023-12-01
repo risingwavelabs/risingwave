@@ -19,7 +19,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
-pub mod doris_connector;
+pub mod doris_starrocks_connector;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
@@ -30,6 +30,7 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod starrocks;
 pub mod test_sink;
 pub mod utils;
 pub mod writer;
@@ -80,6 +81,7 @@ macro_rules! for_all_sinks {
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
@@ -226,6 +228,9 @@ pub struct SinkMetrics {
     pub log_store_write_rows: LabelGuardedIntCounter<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
+
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<2>,
 }
 
 impl SinkMetrics {
@@ -238,6 +243,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_file_appender_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_file_appender_write_latency: LabelGuardedHistogram::test_histogram(),
         }
     }
 }
@@ -412,14 +419,16 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
-    #[error("Doris http error: {0}")]
-    Http(
+    #[error("Doris/Starrocks connect error: {0}")]
+    DorisStarrocksConnect(
         #[source]
         #[backtrace]
         anyhow::Error,
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("Starrocks error: {0}")]
+    Starrocks(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

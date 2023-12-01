@@ -23,8 +23,6 @@ use super::iter_util::ZipEqDebug;
 use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::dispatch_array_variants;
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
@@ -372,7 +370,6 @@ impl Ord for HeapElem {
                 other.elem_idx,
                 self.column_orders.as_ref(),
             )
-            .unwrap()
         };
         ord.reverse()
     }
@@ -439,25 +436,25 @@ where
     .expect("items in the same `Array` type should be able to compare")
 }
 
-pub fn compare_rows_in_chunk(
+fn compare_rows_in_chunk(
     lhs_data_chunk: &DataChunk,
     lhs_idx: usize,
     rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
     column_orders: &[ColumnOrder],
-) -> Result<Ordering> {
+) -> Ordering {
     for column_order in column_orders {
         let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
         let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
 
         let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
-            let rhs_inner = (&**rhs_array).try_into().map_err(|_| {
-                InternalError(format!(
+            let rhs_inner = (&**rhs_array).try_into().unwrap_or_else(|_| {
+                panic!(
                     "Unmatched array types, lhs array is: {}, rhs array is: {}",
                     lhs_array.get_ident(),
                     rhs_array.get_ident(),
-                ))
-            })?;
+                )
+            });
             compare_values_in_array(
                 lhs_inner,
                 lhs_idx,
@@ -468,10 +465,10 @@ pub fn compare_rows_in_chunk(
         });
 
         if res != Ordering::Equal {
-            return Ok(res);
+            return res;
         }
     }
-    Ok(Ordering::Equal)
+    Ordering::Equal
 }
 
 /// Partial compare two `Datum`s with specified order type.
@@ -651,11 +648,11 @@ mod tests {
 
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders)
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders)
         );
     }
 
@@ -678,10 +675,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(3.0.into())),
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
         let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
@@ -700,10 +694,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Int32(2)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([1, 2]))),
         ]);
 
         let column_orders = (0..row1.len())
@@ -731,11 +722,11 @@ mod tests {
         );
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders)
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders)
         );
     }
 

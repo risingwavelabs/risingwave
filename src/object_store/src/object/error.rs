@@ -20,6 +20,7 @@ use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStreamError;
+use aws_smithy_types::body::SdkBody;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
@@ -79,13 +80,19 @@ impl ObjectError {
     pub fn is_object_not_found_error(&self) -> bool {
         match &self.inner {
             ObjectErrorInner::S3(e) => {
-                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
-                    e.downcast_ref::<aws_smithy_http::result::SdkError<GetObjectError>>()
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
+                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                        GetObjectError,
+                        aws_smithy_runtime_api::http::Response<SdkBody>,
+                    >>()
                 {
                     return matches!(err.err(), GetObjectError::NoSuchKey(_));
                 }
-                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
-                    e.downcast_ref::<aws_smithy_http::result::SdkError<HeadObjectError>>()
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
+                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                        HeadObjectError,
+                        aws_smithy_runtime_api::http::Response<SdkBody>,
+                    >>()
                 {
                     return matches!(err.err(), HeadObjectError::NotFound(_));
                 }
@@ -105,11 +112,12 @@ impl ObjectError {
     }
 }
 
-impl<E> From<aws_sdk_s3::error::SdkError<E>> for ObjectError
+impl<E, R> From<aws_smithy_runtime_api::client::result::SdkError<E, R>> for ObjectError
 where
     E: std::error::Error + Sync + Send + 'static,
+    R: Send + Sync + 'static + std::fmt::Debug,
 {
-    fn from(e: aws_sdk_s3::error::SdkError<E>) -> Self {
+    fn from(e: aws_smithy_runtime_api::client::result::SdkError<E, R>) -> Self {
         ObjectErrorInner::S3(e.into()).into()
     }
 }

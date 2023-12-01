@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, Error, TrackingIssue};
+use risingwave_common::error::{BoxedError, Error, NotImplemented};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -82,7 +82,7 @@ enum ErrorKind {
         SinkError,
     ),
 
-    #[error("RPC error: {0}")]
+    #[error(transparent)]
     RpcError(
         #[from]
         #[backtrace]
@@ -109,8 +109,8 @@ enum ErrorKind {
         BoxedError,
     ),
 
-    #[error("Feature is not yet implemented: {0}, {1}")]
-    NotImplemented(String, TrackingIssue),
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
 
     #[error(transparent)]
     Internal(
@@ -135,10 +135,6 @@ impl StreamExecutorError {
 
     pub fn connector_error(error: impl Error) -> Self {
         ErrorKind::ConnectorError(error.into()).into()
-    }
-
-    pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
-        ErrorKind::NotImplemented(error.into(), issue.into()).into()
     }
 
     pub fn dml_error(error: impl Error) -> Self {

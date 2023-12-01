@@ -457,11 +457,17 @@ impl JsonParseOptions {
                     .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
-                        self.parse(
-                            json_object_get_case_insensitive(value, field_name)
-                                .unwrap_or(&BorrowedValue::Static(simd_json::StaticNode::Null)),
-                            Some(field_type),
-                        )
+                        let field_value = json_object_get_case_insensitive(value, field_name)
+                            .unwrap_or_else(|| {
+                                let error = AccessError::Undefined {
+                                    name: field_name.to_owned(),
+                                    path: struct_type_info.to_string(), // TODO: this is not good, we should maintain a path stack
+                                };
+                                // TODO: is it possible to unify the logging with the one in `do_action`?
+                                tracing::warn!(%error, "undefined nested field, padding with `NULL`");
+                                &BorrowedValue::Static(simd_json::StaticNode::Null)
+                            });
+                        self.parse(field_value, Some(field_type))
                     })
                     .collect::<Result<_, _>>()?,
             )
@@ -490,24 +496,17 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, Some(item_type)))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new({
+                let array = value.as_array().unwrap();
+                let mut builder = item_type.create_array_builder(array.len());
+                for v in array {
+                    let value = self.parse(v, Some(item_type))?;
+                    builder.append(value);
+                }
+                builder.finish()
+            })
             .into(),
-            (None, ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, None))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .into(),
+
             // ---- Bytea -----
             (Some(DataType::Bytea), ValueType::String) => match self.bytea_handling {
                 ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())

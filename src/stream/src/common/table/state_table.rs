@@ -35,7 +35,7 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, range_of_prefix,
+    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range_with_vnode, range_of_prefix,
     start_bound_of_excluded_prefix, TableKey,
 };
 use risingwave_pb::catalog::Table;
@@ -48,7 +48,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    StateStoreIterItemStream,
+    SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -910,7 +910,8 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(new_epoch.curr);
+            self.local_store
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -978,7 +979,8 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(new_epoch.curr);
+        self.local_store
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
     }
 
     /// Write to state store.
@@ -1087,7 +1089,13 @@ where
         }
 
         self.local_store.flush(delete_ranges).await?;
-        self.local_store.seal_current_epoch(next_epoch);
+        self.local_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.local_store.try_flush().await?;
         Ok(())
     }
 }
@@ -1157,13 +1165,11 @@ where
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
 
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
@@ -1178,13 +1184,15 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 
         trace!(
             table_id = %self.table_id(),
-            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?prefix_hint, ?pk_prefix,
              ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
@@ -1192,7 +1200,7 @@ where
         let memcomparable_range =
             prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
 
-        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         Ok(deserialize_keyed_row_stream(
             self.iter_kv(
@@ -1218,8 +1226,7 @@ where
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
-        let memcomparable_range_with_vnode =
-            prefixed_range(memcomparable_range, &vnode.to_be_bytes());
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         // TODO: provide a trace of useful params.
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
@@ -1242,8 +1249,9 @@ where
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let table_key_range = map_table_key_range(prefixed_range(encoded_key_range, &vnode));
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
+        let table_key_range =
+            map_table_key_range(prefixed_range_with_vnode(encoded_key_range, vnode));
 
         // Construct prefix hint for prefix bloom filter.
         if self.prefix_hint_len != 0 {
@@ -1257,7 +1265,9 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 

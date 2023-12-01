@@ -39,10 +39,8 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
             .expect("vnodes not set for row id gen executor");
         let executor = RowIdGenExecutor::new(
             params.actor_context,
+            params.info,
             upstream,
-            params.schema,
-            params.pk_indices,
-            params.executor_id,
             node.row_id_index as _,
             vnodes,
         );

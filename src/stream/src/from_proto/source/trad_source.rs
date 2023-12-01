@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
@@ -71,29 +70,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     // TODO: use the correct information to fill in pk_dicies.
                     // We should consdier add back the "pk_column_ids" field removed by #8841 in
                     // StreamSource
-                    params.pk_indices.clone(),
+                    params.info.pk_indices.clone(),
                 );
 
                 let source_ctrl_opts = SourceCtrlOpts {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let column_ids: Vec<_> = source
+                let source_column_ids: Vec<_> = source
                     .columns
                     .iter()
                     .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
                     .collect();
-                let fields = source
-                    .columns
-                    .iter()
-                    .map(|prost| {
-                        let column_desc = prost.column_desc.as_ref().unwrap();
-                        let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
-                        let name = column_desc.name.clone();
-                        Field::with_name(data_type, name)
-                    })
-                    .collect();
-                let schema = Schema::new(fields);
 
                 let state_table_handler = SourceStateTableHandler::from_table_catalog(
                     source.state_table.as_ref().unwrap(),
@@ -103,7 +91,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 let stream_source_core = StreamSourceCore::new(
                     source_id,
                     source_name,
-                    column_ids,
+                    source_column_ids,
                     source_desc_builder,
                     state_table_handler,
                 );
@@ -119,27 +107,23 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     FsSourceExecutor::new(
-                        params.actor_context,
-                        schema,
-                        params.pk_indices,
+                        params.actor_context.clone(),
+                        params.info,
                         stream_source_core,
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        params.executor_id,
                         source_ctrl_opts,
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),
-                        schema.clone(),
-                        params.pk_indices.clone(),
+                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        params.executor_id,
                         source_ctrl_opts.clone(),
                         params.env.connector_params(),
                     )
@@ -147,13 +131,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else {
                     let source_exec = SourceExecutor::new(
                         params.actor_context.clone(),
-                        schema.clone(),
-                        params.pk_indices.clone(),
+                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        params.executor_id,
                         source_ctrl_opts.clone(),
                         params.env.connector_params(),
                     );
@@ -162,8 +144,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     if table_type.can_backfill()
                         && let Some(table_desc) = source_info.external_table.clone()
                     {
-                        let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
-                        let upstream_table_name = SchemaTableName::from_properties(&source.properties);
+                        let table_schema =
+                            Schema::new(table_desc.columns.iter().map(Into::into).collect());
+                        let upstream_table_name =
+                            SchemaTableName::from_properties(&source.properties);
                         let table_pk_indices = table_desc
                             .pk
                             .iter()
@@ -176,7 +160,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .collect_vec();
 
                         let table_reader = table_type
-                            .create_table_reader(source.properties.clone(), table_schema.clone())?;
+                            .create_table_reader(source.properties.clone(), table_schema.clone())
+                            .await?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
@@ -191,18 +176,19 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         let source_state_handler = SourceStateTableHandler::from_table_catalog(
                             source.state_table.as_ref().unwrap(),
                             store.clone(),
-                        ).await;
+                        )
+                        .await;
                         // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
+                            params.info.clone(),
                             external_table,
                             Box::new(source_exec),
                             (0..table_schema.len()).collect_vec(),
                             None,
-                            table_schema,
-                            params.pk_indices,
                             params.executor_stats,
-                            source_state_handler,
+                            None,
+                            Some(source_state_handler),
                             false,
                             source_ctrl_opts.chunk_size,
                         );
@@ -212,20 +198,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            let rate_limit = source.get_rate_limit().cloned().ok();
-            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+            let rate_limit = source.rate_limit.map(|x| x as _);
+            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
             Ok(SourceExecutor::<PanicStateStore>::new(
                 params.actor_context,
-                params.schema,
-                params.pk_indices,
+                params.info,
                 None,
                 params.executor_stats,
                 barrier_receiver,
                 system_params,
-                params.executor_id,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
                 params.env.connector_params(),

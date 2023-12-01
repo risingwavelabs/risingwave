@@ -86,6 +86,12 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    prometheus_selector: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -151,19 +157,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
     #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
-
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
 
     /// Enable heap profile dump when memory usage is high.
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
@@ -234,7 +227,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr,
+            advertise_addr: opts.advertise_addr.to_owned(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -249,6 +242,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
+                enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
+                enable_automatic_parallelism_control: config
+                    .meta
+                    .enable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -270,6 +267,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
@@ -299,6 +297,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                event_log_enabled: config.meta.event_log_enabled,
+                event_log_channel_max_size: config.meta.event_log_channel_max_size,
+                advertise_addr: opts.advertise_addr,
             },
             config.system.into_init_system_params(),
         )

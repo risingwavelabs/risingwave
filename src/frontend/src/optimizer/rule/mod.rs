@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod over_window_merge_rule;
+pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
 pub use project_join_merge_rule::*;
 mod project_eliminate_rule;
@@ -128,7 +130,7 @@ pub use apply_project_set_transpose_rule::*;
 mod cross_join_eliminate_rule;
 pub use cross_join_eliminate_rule::*;
 mod table_function_to_project_set_rule;
-pub use cross_join_eliminate_rule::*;
+
 pub use table_function_to_project_set_rule::*;
 mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
@@ -151,6 +153,7 @@ pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
 mod values_extract_project_rule;
+pub use batch::batch_push_limit_to_scan_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -180,6 +183,7 @@ macro_rules! for_all_rules {
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
             , { OverWindowSplitRule }
+            , { OverWindowMergeRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -218,6 +222,7 @@ macro_rules! for_all_rules {
             , { ApplyHopWindowTransposeRule }
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
+            , { BatchPushLimitToScanRule }
         }
     };
 }

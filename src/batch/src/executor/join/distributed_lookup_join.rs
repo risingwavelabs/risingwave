@@ -18,7 +18,6 @@ use std::mem::swap;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
-use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
@@ -35,6 +34,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
+use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
@@ -380,9 +380,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                return Err(internal_error(format!(
-                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
-                )));
+                bail!("Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}");
             };
 
             scan_range.eq_conds.push(datum);
@@ -407,7 +405,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
 

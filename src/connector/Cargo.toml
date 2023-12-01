@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0dev/resolved_schema", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16ce813a225af04ade35b3b8117b137a29", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -32,6 +32,8 @@ aws-credential-types = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
+aws-smithy-runtime-api = { workspace = true }
+aws-smithy-types = { workspace = true }
 aws-types = { workspace = true }
 base64 = "0.21"
 byteorder = "1"
@@ -51,7 +53,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.20"
+google-cloud-pubsub = "0.21"
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
@@ -63,15 +65,15 @@ hyper = { version = "0.14", features = [
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
-itertools = "0.11"
+itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
-mysql_async = { version = "0.32", default-features = false, features = [
+mysql_async = { version = "0.33", default-features = false, features = [
     "default",
 ] }
-mysql_common = { version = "0.30", default-features = false, features = [
+mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
@@ -154,6 +156,7 @@ walkdir = "2"
 
 [build-dependencies]
 prost-build = "0.12"
+protobuf-src = "1"
 
 [[bench]]
 name = "parser"

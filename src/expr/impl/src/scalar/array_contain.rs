@@ -35,19 +35,25 @@ use risingwave_expr::function;
 /// f
 ///
 /// query I
-/// select array[1,2,3] @> NULL;
+/// select array[[[1,2],[3,4]],[[5,6],[7,8]]] @> array[2,3];
+/// ----
+/// t
+///
+/// query I
+/// select array[1,2,3] @> null;
 /// ----
 /// NULL
 ///
 /// query I
-/// select NULL @> array[3,4];
+/// select null @> array[3,4];
 /// ----
 /// NULL
 /// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
-    let set: HashSet<_> = left.iter().collect();
-    right.iter().all(|item| set.contains(&item))
+    let flatten = left.flatten();
+    let set: HashSet<_> = flatten.iter().collect();
+    right.flatten().iter().all(|item| set.contains(&item))
 }
 
 #[function("array_contained(anyarray, anyarray) -> boolean")]
@@ -57,27 +63,19 @@ fn array_contained(left: ListRef<'_>, right: ListRef<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{ListValue, ScalarImpl};
+    use risingwave_common::types::{ListValue, Scalar};
 
     use super::*;
 
     #[test]
     fn test_contains() {
         assert!(array_contains(
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2)), Some(ScalarImpl::Int32(3))]),
-            },
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2))]),
-            }
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([2]).as_scalar_ref(),
         ));
         assert!(!array_contains(
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(2)), Some(ScalarImpl::Int32(3))]),
-            },
-            ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(ScalarImpl::Int32(5))]),
-            }
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([5]).as_scalar_ref(),
         ));
     }
 }

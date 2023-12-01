@@ -13,3 +13,13 @@
   formatted_sql: SET TIME ZONE UTC
 - input: set time = '1';
   formatted_sql: SET time = '1'
+- input: set search_path to 'default', 'my_path';
+  formatted_sql: SET search_path = 'default', 'my_path'
+- input: set search_path to default, 'my_path';
+  error_msg: |-
+    sql parser error: Expected end of statement, found: , at line:1, column:28
+    Near "set search_path to default"
+- input: set search_path to 'my_path', default;
+  error_msg: |-
+    sql parser error: Expected parameter list value, found: default at line:1, column:36
+    Near "set search_path to 'my_path', default"

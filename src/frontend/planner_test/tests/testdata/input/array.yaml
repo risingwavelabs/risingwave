@@ -84,7 +84,7 @@
   expected_outputs:
   - batch_plan
 - sql: |
-    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+    select array_cat('{a}', '{"{b}"}') = array['a', '{b}'];
   name: array_cat(unknown as text[], unknown as text[]) -> text[]
   expected_outputs:
   - batch_plan
@@ -149,12 +149,20 @@
   sql: select array[1,2] @> array[2,3];
   expected_outputs:
   - logical_plan
+- name: array_contains(int[][], int[]) -> bool
+  sql: select array[[1,2]] @> array[2,3];
+  expected_outputs:
+  - logical_plan
 - name: array_contains(int[], int) -> bool
   sql: select array[1,2] @> 2;
   expected_outputs:
   - binder_error
 - name: array_contains(int[], varchar[]) -> bool
   sql: select array[2,3] @> array['1'];
+  expected_outputs:
+  - binder_error
+- name: array_contains(int[][], varchar[][]) -> bool
+  sql: select array[array[1,2]] @> array[array['2','3']];
   expected_outputs:
   - binder_error
 - name: any contains(null, null) -> bool

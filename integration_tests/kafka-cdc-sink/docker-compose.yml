@@ -55,6 +55,19 @@ services:
     restart: always
     container_name: postgres
 
+  prepare_postgres:
+    image: postgres
+    depends_on:
+      - postgres
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
+    volumes:
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
+    container_name: prepare_postgres
+    restart: on-failure
+
   mysql:
     image: mysql
     ports:
@@ -111,11 +124,11 @@ services:
     container_name: flink-sql-client
 
   connect:
-    image: debezium/connect:2.2
+    image: debezium/connect:2.4.0.Final
     build:
       context: debezium-jdbc
       args:
-        DEBEZIUM_VERSION: 2.2
+        DEBEZIUM_VERSION: 2.4.0.Final
     ports:
      - 8083:8083
      - 5005:5005

@@ -111,7 +111,7 @@ impl ProtobufParserConfig {
             let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
-            let url = url.get(0).unwrap();
+            let url = url.first().unwrap();
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
                 "file" => {
@@ -487,11 +487,12 @@ pub fn from_protobuf_value(
             }
         }
         Value::List(values) => {
-            let rw_values = values
-                .iter()
-                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool))
-                .collect::<Result<Vec<_>>>()?;
-            ScalarImpl::List(ListValue::new(rw_values))
+            let data_type = protobuf_type_mapping(field_desc, &mut vec![])?;
+            let mut builder = data_type.as_list().create_array_builder(values.len());
+            for value in values {
+                builder.append(from_protobuf_value(field_desc, value, descriptor_pool)?);
+            }
+            ScalarImpl::List(ListValue::new(builder.finish()))
         }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
@@ -580,7 +581,7 @@ mod test {
     use std::path::PathBuf;
 
     use prost::Message;
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::{DataType, ListValue, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -857,12 +858,7 @@ mod test {
         pb_eq(
             a,
             "repeated_int_field",
-            S::List(ListValue::new(
-                m.repeated_int_field
-                    .iter()
-                    .map(|&x| Some(x.into()))
-                    .collect(),
-            )),
+            S::List(ListValue::from_iter(m.repeated_int_field.clone())),
         );
         pb_eq(
             a,

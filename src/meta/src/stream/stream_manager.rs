@@ -29,10 +29,10 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::Locations;
+use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -69,6 +69,8 @@ pub struct CreateStreamingJobContext {
     pub mv_table_id: Option<u32>,
 
     pub create_type: CreateType,
+
+    pub ddl_type: DdlType,
 }
 
 impl CreateStreamingJobContext {
@@ -195,6 +197,8 @@ pub struct GlobalStreamManager {
     hummock_manager: HummockManagerRef,
 
     pub reschedule_lock: RwLock<()>,
+
+    pub(crate) scale_controller: ScaleControllerRef,
 }
 
 impl GlobalStreamManager {
@@ -206,6 +210,12 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            env.clone(),
+        ));
         Ok(Self {
             env,
             fragment_manager,
@@ -215,6 +225,7 @@ impl GlobalStreamManager {
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             reschedule_lock: RwLock::new(()),
+            scale_controller,
         })
     }
 
@@ -431,6 +442,7 @@ impl GlobalStreamManager {
             mv_table_id,
             internal_tables,
             create_type,
+            ddl_type,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
@@ -474,6 +486,7 @@ impl GlobalStreamManager {
                 dispatchers,
                 init_split_assignment,
                 definition: definition.to_string(),
+                ddl_type,
             })
             .await
         {
@@ -627,11 +640,11 @@ impl GlobalStreamManager {
                 Ok(_) => {
                     tracing::info!(?id, "cancelled recovered streaming job");
                     Some(id)
-                },
+                }
                 Err(_) => {
                     tracing::error!(?id, "failed to cancel recovered streaming job, does it correspond to any jobs in `SHOW JOBS`?");
                     None
-                },
+                }
             }
         });
         let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
@@ -833,6 +846,7 @@ mod tests {
                         is_serving: true,
                         is_unschedulable: false,
                     },
+                    Default::default(),
                 )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;

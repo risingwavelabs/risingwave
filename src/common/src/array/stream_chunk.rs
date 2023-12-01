@@ -174,6 +174,43 @@ impl StreamChunk {
         StreamChunk::new(new_ops, columns)
     }
 
+    /// Split the `StreamChunk` into multiple chunks with the given size at most.
+    ///
+    /// When the total cardinality of all the chunks is not evenly divided by the `size`,
+    /// the last new chunk will be the remainder.
+    ///
+    /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
+    /// As a result, some chunks may have `size + 1` rows.
+    pub fn split(&self, size: usize) -> Vec<Self> {
+        let data_types = self.data_types();
+        let mut rows = Vec::with_capacity(size + 1);
+        let mut results = vec![];
+
+        let mut iter = self.rows();
+        while let Some(row) = iter.next() {
+            rows.push(row);
+            if rows.len() == size {
+                // If the last row is UpdateDelete, also include the UpdateInsert.
+                if rows.last().unwrap().0 == Op::UpdateDelete {
+                    let next_row = iter
+                        .next()
+                        .expect("UpdateDelete should have UpdateInsert after");
+                    assert_eq!(next_row.0, Op::UpdateInsert);
+                    rows.push(next_row);
+                }
+                let chunk = Self::from_rows(&rows, &data_types);
+                results.push(chunk);
+                rows.clear();
+            }
+        }
+
+        if !rows.is_empty() {
+            let chunk = StreamChunk::from_rows(&rows, &data_types);
+            results.push(chunk);
+        }
+        results
+    }
+
     pub fn into_parts(self) -> (DataChunk, Arc<[Op]>) {
         (self.data, self.ops)
     }
@@ -731,6 +768,64 @@ mod tests {
 | U- | 3 | 7 |
 | U+ | 4 |   |
 +----+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_split_1() {
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+             - 2 .
+            U- 3 7
+            U+ 4 .",
+        );
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
+        assert_eq!(
+            results[0].to_pretty().to_string(),
+            "\
++---+---+---+
+| + | 1 | 6 |
+| - | 2 |   |
++---+---+---+"
+        );
+        assert_eq!(
+            results[1].to_pretty().to_string(),
+            "\
++----+---+---+
+| U- | 3 | 7 |
+| U+ | 4 |   |
++----+---+---+"
+        );
+    }
+
+    #[test]
+    fn test_split_2() {
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+            U- 3 7
+            U+ 4 .
+             - 2 .",
+        );
+        let results = chunk.split(2);
+        assert_eq!(2, results.len());
+        assert_eq!(
+            results[0].to_pretty().to_string(),
+            "\
++----+---+---+
+|  + | 1 | 6 |
+| U- | 3 | 7 |
+| U+ | 4 |   |
++----+---+---+"
+        );
+        assert_eq!(
+            results[1].to_pretty().to_string(),
+            "\
++---+---+---+
+| - | 2 |   |
++---+---+---+"
         );
     }
 }

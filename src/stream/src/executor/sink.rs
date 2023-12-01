@@ -33,18 +33,16 @@ use risingwave_connector::sink::{
 };
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Executor, Message, PkIndices};
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
+use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, Mutation};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
+    actor_context: ActorContextRef,
+    info: ExecutorInfo,
     input: BoxedExecutor,
     sink: SinkImpl,
-    identity: String,
-    pk_indices: PkIndices,
     input_columns: Vec<ColumnCatalog>,
-    input_schema: Schema,
     sink_param: SinkParam,
-    actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
     sink_writer_param: SinkWriterParam,
@@ -79,30 +77,30 @@ fn force_delete_only(c: StreamChunk) -> StreamChunk {
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        actor_context: ActorContextRef,
+        info: ExecutorInfo,
         input: BoxedExecutor,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
-        actor_context: ActorContextRef,
         log_store_factory: F,
-        pk_indices: PkIndices,
     ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
 
         let sink = build_sink(sink_param.clone())?;
-        let input_schema = columns
+        let input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
+        assert_eq!(input_schema.data_types(), info.schema.data_types());
+
         Ok(Self {
+            actor_context,
+            info,
             input,
             sink,
-            identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
-            pk_indices,
             input_columns: columns,
-            input_schema,
             sink_param,
-            actor_context,
             log_reader,
             log_writer,
             sink_writer_param,
@@ -110,7 +108,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     fn execute_inner(self) -> BoxedMessageStream {
-        let stream_key = self.pk_indices;
+        let stream_key = self.info.pk_indices.clone();
 
         let stream_key_sink_pk_mismatch = {
             stream_key
@@ -136,6 +134,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 self.input_columns,
                 self.sink_writer_param,
                 self.actor_context,
+                self.info,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
@@ -157,7 +156,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer.init(epoch_pair).await?;
+        log_writer
+            .init(epoch_pair, barrier.is_pause_on_startup())
+            .await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
@@ -238,6 +239,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
                         }
+
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
@@ -255,6 +265,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 match msg? {
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(chunk) => {
+                        actor_context
+                            .streaming_metrics
+                            .sink_input_row_count
+                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
+                            .inc_by(chunk.capacity() as u64);
+
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         let chunk = merge_chunk_row(chunk, &stream_key);
@@ -273,6 +289,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
@@ -293,9 +317,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
+        info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
-        let identity = format!("SinkExecutor {:X?}", sink_writer_param.executor_id);
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
@@ -330,7 +354,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
             GLOBAL_ERROR_METRICS.user_sink_error.report([
                 S::SINK_NAME.to_owned(),
-                identity,
+                info.identity,
                 err_str,
             ]);
             return Err(e.into());
@@ -345,15 +369,15 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.input_schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -400,11 +424,11 @@ mod test {
             .iter()
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
-        let pk = vec![0];
+        let pk_indices = vec![0];
 
         let mock = MockSource::with_messages(
-            schema,
-            pk.clone(),
+            schema.clone(),
+            pk_indices.clone(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
@@ -433,21 +457,27 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk.clone(),
+            downstream_pk: pk_indices.clone(),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "SinkExecutor".to_string(),
+        };
+
         let sink_executor = SinkExecutor::new(
+            ActorContext::create(0),
+            info,
             Box::new(mock),
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
-            ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
-            pk,
         )
         .await
         .unwrap();
@@ -520,7 +550,7 @@ mod test {
             .collect();
 
         let mock = MockSource::with_messages(
-            schema,
+            schema.clone(),
             vec![0, 1],
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
@@ -561,14 +591,20 @@ mod test {
             sink_from_name: "test".into(),
         };
 
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![0, 1],
+            identity: "SinkExecutor".to_string(),
+        };
+
         let sink_executor = SinkExecutor::new(
+            ActorContext::create(0),
+            info,
             Box::new(mock),
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
-            ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
-            vec![0, 1],
         )
         .await
         .unwrap();
@@ -652,11 +688,11 @@ mod test {
             .iter()
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
-        let pk = vec![0];
+        let pk_indices = vec![0];
 
         let mock = MockSource::with_messages(
-            schema,
-            pk.clone(),
+            schema.clone(),
+            pk_indices.clone(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Barrier(Barrier::new_test_barrier(2)),
@@ -672,21 +708,27 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk.clone(),
+            downstream_pk: pk_indices.clone(),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "SinkExecutor".to_string(),
+        };
+
         let sink_executor = SinkExecutor::new(
+            ActorContext::create(0),
+            info,
             Box::new(mock),
             SinkWriterParam::for_test(),
             sink_param,
             columns,
-            ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
-            pk,
         )
         .await
         .unwrap();
