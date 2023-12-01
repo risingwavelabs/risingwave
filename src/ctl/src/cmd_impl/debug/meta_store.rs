@@ -20,6 +20,7 @@ use risingwave_meta::model::{MetadataModel, TableFragments, Worker};
 use risingwave_meta::storage::meta_store::MetaStore;
 use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
 use risingwave_meta::{ElectionClient, ElectionMember, EtcdElectionClient};
+use risingwave_pb::catalog;
 use risingwave_pb::user::UserInfo;
 use serde_yaml::Value;
 
@@ -60,6 +61,24 @@ enum Item {
     User(UserInfo),
     Table(TableFragments),
     MetaMember(ElectionMember),
+    SourceCatalog(catalog::Source),
+    SinkCatalog(catalog::Sink),
+    IndexCatalog(catalog::Index),
+    FunctionCatalog(catalog::Function),
+    ViewCatalog(catalog::View),
+    ConnectionCatalog(catalog::Connection),
+    DatabaseCatalog(catalog::Database),
+    SchemaCatalog(catalog::Schema),
+    TableCatalog(catalog::Table),
+}
+
+macro_rules! generate_list_branches_for_catalog {
+    ($kind:expr, $catalog:ident, $snapshot:expr, $items:ident) => {
+        catalog::$catalog::list_at_snapshot::<EtcdMetaStore>($snapshot)
+            .await?
+            .into_iter()
+            .for_each(|item| $items.push($kind(item)))
+    };
 }
 
 pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
@@ -129,6 +148,48 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
                         items.push(Item::MetaMember(member));
                     });
             }
+            DebugCommonKind::SourceCatalog => {
+                generate_list_branches_for_catalog!(Item::SourceCatalog, Source, &snapshot, items)
+            }
+            DebugCommonKind::SinkCatalog => {
+                generate_list_branches_for_catalog!(Item::SinkCatalog, Sink, &snapshot, items)
+            }
+            DebugCommonKind::IndexCatalog => {
+                generate_list_branches_for_catalog!(Item::IndexCatalog, Index, &snapshot, items)
+            }
+            DebugCommonKind::FunctionCatalog => {
+                generate_list_branches_for_catalog!(
+                    Item::FunctionCatalog,
+                    Function,
+                    &snapshot,
+                    items
+                )
+            }
+            DebugCommonKind::ViewCatalog => {
+                generate_list_branches_for_catalog!(Item::ViewCatalog, View, &snapshot, items)
+            }
+            DebugCommonKind::ConnectionCatalog => {
+                generate_list_branches_for_catalog!(
+                    Item::ConnectionCatalog,
+                    Connection,
+                    &snapshot,
+                    items
+                )
+            }
+            DebugCommonKind::DatabaseCatalog => {
+                generate_list_branches_for_catalog!(
+                    Item::DatabaseCatalog,
+                    Database,
+                    &snapshot,
+                    items
+                )
+            }
+            DebugCommonKind::SchemaCatalog => {
+                generate_list_branches_for_catalog!(Item::SchemaCatalog, Schema, &snapshot, items)
+            }
+            DebugCommonKind::TableCatalog => {
+                generate_list_branches_for_catalog!(Item::TableCatalog, Table, &snapshot, items)
+            }
         };
     }
 
@@ -145,6 +206,17 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
                     Item::MetaMember(member) => {
                         yaml_arm!("meta_member", member)
                     }
+                    Item::SourceCatalog(catalog) => {
+                        yaml_arm!("source_catalog", catalog)
+                    }
+                    Item::SinkCatalog(catalog) => yaml_arm!("sink_catalog", catalog),
+                    Item::IndexCatalog(catalog) => yaml_arm!("index_catalog", catalog),
+                    Item::FunctionCatalog(catalog) => yaml_arm!("function_catalog", catalog),
+                    Item::ViewCatalog(catalog) => yaml_arm!("view_catalog", catalog),
+                    Item::ConnectionCatalog(catalog) => yaml_arm!("connection_catalog", catalog),
+                    Item::DatabaseCatalog(catalog) => yaml_arm!("database_catalog", catalog),
+                    Item::SchemaCatalog(catalog) => yaml_arm!("schema_catalog", catalog),
+                    Item::TableCatalog(catalog) => yaml_arm!("table_catalog", catalog),
                 });
             }
             serde_yaml::to_writer(writer, &seq).unwrap();
@@ -159,6 +231,15 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
                     Item::MetaMember(member) => {
                         json_arm!("meta_member", member)
                     }
+                    Item::SourceCatalog(catalog) => json_arm!("source_catalog", catalog),
+                    Item::SinkCatalog(catalog) => json_arm!("sink_catalog", catalog),
+                    Item::IndexCatalog(catalog) => json_arm!("index_catalog", catalog),
+                    Item::FunctionCatalog(catalog) => json_arm!("function_catalog", catalog),
+                    Item::ViewCatalog(catalog) => json_arm!("view_catalog", catalog),
+                    Item::ConnectionCatalog(catalog) => json_arm!("connection_catalog", catalog),
+                    Item::DatabaseCatalog(catalog) => json_arm!("database_catalog", catalog),
+                    Item::SchemaCatalog(catalog) => json_arm!("schema_catalog", catalog),
+                    Item::TableCatalog(catalog) => json_arm!("table_catalog", catalog),
                 });
             }
             serde_json::to_writer_pretty(writer, &seq).unwrap();
