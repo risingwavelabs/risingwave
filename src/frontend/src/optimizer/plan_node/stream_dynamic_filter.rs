@@ -18,17 +18,19 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::{DynamicFilter, GenericPlanRef};
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
 }
@@ -139,3 +141,5 @@ impl StreamNode for StreamDynamicFilter {
 }
 
 impl ExprRewritable for StreamDynamicFilter {}
+
+impl ExprVisitable for StreamDynamicFilter {}

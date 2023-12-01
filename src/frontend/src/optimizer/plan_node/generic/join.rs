@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
@@ -51,6 +51,10 @@ impl<PlanRef> Join<PlanRef> {
         self.on = self.on.clone().rewrite_expr(r);
     }
 
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v);
+    }
+
     pub fn new(
         left: PlanRef,
         right: PlanRef,
@@ -70,10 +74,10 @@ impl<PlanRef> Join<PlanRef> {
     }
 }
 
-impl<PlanRef: stream::StreamPlanRef> Join<PlanRef> {
+impl<I: stream::StreamPlanRef> Join<I> {
     /// Return stream hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        input: &PlanRef,
+        input: I,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
@@ -431,7 +435,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::with_target_size(
+        ColIndexMapping::new(
             self.output_indices.iter().map(|x| Some(*x)).collect(),
             self.internal_column_num(),
         )

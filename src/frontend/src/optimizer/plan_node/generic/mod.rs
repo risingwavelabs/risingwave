@@ -42,6 +42,12 @@ mod source;
 pub use source::*;
 mod scan;
 pub use scan::*;
+mod sys_scan;
+pub use sys_scan::*;
+
+mod cdc_scan;
+pub use cdc_scan::*;
+
 mod union;
 pub use union::*;
 mod top_n;
@@ -84,6 +90,7 @@ macro_rules! impl_distill_unit_from_fields {
 }
 pub(super) use impl_distill_unit_from_fields;
 
+#[auto_impl::auto_impl(&)]
 pub trait GenericPlanRef: Eq + Hash {
     fn id(&self) -> PlanNodeId;
     fn schema(&self) -> &Schema;
@@ -92,6 +99,7 @@ pub trait GenericPlanRef: Eq + Hash {
     fn ctx(&self) -> OptimizerContextRef;
 }
 
+#[auto_impl::auto_impl(&)]
 pub trait PhysicalPlanRef: GenericPlanRef {
     fn distribution(&self) -> &Distribution;
 }

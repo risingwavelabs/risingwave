@@ -24,11 +24,12 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    StreamValues, ToBatch, ToStream,
+    BatchValues, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
+    PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -38,7 +39,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     rows: Arc<[Vec<ExprImpl>]>,
 }
 
@@ -131,6 +132,12 @@ impl ExprRewritable for LogicalValues {
             .into();
         new.base = new.base.clone_with_new_plan_id();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.rows.iter().flatten().for_each(|e| v.visit_expr(e));
     }
 }
 

@@ -170,10 +170,7 @@ fn bench_expr(c: &mut Criterion) {
             // 25: serial array
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
-            JsonbArray::from_iter(
-                (1..=CHUNK_SIZE).map(|i| JsonbVal::from(serde_json::Value::Number(i.into()))),
-            )
-            .into_ref(),
+            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as f64))).into_ref(),
             // 27: int256 array
             Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
             // 28: extract field for interval
@@ -279,16 +276,16 @@ fn bench_expr(c: &mut Criterion) {
     'sig: for sig in sigs {
         if (sig.inputs_type.iter())
             .chain([&sig.ret_type])
-            .any(|t| !t.is_exact())
+            .any(|t| !t.is_exact() || t.as_exact().is_array())
         {
-            // TODO: support struct and list
+            // TODO: support struct and array
             println!("todo: {sig:?}");
             continue;
         }
         if [
-            "date_trunc(varchar, timestamptz) -> timestamptz",
-            "to_timestamp1(varchar, varchar) -> timestamptz",
-            "to_char(timestamptz, varchar) -> varchar",
+            "date_trunc(character varying, timestamp with time zone) -> timestamp with time zone",
+            "to_timestamp1(character varying, character varying) -> timestamp with time zone",
+            "to_char(timestamp with time zone, character varying) -> character varying",
         ]
         .contains(&format!("{sig:?}").as_str())
         {
@@ -357,6 +354,11 @@ fn bench_expr(c: &mut Criterion) {
         });
     }
 
+    c.bench_function("cast(character varying) -> int8[]", |bencher| {
+        let expr = build_from_pretty(r#"(cast:int8[] {1,"2"}:varchar)"#);
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
+    });
+
     let sigs = FUNCTION_REGISTRY
         .iter_aggregates()
         .sorted_by_cached_key(|sig| format!("{sig:?}"));
@@ -376,6 +378,13 @@ fn bench_expr(c: &mut Criterion) {
             args: match sig.inputs_type.as_slice() {
                 [] => AggArgs::None,
                 [t] => AggArgs::Unary(t.as_exact().clone(), input_index_for_type(t.as_exact())),
+                [t1, t2] => AggArgs::Binary(
+                    [t1.as_exact().clone(), t2.as_exact().clone()],
+                    [
+                        input_index_for_type(t1.as_exact()),
+                        input_index_for_type(t2.as_exact()),
+                    ],
+                ),
                 _ => {
                     println!("todo: {sig:?}");
                     continue;
@@ -392,6 +401,15 @@ fn bench_expr(c: &mut Criterion) {
                 println!("error: {e}");
                 continue;
             }
+        };
+        let input = match sig.inputs_type.as_slice() {
+            [] => input.project(&[]),
+            [t] => input.project(&[input_index_for_type(t.as_exact())]),
+            [t1, t2] => input.project(&[
+                input_index_for_type(t1.as_exact()),
+                input_index_for_type(t2.as_exact()),
+            ]),
+            _ => unreachable!(),
         };
         c.bench_function(&format!("{sig:?}"), |bencher| {
             bencher

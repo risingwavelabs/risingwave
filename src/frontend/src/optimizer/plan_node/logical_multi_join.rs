@@ -23,11 +23,12 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -46,7 +47,7 @@ use crate::utils::{
 /// expressed as 2-way `LogicalJoin`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
@@ -87,7 +88,7 @@ impl LogicalMultiJoinBuilder {
     /// add a predicate above the plan, so they will be rewritten from the `output_indices` to the
     /// input indices
     pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
-        let mut mapping = ColIndexMapping::with_target_size(
+        let mut mapping = ColIndexMapping::new(
             self.output_indices.iter().map(|i| Some(*i)).collect(),
             self.tot_input_col_num,
         );
@@ -240,7 +241,7 @@ impl LogicalMultiJoin {
 
             i2o_maps
                 .into_iter()
-                .map(|map| ColIndexMapping::with_target_size(map, tot_col_num))
+                .map(|map| ColIndexMapping::new(map, tot_col_num))
                 .collect_vec()
         };
 
@@ -832,6 +833,15 @@ impl ColPrunable for LogicalMultiJoin {
 
 impl ExprRewritable for LogicalMultiJoin {
     fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl ExprVisitable for LogicalMultiJoin {
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

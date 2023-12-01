@@ -19,7 +19,7 @@ use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
@@ -137,14 +137,14 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
 
 impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (TableKey<Bytes>, (HummockEpoch, HummockValue<Bytes>)) {
+    pub fn current_item(&self) -> (TableKey<Bytes>, (EpochWithGap, HummockValue<Bytes>)) {
         let item = self
             .heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
             .current_item();
-        (item.0.clone(), item.1.clone())
+        (item.0.clone(), (item.1 .0, item.1 .1.clone()))
     }
 }
 
@@ -211,10 +211,7 @@ where
 /// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
 /// extract this trait.
 trait MergeIteratorNext {
-    type HummockResultFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
+    fn next_inner(&mut self) -> impl Future<Output = HummockResult<()>> + Send + '_;
 }
 
 /// This is a wrapper for the `PeekMut` of heap.
@@ -286,105 +283,93 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let top_key = {
-                let top_key = self.heap.peek().expect("no inner iter").iter.key();
-                self.last_table_key.clear();
-                self.last_table_key
-                    .extend_from_slice(top_key.user_key.table_key.0);
-                FullKey {
-                    user_key: UserKey {
-                        table_id: top_key.user_key.table_id,
-                        table_key: TableKey(self.last_table_key.as_slice()),
-                    },
-                    epoch: top_key.epoch,
-                }
+    async fn next_inner(&mut self) -> HummockResult<()> {
+        let top_key = {
+            let top_key = self.heap.peek().expect("no inner iter").iter.key();
+            self.last_table_key.clear();
+            self.last_table_key
+                .extend_from_slice(top_key.user_key.table_key.0);
+            FullKey {
+                user_key: UserKey {
+                    table_id: top_key.user_key.table_id,
+                    table_key: TableKey(self.last_table_key.as_slice()),
+                },
+                epoch_with_gap: top_key.epoch_with_gap,
+            }
+        };
+        loop {
+            let Some(mut node) = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters)
+            else {
+                break;
             };
-            loop {
-                let Some(mut node) = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters)
-                else {
-                    break;
-                };
-                // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places
-                // of return. Once the iterator enters an invalid state, we should
-                // remove it from heap before returning.
+            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places
+            // of return. Once the iterator enters an invalid state, we should
+            // remove it from heap before returning.
 
-                if node.iter.key() == top_key {
-                    if let Err(e) = node.iter.next().await {
-                        node.pop();
-                        self.heap.clear();
-                        return Err(e);
-                    };
-                    if !node.iter.is_valid() {
-                        let node = node.pop();
-                        self.unused_iters.push_back(node);
-                    } else {
-                        node.used();
-                    }
+            if node.iter.key() == top_key {
+                if let Err(e) = node.iter.next().await {
+                    node.pop();
+                    self.heap.clear();
+                    return Err(e);
+                };
+                if !node.iter.is_valid() {
+                    let node = node.pop();
+                    self.unused_iters.push_back(node);
                 } else {
                     node.used();
-                    break;
                 }
+            } else {
+                node.used();
+                break;
             }
-
-            Ok(())
         }
+
+        Ok(())
     }
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    async fn next_inner(&mut self) -> HummockResult<()> {
+        let mut node =
+            PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters).expect("no inner iter");
 
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let mut node = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters)
-                .expect("no inner iter");
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
 
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-
-            match node.iter.next().await {
-                Ok(_) => {}
-                Err(e) => {
-                    // If the iterator returns error, we should clear the heap, so that this
-                    // iterator becomes invalid.
-                    node.pop();
-                    self.heap.clear();
-                    return Err(e);
-                }
+        match node.iter.next().await {
+            Ok(_) => {}
+            Err(e) => {
+                // If the iterator returns error, we should clear the heap, so that this
+                // iterator becomes invalid.
+                node.pop();
+                self.heap.clear();
+                return Err(e);
             }
-
-            if !node.iter.is_valid() {
-                // Put back to `unused_iters`
-                let node = node.pop();
-                self.unused_iters.push_back(node);
-            } else {
-                // This will update the heap top.
-                node.used();
-            }
-
-            Ok(())
         }
+
+        if !node.iter.is_valid() {
+            // Put back to `unused_iters`
+            let node = node.pop();
+            self.unused_iters.push_back(node);
+        } else {
+            // This will update the heap top.
+            node.used();
+        }
+
+        Ok(())
     }
 }
 
 impl<I: HummockIterator, NE: NodeExtraOrderInfo> HummockIterator for MergeIteratorInner<I, NE>
 where
-    Self: MergeIteratorNext + 'static,
+    Self: MergeIteratorNext,
     Node<I, NE>: Ord,
 {
     type Direction = I::Direction;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        self.next_inner()
+    async fn next(&mut self) -> HummockResult<()> {
+        self.next_inner().await
     }
 
     fn key(&self) -> FullKey<&[u8]> {
@@ -399,24 +384,20 @@ where
         self.heap.peek().map_or(false, |n| n.iter.is_valid())
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.reset_heap();
-            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.rewind()))
-                .await?;
-            self.build_heap();
-            Ok(())
-        }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.reset_heap();
+        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.rewind()))
+            .await?;
+        self.build_heap();
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            self.reset_heap();
-            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
-                .await?;
-            self.build_heap();
-            Ok(())
-        }
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.reset_heap();
+        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
+            .await?;
+        self.build_heap();
+        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

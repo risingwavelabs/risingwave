@@ -17,17 +17,18 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
-use super::generic::{self, GenericPlanNode, GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::generic::GenericPlanNode;
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDedup {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Dedup<PlanRef>,
 }
 
@@ -104,3 +105,5 @@ impl StreamNode for StreamDedup {
 }
 
 impl ExprRewritable for StreamDedup {}
+
+impl ExprVisitable for StreamDedup {}

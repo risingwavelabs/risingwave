@@ -18,12 +18,13 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::generic::GenericPlanRef;
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -31,7 +32,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Project<PlanRef>,
 }
 
@@ -112,5 +113,11 @@ impl ExprRewritable for BatchProject {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchProject {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

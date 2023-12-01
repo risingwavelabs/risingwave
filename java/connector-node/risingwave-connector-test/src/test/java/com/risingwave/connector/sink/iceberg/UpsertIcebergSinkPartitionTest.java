@@ -18,7 +18,6 @@ import static com.risingwave.proto.Data.*;
 import static org.junit.Assert.*;
 import static org.junit.Assert.assertEquals;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.risingwave.connector.IcebergSinkCoordinator;
@@ -131,7 +130,7 @@ public class UpsertIcebergSinkPartitionTest {
 
         try {
             sink.beginEpoch(233);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
+            sink.write(Collections.singletonList(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
             ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
             coordinator.commit(233, Collections.singletonList(metadata));
 
@@ -144,7 +143,7 @@ public class UpsertIcebergSinkPartitionTest {
             validateTableWithSpark(expected);
 
             sink.beginEpoch(234);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
+            sink.write(Collections.singletonList((new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb"))));
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
@@ -180,7 +179,7 @@ public class UpsertIcebergSinkPartitionTest {
         try {
             sink.beginEpoch(233);
             sink.write(
-                    Iterators.forArray(
+                    Arrays.asList(
                             new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa"),
                             new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb"),
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice", "aaa"),
@@ -199,7 +198,7 @@ public class UpsertIcebergSinkPartitionTest {
 
             sink.beginEpoch(234);
             sink.write(
-                    Iterators.forArray(
+                    Arrays.asList(
                             new ArraySinkRow(Op.UPDATE_DELETE, 1, "Clare", "ccc"),
                             new ArraySinkRow(Op.UPDATE_INSERT, 1, "Alice", "aaa"),
                             new ArraySinkRow(Op.DELETE, 1, "Alice", "aaa")));

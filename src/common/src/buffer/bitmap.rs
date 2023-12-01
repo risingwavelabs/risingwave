@@ -44,7 +44,7 @@ use risingwave_pb::common::PbBuffer;
 
 use crate::estimate_size::EstimateSize;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, EstimateSize)]
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<usize>,
@@ -977,7 +977,7 @@ mod tests {
             body: bitmap_bytes,
             compression: CompressionType::None as _,
         };
-        let bitmap: Bitmap = (&buf).try_into().unwrap();
+        let bitmap: Bitmap = (&buf).into();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
 
         assert_eq!(actual_bytes, vec![0, 1, 0, 0, 1, 0, 1, 0, /*  */ 0, 1, 1]); // in reverse order

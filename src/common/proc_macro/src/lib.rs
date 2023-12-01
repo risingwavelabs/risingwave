@@ -24,6 +24,7 @@ use syn::parse_macro_input;
 
 mod config;
 mod estimate_size;
+mod session_config;
 
 /// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
 /// implementation of overwriting configs from the file.
@@ -190,7 +191,11 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
                 let gen = quote! {
-                    impl EstimateSize for #name {}
+                    impl EstimateSize for #name {
+                        fn estimated_heap_size(&self) -> usize {
+                            0
+                        }
+                    }
                 };
                 return gen.into();
             }
@@ -242,4 +247,19 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             gen.into()
         }
     }
+}
+
+/// To add a new parameter, you can add a field with `#[parameter]` in the struct
+/// A default value is required by setting the `default` option.
+/// The field name will be the parameter name. You can overwrite the parameter name by setting the `rename` option.
+/// To check the input parameter, you can use `check_hook` option.
+///
+/// `flags` options include
+/// - `SETTER`: to manually write a `set_your_parameter_name` function, in which you should call `set_your_parameter_name_inner`.
+/// - `REPORT`: to report the parameter through `ConfigReporter`
+#[proc_macro_derive(SessionConfig, attributes(parameter))]
+#[proc_macro_error]
+pub fn session_config(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input);
+    session_config::derive_config(input).into()
 }

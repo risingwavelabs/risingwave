@@ -38,8 +38,10 @@ use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -50,7 +52,7 @@ const DOWNSTREAM_PK_KEY: &str = "primary_key";
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
 }
@@ -58,7 +60,11 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        let base = input.plan_base().clone_with_new_plan_id();
+        let base = input
+            .plan_base()
+            .into_stream()
+            .expect("input should be stream plan")
+            .clone_with_new_plan_id();
         Self {
             base,
             input,
@@ -164,7 +170,19 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
+                        if downstream_pk.is_empty() {
+                            RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                input.expect_stream_key(),
+                            )
+                        } else {
+                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
+                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
+                            RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                downstream_pk.as_slice(),
+                            )
+                        }
                     }
                 }
             }
@@ -233,14 +251,16 @@ impl StreamSink {
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-        let (user_defined_append_only, user_force_append_only) = match format_desc {
+        let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
                 Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                false,
             ),
             None => (
                 Self::is_user_defined_append_only(properties)?,
                 Self::is_user_force_append_only(properties)?,
+                true,
             ),
         };
 
@@ -255,14 +275,14 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
+                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy {"WITH"} else {"FORMAT ENCODE"}),
                 )))
                 .into())
             }
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"FORMAT PLAIN\" or \"type='append-only'\".",
+                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy {"type='append-only'"} else {"FORMAT PLAIN"}),
                 )))
                 .into())
             }
@@ -410,7 +430,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx().session_ctx().config().get_sink_decouple() {
+            log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
                 SinkDecouple::Default => {
                     let enable_sink_decouple =
                         match_sink_name_str!(
@@ -437,3 +457,5 @@ impl StreamNode for StreamSink {
 }
 
 impl ExprRewritable for StreamSink {}
+
+impl ExprVisitable for StreamSink {}

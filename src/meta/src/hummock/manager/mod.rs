@@ -29,6 +29,7 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
@@ -193,7 +194,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::{parse_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -249,6 +250,34 @@ pub enum CompactionResumeTrigger {
     CompactorAddition { context_id: HummockContextId },
     /// A compaction task is reported when all compactors are not idle.
     TaskReport { original_task_num: usize },
+}
+
+pub struct CommitEpochInfo {
+    pub sstables: Vec<ExtendedSstableInfo>,
+    pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+}
+
+impl CommitEpochInfo {
+    pub fn new(
+        sstables: Vec<ExtendedSstableInfo>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self {
+            sstables,
+            sst_to_context,
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub(crate) fn for_test(
+        sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self::new(
+            sstables.into_iter().map(Into::into).collect(),
+            sst_to_context,
+        )
+    }
 }
 
 impl HummockManager {
@@ -330,10 +359,11 @@ impl HummockManager {
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
-            parse_remote_object_store(
+            build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
+                ObjectStoreConfig::default(),
             )
             .await,
         );
@@ -352,8 +382,9 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
-                if is_bucket_expiration_configured{
+                let is_bucket_expiration_configured =
+                    s3.inner().configure_bucket_lifecycle(state_store_dir).await;
+                if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
                     .into());
@@ -556,7 +587,7 @@ impl HummockManager {
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
-        tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
     }
@@ -628,7 +659,7 @@ impl HummockManager {
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
-    /// this `context_id` so they will not be vacummed.
+    /// this `context_id` so they will not be vacuumed.
     #[named]
     pub async fn unpin_version_before(
         &self,
@@ -645,6 +676,12 @@ impl HummockManager {
                 context_id,
                 min_pinned_id: 0,
             },
+        );
+        assert!(
+            context_pinned_version.min_pinned_id <= unpin_before,
+            "val must be monotonically non-decreasing. old = {}, new = {}.",
+            context_pinned_version.min_pinned_id,
+            unpin_before
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(
@@ -1402,10 +1439,12 @@ impl HummockManager {
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<impl Into<ExtendedSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        commit_info: CommitEpochInfo,
     ) -> Result<Option<HummockSnapshot>> {
-        let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
+        let CommitEpochInfo {
+            mut sstables,
+            sst_to_context,
+        } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -2748,9 +2787,10 @@ impl HummockManager {
                                 // TODO: task cancellation can be batched
                                 for task in cancel_tasks {
                                     tracing::info!(
-                                        "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                        task.compaction_group_id,
+                                        task.task_id,
                                         context_id,
-                                        task.task_id
                                     );
 
                                     if let Err(e) =

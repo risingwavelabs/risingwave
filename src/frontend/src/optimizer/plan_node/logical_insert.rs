@@ -19,11 +19,12 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -35,7 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Insert<PlanRef>,
 }
 
@@ -129,6 +130,15 @@ impl ExprRewritable for LogicalInsert {
             .map(|(c, e)| (c, r.rewrite_expr(e)))
             .collect();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalInsert {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
     }
 }
 

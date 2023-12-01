@@ -17,10 +17,10 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::batch::BatchPlanRef;
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
@@ -28,7 +28,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order, Order
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     input: PlanRef,
 }
 
@@ -101,3 +101,5 @@ impl ToLocalBatch for BatchExchange {
 }
 
 impl ExprRewritable for BatchExchange {}
+
+impl ExprVisitable for BatchExchange {}

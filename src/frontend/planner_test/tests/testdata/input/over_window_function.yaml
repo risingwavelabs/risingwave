@@ -183,12 +183,12 @@
 - id: multiple rank function calls
   sql: |
     create table t(x int);
-    select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
+    select row_number() over(PARTITION BY x ORDER BY x), rank() over(PARTITION BY x ORDER BY x), dense_rank() over (PARTITION BY x ORDER BY x) from t;
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 - id: row_number with valid over clause
   sql: |
     create table t(x int, y int);
@@ -251,8 +251,8 @@
     -- OFFSET for RANK() is not yet supported
   expected_outputs:
     - logical_plan
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 # >>> TopN by row_number, with offset
 - sql: |
     create table t(x int, y int);
@@ -370,6 +370,24 @@
     - optimized_logical_plan_for_stream
     - stream_plan
     - batch_plan
+- id: TopN among multiple window function calls, some not TopN
+  sql: |
+    create table t (x int, y int, z int);
+    select r2, r3
+    from (
+      select
+        *,
+        row_number() over (partition by x order by y) r1,
+        row_number() over (partition by x, y order by z) r2,
+        rank() over (partition by x, y order by z) r3
+      from t
+    ) Q
+    where Q.r1 < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
 
 # TopN on nexmark schema
 - id: create_bid
@@ -471,6 +489,22 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
+    - stream_plan
     - optimized_logical_plan_for_batch
-    - batch_error
+    - batch_plan
+
+# With filter
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select * from (select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t) as with_prev
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch

@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, Error, TrackingIssue};
+use risingwave_common::error::{BoxedError, Error, NotImplemented};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -49,25 +49,45 @@ enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
     #[error("Chunk operation error: {0}")]
-    ArrayError(#[source] ArrayError),
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Chunk operation error: {0}")]
-    ExprError(#[source] ExprError),
+    ExprError(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     // TODO: remove this after state table is fully used
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(#[source] BoxedError),
+    SerdeError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Sink error: {0}")]
-    SinkError(#[source] SinkError),
+    SinkError(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
-    #[error("RPC error: {0}")]
-    RpcError(#[source] RpcError),
+    #[error(transparent)]
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
@@ -76,16 +96,28 @@ enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(#[source] BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Dml error: {0}")]
-    DmlError(#[source] BoxedError),
-
-    #[error("Feature is not yet implemented: {0}, {1}")]
-    NotImplemented(String, TrackingIssue),
+    DmlError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    NotImplemented(#[from] NotImplemented),
+
+    #[error(transparent)]
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl StreamExecutorError {
@@ -103,10 +135,6 @@ impl StreamExecutorError {
 
     pub fn connector_error(error: impl Error) -> Self {
         ErrorKind::ConnectorError(error.into()).into()
-    }
-
-    pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
-        ErrorKind::NotImplemented(error.into(), issue.into()).into()
     }
 
     pub fn dml_error(error: impl Error) -> Self {

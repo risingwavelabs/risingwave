@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeSet, HashMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
@@ -62,10 +62,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
-        SstableObjectIdManager,
+        CachePolicy, CompressionAlgorithm, HummockStorage as GlobalHummockStorage, HummockStorage,
+        MemoryLimiter, SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -166,9 +165,9 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
-                local.seal_current_epoch(epochs[i + 1]);
+                local.seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test());
             } else {
-                local.seal_current_epoch(u64::MAX);
+                local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -185,11 +184,11 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_impl(
-        options: Arc<StorageOpts>,
+        storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
         CompactorContext {
-            storage_opts: options,
+            storage_opts,
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
@@ -250,6 +249,7 @@ pub(crate) mod tests {
                 WorkerType::ComputeNode,
                 HostAddress::default(),
                 Property::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -280,7 +280,7 @@ pub(crate) mod tests {
             let compaction_filter_flag = CompactionFilterFlag::TTL;
             compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.table_options = HashMap::from([(
+            compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
                     retention_seconds: 64,
@@ -549,7 +549,7 @@ pub(crate) mod tests {
                     .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(epoch + 1);
+            local.seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
@@ -734,8 +734,8 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             storage.flush(Vec::new()).await.unwrap();
-            storage.seal_current_epoch(next_epoch);
-            other.seal_current_epoch(next_epoch);
+            storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+            other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = global_storage
                 .seal_and_sync_epoch(epoch)
@@ -839,7 +839,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -925,7 +925,7 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(next_epoch);
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -952,7 +952,7 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         let retention_seconds_expire_second = 1;
-        compact_task.table_options = HashMap::from_iter([(
+        compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
                 retention_seconds: retention_seconds_expire_second,
@@ -1035,7 +1035,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1123,7 +1123,7 @@ pub(crate) mod tests {
                 .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(next_epoch);
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -1157,8 +1157,6 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // compact_task.table_options =
-        //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
         // 3. compact
@@ -1238,7 +1236,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1296,7 +1294,7 @@ pub(crate) mod tests {
             .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
             .await
             .unwrap();
-        local.seal_current_epoch(u64::MAX);
+        local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
 
@@ -1360,12 +1358,7 @@ pub(crate) mod tests {
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
 
-    async fn test_fast_compact_impl(
-        data1: Vec<KeyValue>,
-        data2: Vec<KeyValue>,
-        data3: Vec<KeyValue>,
-        data4: Vec<KeyValue>,
-    ) {
+    async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -1385,31 +1378,41 @@ pub(crate) mod tests {
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
-        let mut options = SstableBuilderOptions {
+        let options = SstableBuilderOptions {
             capacity,
             block_capacity: 2048,
             restart_interval: 16,
             bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
         };
-        let sst1 = gen_test_sstable_info(options.clone(), 1, data1, sstable_store.clone()).await;
-        let sst2 = gen_test_sstable_info(options.clone(), 2, data2, sstable_store.clone()).await;
-        options.compression_algorithm = CompressionAlgorithm::Lz4;
-        let sst3 = gen_test_sstable_info(options.clone(), 3, data3, sstable_store.clone()).await;
-        let sst4 = gen_test_sstable_info(options, 4, data4, sstable_store.clone()).await;
+        let capacity = options.capacity as u64;
+        let mut ssts = vec![];
+        for (idx, sst_input) in data.into_iter().enumerate() {
+            let sst = gen_test_sstable_info(
+                options.clone(),
+                (idx + 1) as u64,
+                sst_input,
+                sstable_store.clone(),
+            )
+            .await;
+            println!("generate ssts size: {}", sst.file_size);
+            ssts.push(sst);
+        }
         let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let select_file_count = ssts.len() / 2;
 
         let task = CompactTask {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
                     level_type: 1,
-                    table_infos: vec![sst1, sst2],
+                    table_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: 1,
-                    table_infos: vec![sst3, sst4],
+                    table_infos: ssts,
                 },
             ],
             existing_table_ids: vec![1],
@@ -1418,12 +1421,11 @@ pub(crate) mod tests {
             splits: vec![KeyRange::inf()],
             target_level: 6,
             base_level: 4,
-            target_file_size: capacity as u64,
+            target_file_size: capacity,
             compression_algorithm: 1,
             gc_delete_keys: true,
             ..Default::default()
         };
-        let deg = Arc::new(CompactionDeleteRanges::default());
         let multi_filter_key_extractor =
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
@@ -1432,7 +1434,7 @@ pub(crate) mod tests {
             compact_ctx.clone(),
             task.clone(),
             Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([5, 6, 7, 8, 9]),
+                VecDeque::from_iter([5, 6, 7, 8, 9, 10, 11, 12, 13]),
             )),
         );
         let fast_compact_runner = FastCompactorRunner::new(
@@ -1440,7 +1442,7 @@ pub(crate) mod tests {
             task.clone(),
             multi_filter_key_extractor.clone(),
             Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([10, 11, 12, 13, 14]),
+                VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
             )),
             Arc::new(TaskProgress::default()),
         );
@@ -1448,19 +1450,13 @@ pub(crate) mod tests {
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
-                deg,
                 Arc::new(TaskProgress::default()),
             )
             .await
             .unwrap();
         let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
-        let fast_ret = fast_compact_runner
-            .run()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|sst| sst.sst_info)
-            .collect_vec();
+        let (ssts, _) = fast_compact_runner.run().await.unwrap();
+        let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
         println!("ssts: {} vs {}", fast_ret.len(), ret.len());
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
@@ -1484,9 +1480,10 @@ pub(crate) mod tests {
                     .unwrap(),
             );
         }
+        assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
         println!(
-            "fast sstables {}.file size={}",
-            fast_ret[0].object_id, fast_ret[0].file_size,
+            "fast sstables file size: {:?}",
+            fast_ret.iter().map(|f| f.file_size).collect_vec(),
         );
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
@@ -1563,7 +1560,7 @@ pub(crate) mod tests {
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 3000, 400)
+                (last_k + 2000, 400)
             } else if rand_v < 5 {
                 (last_k, last_epoch - 1)
             } else {
@@ -1591,7 +1588,7 @@ pub(crate) mod tests {
         let max_epoch = std::cmp::min(300, last_epoch - 1);
         last_epoch = max_epoch;
 
-        for _ in 0..KEY_COUNT * 2 {
+        for _ in 0..KEY_COUNT * 4 {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
@@ -1611,6 +1608,41 @@ pub(crate) mod tests {
             last_epoch = epoch;
         }
         let data4 = data;
-        test_fast_compact_impl(data1, data2, data3, data4).await;
+        test_fast_compact_impl(vec![data1, data2, data3, data4]).await;
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_cut_file() {
+        const KEY_COUNT: usize = 20000;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
+        for start_idx in 0..3 {
+            let base = start_idx * KEY_COUNT;
+            for k in 0..KEY_COUNT / 3 {
+                let key = (k + base).to_be_bytes().to_vec();
+                let key = FullKey::new(TableId::new(1), TableKey(key), 400);
+                let rand_v = rng.next_u32() % 10;
+                let v = if rand_v == 1 {
+                    HummockValue::delete()
+                } else {
+                    HummockValue::put(format!("sst1-{}", 400).into_bytes())
+                };
+                data1.push((key, v));
+            }
+        }
+
+        let mut data2 = Vec::with_capacity(KEY_COUNT);
+        for k in 0..KEY_COUNT * 4 {
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), 300);
+            let v = HummockValue::put(format!("sst2-{}", 300).into_bytes());
+            data2.push((key, v));
+        }
+        test_fast_compact_impl(vec![data1, data2]).await;
     }
 }

@@ -27,13 +27,13 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::resource_util;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -87,18 +87,18 @@ pub async fn prepare_start_parameters(
         &system_params_reader,
         &storage_memory_config,
     )));
-    let total_memory_available_bytes =
-        (resource_util::memory::system_memory_available_bytes() as f64
-            * config.storage.compactor_memory_available_proportion) as usize;
+    let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
+        * config.storage.compactor_memory_available_proportion)
+        as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (total_memory_available_bytes - meta_cache_capacity_bytes) as u64,
+        None => (non_reserved_memory_bytes - meta_cache_capacity_bytes) as u64,
     };
 
     tracing::info!(
-        "Compactor total_memory_available_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
-        total_memory_available_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
+        "Compactor non_reserved_memory_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
+        non_reserved_memory_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
         storage_opts.sstable_size_mb * (1 << 20),
         storage_opts.block_size_kb * (1 << 10),
     );
@@ -114,20 +114,16 @@ pub async fn prepare_start_parameters(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store(
+    let object_store = build_remote_object_store(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
+        config.storage.object_store.clone(),
     )
     .await;
-    object_store.set_opts(
-        storage_opts.object_store_streaming_read_timeout_ms,
-        storage_opts.object_store_streaming_upload_timeout_ms,
-        storage_opts.object_store_read_timeout_ms,
-        storage_opts.object_store_upload_timeout_ms,
-    );
+
     let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
@@ -145,7 +141,7 @@ pub async fn prepare_start_parameters(
     ));
 
     let heap_profiler = HeapProfiler::new(
-        total_memory_available_bytes,
+        system_memory_available_bytes(),
         config.server.heap_profiling.clone(),
     );
 

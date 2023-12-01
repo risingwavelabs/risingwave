@@ -16,10 +16,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -27,7 +27,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     no_shuffle: bool,
 }
@@ -139,3 +139,5 @@ impl StreamNode for StreamExchange {
 }
 
 impl ExprRewritable for StreamExchange {}
+
+impl ExprVisitable for StreamExchange {}

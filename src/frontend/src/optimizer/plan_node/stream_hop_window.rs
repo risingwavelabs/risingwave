@@ -18,17 +18,19 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
@@ -145,5 +147,12 @@ impl ExprRewritable for StreamHopWindow {
                 .collect(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for StreamHopWindow {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.window_start_exprs.iter().for_each(|e| v.visit_expr(e));
+        self.window_end_exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

@@ -21,9 +21,11 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::{self, GenericPlanRef};
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
@@ -34,7 +36,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// inputs to be indexes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
@@ -206,5 +208,10 @@ impl ExprRewritable for StreamDeltaJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+impl ExprVisitable for StreamDeltaJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

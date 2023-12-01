@@ -80,6 +80,8 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::BitwiseAnd => debug_binary_op(f, "&", &self.inputs),
                 ExprType::BitwiseOr => debug_binary_op(f, "|", &self.inputs),
                 ExprType::BitwiseXor => debug_binary_op(f, "#", &self.inputs),
+                ExprType::ArrayContains => debug_binary_op(f, "@>", &self.inputs),
+                ExprType::ArrayContained => debug_binary_op(f, "<@", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
                     let mut builder = f.debug_tuple(&func_name);
@@ -100,7 +102,7 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = infer_type(func_type, &mut inputs)?;
+        let return_type = infer_type(func_type.into(), &mut inputs)?;
         Ok(Self::new_unchecked(func_type, inputs, return_type))
     }
 
@@ -111,12 +113,16 @@ impl FunctionCall {
         target: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
-        if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+        if let ExprImpl::Parameter(expr) = child
+            && !expr.has_infer()
+        {
             // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
             return Ok(());
         }
-        if let ExprImpl::FunctionCall(func) = child && func.func_type == ExprType::Row {
+        if let ExprImpl::FunctionCall(func) = child
+            && func.func_type == ExprType::Row
+        {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
             // types, they will be handled in `cast_ok`.
@@ -272,8 +278,9 @@ impl FunctionCall {
     }
 
     pub fn is_pure(&self) -> bool {
-        let mut a = ImpureAnalyzer {};
-        !a.visit_function_call(self)
+        let mut a = ImpureAnalyzer { impure: false };
+        a.visit_function_call(self);
+        !a.impure
     }
 }
 
@@ -354,6 +361,12 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayContains => {
+                explain_verbose_binary_op(f, "@>", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayContained => {
+                explain_verbose_binary_op(f, "<@", &that.inputs, self.input_schema)
             }
             ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)

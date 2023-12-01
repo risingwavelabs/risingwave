@@ -17,9 +17,11 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
+use super::batch::prelude::*;
 use super::batch::BatchPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
 
@@ -27,7 +29,7 @@ use crate::optimizer::property::{Order, OrderDisplay};
 /// collation required by user or parent plan node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSort {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     input: PlanRef,
 }
 
@@ -84,3 +86,5 @@ impl ToLocalBatch for BatchSort {
 }
 
 impl ExprRewritable for BatchSort {}
+
+impl ExprVisitable for BatchSort {}

@@ -37,17 +37,23 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- install postgresql"
 sudo yum install -y postgresql15
 
+echo "--- download rwctest-key"
+aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
+
 cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
 
-if [ -z "${RW_IMAGE_VERSION-}" ]; then
-  export RW_IMAGE_VERSION=latest
+if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
+  echo Docker image: $RW_IMAGE
 fi
+
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
-  export RW_IMAGE_VERSION="nightly-$(date '+%Y%m%d')"
+  # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
+  echo Docker image: $RW_IMAGE
 fi
-echo Docker image version: $RW_IMAGE_VERSION
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then

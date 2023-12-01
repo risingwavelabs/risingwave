@@ -32,7 +32,7 @@ impl From<&Object> for FsSplit {
         Self {
             name: value.key().unwrap().to_owned(),
             offset: 0,
-            size: value.size() as usize,
+            size: value.size().unwrap_or_default() as usize,
         }
     }
 }
@@ -81,7 +81,7 @@ impl From<&Object> for FsPageItem {
         let aws_ts = value.last_modified().unwrap();
         Self {
             name: value.key().unwrap().to_owned(),
-            size: value.size(),
+            size: value.size().unwrap_or_default(),
             timestamp: Timestamp::from_timestamp_uncheck(aws_ts.secs(), aws_ts.subsec_nanos()),
         }
     }

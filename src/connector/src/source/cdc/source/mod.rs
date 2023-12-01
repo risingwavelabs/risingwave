@@ -15,6 +15,7 @@
 mod message;
 mod reader;
 
+pub use message::*;
 pub use reader::*;
 
 pub use crate::source::cdc::split::*;

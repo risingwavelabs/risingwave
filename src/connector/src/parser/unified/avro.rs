@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use apache_avro::schema::{DecimalSchema, RecordSchema};
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
@@ -110,9 +111,9 @@ impl<'a> AvroParseOptions<'a> {
             // ---- Decimal -----
             (Some(DataType::Decimal) | None, Value::Decimal(avro_decimal)) => {
                 let (precision, scale) = match self.schema {
-                    Some(Schema::Decimal {
+                    Some(Schema::Decimal(DecimalSchema {
                         precision, scale, ..
-                    }) => (*precision, *scale),
+                    })) => (*precision, *scale),
                     _ => Err(create_error())?,
                 };
                 let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
@@ -230,31 +231,19 @@ impl<'a> AvroParseOptions<'a> {
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
             // ---- List -----
-            (Some(DataType::List(item_type)), Value::Array(arr)) => ListValue::new(
-                arr.iter()
-                    .map(|v| {
-                        let schema = self.extract_inner_schema(None);
-                        Self {
-                            schema,
-                            relax_numeric: self.relax_numeric,
-                        }
-                        .parse(v, Some(item_type))
-                    })
-                    .collect::<Result<Vec<_>, AccessError>>()?,
-            )
-            .into(),
-            (None, Value::Array(arr)) => ListValue::new(
-                arr.iter()
-                    .map(|v| {
-                        let schema = self.extract_inner_schema(None);
-                        Self {
-                            schema,
-                            relax_numeric: self.relax_numeric,
-                        }
-                        .parse(v, None)
-                    })
-                    .collect::<Result<Vec<_>, AccessError>>()?,
-            )
+            (Some(DataType::List(item_type)), Value::Array(array)) => ListValue::new({
+                let schema = self.extract_inner_schema(None);
+                let mut builder = item_type.create_array_builder(array.len());
+                for v in array {
+                    let value = Self {
+                        schema,
+                        relax_numeric: self.relax_numeric,
+                    }
+                    .parse(v, Some(item_type))?;
+                    builder.append(value);
+                }
+                builder.finish()
+            })
             .into(),
             // ---- Bytea -----
             (Some(DataType::Bytea) | None, Value::Bytes(value)) => {
@@ -392,7 +381,7 @@ pub fn avro_extract_field_schema<'a>(
     name: Option<&'a str>,
 ) -> anyhow::Result<&'a Schema> {
     match schema {
-        Schema::Record { fields, lookup, .. } => {
+        Schema::Record(RecordSchema { fields, lookup, .. }) => {
             let name =
                 name.ok_or_else(|| anyhow::format_err!("no name provided for a field in record"))?;
             let index = lookup.get(name).ok_or_else(|| {

@@ -14,17 +14,19 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
@@ -36,7 +38,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::TopN<PlanRef>,
 }
 
@@ -70,11 +72,7 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Result<PlanRef> {
         if with_ties && offset > 0 {
-            return Err(ErrorCode::NotImplemented(
-                "WITH TIES is not supported with OFFSET".to_string(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("WITH TIES is not supported with OFFSET");
         }
         Ok(Self::new(input, limit, offset, with_ties, order, group_key).into())
     }
@@ -107,6 +105,8 @@ impl LogicalTopN {
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution().clone();
 
         // if it is append only, for now we don't generate 2-phase rules
@@ -118,10 +118,7 @@ impl LogicalTopN {
             Distribution::Single | Distribution::SomeShard => {
                 self.gen_single_stream_top_n_plan(stream_input)
             }
-            Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented(
-                "topN does not support Broadcast".to_string(),
-                None.into(),
-            ))),
+            Distribution::Broadcast => bail_not_implemented!("topN does not support Broadcast"),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_stream_top_n_plan(stream_input, &dists)
             }
@@ -295,6 +292,8 @@ impl ColPrunable for LogicalTopN {
 }
 
 impl ExprRewritable for LogicalTopN {}
+
+impl ExprVisitable for LogicalTopN {}
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(

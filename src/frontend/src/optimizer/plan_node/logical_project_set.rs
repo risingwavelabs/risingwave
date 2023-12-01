@@ -19,12 +19,15 @@ use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet,
+    ToBatch, ToStream,
 };
 use crate::expr::{
-    collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
+    collect_input_refs, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
+    TableFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -41,7 +44,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 /// column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::ProjectSet<PlanRef>,
 }
 
@@ -308,6 +311,12 @@ impl ExprRewritable for LogicalProjectSet {
     }
 }
 
+impl ExprVisitable for LogicalProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalProjectSet {
     fn predicate_pushdown(
         &self,
@@ -384,7 +393,7 @@ impl ToStream for LogicalProjectSet {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, project_set.schema().len());
+        let out_col_change = ColIndexMapping::new(map, project_set.schema().len());
         Ok((project_set.into(), out_col_change))
     }
 

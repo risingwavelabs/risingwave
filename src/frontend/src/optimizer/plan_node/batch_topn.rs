@@ -16,19 +16,21 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
+use super::batch::prelude::*;
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{BatchLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::TopN<PlanRef>,
 }
 
@@ -115,3 +117,5 @@ impl ToLocalBatch for BatchTopN {
 }
 
 impl ExprRewritable for BatchTopN {}
+
+impl ExprVisitable for BatchTopN {}

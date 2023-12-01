@@ -18,11 +18,12 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -34,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `UPDATE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Update<PlanRef>,
 }
 
@@ -88,6 +89,12 @@ impl ExprRewritable for LogicalUpdate {
         let mut new = self.core.clone();
         new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
         Self::from(new).into()
+    }
+}
+
+impl ExprVisitable for LogicalUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }
 

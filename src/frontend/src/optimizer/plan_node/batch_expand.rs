@@ -18,8 +18,10 @@ use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -28,7 +30,7 @@ use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Expand<PlanRef>,
 }
 
@@ -98,3 +100,5 @@ impl ToLocalBatch for BatchExpand {
 }
 
 impl ExprRewritable for BatchExpand {}
+
+impl ExprVisitable for BatchExpand {}

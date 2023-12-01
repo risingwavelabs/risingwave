@@ -20,10 +20,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
+use risingwave_common::error::Result;
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -32,26 +33,28 @@ use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
-    ToStream,
+    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
+    StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     ToStreamContext,
 };
+use crate::optimizer::property::Distribution::HashShard;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
     /// Expressions to output. This field presents and will be turned to a `Project` when
@@ -127,7 +130,7 @@ impl LogicalSource {
                     mapping[idx] = None;
                 }
             }
-            ColIndexMapping::with_target_size(mapping, columns.len())
+            ColIndexMapping::new(mapping, columns.len())
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);
@@ -346,6 +349,15 @@ impl ExprRewritable for LogicalSource {
     }
 }
 
+impl ExprVisitable for LogicalSource {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.output_exprs
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}
+
 /// A util function to extract kafka offset timestamp range.
 ///
 /// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
@@ -535,10 +547,7 @@ impl ToBatch for LogicalSource {
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "New S3 connector for batch".to_string(),
-                TrackingIssue::from(None),
-            )));
+            bail_not_implemented!("New S3 connector for batch");
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)
@@ -571,8 +580,11 @@ impl ToStream for LogicalSource {
         }
 
         assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        if let Some(row_id_index) = self.core.row_id_index
+            && self.core.gen_row_id
+        {
+            plan = StreamRowIdGen::new_with_dist(plan, row_id_index, HashShard(vec![row_id_index]))
+                .into();
         }
         Ok(plan)
     }

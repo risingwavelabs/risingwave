@@ -48,10 +48,30 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
+  mysql_prepare:
+    image: mysql:8.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - "./compatibility-mysql.sql:/compatibility-mysql.sql"
+    command:
+      - /bin/sh
+      - -c
+      - "mysql -h mysql -u root -P 3306 mydb --password=123456 -A < /compatibility-mysql.sql"
+  rw_prepare:
+    image: postgres
+    depends_on:
+      mysql_prepare:
+        condition: service_completed_successfully
+      frontend-node-0:
+        condition: service_healthy
+    volumes:
+      - "./compatibility-rw.sql:/compatibility-rw.sql"
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://root:@frontend-node-0:4566/dev < /compatibility-rw.sql"
   datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on:

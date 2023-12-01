@@ -21,9 +21,10 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
@@ -31,7 +32,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
 }
 
 impl LogicalNow {
@@ -65,7 +66,11 @@ impl Distill for LogicalNow {
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
+
 impl ExprRewritable for LogicalNow {}
+
+impl ExprVisitable for LogicalNow {}
+
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
         &self,
@@ -81,10 +86,7 @@ impl ToStream for LogicalNow {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Ok((
-            self.clone().into(),
-            ColIndexMapping::with_target_size(vec![Some(0)], 1),
-        ))
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)], 1)))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`

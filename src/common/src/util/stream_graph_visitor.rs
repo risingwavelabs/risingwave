@@ -194,9 +194,14 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "Sort");
             }
 
-            // Chain
-            NodeBody::Chain(node) => {
-                optional!(node.state_table, "Chain")
+            // Stream Scan
+            NodeBody::StreamScan(node) => {
+                optional!(node.state_table, "StreamScan")
+            }
+
+            // Stream Cdc Scan
+            NodeBody::StreamCdcScan(node) => {
+                always!(node.state_table, "StreamCdcScan")
             }
 
             // Note: add internal tables for new nodes here.

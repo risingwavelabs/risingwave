@@ -17,10 +17,11 @@ use risingwave_common::error::Result;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -31,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `DELETE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDelete {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Delete<PlanRef>,
 }
 
@@ -90,6 +91,8 @@ impl ColPrunable for LogicalDelete {
 }
 
 impl ExprRewritable for LogicalDelete {}
+
+impl ExprVisitable for LogicalDelete {}
 
 impl PredicatePushdown for LogicalDelete {
     fn predicate_pushdown(

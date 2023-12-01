@@ -21,12 +21,14 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::generic::{GenericPlanRef, Join};
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
-use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
@@ -38,7 +40,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// get output rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
@@ -160,7 +162,9 @@ impl StreamHashJoin {
                     )
                 };
                 let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                if let Some(internal) = internal
+                    && !watermark_columns.contains(internal)
+                {
                     watermark_columns.insert(internal);
                     is_valuable_inequality = true;
                 }
@@ -449,5 +453,11 @@ impl ExprRewritable for StreamHashJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+
+impl ExprVisitable for StreamHashJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

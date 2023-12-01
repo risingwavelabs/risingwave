@@ -21,8 +21,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
 use super::utils::impl_distill_by_unit;
-use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::{
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+};
 use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
@@ -37,7 +40,7 @@ use crate::Explain;
 /// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Union<PlanRef>,
 }
 
@@ -96,6 +99,8 @@ impl ColPrunable for LogicalUnion {
 }
 
 impl ExprRewritable for LogicalUnion {}
+
+impl ExprVisitable for LogicalUnion {}
 
 impl PredicatePushdown for LogicalUnion {
     fn predicate_pushdown(

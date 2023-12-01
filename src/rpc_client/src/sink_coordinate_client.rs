@@ -15,7 +15,7 @@
 use std::future::Future;
 
 use anyhow::anyhow;
-use futures::Stream;
+use futures::{Stream, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest,
@@ -24,9 +24,11 @@ use risingwave_pb::connector_service::{
     coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
     SinkMetadata,
 };
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::{Response, Status};
 
+use crate::error::RpcError;
 use crate::{BidiStreamHandle, SinkCoordinationRpcClient};
 
 pub type CoordinatorStreamHandle = BidiStreamHandle<CoordinateRequest, CoordinateResponse>;
@@ -36,9 +38,9 @@ impl CoordinatorStreamHandle {
         mut client: SinkCoordinationRpcClient,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
-    ) -> anyhow::Result<Self> {
-        Self::new_with_init_stream(param, vnode_bitmap, |req_stream| async move {
-            client.coordinate(req_stream).await
+    ) -> Result<Self, RpcError> {
+        Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+            client.coordinate(ReceiverStream::new(rx)).await
         })
         .await
     }
@@ -47,9 +49,9 @@ impl CoordinatorStreamHandle {
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
         init_stream: F,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self, RpcError>
     where
-        F: FnOnce(Request<ReceiverStream<CoordinateRequest>>) -> Fut,
+        F: FnOnce(Receiver<CoordinateRequest>) -> Fut + Send,
         St: Stream<Item = Result<CoordinateResponse, Status>> + Send + Unpin + 'static,
         Fut: Future<Output = Result<Response<St>, Status>> + Send,
     {
@@ -62,14 +64,19 @@ impl CoordinatorStreamHandle {
                     },
                 )),
             },
-            init_stream,
+            move |rx| async move {
+                init_stream(rx)
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
         )
         .await?;
         match first_response {
             CoordinateResponse {
                 msg: Some(coordinate_response::Msg::StartResponse(_)),
             } => Ok(stream_handle),
-            msg => Err(anyhow!("should get start response but get {:?}", msg)),
+            msg => Err(anyhow!("should get start response but get {:?}", msg).into()),
         }
     }
 

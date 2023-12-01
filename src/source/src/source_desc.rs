@@ -171,7 +171,7 @@ impl SourceDescBuilder {
 pub mod test_utils {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+    use risingwave_common::catalog::{ColumnDesc, Schema};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::ColumnCatalog;
 
@@ -190,14 +190,11 @@ pub mod test_utils {
             .enumerate()
             .map(|(i, f)| ColumnCatalog {
                 column_desc: Some(
-                    ColumnDesc {
-                        data_type: f.data_type.clone(),
-                        column_id: ColumnId::from(i as i32), // use column index as column id
-                        name: f.name.clone(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_or_default_column: None,
-                    }
+                    ColumnDesc::named(
+                        f.name.clone(),
+                        (i as i32).into(), // use column index as column id
+                        f.data_type.clone(),
+                    )
                     .to_protobuf(),
                 ),
                 is_hidden: false,

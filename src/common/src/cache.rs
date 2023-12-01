@@ -708,9 +708,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 
     pub fn contains(self: &Arc<Self>, hash: u64, key: &K) -> bool {
-        let mut shard = self.shards[self.shard(hash)].lock();
+        let shard = self.shards[self.shard(hash)].lock();
         unsafe {
-            let ptr = shard.lookup(hash, key);
+            let ptr = shard.table.lookup(hash, key);
             !ptr.is_null()
         }
     }
@@ -757,7 +757,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.release(handle)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key, value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data
+            && let Some(listener) = &self.listener
+        {
             listener.on_release(key, value);
         }
     }
@@ -819,7 +821,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.erase(hash, key)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key, value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data
+            && let Some(listener) = &self.listener
+        {
             listener.on_release(key, value);
         }
     }

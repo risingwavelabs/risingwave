@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -25,6 +25,9 @@ use serde::de::DeserializeOwned;
 
 use super::util::*;
 
+pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+
 #[derive(Debug, Clone, Default)]
 pub struct SchemaRegistryAuth {
     username: Option<String>,
@@ -33,9 +36,15 @@ pub struct SchemaRegistryAuth {
 
 impl From<&HashMap<String, String>> for SchemaRegistryAuth {
     fn from(props: &HashMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+        SchemaRegistryAuth {
+            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
+            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
+        }
+    }
+}
 
+impl From<&BTreeMap<String, String>> for SchemaRegistryAuth {
+    fn from(props: &BTreeMap<String, String>) -> Self {
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
@@ -123,7 +132,9 @@ impl Client {
 
         Err(RwError::from(ProtocolError(format!(
             "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
-            path, self.url, errs
+            path,
+            self.url,
+            errs.iter().map(|e| e.to_string()).collect_vec()
         ))))
     }
 

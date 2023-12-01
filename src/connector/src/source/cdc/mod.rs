@@ -23,13 +23,17 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::ExternalTableDesc;
+use simd_json::prelude::ArrayTrait;
 pub use source::*;
-pub use split::*;
 
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
+pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
+pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -42,22 +46,52 @@ pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
 
 for_all_classified_sources!(impl_cdc_source_type);
 
+impl<'a> From<&'a str> for CdcSourceType {
+    fn from(name: &'a str) -> Self {
+        match name {
+            MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
+            POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
+            CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            _ => CdcSourceType::Unspecified,
+        }
+    }
+}
+
+impl CdcSourceType {
+    pub fn as_str_name(&self) -> &str {
+        match self {
+            CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Postgres => "Postgres",
+            CdcSourceType::Citus => "Citus",
+            CdcSourceType::Unspecified => "Unspecified",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
-    pub props: HashMap<String, String>,
+    pub properties: HashMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
+
+    /// Whether the properties is shared by multiple tables
+    pub is_multi_table_shared: bool,
 
     pub _phantom: PhantomData<T>,
 }
 
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(properties: HashMap<String, String>) -> anyhow::Result<Self> {
+        let is_multi_table_shared = properties
+            .get(CDC_SHARING_MODE_KEY)
+            .is_some_and(|v| v == "true");
         Ok(CdcProperties {
-            props,
+            properties,
             table_schema: Default::default(),
+            // TODO(siyuan): use serde to deserialize input hashmap
+            is_multi_table_shared,
             _phantom: PhantomData,
         })
     }
@@ -97,6 +131,28 @@ where
             pk_indices,
         };
         self.table_schema = table_schema;
+        if let Some(info) = source.info.as_ref() {
+            self.is_multi_table_shared = info.cdc_source_job;
+        }
+    }
+
+    fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
+        let properties: HashMap<String, String> = table_desc
+            .connect_properties
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v))
+            .collect();
+
+        let table_schema = TableSchema {
+            columns: table_desc.columns.clone(),
+            pk_indices: table_desc.stream_key.clone(),
+        };
+
+        self.properties = properties;
+        self.table_schema = table_schema;
+        // properties are not shared, so mark it as false
+        self.is_multi_table_shared = false;
     }
 }
 

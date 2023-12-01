@@ -450,7 +450,9 @@ where
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg && !is_completely_finished {
+                if let Message::Barrier(barrier) = &msg
+                    && !is_completely_finished
+                {
                     // If snapshot was empty, we do not need to backfill,
                     // but we still need to persist the finished state.
                     // We currently persist it on the second barrier here rather than first.
@@ -458,9 +460,13 @@ where
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
-                        let finished_state = construct_initial_finished_state(pk_in_output_indices.len());
+                        let finished_state =
+                            construct_initial_finished_state(pk_in_output_indices.len());
                         for vnode in upstream_table.vnodes().iter_vnodes() {
-                            backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(finished_state.clone()));
+                            backfill_state.update_progress(
+                                vnode,
+                                BackfillProgressPerVnode::InProgress(finished_state.clone()),
+                            );
                         }
                     }
 
@@ -471,9 +477,11 @@ where
                         &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
-                    ).await?;
+                    )
+                    .await?;
 
-                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    self.progress
+                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }

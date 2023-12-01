@@ -19,10 +19,12 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -33,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
     eq_join_predicate: EqJoinPredicate,
 }
@@ -180,5 +182,12 @@ impl ExprRewritable for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+    }
+}
+
+impl ExprVisitable for StreamTemporalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+        self.eq_join_predicate.visit_exprs(v);
     }
 }

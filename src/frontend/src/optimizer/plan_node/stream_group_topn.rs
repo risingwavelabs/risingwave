@@ -17,9 +17,11 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, GenericPlanRef, TopNLimit};
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -27,7 +29,7 @@ use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
@@ -56,7 +58,9 @@ impl StreamGroupTopN {
         let mut stream_key = core
             .stream_key()
             .expect("logical node should have stream key here");
-        if let Some(vnode_col_idx) = vnode_col_idx && stream_key.len() > 1 {
+        if let Some(vnode_col_idx) = vnode_col_idx
+            && stream_key.len() > 1
+        {
             // The output stream key of `GroupTopN` is a union of group key and input stream key,
             // while vnode is calculated from a subset of input stream key. So we can safely remove
             // the vnode column from output stream key. While at meanwhile we cannot leave the stream key
@@ -158,3 +162,5 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
 }
 
 impl ExprRewritable for StreamGroupTopN {}
+
+impl ExprVisitable for StreamGroupTopN {}

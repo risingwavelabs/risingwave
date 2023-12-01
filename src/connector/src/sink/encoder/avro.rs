@@ -14,9 +14,8 @@
 
 use std::sync::Arc;
 
-use apache_avro::schema::Schema as AvroSchema;
+use apache_avro::schema::{RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
-use apache_avro::Writer;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
@@ -30,6 +29,28 @@ pub struct AvroEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
     avro_schema: Arc<AvroSchema>,
+    header: AvroHeader,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AvroHeader {
+    None,
+    /// <https://avro.apache.org/docs/1.11.1/specification/#single-object-encoding>
+    ///
+    /// * C3 01
+    /// * 8-byte little-endian CRC-64-AVRO fingerprint
+    SingleObject,
+    /// <https://avro.apache.org/docs/1.11.1/specification/#object-container-files>
+    ///
+    /// * 4F 62 6A 01
+    /// * schema
+    /// * 16-byte random sync marker
+    ContainerFile,
+    /// <https://docs.confluent.io/platform/7.5/schema-registry/fundamentals/serdes-develop/index.html#messages-wire-format>
+    ///
+    /// * 00
+    /// * 4-byte big-endian schema ID
+    ConfluentSchemaRegistry(i32),
 }
 
 impl AvroEncoder {
@@ -37,6 +58,7 @@ impl AvroEncoder {
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         avro_schema: Arc<AvroSchema>,
+        header: AvroHeader,
     ) -> SinkResult<Self> {
         match &col_indices {
             Some(col_indices) => validate_fields(
@@ -59,12 +81,19 @@ impl AvroEncoder {
             schema,
             col_indices,
             avro_schema,
+            header,
         })
     }
 }
 
+pub struct AvroEncoded {
+    value: Value,
+    schema: Arc<AvroSchema>,
+    header: AvroHeader,
+}
+
 impl RowEncoder for AvroEncoder {
-    type Output = (Value, Arc<AvroSchema>);
+    type Output = AvroEncoded;
 
     fn schema(&self) -> &Schema {
         &self.schema
@@ -86,16 +115,32 @@ impl RowEncoder for AvroEncoder {
             }),
             &self.avro_schema,
         )?;
-        Ok((record.into(), self.avro_schema.clone()))
+        Ok(AvroEncoded {
+            value: record.into(),
+            schema: self.avro_schema.clone(),
+            header: self.header,
+        })
     }
 }
 
-impl SerTo<Vec<u8>> for (Value, Arc<AvroSchema>) {
+impl SerTo<Vec<u8>> for AvroEncoded {
     fn ser_to(self) -> SinkResult<Vec<u8>> {
-        let mut w = Writer::new(&self.1, Vec::new());
-        w.append(self.0)
-            .and_then(|_| w.into_inner())
-            .map_err(|e| crate::sink::SinkError::Encode(e.to_string()))
+        use bytes::BufMut as _;
+
+        let AvroHeader::ConfluentSchemaRegistry(schema_id) = self.header else {
+            return Err(crate::sink::SinkError::Encode(format!(
+                "{:?} unsupported yet",
+                self.header
+            )));
+        };
+        let raw = apache_avro::to_avro_datum(&self.schema, self.value)
+            .map_err(|e| crate::sink::SinkError::Encode(e.to_string()))?;
+        let mut buf = Vec::with_capacity(1 + 4 + raw.len());
+        buf.put_u8(0);
+        buf.put_i32(schema_id);
+        buf.put_slice(&raw);
+
+        Ok(buf)
     }
 }
 
@@ -205,7 +250,7 @@ fn validate_fields<'rw>(
     rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
     avro: &AvroSchema,
 ) -> Result<()> {
-    let AvroSchema::Record { fields, lookup, .. } = avro else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = avro else {
         return Err(FieldEncodeError::new(format!(
             "expect avro record but got {}",
             avro.canonical_form(),
@@ -238,7 +283,7 @@ fn encode_fields<'avro, 'rw>(
     schema: &'avro AvroSchema,
 ) -> Result<Record<'avro>> {
     let mut record = Record::new(schema).unwrap();
-    let AvroSchema::Record { fields, lookup, .. } = schema else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = schema else {
         unreachable!()
     };
     let mut present = vec![false; fields.len()];
@@ -525,9 +570,7 @@ mod tests {
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            // r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             Value::Duration(apache_avro::Duration::new(
                 apache_avro::Months::new(13),
                 apache_avro::Days::new(2),
@@ -603,8 +646,7 @@ mod tests {
                 -1,
                 i64::MAX,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 
@@ -616,8 +658,16 @@ mod tests {
         .unwrap();
         let mut record = Record::new(&avro_schema).unwrap();
         record.put("f0", Value::String("2".into()));
-        let res: SinkResult<Vec<u8>> = (Value::from(record), Arc::new(avro_schema)).ser_to();
-        assert_eq!(res.unwrap_err().to_string(), "Encode error: Value does not match schema: Reason: Unsupported value-schema combination");
+        let res: SinkResult<Vec<u8>> = AvroEncoded {
+            value: Value::from(record),
+            schema: Arc::new(avro_schema),
+            header: AvroHeader::ConfluentSchemaRegistry(42),
+        }
+        .ser_to();
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "Encode error: Value does not match schema"
+        );
     }
 
     #[test]
@@ -634,6 +684,7 @@ mod tests {
         )
         .unwrap();
         let avro_schema = Arc::new(avro_schema);
+        let header = AvroHeader::None;
 
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int64, "opt"),
@@ -643,10 +694,10 @@ mod tests {
             Some(ScalarImpl::Int64(31)),
             Some(ScalarImpl::Int32(15)),
         ]);
-        let encoder = AvroEncoder::new(schema, None, avro_schema.clone()).unwrap();
+        let encoder = AvroEncoder::new(schema, None, avro_schema.clone(), header).unwrap();
         let actual = encoder.encode(row).unwrap();
         assert_eq!(
-            actual.0,
+            actual.value,
             Value::Record(vec![
                 ("req".into(), Value::Int(15)),
                 ("opt".into(), Value::Union(1, Value::Long(31).into())),
@@ -655,10 +706,10 @@ mod tests {
 
         let schema = Schema::new(vec![Field::with_name(DataType::Int32, "req")]);
         let row = OwnedRow::new(vec![Some(ScalarImpl::Int32(15))]);
-        let encoder = AvroEncoder::new(schema, None, avro_schema.clone()).unwrap();
+        let encoder = AvroEncoder::new(schema, None, avro_schema.clone(), header).unwrap();
         let actual = encoder.encode(row).unwrap();
         assert_eq!(
-            actual.0,
+            actual.value,
             Value::Record(vec![
                 ("req".into(), Value::Int(15)),
                 ("opt".into(), Value::Union(0, Value::Null.into())),
@@ -666,7 +717,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![Field::with_name(DataType::Int64, "opt")]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone()) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
             panic!()
         };
         assert_eq!(
@@ -679,7 +730,7 @@ mod tests {
             Field::with_name(DataType::Int32, "req"),
             Field::with_name(DataType::Varchar, "extra"),
         ]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone()) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
             panic!()
         };
         assert_eq!(
@@ -689,7 +740,7 @@ mod tests {
 
         let avro_schema = AvroSchema::parse_str(r#"["null", "long"]"#).unwrap();
         let schema = Schema::new(vec![Field::with_name(DataType::Int64, "opt")]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.into()) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema.into(), header) else {
             panic!()
         };
         assert_eq!(
@@ -714,31 +765,21 @@ mod tests {
 
         test_ok(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                Some(ScalarImpl::Int32(5)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                None,
-            ])))
-            .to_datum_ref(),
+            Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode  error: found null but required",
         );
 
         test_ok(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                None,
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
                 "items": ["null", "int"]
@@ -751,15 +792,9 @@ mod tests {
 
         test_ok(
             &DataType::List(DataType::List(DataType::Int32.into()).into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::List(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(26)),
-                    Some(ScalarImpl::Int32(29)),
-                ]))),
-                Some(ScalarImpl::List(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(46)),
-                    Some(ScalarImpl::Int32(49)),
-                ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([
+                ListValue::from_iter([26, 29]),
+                ListValue::from_iter([46, 49]),
             ]))),
             r#"{
                 "type": "array",
@@ -843,7 +878,7 @@ mod tests {
     /// The encoder is not using these buggy calls and is already tested above.
     #[test]
     fn test_encode_avro_lib_bug() {
-        use apache_avro::Reader;
+        use apache_avro::{Reader, Writer};
 
         // a record with 2 optional int fields
         let avro_schema = AvroSchema::parse_str(

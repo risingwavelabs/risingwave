@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
@@ -21,7 +20,6 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;
 
@@ -33,9 +31,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
-        let fields = node.fields.iter().map(Field::from).collect();
-        let schema = Schema::new(fields);
-        let actor_context = params.actor_context;
 
         let inputs: Vec<_> = upstreams
             .iter()
@@ -43,7 +38,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 new_input(
                     &stream.context,
                     stream.streaming_metrics.clone(),
-                    actor_context.id,
+                    params.actor_context.id,
                     params.fragment_id,
                     upstream_actor_id,
                     upstream_fragment_id,
@@ -64,9 +59,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
 
         if always_single_input {
             Ok(ReceiverExecutor::new(
-                schema,
-                params.pk_indices,
-                actor_context,
+                params.actor_context,
+                params.info,
                 params.fragment_id,
                 upstream_fragment_id,
                 inputs.into_iter().exactly_one().unwrap(),
@@ -77,12 +71,10 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .boxed())
         } else {
             Ok(MergeExecutor::new(
-                schema,
-                params.pk_indices,
-                actor_context,
+                params.actor_context,
+                params.info,
                 params.fragment_id,
                 upstream_fragment_id,
-                params.executor_id,
                 inputs,
                 stream.context.clone(),
                 params.operator_id,

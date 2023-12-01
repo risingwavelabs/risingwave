@@ -16,11 +16,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::ColIndexMappingRewriteExt;
@@ -29,7 +31,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// input rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
@@ -157,5 +159,12 @@ impl ExprRewritable for BatchHopWindow {
                 .collect(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchHopWindow {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.window_start_exprs.iter().for_each(|e| v.visit_expr(e));
+        self.window_end_exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

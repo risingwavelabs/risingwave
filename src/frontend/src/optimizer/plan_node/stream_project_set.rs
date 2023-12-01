@@ -17,15 +17,17 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};
+use crate::expr::{try_derive_watermark, ExprRewriter, ExprVisitor, WatermarkDerivation};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::ProjectSet<PlanRef>,
     /// All the watermark derivations, (input_column_idx, expr_idx). And the
     /// derivation expression is the project_set's expression itself.
@@ -126,5 +128,11 @@ impl ExprRewritable for StreamProjectSet {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for StreamProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

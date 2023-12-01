@@ -20,6 +20,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::OwnedByUserCatalog;
 
 pub const RW_DATABASES: BuiltinTable = BuiltinTable {
     name: "rw_databases",

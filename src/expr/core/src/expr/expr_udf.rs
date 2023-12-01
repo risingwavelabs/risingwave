@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock, Mutex, Weak};
 use arrow_schema::{Field, Fields, Schema};
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
@@ -100,7 +100,7 @@ impl UdfExpression {
 
         let output = self
             .client
-            .call(&self.identifier, input)
+            .call_with_retry(&self.identifier, input)
             .instrument_await(self.span.clone())
             .await?;
         if output.num_rows() != vis.count_ones() {
@@ -115,7 +115,7 @@ impl UdfExpression {
             DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
         let output = data_chunk.uncompact(vis.clone());
 
-        let Some(array) = output.columns().get(0) else {
+        let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
         };
         if !array.data_type().equals_datatype(&self.return_type) {
@@ -148,9 +148,9 @@ impl Build for UdfExpression {
                 .map::<Result<_>, _>(|t| {
                     Ok(Field::new(
                         "",
-                        DataType::from(t)
-                            .try_into()
-                            .map_err(risingwave_udf::Error::Unsupported)?,
+                        DataType::from(t).try_into().map_err(|e: ArrayError| {
+                            risingwave_udf::Error::unsupported(e.to_string())
+                        })?,
                         true,
                     ))
                 })

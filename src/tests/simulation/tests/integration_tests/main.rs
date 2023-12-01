@@ -27,3 +27,4 @@ mod recovery;
 mod scale;
 mod sink;
 mod storage;
+mod throttle;

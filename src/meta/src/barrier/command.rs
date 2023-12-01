@@ -24,10 +24,11 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, Dispatchers, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, UpdateMutation,
+    AddMutation, Dispatcher, Dispatchers, FragmentTypeFlag, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -37,9 +38,12 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
+use crate::manager::{CatalogManagerRef, DdlType, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
+use crate::stream::{
+    build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
+    ThrottleConfig,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -72,7 +76,7 @@ pub struct Reschedule {
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
 /// we'll build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum::Display)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.
     ///
@@ -113,6 +117,7 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
         definition: String,
+        ddl_type: DdlType,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -146,6 +151,10 @@ pub enum Command {
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
     SourceSplitAssignment(SplitAssignment),
+
+    /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
+    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
+    Throttle(ThrottleConfig),
 }
 
 impl Command {
@@ -195,6 +204,7 @@ impl Command {
                 CommandChanges::Actor { to_add, to_remove }
             }
             Command::SourceSplitAssignment(_) => CommandChanges::None,
+            Command::Throttle(_) => CommandChanges::None,
         }
     }
 
@@ -238,6 +248,8 @@ pub struct CommandContext {
 
     source_manager: SourceManagerRef,
 
+    scale_controller: ScaleControllerRef,
+
     /// The tracing span of this command.
     ///
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
@@ -260,6 +272,7 @@ impl CommandContext {
         command: Command,
         kind: BarrierKind,
         source_manager: SourceManagerRef,
+        scale_controller: ScaleControllerRef,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -274,6 +287,7 @@ impl CommandContext {
             command,
             kind,
             source_manager,
+            scale_controller,
             span,
         }
     }
@@ -312,6 +326,21 @@ impl CommandContext {
 
                 Some(Mutation::Splits(SourceChangeSplitMutation {
                     actor_splits: build_actor_connector_splits(&diff),
+                }))
+            }
+
+            Command::Throttle(config) => {
+                let mut actor_to_apply = HashMap::new();
+                for per_fragment in config.values() {
+                    actor_to_apply.extend(
+                        per_fragment
+                            .iter()
+                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
+                    );
+                }
+
+                Some(Mutation::Throttle(ThrottleMutation {
+                    actor_throttle: actor_to_apply,
                 }))
             }
 
@@ -550,7 +579,7 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
@@ -558,21 +587,30 @@ impl CommandContext {
                 dispatchers,
                 table_fragments,
                 ..
-            } => dispatchers
-                .values()
-                .flatten()
-                .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                .chain(table_fragments.values_actor_ids())
-                .collect(),
+            } => {
+                // cdc backfill table job doesn't need to be tracked
+                if table_fragments.fragments().iter().any(|fragment| {
+                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
+                }) {
+                    Default::default()
+                } else {
+                    dispatchers
+                        .values()
+                        .flatten()
+                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                        .chain(table_fragments.values_actor_ids())
+                        .collect()
+                }
+            }
             _ => Default::default(),
         }
     }
 
-    /// For `CancelStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CancelStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CancelStreamingJob(table_fragments) => table_fragments.chain_actor_ids(),
+            Command::CancelStreamingJob(table_fragments) => table_fragments.backfill_actor_ids(),
             _ => Default::default(),
         }
     }
@@ -636,6 +674,8 @@ impl CommandContext {
         match &self.command {
             Command::Plain(_) => {}
 
+            Command::Throttle(_) => {}
+
             Command::Pause(reason) => {
                 if let PausedReason::ConfigChange = reason {
                     // After the `Pause` barrier is collected and committed, we must ensure that the
@@ -668,6 +708,7 @@ impl CommandContext {
             }
 
             Command::CancelStreamingJob(table_fragments) => {
+                tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
 
@@ -759,60 +800,11 @@ impl CommandContext {
             }
 
             Command::RescheduleFragment { reschedules } => {
-                let mut node_dropped_actors = HashMap::new();
-                for table_fragments in self
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .values()
-                {
-                    for fragment_id in table_fragments.fragments.keys() {
-                        if let Some(reschedule) = reschedules.get(fragment_id) {
-                            for actor_id in &reschedule.removed_actors {
-                                let node_id = table_fragments
-                                    .actor_status
-                                    .get(actor_id)
-                                    .unwrap()
-                                    .parallel_unit
-                                    .as_ref()
-                                    .unwrap()
-                                    .worker_node_id;
-                                node_dropped_actors
-                                    .entry(node_id as WorkerId)
-                                    .or_insert(vec![])
-                                    .push(*actor_id as ActorId);
-                            }
-                        }
-                    }
-                }
-                self.clean_up(node_dropped_actors).await?;
-
-                // Update fragment info after rescheduling in meta store.
-                self.fragment_manager
-                    .post_apply_reschedules(reschedules.clone())
+                let node_dropped_actors = self
+                    .scale_controller
+                    .post_apply_reschedule(reschedules)
                     .await?;
-
-                let mut stream_source_actor_splits = HashMap::new();
-                let mut stream_source_dropped_actors = HashSet::new();
-
-                for (fragment_id, reschedule) in reschedules {
-                    if !reschedule.actor_splits.is_empty() {
-                        stream_source_actor_splits
-                            .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
-                        stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
-                    }
-                }
-
-                if !stream_source_actor_splits.is_empty() {
-                    self.source_manager
-                        .apply_source_change(
-                            None,
-                            Some(stream_source_actor_splits),
-                            Some(stream_source_dropped_actors),
-                        )
-                        .await;
-                }
+                self.clean_up(node_dropped_actors).await?;
             }
 
             Command::ReplaceTable {
