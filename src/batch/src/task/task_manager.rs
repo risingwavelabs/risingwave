@@ -334,6 +334,7 @@ impl BatchManager {
 }
 
 #[cfg(test)]
+#[allow(rw::format_error)]
 mod tests {
     use std::sync::Arc;
 

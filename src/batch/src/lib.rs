@@ -34,6 +34,8 @@
 #![feature(lazy_cell)]
 #![feature(array_methods)]
 #![feature(error_generic_member_access)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 pub mod error;
 pub mod exchange_source;

@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -77,7 +77,7 @@ impl ProjectionOrderBy {
     fn push_row(&self, state: &mut State, row: RowRef<'_>) -> Result<()> {
         let key =
             memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
-                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
+                .context("failed to encode row")?;
         let projected_row = row.project(&self.arg_indices).to_owned_row();
 
         state.unordered_values_estimated_heap_size +=
