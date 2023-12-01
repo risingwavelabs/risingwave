@@ -302,6 +302,13 @@ where
         (switch_builder, vnode_changed)
     }
 
+    pub fn need_flush(&self) -> bool {
+        self.current_builder
+            .as_ref()
+            .map(|builder| builder.reach_capacity())
+            .unwrap_or(false)
+    }
+
     /// Add kv pair to sstable.
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_mut()
