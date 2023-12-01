@@ -668,9 +668,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
-    pub reclaim_rate_limit_mb: usize,
-
     #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
     pub ring_buffer_capacity_mb: usize,
 
@@ -1216,10 +1213,6 @@ pub mod default {
         }
 
         pub fn insert_rate_limit_mb() -> usize {
-            0
-        }
-
-        pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
 

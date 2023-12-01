@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.source.common;
+use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_pb::plan_common::CapturedExecutionContext;
 
-import java.util.Map;
+// For all execution mode.
+define_context! {
+    pub TIME_ZONE: String,
+}
 
-public class Utils {
-
-    public static CdcSourceMode getCdcSourceMode(Map<String, String> props) {
-        var isSharing =
-                Boolean.parseBoolean(
-                        props.getOrDefault(DbzConnectorConfig.CDC_SHARING_MODE, "false"));
-        return isSharing ? CdcSourceMode.SHARING_MODE : CdcSourceMode.SINGLE_MODE;
-    }
+pub fn capture_execution_context() -> ExprResult<CapturedExecutionContext> {
+    let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
+    Ok(CapturedExecutionContext { time_zone })
 }
