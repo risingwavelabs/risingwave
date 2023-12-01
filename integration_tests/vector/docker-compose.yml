@@ -40,6 +40,7 @@ services:
       - "./vector.yaml:/etc/vector/vector.yaml:ro"
     depends_on:
       - "frontend-node-0"
+    container_name: vector
 
 volumes:
   compute-node-0:
