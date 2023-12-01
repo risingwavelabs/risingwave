@@ -19,8 +19,9 @@ use thiserror::Error;
 use crate::hummock::HummockError;
 use crate::mem_table::MemTableError;
 
-#[derive(Error, Debug)]
-pub enum StorageError {
+#[derive(Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = StorageError, backtrace, report_debug))]
+pub enum ErrorKind {
     #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]

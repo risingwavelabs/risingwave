@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::key::{
     start_bound_of_excluded_prefix, TableKey,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -689,8 +689,8 @@ where
     SD: ValueRowSerde,
 {
     fn handle_mem_table_error(&self, e: StorageError) {
-        let e = match e {
-            StorageError::MemTable(e) => e,
+        let e = match e.into_inner() {
+            ErrorKind::MemTable(e) => e,
             _ => unreachable!("should only get memtable error"),
         };
         match *e {
