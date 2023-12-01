@@ -143,11 +143,15 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             }
         });
 
+        // wait for the handshake message
         if let Some(res) = rx.recv().await {
             let resp: GetEventStreamResponse = res?;
             let inited = match resp.control {
                 Some(info) => info.handshake_ok,
-                None => false,
+                None => {
+                    tracing::error!(?source_id, "handshake message not received. {:?}", resp);
+                    false
+                }
             };
             if !inited {
                 return Err(anyhow!("failed to start cdc connector"));
