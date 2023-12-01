@@ -381,6 +381,14 @@ impl CacheRefillTask {
                         != std::cmp::Ordering::Greater
                 });
 
+                tracing::debug!(
+                    "psst: {}, pblk: {}, uleft: {}, uright: {}",
+                    psst.id,
+                    pblk,
+                    uleft,
+                    uright
+                );
+
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
                     res.entry(SstableUnit {
