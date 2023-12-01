@@ -208,5 +208,37 @@ LL |         err, err, err
    |
    = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
 
-error: aborting due to 26 previous errors
+error: should not format error directly
+  --> $DIR/format_error.rs:47:17
+   |
+LL |     let _ = err.to_string();
+   |                 ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:48:27
+   |
+LL |     let _ = (err.clone()).to_string();
+   |                           ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:49:17
+   |
+LL |     let _ = err.to_string().to_string();
+   |                 ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:50:21
+   |
+LL |     let _ = (&&err).to_string();
+   |                     ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: aborting due to 30 previous errors
 

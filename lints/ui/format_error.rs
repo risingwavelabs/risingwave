@@ -43,4 +43,9 @@ fn main() {
         "this is a really long message, test lint span: {} {} {} ",
         err, err, err
     );
+
+    let _ = err.to_string();
+    let _ = (err.clone()).to_string();
+    let _ = err.to_string().to_string();
+    let _ = (&&err).to_string();
 }

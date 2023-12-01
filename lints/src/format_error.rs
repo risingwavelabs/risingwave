@@ -16,13 +16,13 @@ use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
-use clippy_utils::match_function_call;
 use clippy_utils::ty::implements_trait;
+use clippy_utils::{is_trait_method, match_function_call};
 use rustc_ast::FormatArgsPiece;
-use rustc_hir::Expr;
+use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
-use rustc_span::sym;
+use rustc_span::{sym, Span};
 
 declare_tool_lint! {
     /// ### What it does
@@ -68,27 +68,53 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
             .or_else(|| match_function_call(cx, expr, &TRACING_FIELD_DISPLAY))
             && let [arg_expr, ..] = args
         {
-            check_arg(cx, arg_expr);
+            check_fmt_arg(cx, arg_expr);
         }
 
+        // `{}`, `{:?}` in format macros.
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
-            && let Some(format_args) = find_format_args(cx, expr, macro_call.expn) {
+                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn) {
                 for piece in &format_args.template {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece
                         && let Ok(index) = placeholder.argument.index
                         && let Some(arg) = format_args.arguments.all_args().get(index)
                         && let Ok(arg_expr) = find_format_arg_expr(expr, arg)
                     {
-                        check_arg(cx, arg_expr);
+                        check_fmt_arg(cx, arg_expr);
                     }
                 }
             }
         }
+
+        // `err.to_string()`
+        if let ExprKind::MethodCall(_, receiver, [], to_string_span) = expr.kind
+            && is_trait_method(cx, expr, sym::ToString)
+        {
+            check_to_string_call(cx, receiver, to_string_span);
+        }
     }
 }
 
-fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+fn check_fmt_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+    check_arg(
+        cx,
+        arg_expr,
+        arg_expr.span,
+        "consider importing `thiserror_ext::AsReport` and using `.as_report()` instead",
+    );
+}
+
+fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_span: Span) {
+    check_arg(
+        cx,
+        receiver,
+        to_string_span,
+        "consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead",
+    );
+}
+
+fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: &str) {
     let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
         return;
     };
@@ -96,7 +122,7 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     let ty = cx.typeck_results().expr_ty(arg_expr).peel_refs();
 
     if implements_trait(cx, ty, error_trait_id, &[]) {
-        if let Some(span) = core::iter::successors(Some(arg_expr.span), |s| s.parent_callsite())
+        if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
             .find(|s| s.can_be_used_for_suggestions())
         {
             // TODO: applicable suggestions
@@ -106,7 +132,7 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
                 span,
                 "should not format error directly",
                 None,
-                "consider importing `thiserror_ext::AsReport` and using `.as_report()` instead",
+                help,
             );
         }
     }
