@@ -481,3 +481,304 @@ impl PbTableWatermarks {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::vec;
+
+    use bytes::Bytes;
+    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
+    use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
+
+    use crate::table_watermark::{
+        merge_multiple_new_table_watermarks, PbTableWatermarksExt, TableWatermarks, VnodeWatermark,
+        WatermarkDirection,
+    };
+
+    fn build_bitmap(vnodes: impl IntoIterator<Item = usize>) -> Arc<Bitmap> {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        for vnode in vnodes.into_iter() {
+            builder.set(vnode, true);
+        }
+        Arc::new(builder.finish())
+    }
+
+    #[test]
+    fn test_apply_new_table_watermark() {
+        let epoch1 = 233;
+        let direction = WatermarkDirection::Ascending;
+        let watermark1 = Bytes::from("watermark1");
+        let watermark2 = Bytes::from("watermark2");
+        let watermark3 = Bytes::from("watermark3");
+        let watermark4 = Bytes::from("watermark4");
+        let mut table_watermarks = TableWatermarks::single_epoch(
+            epoch1,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 1, 2]),
+                watermark1.clone(),
+            )],
+            direction,
+        );
+        let epoch2 = epoch1 + 1;
+        table_watermarks.add_new_epoch_watermarks(
+            epoch2,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 1, 2, 3]),
+                watermark2.clone(),
+            )],
+            direction,
+        );
+
+        let mut pb_table_watermark = table_watermarks.to_protobuf();
+
+        let epoch3 = epoch2 + 1;
+        let mut second_table_watermark = TableWatermarks::single_epoch(
+            epoch3,
+            vec![VnodeWatermark::new(
+                build_bitmap(0..VirtualNode::COUNT),
+                watermark3.clone(),
+            )],
+            direction,
+        );
+        table_watermarks.add_new_epoch_watermarks(
+            epoch3,
+            vec![VnodeWatermark::new(
+                build_bitmap(0..VirtualNode::COUNT),
+                watermark3.clone(),
+            )],
+            direction,
+        );
+        let epoch4 = epoch3 + 1;
+        let epoch5 = epoch4 + 1;
+        table_watermarks.add_new_epoch_watermarks(
+            epoch5,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 3, 4]),
+                watermark4.clone(),
+            )],
+            direction,
+        );
+        second_table_watermark.add_new_epoch_watermarks(
+            epoch5,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 3, 4]),
+                watermark4.clone(),
+            )],
+            direction,
+        );
+
+        pb_table_watermark.apply_new_table_watermarks(&second_table_watermark.to_protobuf());
+        assert_eq!(table_watermarks.to_protobuf(), pb_table_watermark);
+    }
+
+    #[test]
+    fn test_clear_stale_epoch_watmermark() {
+        let epoch1 = 233;
+        let direction = WatermarkDirection::Ascending;
+        let watermark1 = Bytes::from("watermark1");
+        let watermark2 = Bytes::from("watermark2");
+        let watermark3 = Bytes::from("watermark3");
+        let watermark4 = Bytes::from("watermark4");
+        let mut table_watermarks = TableWatermarks::single_epoch(
+            epoch1,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 1, 2]),
+                watermark1.clone(),
+            )],
+            direction,
+        );
+        let epoch2 = epoch1 + 1;
+        table_watermarks.add_new_epoch_watermarks(
+            epoch2,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 1, 2, 3]),
+                watermark2.clone(),
+            )],
+            direction,
+        );
+        let epoch3 = epoch2 + 1;
+        table_watermarks.add_new_epoch_watermarks(
+            epoch3,
+            vec![VnodeWatermark::new(
+                build_bitmap(0..VirtualNode::COUNT),
+                watermark3.clone(),
+            )],
+            direction,
+        );
+        let epoch4 = epoch3 + 1;
+        let epoch5 = epoch4 + 1;
+        table_watermarks.add_new_epoch_watermarks(
+            epoch5,
+            vec![VnodeWatermark::new(
+                build_bitmap(vec![0, 3, 4]),
+                watermark4.clone(),
+            )],
+            direction,
+        );
+
+        let mut pb_table_watermarks = table_watermarks.to_protobuf();
+        pb_table_watermarks.clear_stale_epoch_watermark(epoch1);
+        assert_eq!(pb_table_watermarks, table_watermarks.to_protobuf());
+
+        pb_table_watermarks.clear_stale_epoch_watermark(epoch2);
+        assert_eq!(
+            pb_table_watermarks,
+            TableWatermarks {
+                watermarks: vec![
+                    (
+                        epoch2,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(vec![0, 1, 2, 3]),
+                            watermark2.clone(),
+                        )]
+                    ),
+                    (
+                        epoch3,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(0..VirtualNode::COUNT),
+                            watermark3.clone(),
+                        )]
+                    ),
+                    (
+                        epoch5,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(vec![0, 3, 4]),
+                            watermark4.clone(),
+                        )]
+                    )
+                ],
+                direction,
+            }
+            .to_protobuf()
+        );
+
+        pb_table_watermarks.clear_stale_epoch_watermark(epoch3);
+        assert_eq!(
+            pb_table_watermarks,
+            TableWatermarks {
+                watermarks: vec![
+                    (
+                        epoch3,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(0..VirtualNode::COUNT),
+                            watermark3.clone(),
+                        )]
+                    ),
+                    (
+                        epoch5,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(vec![0, 3, 4]),
+                            watermark4.clone(),
+                        )]
+                    )
+                ],
+                direction,
+            }
+            .to_protobuf()
+        );
+
+        pb_table_watermarks.clear_stale_epoch_watermark(epoch4);
+        assert_eq!(
+            pb_table_watermarks,
+            TableWatermarks {
+                watermarks: vec![
+                    (
+                        epoch4,
+                        vec![VnodeWatermark::new(
+                            build_bitmap((1..3).chain(5..VirtualNode::COUNT)),
+                            watermark3.clone()
+                        )]
+                    ),
+                    (
+                        epoch5,
+                        vec![VnodeWatermark::new(
+                            build_bitmap(vec![0, 3, 4]),
+                            watermark4.clone(),
+                        )]
+                    )
+                ],
+                direction,
+            }
+            .to_protobuf()
+        );
+
+        pb_table_watermarks.clear_stale_epoch_watermark(epoch5);
+        assert_eq!(
+            pb_table_watermarks,
+            TableWatermarks {
+                watermarks: vec![(
+                    epoch5,
+                    vec![
+                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone()),
+                        VnodeWatermark::new(
+                            build_bitmap((1..3).chain(5..VirtualNode::COUNT)),
+                            watermark3.clone()
+                        )
+                    ]
+                )],
+                direction,
+            }
+            .to_protobuf()
+        );
+    }
+
+    #[test]
+    fn test_merge_multiple_new_table_watermarks() {
+        fn epoch_new_watermark(epoch: u64, bitmaps: Vec<&Bitmap>) -> PbEpochNewWatermarks {
+            PbEpochNewWatermarks {
+                watermarks: bitmaps
+                    .into_iter()
+                    .map(|bitmap| PbVnodeWatermark {
+                        watermark: vec![1, 2, epoch as _],
+                        vnode_bitmap: Some(bitmap.to_protobuf()),
+                    })
+                    .collect(),
+                epoch: epoch as _,
+            }
+        }
+        fn build_table_watermark(
+            vnodes: impl IntoIterator<Item = usize>,
+            epochs: impl IntoIterator<Item = u64>,
+        ) -> PbTableWatermarks {
+            let bitmap = build_bitmap(vnodes);
+            PbTableWatermarks {
+                epoch_watermarks: epochs
+                    .into_iter()
+                    .map(|epoch: u64| epoch_new_watermark(epoch, vec![&bitmap]))
+                    .collect(),
+                is_ascending: true,
+            }
+        }
+        let table1_watermark1 = build_table_watermark(0..3, vec![1, 2, 4]);
+        let table1_watermark2 = build_table_watermark(4..6, vec![1, 2, 5]);
+        let table2_watermark = build_table_watermark(0..4, 1..3);
+        let table3_watermark = build_table_watermark(0..4, 3..5);
+        let mut first = HashMap::new();
+        first.insert(1, table1_watermark1);
+        first.insert(2, table2_watermark.clone());
+        let mut second = HashMap::new();
+        second.insert(1, table1_watermark2);
+        second.insert(3, table3_watermark.clone());
+        let result = merge_multiple_new_table_watermarks(vec![first, second]);
+        let mut expected = HashMap::new();
+        expected.insert(
+            1,
+            PbTableWatermarks {
+                epoch_watermarks: vec![
+                    epoch_new_watermark(1, vec![&build_bitmap(0..3), &build_bitmap(4..6)]),
+                    epoch_new_watermark(2, vec![&build_bitmap(0..3), &build_bitmap(4..6)]),
+                    epoch_new_watermark(4, vec![&build_bitmap(0..3)]),
+                    epoch_new_watermark(5, vec![&build_bitmap(4..6)]),
+                ],
+                is_ascending: true,
+            },
+        );
+        expected.insert(2, table2_watermark);
+        expected.insert(3, table3_watermark);
+        assert_eq!(result, expected);
+    }
+}
