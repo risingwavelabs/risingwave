@@ -69,8 +69,10 @@ pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Vec<Self>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client)).await
+    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
+        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
+            .await
+            .map(Arc::new)
     }
 }
 
@@ -78,7 +80,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
-    clients: Cache<HostAddr, Vec<S>>,
+    clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>

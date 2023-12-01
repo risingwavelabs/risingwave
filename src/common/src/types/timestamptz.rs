@@ -25,7 +25,6 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result;
 use crate::estimate_size::ZeroHeapSize;
 
 /// Timestamp with timezone.
@@ -38,7 +37,7 @@ pub struct Timestamptz(i64);
 impl ZeroHeapSize for Timestamptz {}
 
 impl ToBinary for Timestamptz {
-    fn to_binary_with_type(&self, _ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         let instant = self.to_datetime_utc();
         let mut out = BytesMut::new();
         // postgres_types::Type::ANY is only used as a placeholder.
@@ -158,6 +157,10 @@ impl FromStr for Timestamptz {
                 // * Extra space before offset `2006-01-02 15:04:05 -07:00`
                 return s
                     .parse::<chrono::DateTime<Utc>>()
+                    .or_else(|_| {
+                        chrono::DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f%#z")
+                            .map(|t| t.with_timezone(&Utc))
+                    })
                     .map(|t| Timestamptz(t.timestamp_micros()))
                     .map_err(|_| ERROR_MSG);
             }
@@ -194,5 +197,18 @@ mod test {
             "2022-08-03 10:34:02Z".parse::<Timestamptz>().unwrap(),
             "2022-08-03 02:34:02-08:00".parse::<Timestamptz>().unwrap()
         );
+
+        let expected = Ok(Timestamptz::from_micros(1689130892000000));
+        // Most standard: ISO 8601 & RFC 3339
+        assert_eq!("2023-07-12T03:01:32Z".parse(), expected);
+        assert_eq!("2023-07-12T03:01:32+00:00".parse(), expected);
+        assert_eq!("2023-07-12T11:01:32+08:00".parse(), expected);
+        // RFC 3339
+        assert_eq!("2023-07-12 03:01:32Z".parse(), expected);
+        assert_eq!("2023-07-12 03:01:32+00:00".parse(), expected);
+        assert_eq!("2023-07-12 11:01:32+08:00".parse(), expected);
+        // PostgreSQL, but neither ISO 8601 nor RFC 3339
+        assert_eq!("2023-07-12 03:01:32+00".parse(), expected);
+        assert_eq!("2023-07-12 11:01:32+08".parse(), expected);
     }
 }

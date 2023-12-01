@@ -22,6 +22,7 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
@@ -35,7 +36,8 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
-mod alter_relation_rename;
+mod alter_rename;
+mod alter_set_schema;
 mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
@@ -229,18 +231,10 @@ pub async fn handle(
             cdc_table_info,
         } => {
             if or_replace {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE OR REPLACE TABLE".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE OR REPLACE TABLE");
             }
             if temporary {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE TEMPORARY TABLE".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE TEMPORARY TABLE");
             }
             if let Some(query) = query {
                 return create_table_as::handle_create_as(
@@ -312,11 +306,7 @@ pub async fn handle(
                     | ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection => {
-                        return Err(ErrorCode::NotImplemented(
-                            "DROP CASCADE".to_string(),
-                            None.into(),
-                        )
-                        .into());
+                        bail_not_implemented!("DROP CASCADE");
                     }
                 };
             };
@@ -396,11 +386,7 @@ pub async fn handle(
             emit_mode,
         } => {
             if or_replace {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE OR REPLACE VIEW".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE OR REPLACE VIEW");
             }
             if materialized {
                 create_mv::handle_create_mv(
@@ -436,9 +422,7 @@ pub async fn handle(
             if_not_exists,
         } => {
             if unique {
-                return Err(
-                    ErrorCode::NotImplemented("create unique index".into(), None.into()).into(),
-                );
+                bail_not_implemented!("create unique index");
             }
 
             create_index::handle_create_index(
@@ -454,6 +438,10 @@ pub async fn handle(
         }
         Statement::AlterDatabase {
             name,
+            operation: AlterDatabaseOperation::RenameDatabase { database_name },
+        } => alter_rename::handle_rename_database(handler_args, name, database_name).await,
+        Statement::AlterDatabase {
+            name,
             operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
         } => {
             alter_owner::handle_alter_owner(
@@ -464,6 +452,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::RenameSchema { schema_name },
+        } => alter_rename::handle_rename_schema(handler_args, name, schema_name).await,
         Statement::AlterSchema {
             name,
             operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
@@ -486,13 +478,8 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RenameTable { table_name },
         } => {
-            alter_relation_rename::handle_rename_table(
-                handler_args,
-                TableType::Table,
-                name,
-                table_name,
-            )
-            .await
+            alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
+                .await
         }
         Statement::AlterTable {
             name,
@@ -506,17 +493,30 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_TABLE,
+                None,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
-        } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
+        } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
         Statement::AlterView {
             materialized,
             name,
             operation: AlterViewOperation::RenameView { view_name },
         } => {
             if materialized {
-                alter_relation_rename::handle_rename_table(
+                alter_rename::handle_rename_table(
                     handler_args,
                     TableType::MaterializedView,
                     name,
@@ -524,7 +524,7 @@ pub async fn handle(
                 )
                 .await
             } else {
-                alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
+                alter_rename::handle_rename_view(handler_args, name, view_name).await
             }
         }
         Statement::AlterView {
@@ -550,10 +550,35 @@ pub async fn handle(
                 .await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetSchema { new_schema_name },
+        } => {
+            if materialized {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_MATERIALIZED_VIEW,
+                    None,
+                )
+                .await
+            } else {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_VIEW,
+                    None,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
-        } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::ChangeOwner { new_owner_name },
@@ -566,10 +591,23 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SINK,
+                None,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
-        } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
+        } => alter_rename::handle_rename_source(handler_args, name, source_name).await,
         Statement::AlterSource {
             name,
             operation: operation @ AlterSourceOperation::AddColumn { .. },
@@ -583,6 +621,46 @@ pub async fn handle(
                 name,
                 new_owner_name,
                 StatementType::ALTER_SOURCE,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SOURCE,
+                None,
+            )
+            .await
+        }
+        Statement::AlterFunction {
+            name,
+            args,
+            operation: AlterFunctionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_FUNCTION,
+                args,
+            )
+            .await
+        }
+        Statement::AlterConnection {
+            name,
+            operation: AlterConnectionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_CONNECTION,
+                None,
             )
             .await
         }
@@ -612,8 +690,6 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
-        _ => Err(
-            ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
-        ),
+        _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

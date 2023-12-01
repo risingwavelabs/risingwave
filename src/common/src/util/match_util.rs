@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Try to match an enum variant and return the internal value.
+///
+/// Return an [`anyhow::Error`] if the enum variant does not match.
 #[macro_export]
 macro_rules! try_match_expand {
     ($e:expr, $variant:path) => {
@@ -32,6 +35,9 @@ macro_rules! try_match_expand {
     };
 }
 
+/// Match an enum variant and return the internal value.
+///
+/// Panic if the enum variant does not match.
 #[macro_export]
 macro_rules! must_match {
     ($expression:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? => $action:expr) => {
@@ -43,41 +49,39 @@ macro_rules! must_match {
 }
 
 mod tests {
+    #[derive(thiserror::Error, Debug)]
+    #[error(transparent)]
+    struct ExpandError(#[from] anyhow::Error);
+
+    #[allow(dead_code)]
+    enum MyEnum {
+        A(String),
+        B,
+    }
+
     #[test]
-    fn test_try_match() -> crate::error::Result<()> {
+    fn test_try_match() -> Result<(), ExpandError> {
         assert_eq!(
-            try_match_expand!(
-                crate::error::ErrorCode::InternalError("failure".to_string()),
-                crate::error::ErrorCode::InternalError
-            )?,
+            try_match_expand!(MyEnum::A("failure".to_string()), MyEnum::A)?,
             "failure"
         );
         assert_eq!(
-            try_match_expand!(
-                crate::error::ErrorCode::InternalError("failure".to_string()),
-                crate::error::ErrorCode::InternalError
-            )?,
+            try_match_expand!(MyEnum::A("failure".to_string()), MyEnum::A)?,
             "failure"
         );
         assert_eq!(
-            try_match_expand!(
-                crate::error::ErrorCode::InternalError("failure".to_string()),
-                crate::error::ErrorCode::InternalError
-            )?,
+            try_match_expand!(MyEnum::A("failure".to_string()), MyEnum::A)?,
             "failure"
         );
 
         // Test let statement is compilable.
-        let err_str = try_match_expand!(
-            crate::error::ErrorCode::InternalError("failure".to_string()),
-            crate::error::ErrorCode::InternalError
-        )?;
+        let err_str = try_match_expand!(MyEnum::A("failure".to_string()), MyEnum::A)?;
         assert_eq!(err_str, "failure");
         Ok(())
     }
 
     #[test]
-    fn test_must_match() -> crate::error::Result<()> {
+    fn test_must_match() -> Result<(), ExpandError> {
         #[allow(dead_code)]
         enum A {
             Foo,

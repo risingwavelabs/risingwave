@@ -172,15 +172,7 @@ mod tests {
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),
-            Some(
-                ListValue::new(vec![
-                    Some(789.into()),
-                    Some(456.into()),
-                    Some(123.into()),
-                    Some(321.into()),
-                ])
-                .into()
-            )
+            Some(ListValue::from_iter([789, 456, 123, 321]).into())
         );
     }
 

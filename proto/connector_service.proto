@@ -168,12 +168,17 @@ enum SourceType {
   CITUS = 3;
 }
 
+message SourceCommonParam {
+  bool is_multi_table_shared = 1;
+}
+
 message GetEventStreamRequest {
   uint64 source_id = 1;
   SourceType source_type = 2;
   string start_offset = 3;
   map<string, string> properties = 4;
   bool snapshot_done = 5;
+  SourceCommonParam common_param = 6;
 }
 
 message GetEventStreamResponse {
@@ -190,6 +195,7 @@ message ValidateSourceRequest {
   SourceType source_type = 2;
   map<string, string> properties = 3;
   TableSchema table_schema = 4;
+  SourceCommonParam common_param = 5;
 }
 
 message ValidateSourceResponse {
