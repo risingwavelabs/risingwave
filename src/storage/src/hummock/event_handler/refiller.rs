@@ -505,10 +505,11 @@ impl CacheRefillTask {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
             Err(e) => return tracing::error!("get old meta from cache error: {}", e),
         };
-        let units = Self::get_inheritance_info(context, &holders, &parent_ssts);
+        let inheritances = Self::get_inheritance_info(context, &holders, &parent_ssts);
+        tracing::trace!("compaction inheritance: {:#?}", inheritances);
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
-        let futures = units.into_iter().map(|(unit, pblks)| {
+        let futures = inheritances.into_iter().map(|(unit, pblks)| {
             let store = &sstable_store;
             let ssts = &ssts;
             async move {
