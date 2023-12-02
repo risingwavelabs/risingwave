@@ -896,21 +896,61 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
     })
 }
 
+pub enum JniSinkWriterStreamRequest {
+    PbRequest(SinkWriterStreamRequest),
+    Chunk {
+        epoch: u64,
+        batch_id: u64,
+        chunk: StreamChunk,
+    },
+}
+
+impl From<SinkWriterStreamRequest> for JniSinkWriterStreamRequest {
+    fn from(value: SinkWriterStreamRequest) -> Self {
+        Self::PbRequest(value)
+    }
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, JniReceiverType<SinkWriterStreamRequest>>,
-) -> JByteArray<'a> {
+    mut channel: Pointer<'a, JniReceiverType<JniSinkWriterStreamRequest>>,
+) -> JObject<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
-            let bytes = env
-                .byte_array_from_slice(&Message::encode_to_vec(&msg))
-                .unwrap();
-            Ok(bytes)
+            let obj = match msg {
+                JniSinkWriterStreamRequest::PbRequest(request) => {
+                    let bytes = env.byte_array_from_slice(&Message::encode_to_vec(&request))?;
+                    call_static_method!(
+                        env,
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromSerializedPayload(byte[] payload)},
+                        &JObject::from(bytes)
+                    )?
+                }
+                JniSinkWriterStreamRequest::Chunk {
+                    epoch,
+                    batch_id,
+                    chunk,
+                } => {
+                    let pointer = Box::into_raw(Box::new(chunk));
+                    call_static_method!(
+                        env,
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(long pointer, long epoch, long batchId)},
+                        pointer as u64, epoch, batch_id
+                    )
+                    .inspect_err(|_| unsafe {
+                        // release the stream chunk on err
+                        drop(Box::from_raw(pointer));
+                    })?
+                }
+            };
+            Ok(obj)
         }
-        None => Ok(JObject::null().into()),
+        None => Ok(JObject::null()),
     })
 }
 

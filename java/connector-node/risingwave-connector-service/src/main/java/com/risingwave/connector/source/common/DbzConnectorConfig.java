@@ -55,8 +55,6 @@ public class DbzConnectorConfig {
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     /* RisingWave configs */
-    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
-
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
@@ -81,10 +79,9 @@ public class DbzConnectorConfig {
     }
 
     private final long sourceId;
-
     private final SourceTypeE sourceType;
-
     private final Properties resolvedDbzProps;
+    private final boolean isBackfillSource;
 
     public long getSourceId() {
         return sourceId;
@@ -98,12 +95,17 @@ public class DbzConnectorConfig {
         return resolvedDbzProps;
     }
 
+    public boolean isBackfillSource() {
+        return isBackfillSource;
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
-            boolean snapshotDone) {
+            boolean snapshotDone,
+            boolean isMultiTableShared) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
@@ -112,12 +114,13 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
-                isCdcBackfill);
+                isCdcBackfill,
+                isMultiTableShared);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -183,13 +186,14 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
+        if (isMultiTableShared) {
             adjustConfigForSharedCdcStream(dbzProps);
         }
 
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+        this.isBackfillSource = isCdcBackfill;
     }
 
     private void adjustConfigForSharedCdcStream(Properties dbzProps) {

@@ -21,6 +21,7 @@ import traceback
 import json
 from concurrent.futures import ThreadPoolExecutor
 import concurrent
+from decimal import Decimal
 import signal
 
 
@@ -96,6 +97,7 @@ def _process_func(type: pa.DataType, output: bool) -> Callable:
     if pa.types.is_list(type):
         func = _process_func(type.value_type, output)
         return lambda array: [(func(v) if v is not None else None) for v in array]
+
     if pa.types.is_struct(type):
         funcs = [_process_func(field.type, output) for field in type]
         if output:
@@ -109,11 +111,19 @@ def _process_func(type: pa.DataType, output: bool) -> Callable:
                 (func(v) if v is not None else None)
                 for v, func in zip(map.values(), funcs)
             )
-    if pa.types.is_large_string(type):
+
+    if type.equals(JSONB):
         if output:
             return lambda v: json.dumps(v)
         else:
             return lambda v: json.loads(v)
+
+    if type.equals(UNCONSTRAINED_DECIMAL):
+        if output:
+            return lambda v: str(v).encode("utf-8")
+        else:
+            return lambda v: Decimal(v.decode("utf-8"))
+
     return lambda v: v
 
 
@@ -416,6 +426,11 @@ def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
         return t
 
 
+# we use `large_binary` to represent unconstrained decimal type
+UNCONSTRAINED_DECIMAL = pa.large_binary()
+JSONB = pa.large_string()
+
+
 def _string_to_data_type(type_str: str):
     """
     Convert a SQL data type string to `pyarrow.DataType`.
@@ -437,7 +452,7 @@ def _string_to_data_type(type_str: str):
         return pa.float64()
     elif type_str.startswith("DECIMAL") or type_str.startswith("NUMERIC"):
         if type_str == "DECIMAL" or type_str == "NUMERIC":
-            return pa.decimal128(38)
+            return UNCONSTRAINED_DECIMAL
         rest = type_str[8:-1]  # remove "DECIMAL(" and ")"
         if "," in rest:
             precision, scale = rest.split(",")
@@ -455,16 +470,27 @@ def _string_to_data_type(type_str: str):
     elif type_str in ("VARCHAR"):
         return pa.string()
     elif type_str in ("JSONB"):
-        return pa.large_string()
+        return JSONB
     elif type_str in ("BYTEA"):
         return pa.binary()
     elif type_str.startswith("STRUCT"):
-        # extract 'STRUCT<INT, VARCHAR, ...>'
-        type_list = type_str[6:].strip("<>")
+        # extract 'STRUCT<INT, VARCHAR, STRUCT<INT>, ...>'
+        type_list = type_str[7:-1]  # strip "STRUCT<>"
         fields = []
-        for type_str in type_list.split(","):
-            type_str = type_str.strip()
-            fields.append(pa.field("", _string_to_data_type(type_str)))
+        elements = []
+        start = 0
+        depth = 0
+        for i, c in enumerate(type_list):
+            if c == "<":
+                depth += 1
+            elif c == ">":
+                depth -= 1
+            elif c == "," and depth == 0:
+                type_str = type_list[start:i].strip()
+                fields.append(pa.field("", _string_to_data_type(type_str)))
+                start = i + 1
+        type_str = type_list[start:].strip()
+        fields.append(pa.field("", _string_to_data_type(type_str)))
         return pa.struct(fields)
 
     raise ValueError(f"Unsupported type: {type_str}")
@@ -488,8 +514,10 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return "FLOAT4"
     elif t.equals(pa.float64()):
         return "FLOAT8"
-    elif t.equals(pa.decimal128(38)):
+    elif t.equals(UNCONSTRAINED_DECIMAL):
         return "DECIMAL"
+    elif pa.types.is_decimal(t):
+        return f"DECIMAL({t.precision},{t.scale})"
     elif t.equals(pa.date32()):
         return "DATE"
     elif t.equals(pa.time64("us")):
@@ -500,7 +528,7 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return "INTERVAL"
     elif t.equals(pa.string()):
         return "VARCHAR"
-    elif t.equals(pa.large_string()):
+    elif t.equals(JSONB):
         return "JSONB"
     elif t.equals(pa.binary()):
         return "BYTEA"
@@ -508,7 +536,7 @@ def _data_type_to_string(t: pa.DataType) -> str:
         return (
             "STRUCT<"
             + ",".join(
-                f"field_{i} {_data_type_to_string(field.type)}"
+                f"f{i+1} {_data_type_to_string(field.type)}"
                 for i, field in enumerate(t)
             )
             + ">"
