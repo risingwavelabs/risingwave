@@ -179,9 +179,9 @@ pub struct BidiStreamSender<REQ> {
 }
 
 impl<REQ> BidiStreamSender<REQ> {
-    pub async fn send_request(&mut self, request: REQ) -> Result<()> {
+    pub async fn send_request<R: Into<REQ>>(&mut self, request: R) -> Result<()> {
         self.tx
-            .send(request)
+            .send(request.into())
             .await
             .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
@@ -228,15 +228,16 @@ impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
         F: FnOnce(Receiver<REQ>) -> Fut,
         St: Stream<Item = Result<RSP>> + Send + Unpin + 'static,
         Fut: Future<Output = Result<St>> + Send,
+        R: Into<REQ>,
     >(
-        first_request: REQ,
+        first_request: R,
         init_stream_fn: F,
     ) -> Result<(Self, RSP)> {
         let (request_sender, request_receiver) = channel(DEFAULT_BUFFER_SIZE);
 
         // Send initial request in case of the blocking receive call from creating streaming request
         request_sender
-            .send(first_request)
+            .send(first_request.into())
             .await
             .map_err(|_err| anyhow!("unable to send first request of {}", type_name::<REQ>()))?;
 
