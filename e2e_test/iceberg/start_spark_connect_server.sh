@@ -12,7 +12,7 @@ SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
 wget https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
 tar -xzf $SPARK_FILE --no-same-owner
 
-./spark-3.4.1-bin-hadoop3/sbin/start-connect-server.sh --packages $PACKAGES \
+./spark-${SPARK_VERSION}-bin-hadoop3/sbin/start-connect-server.sh --packages $PACKAGES \
   --master local[3] \
   --conf spark.driver.bindAddress=0.0.0.0 \
   --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
