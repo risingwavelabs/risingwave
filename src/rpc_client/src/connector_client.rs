@@ -44,13 +44,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
-pub type SinkWriterRequestSender = BidiStreamSender<SinkWriterStreamRequest>;
+pub type SinkWriterRequestSender<REQ = SinkWriterStreamRequest> = BidiStreamSender<REQ>;
 pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
 
-pub type SinkWriterStreamHandle =
-    BidiStreamHandle<SinkWriterStreamRequest, SinkWriterStreamResponse>;
+pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
+    BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
-impl SinkWriterRequestSender {
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
@@ -94,7 +94,7 @@ impl SinkWriterResponseReceiver {
     }
 }
 
-impl SinkWriterStreamHandle {
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
         self.request_sender.start_epoch(epoch).await
     }
