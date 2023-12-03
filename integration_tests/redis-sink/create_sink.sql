@@ -19,7 +19,7 @@ FROM
     redis_types WITH (
     primary_key = 'types_id',
     connector = 'redis',
-    redis.url= 'redis://localhost:6379/',
+    redis.url= 'redis://redis:6379/',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 CREATE SINK redis_types_template_sink
@@ -27,7 +27,7 @@ FROM
     redis_types WITH (
     primary_key = 'types_id',
     connector = 'redis',
-    redis.url= 'redis://localhost:6379/',
+    redis.url= 'redis://redis:6379/',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true',
 key_format = 'TYPESID:{types_id}',
 value_format = '
