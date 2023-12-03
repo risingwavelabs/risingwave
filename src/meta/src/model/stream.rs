@@ -66,6 +66,7 @@ pub struct TableFragments {
     /// The environment associated with this stream plan and its fragments
     pub env: StreamEnvironment,
 
+    /// The parallelism assigned to this table fragments
     pub assigned_parallelism: TableFragmentsParallelism,
 }
 
