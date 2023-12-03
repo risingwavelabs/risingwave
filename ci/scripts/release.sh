@@ -15,6 +15,9 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Install lld"
+# The lld in the CentOS 7 repository is too old and contains a bug that causes a linker error.
+# So we install a newer version here. (17.0.6, latest version at the time of writing)
+# It is manually built in the same environent and uploaded to S3.
 aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_x86_64.tar.gz .
 tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz --directory=/usr/local
 ld.lld --version
