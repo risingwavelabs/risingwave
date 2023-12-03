@@ -329,7 +329,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     self.metrics
-                                        .backfill_snapshot_read_row_count
+                                        .cdc_backfill_snapshot_read_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
                                             self.actor_ctx.id.to_string().as_str(),
@@ -337,7 +337,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .inc_by(cur_barrier_snapshot_processed_rows);
 
                                     self.metrics
-                                        .backfill_upstream_output_row_count
+                                        .cdc_backfill_upstream_output_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
                                             self.actor_ctx.id.to_string().as_str(),
