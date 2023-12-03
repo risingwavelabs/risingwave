@@ -67,6 +67,7 @@ pub struct TableFragments {
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
+    /// The parallelism assigned to this table fragments
     pub assigned_parallelism: TableFragmentsParallelism,
 }
 

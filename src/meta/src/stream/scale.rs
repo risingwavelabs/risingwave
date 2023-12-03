@@ -1840,10 +1840,7 @@ impl ScaleController {
 
                     let target = match fragment.get_distribution_type().unwrap() {
                         FragmentDistributionType::Unspecified => unreachable!(),
-                        FragmentDistributionType::Single => {
-                            assert_eq!(*target, 1);
-                            *target
-                        }
+                        FragmentDistributionType::Single => 1,
                         FragmentDistributionType::Hash => *target,
                     };
 
@@ -2324,7 +2321,7 @@ fn rebalance_units(
     slots: BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,
 ) -> MetaResult<HashMap<WorkerId, BTreeSet<ParallelUnitId>>> {
-    let mut ch = ConsistentHash::new(10);
+    let mut ch = ConsistentHashRing::new(1024);
 
     for (worker_id, parallel_unit_ids) in &slots {
         ch.add_worker(*worker_id, parallel_unit_ids.len() as u32);
@@ -2339,24 +2336,29 @@ fn rebalance_units(
                 worker_id,
                 parallel_unit_ids
                     .into_iter()
-                    .take(*target_distribution.get(&worker_id).unwrap() as usize)
+                    .take(
+                        target_distribution
+                            .get(&worker_id)
+                            .cloned()
+                            .unwrap_or_default() as usize,
+                    )
                     .collect::<BTreeSet<_>>(),
             )
         })
         .collect())
 }
 
-struct ConsistentHash {
+struct ConsistentHashRing {
     ring: BTreeMap<u64, u32>,
-    weights: BTreeMap<u32, u32>,
+    capacities: BTreeMap<u32, u32>,
     virtual_nodes: u32,
 }
 
-impl ConsistentHash {
+impl ConsistentHashRing {
     fn new(virtual_nodes: u32) -> Self {
-        ConsistentHash {
+        ConsistentHashRing {
             ring: BTreeMap::new(),
-            weights: BTreeMap::new(),
+            capacities: BTreeMap::new(),
             virtual_nodes,
         }
     }
@@ -2376,16 +2378,29 @@ impl ConsistentHash {
             self.ring.insert(hash, id);
         }
 
-        self.weights.insert(id, capacity);
+        self.capacities.insert(id, capacity);
     }
 
     fn distribute_tasks(&self, total_tasks: u32) -> MetaResult<BTreeMap<u32, u32>> {
-        if self.weights.values().sum::<u32>() < total_tasks {
+        let total_capacity = self.capacities.values().sum::<u32>();
+
+        if total_capacity < total_tasks {
             bail!("Total tasks exceed the total weight of all workers.");
         }
 
+        let mut soft_limits = HashMap::new();
+        for (worker_id, worker_capacity) in &self.capacities {
+            soft_limits.insert(
+                *worker_id,
+                (total_tasks as f64 * (*worker_capacity as f64 / total_capacity as f64)).ceil()
+                    as u32,
+            );
+        }
+
         let mut task_distribution: BTreeMap<u32, u32> = BTreeMap::new();
-        let mut task_hashes = (0..total_tasks).map(|x| Self::hash(&x)).collect::<Vec<_>>();
+        let mut task_hashes = (0..total_tasks)
+            .map(|task_idx| Self::hash(&task_idx))
+            .collect_vec();
 
         // Sort task hashes to disperse them around the hash ring
         task_hashes.sort();
@@ -2397,14 +2412,17 @@ impl ConsistentHash {
             let ring_range = self.ring.range(task_hash..).chain(self.ring.iter());
 
             for (_, &worker_id) in ring_range {
-                if let Some(worker_weight) = self.weights.get(&worker_id) {
-                    let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
+                let worker_capacity = self.capacities.get(&worker_id).unwrap();
+                let worker_soft_limit = soft_limits.get(&worker_id).unwrap();
 
-                    if *worker_task_count < *worker_weight {
-                        *worker_task_count += 1;
-                        assigned = true;
-                        break;
-                    }
+                let task_limit = min(*worker_capacity, *worker_soft_limit);
+
+                let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
+
+                if *worker_task_count < task_limit {
+                    *worker_task_count += 1;
+                    assigned = true;
+                    break;
                 }
             }
 
@@ -2423,7 +2441,7 @@ mod tests {
 
     #[test]
     fn test_single_worker_capacity() {
-        let mut ch = ConsistentHash::new(5);
+        let mut ch = ConsistentHashRing::new(5);
         ch.add_worker(1, 10);
 
         let total_tasks = 5;
@@ -2434,7 +2452,7 @@ mod tests {
 
     #[test]
     fn test_multiple_workers_even_distribution() {
-        let mut ch = ConsistentHash::new(10);
+        let mut ch = ConsistentHashRing::new(10);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 1);
@@ -2450,7 +2468,7 @@ mod tests {
 
     #[test]
     fn test_weighted_distribution() {
-        let mut ch = ConsistentHash::new(10);
+        let mut ch = ConsistentHashRing::new(10);
 
         ch.add_worker(1, 2);
         ch.add_worker(2, 3);
@@ -2466,7 +2484,7 @@ mod tests {
 
     #[test]
     fn test_over_capacity() {
-        let mut ch = ConsistentHash::new(10);
+        let mut ch = ConsistentHashRing::new(10);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 2);
@@ -2480,16 +2498,24 @@ mod tests {
 
     #[test]
     fn test_balance_distribution() {
-        for worker_capacity in 1..10 {
+        for mut worker_capacity in 1..10 {
             for workers in 3..10 {
-                let mut ch = ConsistentHash::new(100);
+                let mut ring = ConsistentHashRing::new(1024);
 
                 for worker_id in 0..workers {
-                    ch.add_worker(worker_id, worker_capacity);
+                    ring.add_worker(worker_id, worker_capacity);
+                }
+
+                // Here we simulate a real situation where the actual parallelism cannot fill all the capacity.
+                // This is to ensure an average distribution, for example, when three workers with 6 parallelism are assigned 9 tasks,
+                // they should ideally get an exact distribution of 3, 3, 3 respectively.
+                if worker_capacity % 2 == 0 {
+                    worker_capacity /= 2;
                 }
 
                 let total_tasks = worker_capacity * workers;
-                let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
+
+                let task_distribution = ring.distribute_tasks(total_tasks).unwrap();
 
                 for (_, v) in task_distribution {
                     assert_eq!(v, worker_capacity);
