@@ -330,6 +330,9 @@ message CompactTask {
   // Deprecated. use table_vnode_partition instead;
   uint32 split_weight_by_vnode = 22 [deprecated = true];
   map<uint32, uint32> table_vnode_partition = 23;
+  // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
+  // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
+  map<uint64, TableWatermarks> table_watermarks = 24;
 }
 
 message LevelHandler {

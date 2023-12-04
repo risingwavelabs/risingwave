@@ -975,6 +975,21 @@ impl HummockManager {
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
 
             compact_task.table_vnode_partition = table_to_vnode_partition;
+            compact_task.table_watermarks = current_version
+                .table_watermarks
+                .iter()
+                .filter_map(|(table_id, table_watermarks)| {
+                    let u32_table_id = *table_id as _;
+                    if !compact_task.existing_table_ids.contains(&u32_table_id) {
+                        None
+                    } else {
+                        Some((
+                            *table_id,
+                            table_watermarks.get_safe_epoch_watermark(current_version.safe_epoch),
+                        ))
+                    }
+                })
+                .collect();
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -3223,6 +3238,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::table_watermark::PbTableWatermarksExt;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;

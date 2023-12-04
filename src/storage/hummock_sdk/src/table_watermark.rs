@@ -278,6 +278,28 @@ impl PbTableWatermarks {
             is_ascending: self.is_ascending,
         }
     }
+
+    pub fn get_safe_epoch_watermark(&self, safe_epoch: u64) -> Self {
+        let epoch_watermarks = if let Some(first_epoch_watermark) = self.epoch_watermarks.first() {
+            assert!(
+                first_epoch_watermark.epoch >= safe_epoch,
+                "smallest epoch {} in table watermark should be at least safe epoch {}",
+                first_epoch_watermark.epoch,
+                safe_epoch
+            );
+            if first_epoch_watermark.epoch == safe_epoch {
+                vec![first_epoch_watermark.clone()]
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        PbTableWatermarks {
+            epoch_watermarks,
+            is_ascending: self.is_ascending,
+        }
+    }
 }
 
 #[cfg(test)]
