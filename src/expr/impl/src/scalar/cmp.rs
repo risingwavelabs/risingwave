@@ -37,6 +37,7 @@ use risingwave_expr::function;
 #[function("equal(interval, time) -> boolean")]
 #[function("equal(varchar, varchar) -> boolean")]
 #[function("equal(bytea, bytea) -> boolean")]
+#[function("equal(jsonb, jsonb) -> boolean")]
 #[function("equal(anyarray, anyarray) -> boolean")]
 #[function("equal(struct, struct) -> boolean")]
 pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -65,6 +66,7 @@ where
 #[function("not_equal(interval, time) -> boolean")]
 #[function("not_equal(varchar, varchar) -> boolean")]
 #[function("not_equal(bytea, bytea) -> boolean")]
+#[function("not_equal(jsonb, jsonb) -> boolean")]
 #[function("not_equal(anyarray, anyarray) -> boolean")]
 #[function("not_equal(struct, struct) -> boolean")]
 pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool

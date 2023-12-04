@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -278,7 +279,7 @@ impl Binder {
 
     fn bind_with(&mut self, with: With) -> Result<()> {
         if with.recursive {
-            Err(ErrorCode::NotImplemented("recursive cte".into(), None.into()).into())
+            bail_not_implemented!("recursive cte");
         } else {
             for cte_table in with.cte_tables {
                 let Cte { alias, query, .. } = cte_table;

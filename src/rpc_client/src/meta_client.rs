@@ -51,7 +51,6 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -444,16 +443,16 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn alter_relation_name(
+    pub async fn alter_name(
         &self,
-        relation: Relation,
+        object: alter_name_request::Object,
         name: &str,
     ) -> Result<CatalogVersion> {
-        let request = AlterRelationNameRequest {
-            relation: Some(relation),
+        let request = AlterNameRequest {
+            object: Some(object),
             new_name: name.to_string(),
         };
-        let resp = self.inner.alter_relation_name(request).await?;
+        let resp = self.inner.alter_name(request).await?;
         Ok(resp.version)
     }
 
@@ -1190,21 +1189,22 @@ impl MetaClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
 
+    pub async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+        let req = ListCompactTaskAssignmentRequest {};
+        let resp = self.inner.list_compact_task_assignment(req).await?;
+        Ok(resp.task_assignment)
+    }
+
     pub async fn list_event_log(&self) -> Result<Vec<EventLog>> {
         let req = ListEventLogRequest::default();
         let resp = self.inner.list_event_log(req).await?;
         Ok(resp.event_logs)
     }
 
-    pub async fn rise_ctl_list_compact_task_assignment(
-        &self,
-    ) -> Result<Vec<CompactTaskAssignment>> {
-        let req = RiseCtlListCompactTaskAssignmentRequest {};
-        let resp = self
-            .inner
-            .rise_ctl_list_compact_task_assignment(req)
-            .await?;
-        Ok(resp.task_assignment)
+    pub async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        let req = ListCompactTaskProgressRequest {};
+        let resp = self.inner.list_compact_task_progress(req).await?;
+        Ok(resp.task_progress)
     }
 }
 
@@ -1796,7 +1796,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
-            ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
+            ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -1859,7 +1859,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
-            ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
+            ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
+            ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
