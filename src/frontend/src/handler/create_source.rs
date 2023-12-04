@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::format;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
