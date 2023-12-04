@@ -417,8 +417,7 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
     /// For all types of DDL
@@ -461,11 +460,6 @@ impl DatabaseManager {
 
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
         self.in_progress_creation_streaming_job.keys().cloned()
-    }
-
-    pub fn clear_creating_stream_jobs(&mut self) {
-        self.in_progress_creation_tracker.clear();
-        self.in_progress_creation_streaming_job.clear();
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {
