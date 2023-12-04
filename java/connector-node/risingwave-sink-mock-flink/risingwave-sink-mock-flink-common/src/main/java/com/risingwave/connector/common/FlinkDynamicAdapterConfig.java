@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.api;
+package com.risingwave.connector.common;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.risingwave.connector.api.sink.CommonSinkConfig;

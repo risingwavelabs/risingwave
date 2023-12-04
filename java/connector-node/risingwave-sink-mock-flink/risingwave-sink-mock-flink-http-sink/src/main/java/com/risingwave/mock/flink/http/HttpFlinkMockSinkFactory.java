@@ -14,22 +14,26 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.api;
+package com.risingwave.mock.flink.http;
 
+import com.getindata.connectors.http.internal.table.sink.HttpDynamicTableSinkFactory;
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.common.FlinkDynamicAdapterConfig;
+import com.risingwave.connector.common.FlinkMockSinkFactory;
 import io.grpc.StatusRuntimeException;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 
 /**
- * Different sinks need to implement this method to provide the required
- * `FlinkSinkTableSchemaFinder` and `DynamicTableSinkFactory` for flink sinks
+ * The `FlinkMockSinkFactory` implementation of the http sink is responsible for creating the http
+ * counterpart of the `DynamicTableSinkFactory`. And `validate` don't need to do anything.
  */
-public interface FlinkSinkValidateAndWriterFactory {
-    /**
-     * It is responsible for validating our schema, the default use of the flink catalog interface.
-     * But some sinks do not implement the catalog, we need to implement their own checksums
-     */
+public class HttpFlinkMockSinkFactory implements FlinkMockSinkFactory {
+    @Override
     public void validate(TableSchema tableSchema, FlinkDynamicAdapterConfig config)
-            throws StatusRuntimeException;
+            throws StatusRuntimeException {}
 
-    public DynamicTableSinkFactory getDynamicTableSinkFactory();
+    @Override
+    public DynamicTableSinkFactory getDynamicTableSinkFactory() {
+        return new HttpDynamicTableSinkFactory();
+    }
 }

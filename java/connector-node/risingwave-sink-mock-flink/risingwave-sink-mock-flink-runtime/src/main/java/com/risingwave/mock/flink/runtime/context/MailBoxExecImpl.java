@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.context;
+package com.risingwave.mock.flink.runtime.context;
 
 import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;

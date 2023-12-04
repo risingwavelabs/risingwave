@@ -14,37 +14,34 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.sinkwriter;
+package com.risingwave.mock.flink.runtime.sinkwriter;
 
-import com.risingwave.connector.RowDataImpl;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
-import com.risingwave.connector.context.SinkWriterContext;
+import com.risingwave.mock.flink.runtime.RowDataImpl;
+import com.risingwave.mock.flink.runtime.context.SinkWriterContextV2;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
-import org.apache.flink.api.connector.sink.Committer;
-import org.apache.flink.api.connector.sink.Sink;
+import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.table.data.RowData;
 
-/*
- * The Sink-type sink will invoke this class to write RW data to the downstream.
+/**
+ * AsyncSinkWriter is the special case of stateful sink, which is also the only stateful support we
+ * currently provide. It involves writing data to the sink by closing the async channel and then
+ * re-creating a writer for subsequent writing. This is different from the usage in Flink.
  */
-public class SinkWriterImpl<CommT> extends SinkWriterBase {
-    Sink<RowData, CommT, ?, ?> sink;
-    org.apache.flink.api.connector.sink.SinkWriter<RowData, CommT, ?> writer;
+public class AsyncSinkWriterImpl extends SinkWriterBase {
+    org.apache.flink.api.connector.sink2.Sink<RowData> sink;
 
-    Optional<? extends Committer<CommT>> committer;
+    SinkWriter<RowData> writer;
 
-    public SinkWriterImpl(TableSchema tableSchema, Sink<RowData, CommT, ?, ?> sink) {
+    public AsyncSinkWriterImpl(
+            TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
         super(tableSchema);
         try {
             this.sink = sink;
-            this.writer = sink.createWriter(new SinkWriterContext(), Collections.emptyList());
-            this.committer = sink.createCommitter();
+            this.writer = sink.createWriter(new SinkWriterContextV2());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -60,9 +57,12 @@ public class SinkWriterImpl<CommT> extends SinkWriterBase {
 
     private void writeRow(RowData rowData) {
         try {
-            writer.write(
+            if (this.writer == null) {
+                this.writer = sink.createWriter(new SinkWriterContextV2());
+            }
+            this.writer.write(
                     rowData,
-                    new org.apache.flink.api.connector.sink.SinkWriter.Context() {
+                    new SinkWriter.Context() {
                         @Override
                         public long currentWatermark() {
                             return 0;
@@ -83,12 +83,11 @@ public class SinkWriterImpl<CommT> extends SinkWriterBase {
     @Override
     public void sync() {
         try {
-            if (committer.isEmpty()) {
+            if (writer == null) {
                 return;
-            } else {
-                List<CommT> objects = writer.prepareCommit(true);
-                committer.get().commit(objects);
             }
+            this.writer.flush(true);
+            closeWriter();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -96,8 +95,16 @@ public class SinkWriterImpl<CommT> extends SinkWriterBase {
 
     @Override
     public void drop() {
+        closeWriter();
+    }
+
+    private void closeWriter() {
+        if (writer == null) {
+            return;
+        }
         try {
             writer.close();
+            this.writer = null;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

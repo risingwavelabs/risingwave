@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.context;
+package com.risingwave.mock.flink.runtime.context;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.table.connector.sink.DynamicTableSink;

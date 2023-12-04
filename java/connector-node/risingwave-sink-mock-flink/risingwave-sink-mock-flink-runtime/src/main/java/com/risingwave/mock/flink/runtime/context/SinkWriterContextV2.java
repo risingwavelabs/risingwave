@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.context;
+package com.risingwave.mock.flink.runtime.context;
 
 import java.util.OptionalLong;
 import java.util.concurrent.ScheduledFuture;
@@ -24,6 +24,7 @@ import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.util.SimpleUserCodeClassLoader;
 import org.apache.flink.util.UserCodeClassLoader;
@@ -82,12 +83,16 @@ public class SinkWriterContextV2 implements Sink.InitContext {
     // Downstream executes some tasks serially by registering them with `MailboxExecutor`
     MailboxExecutor mailboxExecutor;
 
+    InitializationContextImpl initializationContext;
+
     public SinkWriterContextV2() {
         sinkWriterMetricGroup = new SinkWriterMetircGroupImpl();
         processingTimeService = new ProcessingTimeServiceImpl();
         simpleUserCodeClassLoader =
                 SimpleUserCodeClassLoader.create(Thread.currentThread().getContextClassLoader());
         mailboxExecutor = new MailBoxExecImpl();
+        initializationContext =
+                new InitializationContextImpl(sinkWriterMetricGroup, simpleUserCodeClassLoader);
     }
 
     @Override
@@ -127,6 +132,28 @@ public class SinkWriterContextV2 implements Sink.InitContext {
 
     @Override
     public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
-        throw new UnsupportedOperationException();
+        return initializationContext;
+    }
+
+    class InitializationContextImpl implements SerializationSchema.InitializationContext {
+
+        MetricGroup metricGroup;
+        UserCodeClassLoader userCodeClassLoader;
+
+        InitializationContextImpl(
+                MetricGroup metricGroup, UserCodeClassLoader userCodeClassLoader) {
+            this.metricGroup = metricGroup;
+            this.userCodeClassLoader = userCodeClassLoader;
+        }
+
+        @Override
+        public MetricGroup getMetricGroup() {
+            return metricGroup;
+        }
+
+        @Override
+        public UserCodeClassLoader getUserCodeClassLoader() {
+            return userCodeClassLoader;
+        }
     }
 }

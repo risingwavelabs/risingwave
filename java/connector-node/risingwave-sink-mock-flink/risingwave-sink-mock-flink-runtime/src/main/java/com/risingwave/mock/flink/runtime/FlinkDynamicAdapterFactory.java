@@ -14,23 +14,28 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector;
+package com.risingwave.mock.flink.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.risingwave.connector.api.FlinkDynamicAdapterConfig;
-import com.risingwave.connector.api.FlinkSinkValidateAndWriterFactory;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.api.sink.SinkWriterV1;
-import com.risingwave.connector.context.DynamicTableSinkContextImpl;
-import com.risingwave.connector.sinkwriter.SinkWriterImpl;
-import com.risingwave.connector.sinkwriter.SinkWriterV2Impl;
+import com.risingwave.connector.common.FlinkDynamicAdapterConfig;
+import com.risingwave.connector.common.FlinkDynamicUtil;
+import com.risingwave.connector.common.FlinkMockSinkFactory;
+import com.risingwave.mock.flink.runtime.context.DynamicTableSinkContextImpl;
+import com.risingwave.mock.flink.runtime.context.SinkWriterContextV2;
+import com.risingwave.mock.flink.runtime.sinkwriter.AsyncSinkWriterImpl;
+import com.risingwave.mock.flink.runtime.sinkwriter.SinkWriterImpl;
+import com.risingwave.mock.flink.runtime.sinkwriter.SinkWriterV2Impl;
 import com.risingwave.proto.Catalog;
+import java.io.IOException;
 import java.util.*;
 import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.base.sink.writer.AsyncSinkWriter;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.*;
@@ -41,36 +46,31 @@ import org.apache.flink.table.factories.FactoryUtil;
 
 public class FlinkDynamicAdapterFactory implements SinkFactory {
 
-    FlinkSinkValidateAndWriterFactory flinkSinkValidateAndWriterFactory;
+    FlinkMockSinkFactory flinkMockSinkFactory;
 
-    public FlinkDynamicAdapterFactory(
-            FlinkSinkValidateAndWriterFactory flinkSinkValidateAndWriterFactory) {
-        this.flinkSinkValidateAndWriterFactory = flinkSinkValidateAndWriterFactory;
+    public FlinkDynamicAdapterFactory(FlinkMockSinkFactory flinkMockSinkFactory) {
+        this.flinkMockSinkFactory = flinkMockSinkFactory;
     }
 
     // Create corresponding Sink according to different configurations.
     public DynamicTableSink.SinkRuntimeProvider buildDynamicTableSinkProvider(
             TableSchema tableSchema, FlinkDynamicAdapterConfig config) {
-        List<Column> flinkColumns = FlinkDynamicAdapterUtil.getFlinkColumnsFromSchema(tableSchema);
+        List<Column> flinkColumns = FlinkDynamicUtil.getFlinkColumnsFromSchema(tableSchema);
 
         // Start with the default value, and add as needed later
         ObjectIdentifier objectIdentifier =
                 ObjectIdentifier.of("catalog_name", "database_name", "obj_name");
         ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
         DynamicTableSinkFactory dynamicTableSinkFactory =
-                flinkSinkValidateAndWriterFactory.getDynamicTableSinkFactory();
+                flinkMockSinkFactory.getDynamicTableSinkFactory();
         Set<ConfigOption<?>> configOptions = new HashSet<>();
         configOptions.addAll(dynamicTableSinkFactory.requiredOptions());
         configOptions.addAll(dynamicTableSinkFactory.optionalOptions());
         config.processOption(configOptions);
 
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        tableSchema
-                .getColumnDescs()
-                .forEach(
-                        (columnDesc) ->
-                                schemaBuilder.column(
-                                        columnDesc.getName(), columnDesc.getDataType().toString()));
+        flinkColumns.forEach(
+                (column) -> schemaBuilder.column(column.getName(), column.getDataType()));
         Schema shcema = schemaBuilder.primaryKey(tableSchema.getPrimaryKeys()).build();
 
         ResolvedCatalogTable resolvedCatalogTable =
@@ -96,8 +96,8 @@ public class FlinkDynamicAdapterFactory implements SinkFactory {
 
     /**
      * According to different implementations, create different sink writer, and package it as a
-     * RW-recognizable method(FlinkDynamicAdapterSink), after which the RW can call the method to
-     * complete write directly.
+     * RW-recognizable method(SinkWriterV1), after which the RW can call the method to complete
+     * write directly.
      */
     @Override
     public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
@@ -113,6 +113,15 @@ public class FlinkDynamicAdapterFactory implements SinkFactory {
         } else if (sinkRuntimeProvider instanceof SinkV2Provider) {
             org.apache.flink.api.connector.sink2.Sink<RowData> sink =
                     ((SinkV2Provider) sinkRuntimeProvider).createSink();
+
+            try {
+                if (sink.createWriter(new SinkWriterContextV2()) instanceof AsyncSinkWriter) {
+                    return new SinkWriterV1.Adapter(new AsyncSinkWriterImpl(tableSchema, sink));
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
             return new SinkWriterV1.Adapter(new SinkWriterV2Impl(tableSchema, sink));
         } else {
             throw new TableException("Unsupported sink runtime provider.");
@@ -127,6 +136,6 @@ public class FlinkDynamicAdapterFactory implements SinkFactory {
         ObjectMapper mapper = new ObjectMapper();
         FlinkDynamicAdapterConfig flinkDynamicAdapterConfig =
                 mapper.convertValue(tableProperties, FlinkDynamicAdapterConfig.class);
-        flinkSinkValidateAndWriterFactory.validate(tableSchema, flinkDynamicAdapterConfig);
+        flinkMockSinkFactory.validate(tableSchema, flinkDynamicAdapterConfig);
     }
 }

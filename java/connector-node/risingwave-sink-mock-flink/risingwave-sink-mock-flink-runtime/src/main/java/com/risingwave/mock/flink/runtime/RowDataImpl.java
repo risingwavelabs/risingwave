@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector;
+package com.risingwave.mock.flink.runtime;
 
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;

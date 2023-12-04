@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.sinkwriter;
+package com.risingwave.mock.flink.runtime.sinkwriter;
 
-import com.risingwave.connector.RowDataImpl;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
-import com.risingwave.connector.context.SinkWriterContextV2;
+import com.risingwave.mock.flink.runtime.RowDataImpl;
+import com.risingwave.mock.flink.runtime.context.SinkWriterContextV2;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Iterator;
@@ -30,11 +30,11 @@ import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.StatefulSink;
 import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
-import org.apache.flink.connector.base.sink.writer.AsyncSinkWriter;
 import org.apache.flink.table.data.RowData;
 
 /*
  * The SinkV2-type sink will invoke this class to write RW data to the downstream.
+ * Stateful sink is currently not supported.
  */
 public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
 
@@ -43,23 +43,15 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
 
     Committer<CommT> committer;
 
-    boolean isAsyncSink;
-
     public SinkWriterV2Impl(
             TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
         super(tableSchema);
         try {
             this.sink = sink;
             this.writer = sink.createWriter(new SinkWriterContextV2());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        isAsyncSink = writer instanceof AsyncSinkWriter;
-        if (!isAsyncSink && (writer instanceof StatefulSink.StatefulSinkWriter)) {
-            throw new UnsupportedOperationException("Don't support StatefulSink");
-        }
-
-        try {
+            if (writer instanceof StatefulSink.StatefulSinkWriter) {
+                throw new UnsupportedOperationException("Don't support StatefulSink");
+            }
             if (this.sink instanceof TwoPhaseCommittingSink) {
                 this.committer = ((TwoPhaseCommittingSink<?, CommT>) this.sink).createCommitter();
             }
@@ -68,11 +60,8 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
         }
     }
 
-    public void writeRow(RowData rowData) {
+    private void writeRow(RowData rowData) {
         try {
-            if (this.writer == null) {
-                this.writer = sink.createWriter(new SinkWriterContextV2());
-            }
             this.writer.write(
                     rowData,
                     new SinkWriter.Context() {
@@ -104,41 +93,29 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
     @Override
     public void sync() {
         try {
-            if (isAsyncSink) {
-                if (writer == null) {
-                    return;
+            this.writer.flush(false);
+            if (committer != null) {
+                Collection<CommT> objects =
+                        ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, CommT>) this.writer)
+                                .prepareCommit();
+                if (!objects.isEmpty()) {
+                    List<Committer.CommitRequest<CommT>> collect =
+                            objects.stream()
+                                    .map(
+                                            (a) -> {
+                                                return (Committer.CommitRequest<CommT>)
+                                                        new CommitRequestImpl<>(a);
+                                            })
+                                    .collect(Collectors.toList());
+                    committer.commit(collect);
                 }
-                this.writer.flush(true);
-            } else {
-                this.writer.flush(false);
-                if (committer != null) {
-                    Collection<CommT> objects =
-                            ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, CommT>) this.writer)
-                                    .prepareCommit();
-                    if (!objects.isEmpty()) {
-                        List<Committer.CommitRequest<CommT>> collect =
-                                objects.stream()
-                                        .map(
-                                                (a) -> {
-                                                    return (Committer.CommitRequest<CommT>)
-                                                            new CommitRequestImpl<>(a);
-                                                })
-                                        .collect(Collectors.toList());
-                        committer.commit(collect);
-                    }
-                }
-                if (this.writer instanceof TwoPhaseCommittingSink.PrecommittingSinkWriter) {
-                    ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, ?>) this.writer)
-                            .prepareCommit();
-                }
+            }
+            if (this.writer instanceof TwoPhaseCommittingSink.PrecommittingSinkWriter) {
+                ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, ?>) this.writer)
+                        .prepareCommit();
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
-        } finally {
-            if (isAsyncSink) {
-                closeWriter();
-                this.writer = null;
-            }
         }
     }
 
@@ -148,9 +125,6 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
     }
 
     private void closeWriter() {
-        if (writer == null) {
-            return;
-        }
         try {
             writer.close();
         } catch (Exception e) {
