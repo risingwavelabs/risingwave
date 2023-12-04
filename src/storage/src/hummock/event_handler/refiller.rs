@@ -540,12 +540,17 @@ impl CacheRefillTask {
         unit: SstableUnit,
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
-        let object_id = sst.id;
         let threshold = context.config.threshold;
 
         // Avoid newly refilled sst being filtered.
         if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert((object_id, usize::MAX));
+            // filter.insert((object_id, usize::MAX));
+            filter.extend(
+                unit.blks
+                    .clone()
+                    .map(|blk| (sst.id, blk))
+                    .chain(std::iter::once((sst.id, usize::MAX))),
+            )
         }
 
         let blocks = unit.blks.size().unwrap();
@@ -566,7 +571,7 @@ impl CacheRefillTask {
         for blk in unit.blks {
             let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
-                sst_id: object_id,
+                sst_id: sst.id,
                 block_idx: blk as u64,
             };
             // see `CachedBlock::serialized_len()`
@@ -596,7 +601,7 @@ impl CacheRefillTask {
 
                 let data = sstable_store
                     .store()
-                    .read(&sstable_store.get_sst_data_path(object_id), range.clone())
+                    .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
                     .await?;
                 let mut futures = vec![];
                 for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
