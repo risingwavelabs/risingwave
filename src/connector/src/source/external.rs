@@ -542,6 +542,10 @@ mod tests {
 
     #[test]
     fn test_mysql_filter_expr() {
+        let cols = vec!["id".to_string()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(id > :id)");
+
         let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(

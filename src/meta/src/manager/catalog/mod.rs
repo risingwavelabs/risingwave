@@ -260,7 +260,7 @@ impl CatalogManager {
 
         if database_core.has_creation_in_database(database_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target database, try again later".into(),
+                "Some relations are creating in the target database, try again later",
             ));
         }
 
@@ -515,12 +515,12 @@ impl CatalogManager {
         }
         if database_core.has_creation_in_schema(schema_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target schema, try again later".into(),
+                "Some relations are creating in the target schema, try again later",
             ));
         }
         if !database_core.schema_is_empty(schema_id) {
             return Err(MetaError::permission_denied(
-                "The schema is not empty, try dropping them first".into(),
+                "The schema is not empty, try dropping them first",
             ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -3143,6 +3143,7 @@ impl CatalogManager {
             .database
             .tables
             .values()
+            .filter(|table| table.get_stream_job_status() != Ok(StreamJobStatus::Creating))
             .map(|table| table.id)
             .collect()
     }

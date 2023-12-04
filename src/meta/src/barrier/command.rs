@@ -724,9 +724,9 @@ impl CommandContext {
                 let table_id = table_fragments.table_id().table_id;
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
-                if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
-                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
-                }
+                self.hummock_manager
+                    .unregister_table_ids_fail_fast(&table_ids)
+                    .await;
 
                 // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                 // We need to cleanup the table state. So we can do it here.

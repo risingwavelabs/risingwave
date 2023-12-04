@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
@@ -136,7 +136,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let init_epoch = first_barrier.epoch.prev;
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -206,37 +205,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             upstream.peekable()
         };
 
-        tracing::debug!(?upstream_table_id, ?shared_cdc_source, "start cdc backfill");
         state_impl.init_epoch(first_barrier.epoch);
 
         // restore backfill state
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        // If the snapshot is empty, we don't need to backfill.
-        let is_snapshot_empty: bool = {
-            if state.is_finished {
-                // It is finished, so just assign a value to avoid accessing storage table again.
-                false
-            } else {
-                let args = SnapshotReadArgs::new(init_epoch, None, false, self.chunk_size);
-                let snapshot = upstream_table_reader.snapshot_read(args);
-                pin_mut!(snapshot);
-                snapshot.try_next().await?.unwrap().is_none()
-            }
-        };
-
-        // | backfill_is_finished | snapshot_empty | need_to_backfill |
-        // | t                    | t/f            | f                |
-        // | f                    | t              | f                |
-        // | f                    | f              | t                |
-        let to_backfill = !state.is_finished && !is_snapshot_empty;
+        let to_backfill = !state.is_finished;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_row_count: u64 = 0;
+        let mut total_snapshot_row_count = state.row_count as u64;
         let mut snapshot_read_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset> = state
@@ -244,6 +225,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
+
+        tracing::info!(
+            upstream_table_id,
+            shared_cdc_source,
+            ?current_pk_pos,
+            is_finished = state.is_finished,
+            snapshot_row_count = total_snapshot_row_count,
+            "start cdc backfill"
+        );
 
         // CDC Backfill Algorithm:
         //
@@ -269,11 +259,29 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
 
-            tracing::info!(
-                upstream_table_id,
-                initial_binlog_offset = ?last_binlog_offset,
-                "start the bacfill loop");
+            // wait for a barrier to make sure the backfill starts after upstream source
+            #[for_await]
+            for msg in upstream.by_ref() {
+                match msg? {
+                    Message::Barrier(barrier) => {
+                        // commit state just to bump the epoch of state table
+                        state_impl.commit_state(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                        break;
+                    }
+                    Message::Chunk(ref chunk) => {
+                        last_binlog_offset = get_cdc_chunk_last_offset(
+                            upstream_table_reader.inner().table_reader(),
+                            chunk,
+                        )?;
+                    }
+                    Message::Watermark(_) => {
+                        // Ignore watermark
+                    }
+                }
+            }
 
+            tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, ?current_pk_pos, "start cdc backfill loop");
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
@@ -329,7 +337,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     self.metrics
-                                        .backfill_snapshot_read_row_count
+                                        .cdc_backfill_snapshot_read_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
                                             self.actor_ctx.id.to_string().as_str(),
@@ -337,7 +345,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .inc_by(cur_barrier_snapshot_processed_rows);
 
                                     self.metrics
-                                        .backfill_upstream_output_row_count
+                                        .cdc_backfill_upstream_output_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
                                             self.actor_ctx.id.to_string().as_str(),
@@ -471,27 +479,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
-        } else if is_snapshot_empty {
-            tracing::info!(
-                upstream_table_id,
-                initial_binlog_offset = ?last_binlog_offset,
-                "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
-
-            // The snapshot is empty, just set backfill to finished
-            state_impl
-                .mutate_state(
-                    current_pk_pos,
-                    last_binlog_offset,
-                    total_snapshot_row_count,
-                    true,
-                )
-                .await?;
         }
 
         // drop reader to release db connection
         drop(upstream_table_reader);
 
         tracing::info!(
+            upstream_table_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
 
