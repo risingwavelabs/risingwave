@@ -1284,7 +1284,6 @@ pub mod tests {
         );
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
-            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
