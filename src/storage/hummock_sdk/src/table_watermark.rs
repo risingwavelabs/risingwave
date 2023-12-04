@@ -299,7 +299,7 @@ mod tests {
 
     fn build_bitmap(vnodes: impl IntoIterator<Item = usize>) -> Arc<Bitmap> {
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-        for vnode in vnodes.into_iter() {
+        for vnode in vnodes {
             builder.set(vnode, true);
         }
         Arc::new(builder.finish())
