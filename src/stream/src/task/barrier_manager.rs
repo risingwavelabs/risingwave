@@ -33,7 +33,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::bail;
 use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
