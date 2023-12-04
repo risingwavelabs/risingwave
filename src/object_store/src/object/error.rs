@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
 use std::io;
 use std::marker::{Send, Sync};
 
@@ -25,10 +24,9 @@ use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
-use crate::object::Error;
-
-#[derive(Error, Debug)]
-enum ObjectErrorInner {
+#[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
+#[thiserror_ext(newtype(name = ObjectError, backtrace, report_debug))]
+pub enum ObjectErrorInner {
     #[error("s3 error: {}", DisplayErrorContext(&**.0))]
     S3(#[source] BoxedError),
     #[error("disk error: {msg}")]
@@ -42,29 +40,8 @@ enum ObjectErrorInner {
     #[error(transparent)]
     Mem(#[from] crate::object::mem::Error),
     #[error("Internal error: {0}")]
+    #[construct(skip)]
     Internal(String),
-}
-
-#[derive(Error)]
-#[error("{inner}")]
-pub struct ObjectError {
-    #[from]
-    inner: ObjectErrorInner,
-
-    backtrace: Backtrace,
-}
-
-impl std::fmt::Debug for ObjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner)?;
-        writeln!(f)?;
-        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner) {
-            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
-        } else {
-            write!(f, "  backtrace of `ObjectError`:\n{}", self.backtrace)?;
-        }
-        Ok(())
-    }
 }
 
 impl ObjectError {
@@ -72,13 +49,9 @@ impl ObjectError {
         ObjectErrorInner::Internal(msg.to_string()).into()
     }
 
-    pub fn disk(msg: String, err: io::Error) -> Self {
-        ObjectErrorInner::Disk { msg, inner: err }.into()
-    }
-
     /// Tells whether the error indicates the target object is not found.
     pub fn is_object_not_found_error(&self) -> bool {
-        match &self.inner {
+        match self.inner() {
             ObjectErrorInner::S3(e) => {
                 if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
                     .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
@@ -122,12 +95,6 @@ where
     }
 }
 
-impl From<opendal::Error> for ObjectError {
-    fn from(e: opendal::Error) -> Self {
-        ObjectErrorInner::Opendal(e).into()
-    }
-}
-
 impl From<RecvError> for ObjectError {
     fn from(e: RecvError) -> Self {
         ObjectErrorInner::Internal(e.to_string()).into()
@@ -137,12 +104,6 @@ impl From<RecvError> for ObjectError {
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
         ObjectErrorInner::Internal(e.to_string()).into()
-    }
-}
-
-impl From<crate::object::mem::Error> for ObjectError {
-    fn from(e: Error) -> Self {
-        ObjectErrorInner::Mem(e).into()
     }
 }
 

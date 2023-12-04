@@ -57,6 +57,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+exclude = ["lints"]
 resolver = "2"
 
 [workspace.package]
@@ -134,7 +135,7 @@ arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
 arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 deltalake = { git = "https://github.com/delta-io/delta-rs", rev = "72505449e9538371fe5fda35d545dbd662facd07", features = ["s3"] }
 parquet = "49"
-thiserror-ext = "0.0.8"
+thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
@@ -261,3 +262,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+[workspace.metadata.dylint]
+libraries = [{ path = "./lints" }]

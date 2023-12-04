@@ -313,8 +313,7 @@ impl CompactorRunner {
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type(),
             is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
-            split_by_table: task.split_by_state_table,
-            split_weight_by_vnode: task.split_weight_by_vnode,
+            table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
@@ -334,8 +333,7 @@ impl CompactorRunner {
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
             task_config.is_target_l0_or_lbase,
-            task_config.split_by_table,
-            task_config.split_weight_by_vnode,
+            task_config.table_vnode_partition.clone(),
         );
         assert_eq!(
             task.input_ssts.len(),
