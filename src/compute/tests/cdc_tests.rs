@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
+use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,10 +26,9 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
-use risingwave_common::array::{
-    Array, ArrayBuilder, StreamChunk, StreamChunkTestExt, Utf8ArrayBuilder,
-};
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, Utf8ArrayBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
+use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
 use risingwave_connector::source::external::{
@@ -150,18 +150,16 @@ impl Executor for MockOffsetGenExecutor {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_cdc_backfill() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
     let table_id = TableId::new(1002);
     let schema = Schema::new(vec![
-        Field::unnamed(DataType::Int64), // primary key
-        Field::unnamed(DataType::Float64),
-        Field::unnamed(DataType::Varchar),
+        Field::unnamed(DataType::Jsonb),   // payload
+        Field::unnamed(DataType::Varchar), // _rw_offset
     ]);
-    let column_ids = vec![0.into(), 1.into(), 2.into()];
+    let column_ids = vec![0.into(), 1.into()];
 
     let pk_indices = vec![0];
 
@@ -173,7 +171,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MockOffsetGenExecutor::new(Box::new(source), schema.clone(), pk_indices.clone());
 
     let binlog_file = String::from("1.binlog");
-
     // mock binlog watermarks for backfill
     // initial low watermark: 1.binlog, pos=2 and expected behaviors:
     // - ignore events before (1.binlog, pos=2);
@@ -187,37 +184,36 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
 
     let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
+    let table_schema = Schema::new(vec![
+        Field::with_name(DataType::Int64, "id"), // primary key
+        Field::with_name(DataType::Float64, "price"),
+    ]);
     let external_table = ExternalStorageTable::new(
         table_id,
         table_name,
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
-        schema.clone(),
+        table_schema.clone(),
         vec![OrderType::ascending()],
         pk_indices,
         vec![0, 1],
     );
 
     let actor_id = 0x1a;
-    let info = ExecutorInfo {
-        schema: schema.clone(),
-        pk_indices: vec![0],
-        identity: "CdcBackfillExecutor".to_string(),
-    };
 
-    let schema = Schema::new(vec![
-        Field::unnamed(DataType::Varchar), // split_id
-        Field::unnamed(DataType::Int32),   // pk
-        Field::unnamed(DataType::Boolean), // finished
-        Field::unnamed(DataType::Int64),
-        Field::unnamed(DataType::Jsonb), // cdc_offset
+    let state_schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "split_id"),
+        Field::with_name(DataType::Int64, "id"), // pk
+        Field::with_name(DataType::Boolean, "backfill_finished"),
+        Field::with_name(DataType::Int64, "row_count"),
+        Field::with_name(DataType::Jsonb, "cdc_offset"),
     ]);
 
     let column_descs = vec![
-        ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
-        ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
-        ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
-        ColumnDesc::unnamed(ColumnId::from(3), schema[3].data_type.clone()),
-        ColumnDesc::unnamed(ColumnId::from(4), schema[4].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(0), state_schema[0].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(1), state_schema[1].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(2), state_schema[2].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(3), state_schema[3].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
     ];
 
     let state_table = StateTable::new_without_distribution(
@@ -225,16 +221,20 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::ascending()],
-        vec![1_usize],
+        vec![0_usize],
     )
     .await;
-
+    let info = ExecutorInfo {
+        schema: table_schema.clone(),
+        pk_indices: vec![0],
+        identity: "CdcBackfillExecutor".to_string(),
+    };
     let cdc_backfill = CdcBackfillExecutor::new(
         ActorContext::create(actor_id),
         info,
         external_table,
         Box::new(mock_offset_executor),
-        vec![0, 1, 2],
+        vec![0, 1],
         None,
         Arc::new(StreamingMetrics::unused()),
         state_table,
@@ -256,23 +256,38 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     .boxed()
     .execute();
 
-    // push upstream chunks
-    let stream_chunk1 = StreamChunk::from_pretty(
-        " I F
-            + 1 10.01
-            + 2 2.02
-            + 3 3.03 // binlog pos=2
-            + 4 4.04
-            + 5 5.05 // binlog pos=4
-            + 6 6.06",
-    );
-    let stream_chunk2 = StreamChunk::from_pretty(
-        " I F
-            + 6 10.08
-            + 199 40.5
-            + 978 72.6
-            + 134 41.7",
-    );
+    let chunk1_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 2.02}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 3, "price": 3.03}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 4, "price": 4.04}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 5, "price": 5.05}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 6.06}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let chunk2_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 10.08}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 199, "price": 40.5}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 978, "price": 72.6}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 134, "price": 41.7}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let chunk1_datums: Vec<Datum> = chunk1_payload
+        .into_iter()
+        .map(|s| Some(JsonbVal::from_str(s).unwrap().into()))
+        .collect_vec();
+
+    let chunk2_datums: Vec<Datum> = chunk2_payload
+        .into_iter()
+        .map(|s| Some(JsonbVal::from_str(s).unwrap().into()))
+        .collect_vec();
+
+    let chunk_schema = Schema::new(vec![
+        Field::unnamed(DataType::Jsonb), // payload
+    ]);
+
+    let stream_chunk1 = create_stream_chunk(chunk1_datums, &chunk_schema);
+    let stream_chunk2 = create_stream_chunk(chunk2_datums, &chunk_schema);
 
     // The first barrier
     let curr_epoch = 11;
@@ -330,8 +345,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // scan the final result of the mv table
     let column_descs = vec![
-        ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
-        ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(0), table_schema[0].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(1), table_schema[1].data_type.clone()),
     ];
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
@@ -362,6 +377,20 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     mview_handle.await.unwrap()?;
 
     Ok(())
+}
+
+fn create_stream_chunk(datums: Vec<Datum>, schema: &Schema) -> StreamChunk {
+    let mut builders = schema.create_array_builders(8);
+    for datum in &datums {
+        builders[0].append(datum);
+    }
+    let columns = builders
+        .into_iter()
+        .map(|builder| builder.finish().into())
+        .collect();
+
+    let ops = vec![Op::Insert; datums.len()];
+    StreamChunk::from_parts(ops, DataChunk::new(columns, datums.len()))
 }
 
 async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<()> {
