@@ -131,6 +131,8 @@ async fn extract_avro_table_schema(
     row_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties, Some(row_options))?;
+    consume_aws_config_from_options(row_options);
+
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
@@ -218,6 +220,8 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = SpecificParserConfig::new(&info, with_properties, Some(row_options))?;
+    consume_aws_config_from_options(row_options);
+    
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
@@ -254,6 +258,10 @@ pub fn consume_string_from_options(
         "missing field {} in options",
         key
     ))))
+}
+
+fn consume_aws_config_from_options(row_options: &mut BTreeMap<String, String>) {
+    row_options.retain(|key, _| !key.starts_with("aws."))
 }
 
 pub fn get_json_schema_location(
@@ -710,6 +718,7 @@ pub(crate) async fn bind_source_pk(
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
+    let mut options = WithOptions::try_from(source_schema.row_options())?;
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
@@ -730,7 +739,6 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::Upsert, Encode::Avro) => {
-            let mut options = WithOptions::try_from(source_schema.row_options())?;
             if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
@@ -766,7 +774,6 @@ pub(crate) async fn bind_source_pk(
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                let mut options = WithOptions::try_from(source_schema.row_options())?;
                 let pk_names = extract_debezium_avro_table_pk_columns(
                     source_info,
                     with_properties,
