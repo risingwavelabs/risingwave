@@ -185,6 +185,28 @@ select (return_all_arrays(
 ----
 {NULL,t} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,12345678901234567890.12345678} {NULL,2023-06-01} {NULL,01:02:03.456789} {NULL,"2023-06-01 01:02:03.456789"} {NULL,"1 mon 2 days 00:00:03"} {NULL,string} {NULL,"\\x6279746573"} {NULL,"{\"key\": 1}"} {NULL,"(1,2)"}
 
+# test large string output
+query I
+select length((return_all(
+    null::boolean,
+    null::smallint,
+    null::int,
+    null::bigint,
+    null::float4,
+    null::float8,
+    null::decimal,
+    null::date,
+    null::time,
+    null::timestamp,
+    null::interval,
+    repeat('a', 100000)::varchar,
+    repeat('a', 100000)::bytea,
+    null::jsonb,
+    null::struct<f1 int, f2 int>
+)).varchar);
+----
+100000
+
 query I
 select series(5);
 ----
