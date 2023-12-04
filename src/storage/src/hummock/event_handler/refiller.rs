@@ -505,10 +505,7 @@ impl CacheRefillTask {
             let store = &sstable_store;
             let ssts = &ssts;
             async move {
-                // refill if:
-                //
-                // 1. pblk in recent filter
-                // 2. in data memory cache or in data file cache
+                // refill if pblk in recent filter
                 let refill = pblks.into_iter().any(|pblk| {
                     store
                         .data_recent_filter()
@@ -542,9 +539,8 @@ impl CacheRefillTask {
         let sstable_store = &context.sstable_store;
         let threshold = context.config.threshold;
 
-        // Avoid newly refilled sst being filtered.
+        // update recent filter
         if let Some(filter) = sstable_store.data_recent_filter() {
-            // filter.insert((object_id, usize::MAX));
             filter.extend(
                 unit.blks
                     .clone()
