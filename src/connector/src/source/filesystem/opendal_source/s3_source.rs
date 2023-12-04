@@ -44,11 +44,23 @@ where
 
         if let Some(access) = s3_properties.access {
             builder.access_key_id(&access);
+        } else {
+            tracing::error!(
+                "access key id of aws s3 is not set, bucket {}",
+                s3_properties.bucket_name
+            );
         }
 
         if let Some(secret) = s3_properties.secret {
             builder.secret_access_key(&secret);
+        } else {
+            tracing::error!(
+                "secret access key of aws s3 is not set, bucket {}",
+                s3_properties.bucket_name
+            );
         }
+
+        builder.enable_virtual_host_style();
 
         if let Some(assume_role) = assume_role {
             builder.role_arn(&assume_role);

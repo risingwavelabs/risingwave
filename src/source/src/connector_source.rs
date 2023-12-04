@@ -199,7 +199,7 @@ async fn build_opendal_fs_list_stream<C: OpenDalSourceProperties>(lister: Openda
             }
             Err(err) => {
                 tracing::error!("list object fail, err {}", err);
-                break;
+                return Err(err.into());
             }
         }
     }
