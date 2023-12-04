@@ -583,6 +583,13 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
+    pub compactor_fast_max_compact_delete_ratio: u32,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
+    pub compactor_fast_max_compact_task_size: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -1149,6 +1156,14 @@ pub mod default {
         }
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
+        }
+
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
+            40
+        }
+
+        pub fn compactor_fast_max_compact_task_size() -> u64 {
+            2 * 1024 * 1024 * 1024 // 2g
         }
     }
 
