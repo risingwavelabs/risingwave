@@ -346,7 +346,7 @@ impl GlobalStreamManager {
                                 tracing::warn!("failed to notify cancelled: {table_id}")
                             });
                             self.creating_job_info.delete_job(table_id).await;
-                            return Err(MetaError::cancelled("create".into()));
+                            return Err(MetaError::cancelled("create"));
                         }
                     }
                     CreatingState::Created => {
@@ -460,9 +460,9 @@ impl GlobalStreamManager {
         );
         revert_funcs.push(Box::pin(async move {
             if create_type == CreateType::Foreground {
-                if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
-                }
+                hummock_manager_ref
+                    .unregister_table_ids_fail_fast(&registered_table_ids)
+                    .await;
             }
         }));
 
@@ -577,17 +577,9 @@ impl GlobalStreamManager {
             .await?;
 
         // Unregister from compaction group afterwards.
-        if let Err(e) = self
-            .hummock_manager
+        self.hummock_manager
             .unregister_table_fragments_vec(&table_fragments_vec)
-            .await
-        {
-            tracing::warn!(
-                    "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
-                    table_fragments_vec,
-                    e
-                );
-        }
+            .await;
 
         Ok(())
     }

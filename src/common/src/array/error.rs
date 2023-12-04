@@ -19,7 +19,7 @@ use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use thiserror_ext::Construct;
 
-use crate::error::{BoxedError, ErrorCode, RwError};
+use crate::error::BoxedError;
 
 #[derive(Error, Debug, Construct)]
 pub enum ArrayError {
@@ -37,16 +37,18 @@ pub enum ArrayError {
     ),
 
     #[error("Convert from arrow error: {0}")]
-    FromArrow(BoxedError),
+    FromArrow(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Convert to arrow error: {0}")]
-    ToArrow(BoxedError),
-}
-
-impl From<ArrayError> for RwError {
-    fn from(s: ArrayError) -> Self {
-        ErrorCode::ArrayError(s).into()
-    }
+    ToArrow(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 }
 
 impl From<PbFieldNotFound> for ArrayError {
