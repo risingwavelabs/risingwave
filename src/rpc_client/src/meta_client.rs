@@ -283,11 +283,14 @@ impl MetaClient {
             meta_config: meta_config.to_owned(),
         };
 
-        let meta_client_clone = meta_client.clone();
-        std::panic::update_hook(move |default_hook, info| {
-            // Try to report panic event to meta node.
-            meta_client_clone.try_add_panic_event_blocking(info, None);
-            default_hook(info);
+        static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
+        REPORT_PANIC.call_once(|| {
+            let meta_client_clone = meta_client.clone();
+            std::panic::update_hook(move |default_hook, info| {
+                // Try to report panic event to meta node.
+                meta_client_clone.try_add_panic_event_blocking(info, None);
+                default_hook(info);
+            });
         });
 
         Ok((meta_client, system_params_resp.params.unwrap().into()))
