@@ -65,7 +65,7 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector, SourceSchemaCompatExt,
+    get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -1241,8 +1241,8 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
-        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
+        OFFSET_COLUMN_NAME, ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
