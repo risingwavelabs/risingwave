@@ -128,8 +128,9 @@ fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool
 async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    let parser_config = SpecificParserConfig::new(info, with_properties, Some(row_options))?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
@@ -145,8 +146,9 @@ async fn extract_avro_table_schema(
 async fn extract_upsert_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<String>>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    let parser_config = SpecificParserConfig::new(info, with_properties, Some(row_options))?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
@@ -175,8 +177,9 @@ async fn extract_upsert_avro_table_pk_columns(
 async fn extract_debezium_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    let parser_config = SpecificParserConfig::new(info, with_properties, Some(row_options))?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
@@ -185,8 +188,9 @@ async fn extract_debezium_avro_table_pk_columns(
 async fn extract_debezium_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    let parser_config = SpecificParserConfig::new(info, with_properties, Some(row_options))?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
@@ -202,7 +206,8 @@ async fn extract_debezium_avro_table_schema(
 /// Map a protobuf schema to a relational schema.
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
-    with_properties: HashMap<String, String>,
+    with_properties: &HashMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let info = StreamSourceInfo {
         proto_message_name: schema.message_name.0.clone(),
@@ -212,7 +217,7 @@ async fn extract_protobuf_table_schema(
         row_encode: EncodeType::Protobuf.into(),
         ..Default::default()
     };
-    let parser_config = SpecificParserConfig::new(&info, &with_properties)?;
+    let parser_config = SpecificParserConfig::new(&info, with_properties, Some(row_options))?;
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
@@ -347,7 +352,7 @@ pub(crate) async fn bind_columns_from_source(
 
             (
                 Some(
-                    extract_protobuf_table_schema(&protobuf_schema, with_properties.clone())
+                    extract_protobuf_table_schema(&protobuf_schema, with_properties, &mut options)
                         .await?,
                 ),
                 StreamSourceInfo {
@@ -405,7 +410,10 @@ pub(crate) async fn bind_columns_from_source(
                 ..Default::default()
             };
             (
-                Some(extract_avro_table_schema(&stream_source_info, with_properties).await?),
+                Some(
+                    extract_avro_table_schema(&stream_source_info, with_properties, &mut options)
+                        .await?,
+                ),
                 stream_source_info,
             )
         }
@@ -480,7 +488,9 @@ pub(crate) async fn bind_columns_from_source(
                 name_strategy,
                 ..Default::default()
             };
-            let columns = extract_avro_table_schema(&stream_source_info, with_properties).await?;
+            let columns =
+                extract_avro_table_schema(&stream_source_info, with_properties, &mut options)
+                    .await?;
 
             (Some(columns), stream_source_info)
         }
@@ -526,8 +536,12 @@ pub(crate) async fn bind_columns_from_source(
                 ..Default::default()
             };
 
-            let full_columns =
-                extract_debezium_avro_table_schema(&stream_source_info, with_properties).await?;
+            let full_columns = extract_debezium_avro_table_schema(
+                &stream_source_info,
+                with_properties,
+                &mut options,
+            )
+            .await?;
 
             (Some(full_columns), stream_source_info)
         }
@@ -716,6 +730,7 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::Upsert, Encode::Avro) => {
+            let mut options = WithOptions::try_from(source_schema.row_options())?;
             if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
@@ -723,8 +738,12 @@ pub(crate) async fn bind_source_pk(
                     )));
                 }
                 sql_defined_pk_names
-            } else if let Some(extracted_pk_names) =
-                extract_upsert_avro_table_pk_columns(source_info, with_properties).await?
+            } else if let Some(extracted_pk_names) = extract_upsert_avro_table_pk_columns(
+                source_info,
+                with_properties,
+                options.inner_mut(),
+            )
+            .await?
             {
                 extracted_pk_names
             } else {
@@ -747,8 +766,13 @@ pub(crate) async fn bind_source_pk(
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                let pk_names =
-                    extract_debezium_avro_table_pk_columns(source_info, with_properties).await?;
+                let mut options = WithOptions::try_from(source_schema.row_options())?;
+                let pk_names = extract_debezium_avro_table_pk_columns(
+                    source_info,
+                    with_properties,
+                    options.inner_mut(),
+                )
+                .await?;
                 // extract pk(s) from schema registry
                 for pk_name in &pk_names {
                     columns
