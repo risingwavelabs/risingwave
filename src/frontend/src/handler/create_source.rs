@@ -65,7 +65,7 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector, SourceSchemaCompatExt,
+    get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -582,7 +582,6 @@ pub(crate) async fn bind_columns_from_source(
         );
         session.notice_to_user(err_string);
     }
-
     Ok(res)
 }
 
@@ -694,15 +693,7 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
-            sql_defined_pk_names
-        }
-        (Format::Plain, _) => {
-            if is_key_mq_connector(with_properties) {
-                add_default_key_column(columns);
-            }
-            sql_defined_pk_names
-        }
+        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
@@ -1250,8 +1241,8 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
-        OFFSET_COLUMN_NAME, ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
+        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1293,7 +1284,6 @@ pub mod tests {
         );
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
-            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
