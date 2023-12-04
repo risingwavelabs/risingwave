@@ -12,16 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.source.common;
-
-import java.util.Map;
-
-public class Utils {
-
-    public static CdcSourceMode getCdcSourceMode(Map<String, String> props) {
-        var isSharing =
-                Boolean.parseBoolean(
-                        props.getOrDefault(DbzConnectorConfig.CDC_SHARING_MODE, "false"));
-        return isSharing ? CdcSourceMode.SHARING_MODE : CdcSourceMode.SINGLE_MODE;
-    }
-}
+pub mod format_args_collector;

@@ -18,8 +18,6 @@ pub use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 
-use crate::error::{ErrorCode, RwError};
-
 #[derive(Error, Debug)]
 pub enum ArrayError {
     #[error("Pb decode error: {0}")]
@@ -40,12 +38,6 @@ pub enum ArrayError {
 
     #[error("Convert to arrow error: {0}")]
     ToArrow(String),
-}
-
-impl From<ArrayError> for RwError {
-    fn from(s: ArrayError) -> Self {
-        ErrorCode::ArrayError(s).into()
-    }
 }
 
 impl From<PbFieldNotFound> for ArrayError {

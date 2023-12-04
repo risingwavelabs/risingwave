@@ -21,7 +21,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The error type for UDF operations.
 #[derive(Error, Debug, Box, Construct)]
-#[thiserror_ext(type = Error)]
+#[thiserror_ext(newtype(name = Error))]
 pub enum ErrorInner {
     #[error("failed to connect to UDF service: {0}")]
     Connect(#[from] tonic::transport::Error),
