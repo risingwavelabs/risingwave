@@ -381,8 +381,8 @@ impl CacheRefillTask {
                         != std::cmp::Ordering::Greater
                 });
 
-                tracing::debug!(
-                    "psst: {}, pblk: {}, uleft: {}, uright: {}",
+                tracing::info!(
+                    "[inheritance] psst: {}, pblk: {}, uleft: {}, uright: {}",
                     psst.id,
                     pblk,
                     uleft,
