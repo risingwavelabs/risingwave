@@ -198,11 +198,7 @@ where
                 if switch_builder {
                     need_seal_current = true;
                 } else if builder.reach_capacity() {
-                    let is_split_table = self
-                        .table_partition_vnode
-                        .contains_key(&full_key.user_key.table_id.table_id());
-
-                    if !is_split_table || builder.reach_max_sst_size() {
+                    if !self.is_target_level_l0_or_lbase || builder.reach_max_sst_size() {
                         need_seal_current = true;
                     } else {
                         need_seal_current = self.is_target_level_l0_or_lbase && vnode_changed;
