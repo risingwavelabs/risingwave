@@ -1315,9 +1315,6 @@ pub mod tests {
             "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
-        session
-            .set_config("cdc_backfill", "true".to_string())
-            .unwrap();
 
         frontend
             .run_sql_with_session(session.clone(), sql)

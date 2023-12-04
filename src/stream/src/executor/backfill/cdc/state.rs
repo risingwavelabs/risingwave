@@ -32,7 +32,7 @@ pub struct CdcStateRecord {
     pub row_count: i64,
 }
 
-/// state schema: `table_id | backfill_finished | row_count | cdc_offset`
+/// state schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
 pub struct CdcBackfillState<S: StateStore> {
     /// Id of the backfilling table, will be the key of the state
     split_id: String,
