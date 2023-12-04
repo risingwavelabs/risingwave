@@ -700,7 +700,8 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::error!(actor_id, error = %err.as_report(), "actor exit with error");
+                        // Intentionally use `?` on the report to also include the backtrace.
+                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };
