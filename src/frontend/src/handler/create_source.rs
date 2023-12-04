@@ -694,9 +694,7 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
-            sql_defined_pk_names
-        }
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
         (Format::Plain, _) => {
             if is_key_mq_connector(with_properties) {
                 add_default_key_column(columns);
