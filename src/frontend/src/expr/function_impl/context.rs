@@ -19,10 +19,10 @@ use risingwave_expr::define_context;
 
 use crate::session::AuthContext;
 
+// Only for local mode.
 define_context! {
     pub(super) CATALOG_READER: crate::catalog::CatalogReader,
     pub(super) AUTH_CONTEXT: Arc<AuthContext>,
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,
-    pub(super) TIME_ZONE: String,
 }

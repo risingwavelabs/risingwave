@@ -177,7 +177,7 @@ impl Binder {
 
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
-                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbCat,
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
                     // bytea (and varbit, tsvector, tsquery)
                     (Some(t @ DataType::Bytea), Some(DataType::Bytea))

@@ -159,18 +159,17 @@ impl<S: StateStore> MultiBackfillState<S> {
     }
 
     pub async fn mutate_state(&mut self, record: &CdcStateRecord) -> StreamExecutorResult<()> {
-        let Some(current_pk_pos) = &record.current_pk_pos else {
-            return Ok(());
-        };
-
         // schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));
+        let state_len = state.len();
         state[0] = split_id.clone();
-        state[1..=current_pk_pos.len()].clone_from_slice(current_pk_pos.as_inner());
-        state[current_pk_pos.len() + 1] = Some(record.is_finished.into());
-        state[current_pk_pos.len() + 2] = Some(record.row_count.into());
-        state[current_pk_pos.len() + 3] = record.last_cdc_offset.clone().map(|cdc_offset| {
+        if let Some(current_pk_pos) = &record.current_pk_pos {
+            state[1..=current_pk_pos.len()].clone_from_slice(current_pk_pos.as_inner());
+        }
+        state[state_len - 3] = Some(record.is_finished.into());
+        state[state_len - 2] = Some(record.row_count.into());
+        state[state_len - 1] = record.last_cdc_offset.clone().map(|cdc_offset| {
             let json = serde_json::to_value(cdc_offset).unwrap();
             ScalarImpl::Jsonb(JsonbVal::from(json))
         });

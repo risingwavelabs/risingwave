@@ -38,7 +38,7 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
+use crate::manager::{CatalogManagerRef, DdlType, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
@@ -117,6 +117,7 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
         definition: String,
+        ddl_type: DdlType,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -723,9 +724,9 @@ impl CommandContext {
                 let table_id = table_fragments.table_id().table_id;
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
-                if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
-                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
-                }
+                self.hummock_manager
+                    .unregister_table_ids_fail_fast(&table_ids)
+                    .await;
 
                 // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                 // We need to cleanup the table state. So we can do it here.

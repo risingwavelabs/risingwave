@@ -19,7 +19,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
@@ -160,7 +160,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = MAX_EPOCH)]
+        #[clap(short, long = "epoch", default_value_t = HummockEpoch::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
@@ -348,6 +348,10 @@ pub struct ScaleVerticalCommands {
     /// The target parallelism per worker, requires `workers` to be set.
     #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
+
+    /// It will exclude all other workers to maintain the target parallelism only for the target workers.
+    #[clap(long, default_value_t = false)]
+    exclusive: bool,
 }
 
 #[derive(Subcommand, Debug)]

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror::Error;
@@ -429,11 +429,5 @@ pub struct CastError(String);
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
         ErrorCode::BindError(value.to_string())
-    }
-}
-
-impl From<CastError> for RwError {
-    fn from(value: CastError) -> Self {
-        ErrorCode::from(value).into()
     }
 }

@@ -44,7 +44,7 @@
     href="https://hub.docker.com/r/risingwavelabs/risingwave"
     target="_blank"
   >
-    <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
+    <img alt="Docker" src="https://img.shields.io/docker/pulls/risingwavelabs/risingwave" />
   </a>
   <a
     href="https://twitter.com/risingwavelabs"

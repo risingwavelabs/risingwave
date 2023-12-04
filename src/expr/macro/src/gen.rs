@@ -756,7 +756,7 @@ impl FunctionAttr {
             quote! { state = #next_state; }
         };
         let get_result = if custom_state.is_some() {
-            quote! { Ok(Some(state.downcast_ref::<#state_type>().into())) }
+            quote! { Ok(state.downcast_ref::<#state_type>().into()) }
         } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
             && impl_.finalize.is_some()
         {
