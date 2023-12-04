@@ -116,6 +116,19 @@ impl TaskService for BatchServiceImpl {
         &self,
         req: Request<ExecuteRequest>,
     ) -> Result<Response<Self::ExecuteStream>, Status> {
+        let req = req.into_inner();
+        let env = self.env.clone();
+        let mgr = self.mgr.clone();
+        BatchServiceImpl::get_execute_stream(env, mgr, req).await
+    }
+}
+
+impl BatchServiceImpl {
+    async fn get_execute_stream(
+        env: BatchEnvironment,
+        mgr: Arc<BatchManager>,
+        req: ExecuteRequest,
+    ) -> Result<Response<ReceiverStream<GetDataResponseResult>>, Status> {
         let ExecuteRequest {
             task_id,
             plan,
@@ -131,13 +144,13 @@ impl TaskService for BatchServiceImpl {
         let captured_execution_context =
             captured_execution_context.expect("no captured execution context found");
 
-        let context = ComputeNodeContext::new_for_local(self.env.clone());
+        let context = ComputeNodeContext::new_for_local(env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,
             task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
         if let Err(e) = task
@@ -167,7 +180,7 @@ impl TaskService for BatchServiceImpl {
         })?;
         let mut writer = GrpcExchangeWriter::new(tx.clone());
         // Always spawn a task and do not block current function.
-        self.mgr.runtime().spawn(async move {
+        mgr.runtime().spawn(async move {
             match output.take_data(&mut writer).await {
                 Ok(_) => Ok(()),
                 Err(e) => tx.send(Err(e.into())).await,

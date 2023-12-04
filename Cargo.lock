@@ -7323,6 +7323,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio-metrics",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "workspace-hack",
 ]
