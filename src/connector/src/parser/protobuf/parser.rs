@@ -622,8 +622,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), None)?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new(), None)?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -668,8 +667,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), None)?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new(), None)?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -718,8 +716,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -747,8 +744,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await

@@ -221,7 +221,7 @@ async fn extract_protobuf_table_schema(
     };
     let parser_config = SpecificParserConfig::new(&info, with_properties, Some(row_options))?;
     consume_aws_config_from_options(row_options);
-    
+
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
