@@ -48,6 +48,13 @@ SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
 
+statement error
+create table non_exist ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.non_exist';
+
 
 statement ok
 create table orders_test (

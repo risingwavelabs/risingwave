@@ -297,6 +297,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                cut_table_size_limit: config.meta.cut_table_size_limit,
+                hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,

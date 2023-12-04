@@ -17,7 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
@@ -192,6 +192,16 @@ impl MonotonicDeleteEvent {
     #[inline]
     pub fn encoded_size(&self) -> usize {
         4 + self.event_key.left_user_key.encoded_len() + 1 + 8
+    }
+}
+
+impl Display for MonotonicDeleteEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event key {:?} epoch {:?}",
+            self.event_key, self.new_epoch
+        )
     }
 }
 
@@ -385,7 +395,16 @@ impl SstableMeta {
 
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let start_offset = buf.len();
-        buf.put_u32_le(utils::checked_into_u32(self.block_metas.len()));
+        buf.put_u32_le(
+            utils::checked_into_u32(self.block_metas.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert block_metas_len {} into u32 table {}",
+                    self.block_metas.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
@@ -394,9 +413,16 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(utils::checked_into_u32(
-            self.monotonic_tombstone_events.len(),
-        ));
+        buf.put_u32_le(
+            utils::checked_into_u32(self.monotonic_tombstone_events.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert monotonic_tombstone_events_len {} into u32 table {}",
+                    self.monotonic_tombstone_events.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
             monotonic_tombstone_event.encode(buf);
         }

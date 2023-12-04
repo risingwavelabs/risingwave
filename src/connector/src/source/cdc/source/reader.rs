@@ -22,7 +22,9 @@ use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
-use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
+use risingwave_pb::connector_service::{
+    GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
+};
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
@@ -67,8 +69,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        // rewrite the hostname and port for the split
-        let mut properties = conn_props.props.clone();
+        let mut properties = conn_props.properties.clone();
 
         // For citus, we need to rewrite the `table.name` to capture sharding tables
         if matches!(T::source_type(), CdcSourceType::Citus)
@@ -100,6 +101,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             start_offset: split.start_offset().clone().unwrap_or_default(),
             properties,
             snapshot_done: split.snapshot_done(),
+            common_param: Some(SourceCommonParam {
+                is_multi_table_shared: conn_props.is_multi_table_shared,
+            }),
         };
 
         std::thread::spawn(move || {

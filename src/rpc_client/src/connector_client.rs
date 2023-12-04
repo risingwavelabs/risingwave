@@ -44,13 +44,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
-pub type SinkWriterRequestSender = BidiStreamSender<SinkWriterStreamRequest>;
+pub type SinkWriterRequestSender<REQ = SinkWriterStreamRequest> = BidiStreamSender<REQ>;
 pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
 
-pub type SinkWriterStreamHandle =
-    BidiStreamHandle<SinkWriterStreamRequest, SinkWriterStreamResponse>;
+pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
+    BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
-impl SinkWriterRequestSender {
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
@@ -94,7 +94,7 @@ impl SinkWriterResponseReceiver {
     }
 }
 
-impl SinkWriterStreamHandle {
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
         self.request_sender.start_epoch(epoch).await
     }
@@ -217,6 +217,7 @@ impl ConnectorClient {
         start_offset: Option<String>,
         properties: HashMap<String, String>,
         snapshot_done: bool,
+        common_param: SourceCommonParam,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .rpc_client
@@ -227,6 +228,7 @@ impl ConnectorClient {
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
                 snapshot_done,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
@@ -246,6 +248,7 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        common_param: SourceCommonParam,
     ) -> Result<()> {
         let response = self
             .rpc_client
@@ -255,6 +258,7 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 properties,
                 table_schema,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
