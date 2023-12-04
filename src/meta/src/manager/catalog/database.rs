@@ -462,11 +462,6 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job.keys().cloned()
     }
 
-    pub fn clear_creating_stream_jobs(&mut self) {
-        self.in_progress_creation_tracker.clear();
-        self.in_progress_creation_streaming_job.clear();
-    }
-
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {
         self.in_progress_creating_tables
             .extend(tables.iter().map(|t| (t.id, t.clone())));
