@@ -1219,6 +1219,10 @@ impl MetaClient {
         panic_info: impl Display,
         timeout_millis: Option<u64>,
     ) {
+        if cfg!(madsim) {
+            // madsim doesn't support block_on.
+            return;
+        }
         let event = event_log::EventWorkerNodePanic {
             worker_id: self.worker_id,
             worker_type: self.worker_type.into(),
