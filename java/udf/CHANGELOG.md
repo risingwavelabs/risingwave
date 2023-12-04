@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix index-out-of-bound error when string or string list is large.
+- Fix memory leak.
 
 ## [0.1.1] - 2023-12-03
 
