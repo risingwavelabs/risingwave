@@ -196,7 +196,7 @@ impl AvroParserConfig {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
     use std::env;
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -300,7 +300,7 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), Some(&mut BTreeMap::new()))?;
+            SpecificParserConfig::new(&info, &HashMap::new(), None)?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 

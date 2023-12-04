@@ -140,7 +140,6 @@ impl DebeziumAvroParserConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::io::Read;
     use std::path::PathBuf;
 
@@ -305,7 +304,7 @@ mod tests {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &props, Some(&mut BTreeMap::new()))?;
+        let parser_config = SpecificParserConfig::new(&info, &props, None)?;
         let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?

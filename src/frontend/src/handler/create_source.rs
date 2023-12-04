@@ -80,15 +80,15 @@ pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 async fn extract_json_table_schema(
     schema_config: &Option<(AstString, bool)>,
     with_properties: &HashMap<String, String>,
-    options: &mut BTreeMap<String, String>,
+    row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
     match schema_config {
         None => Ok(None),
         Some((schema_location, use_schema_registry)) => {
             let schema_registry_auth = use_schema_registry.then(|| {
-                let auth = SchemaRegistryAuth::from(&*options);
-                try_consume_string_from_options(options, SCHEMA_REGISTRY_USERNAME);
-                try_consume_string_from_options(options, SCHEMA_REGISTRY_PASSWORD);
+                let auth = SchemaRegistryAuth::from(&*row_options);
+                try_consume_string_from_options(row_options, SCHEMA_REGISTRY_USERNAME);
+                try_consume_string_from_options(row_options, SCHEMA_REGISTRY_PASSWORD);
                 auth
             });
             Ok(Some(

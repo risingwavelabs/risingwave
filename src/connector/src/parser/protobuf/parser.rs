@@ -577,7 +577,7 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use prost::Message;
@@ -623,7 +623,7 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), Some(&mut BTreeMap::new()))?;
+            SpecificParserConfig::new(&info, &HashMap::new(), None)?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -669,7 +669,7 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), Some(&mut BTreeMap::new()))?;
+            SpecificParserConfig::new(&info, &HashMap::new(), None)?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -719,7 +719,7 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), Some(&mut BTreeMap::new())).unwrap();
+            SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -748,7 +748,7 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            SpecificParserConfig::new(&info, &HashMap::new(), Some(&mut BTreeMap::new())).unwrap();
+            SpecificParserConfig::new(&info, &HashMap::new(), None).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await
