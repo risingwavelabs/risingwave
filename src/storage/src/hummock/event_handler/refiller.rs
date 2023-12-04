@@ -65,8 +65,8 @@ pub struct CacheRefillMetrics {
     pub data_refill_unit_inheritance_hit_total: GenericCounter<AtomicU64>,
     pub data_refill_unit_inheritance_miss_total: GenericCounter<AtomicU64>,
 
-    pub data_refill_unit_unfiltered_total: GenericCounter<AtomicU64>,
-    pub data_refill_unit_success_total: GenericCounter<AtomicU64>,
+    pub data_refill_block_unfiltered_total: GenericCounter<AtomicU64>,
+    pub data_refill_block_success_total: GenericCounter<AtomicU64>,
 
     pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
     pub data_refill_success_bytes: GenericCounter<AtomicU64>,
@@ -131,11 +131,11 @@ impl CacheRefillMetrics {
             .get_metric_with_label_values(&["unit_inheritance", "miss"])
             .unwrap();
 
-        let data_refill_unit_unfiltered_total = refill_total
-            .get_metric_with_label_values(&["unit", "unfiltered"])
+        let data_refill_block_unfiltered_total = refill_total
+            .get_metric_with_label_values(&["block", "unfiltered"])
             .unwrap();
-        let data_refill_unit_success_total = refill_total
-            .get_metric_with_label_values(&["unit", "success"])
+        let data_refill_block_success_total = refill_total
+            .get_metric_with_label_values(&["block", "success"])
             .unwrap();
 
         let data_refill_ideal_bytes = refill_bytes
@@ -169,8 +169,8 @@ impl CacheRefillMetrics {
             data_refill_unit_inheritance_hit_total,
             data_refill_unit_inheritance_miss_total,
 
-            data_refill_unit_unfiltered_total,
-            data_refill_unit_success_total,
+            data_refill_block_unfiltered_total,
+            data_refill_block_success_total,
 
             data_refill_ideal_bytes,
             data_refill_success_bytes,
@@ -451,15 +451,14 @@ impl CacheRefillTask {
             return;
         }
 
-        // write unfiltered unit metrics
-        let unit = context.config.unit;
-        let units = holders
-            .iter()
-            .map(|sst| sst.block_count() / unit + 1.min(sst.block_count() % unit))
-            .sum::<usize>();
         GLOBAL_CACHE_REFILL_METRICS
-            .data_refill_unit_unfiltered_total
-            .inc_by(units as u64);
+            .data_refill_block_unfiltered_total
+            .inc_by(
+                holders
+                    .iter()
+                    .map(|sst| sst.block_count() as u64)
+                    .sum::<u64>(),
+            );
 
         if delta.insert_sst_level == 0 {
             Self::data_file_cache_refill_l0_impl(context, delta, holders).await;
@@ -643,7 +642,7 @@ impl CacheRefillTask {
                                 .data_refill_success_bytes
                                 .inc_by(len as u64);
                             GLOBAL_CACHE_REFILL_METRICS
-                                .data_refill_unit_success_total
+                                .data_refill_block_success_total
                                 .inc();
                         }
                         res
