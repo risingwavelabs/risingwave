@@ -28,6 +28,7 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
+thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -38,7 +39,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
-thiserror-ext = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = "0.21"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
