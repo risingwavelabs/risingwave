@@ -1230,6 +1230,10 @@ pub async fn handle_create_source(
         columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
+        options: WithOptions::try_from(source_schema.row_options())?
+            .into_inner()
+            .into_iter()
+            .collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,

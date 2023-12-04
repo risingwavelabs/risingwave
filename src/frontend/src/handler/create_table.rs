@@ -568,6 +568,12 @@ pub(crate) async fn gen_create_table_plan_with_source(
         table_name,
         columns,
         properties,
+        Some(
+            WithOptions::try_from(source_schema.row_options())?
+                .into_inner()
+                .into_iter()
+                .collect(),
+        ),
         pk_column_ids,
         row_id_index,
         Some(source_info),
@@ -647,6 +653,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         table_name,
         columns,
         properties,
+        None,
         pk_column_ids,
         row_id_index,
         None,
@@ -664,6 +671,7 @@ fn gen_table_plan_inner(
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
     properties: HashMap<String, String>,
+    options: Option<HashMap<String, String>>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -709,6 +717,7 @@ fn gen_table_plan_inner(
         },
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         properties: with_options.into_inner().into_iter().collect(),
+        options: options.unwrap(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
