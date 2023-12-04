@@ -1213,16 +1213,21 @@ impl MetaClient {
         Ok(resp.task_progress)
     }
 
-    /// If `timeout_millis` is None, default is used.
+    #[cfg(madsim)]
     pub fn try_add_panic_event_blocking(
         &self,
         panic_info: impl Display,
         timeout_millis: Option<u64>,
     ) {
-        if cfg!(madsim) {
-            // madsim doesn't support block_on.
-            return;
-        }
+    }
+
+    /// If `timeout_millis` is None, default is used.
+    #[cfg(not(madsim))]
+    pub fn try_add_panic_event_blocking(
+        &self,
+        panic_info: impl Display,
+        timeout_millis: Option<u64>,
+    ) {
         let event = event_log::EventWorkerNodePanic {
             worker_id: self.worker_id,
             worker_type: self.worker_type.into(),
