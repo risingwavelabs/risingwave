@@ -32,7 +32,7 @@ use risingwave_connector::parser::{
     SpecificParserConfig,
 };
 use risingwave_connector::schema::schema_registry::{
-    name_strategy_from_str, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+    name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
@@ -80,19 +80,28 @@ pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 async fn extract_json_table_schema(
     schema_config: &Option<(AstString, bool)>,
     with_properties: &HashMap<String, String>,
+    options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
     match schema_config {
         None => Ok(None),
-        Some((schema_location, use_schema_registry)) => Ok(Some(
-            schema_to_columns(&schema_location.0, *use_schema_registry, with_properties)
-                .await?
-                .into_iter()
-                .map(|col| ColumnCatalog {
-                    column_desc: col.into(),
-                    is_hidden: false,
-                })
-                .collect_vec(),
-        )),
+        Some((schema_location, use_schema_registry)) => {
+            let schema_registry_auth = use_schema_registry.then(|| {
+                let auth = SchemaRegistryAuth::from(&*options);
+                try_consume_string_from_options(options, SCHEMA_REGISTRY_USERNAME);
+                try_consume_string_from_options(options, SCHEMA_REGISTRY_PASSWORD);
+                auth
+            });
+            Ok(Some(
+                schema_to_columns(&schema_location.0, schema_registry_auth, with_properties)
+                    .await?
+                    .into_iter()
+                    .map(|col| ColumnCatalog {
+                        column_desc: col.into(),
+                        is_hidden: false,
+                    })
+                    .collect_vec(),
+            ))
+        }
     }
 }
 
@@ -225,14 +234,14 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
         .collect()
 }
 
-fn try_consume_string_from_options(
+pub fn try_consume_string_from_options(
     row_options: &mut BTreeMap<String, String>,
     key: &str,
 ) -> Option<AstString> {
     row_options.remove(key).map(AstString)
 }
 
-fn consume_string_from_options(
+pub fn consume_string_from_options(
     row_options: &mut BTreeMap<String, String>,
     key: &str,
 ) -> Result<AstString> {
@@ -359,7 +368,7 @@ pub(crate) async fn bind_columns_from_source(
             let columns = if create_cdc_source_job {
                 Some(debezium_cdc_source_schema())
             } else {
-                extract_json_table_schema(&schema_config, with_properties).await?
+                extract_json_table_schema(&schema_config, with_properties, &mut options).await?
             };
 
             (
@@ -435,7 +444,8 @@ pub(crate) async fn bind_columns_from_source(
         ),
         (Format::Upsert, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut options)?;
-            let columns = extract_json_table_schema(&schema_config, with_properties).await?;
+            let columns =
+                extract_json_table_schema(&schema_config, with_properties, &mut options).await?;
 
             (
                 columns,
@@ -478,7 +488,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Debezium, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut options)?;
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                extract_json_table_schema(&schema_config, with_properties, &mut options).await?,
                 StreamSourceInfo {
                     format: FormatType::Debezium as i32,
                     row_encode: EncodeType::Json as i32,
@@ -533,7 +543,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Maxwell, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut options)?;
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                extract_json_table_schema(&schema_config, with_properties, &mut options).await?,
                 StreamSourceInfo {
                     format: FormatType::Maxwell as i32,
                     row_encode: EncodeType::Json as i32,
@@ -546,7 +556,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Canal, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut options)?;
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                extract_json_table_schema(&schema_config, with_properties, &mut options).await?,
                 StreamSourceInfo {
                     format: FormatType::Canal as i32,
                     row_encode: EncodeType::Json as i32,
@@ -562,12 +572,6 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
-
-    {
-        // fixme: remove this after correctly consuming the two options
-        options.remove(SCHEMA_REGISTRY_USERNAME);
-        options.remove(SCHEMA_REGISTRY_PASSWORD);
-    }
 
     if !options.is_empty() {
         let err_string = format!(

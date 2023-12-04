@@ -226,13 +226,10 @@ impl TryFrom<&Statement> for WithOptions {
             Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
-                        with_properties,
-                        ..
+                        with_properties, ..
                     },
                 ..
-            } => {
-                Self::try_from(with_properties.0.as_slice())
-            }
+            } => Self::try_from(with_properties.0.as_slice()),
             Statement::CreateTable {
                 with_options,
                 source_schema,
