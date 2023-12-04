@@ -140,7 +140,7 @@ fn read_timestamptz(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamptz> {
         .read_i64::<BigEndian>()
         .context("failed to read i64 from Timestamptz buffer")?;
 
-    Ok(Timestamptz::from_protobuf(micros)?)
+    Timestamptz::from_protobuf(micros)
 }
 
 fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
