@@ -29,7 +29,7 @@ itertools = "0.12"
 opendal = "0.41"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
-rustls = "0.21.8"
+rustls = "0.22.0"
 spin = "0.9"
 thiserror = "1"
 thiserror-ext = { workspace = true }
