@@ -146,7 +146,7 @@ impl std::fmt::Display for TonicStatusWrapper {
             write!(f, " to {} service", service_name)?;
         }
         write!(f, " failed: {}: ", self.0.code())?;
-        #[allow(rw::format_error)] // intentionally format the source itself
+        #[expect(rw::format_error)] // intentionally format the source itself
         if let Some(source) = self.source() {
             // Prefer the source chain from the `details` field.
             write!(f, "{}", source)

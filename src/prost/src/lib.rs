@@ -157,7 +157,7 @@ pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
-        #[allow(rw::format_error)] // there's no source error
+        #[expect(rw::format_error)] // there's no source error
         tonic::Status::new(tonic::Code::Internal, e.to_string())
     }
 }
