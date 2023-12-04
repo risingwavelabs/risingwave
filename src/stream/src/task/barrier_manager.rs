@@ -160,12 +160,20 @@ impl LocalBarrierManager {
                     for sender in senders {
                         if let Err(_err) = sender.send(barrier.clone()) {
                             // return err to trigger recovery.
-                            bail!("failed to send barrier to actor {actor_id}");
+                            return Err(StreamError::barrier_send(
+                                barrier.clone(),
+                                actor_id,
+                                "channel closed",
+                            ));
                         }
                     }
                 }
                 None => {
-                    bail!("sender for actor {} does not exist", actor_id)
+                    return Err(StreamError::barrier_send(
+                        barrier.clone(),
+                        actor_id,
+                        "sender not found",
+                    ));
                 }
             }
         }

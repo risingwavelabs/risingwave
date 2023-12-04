@@ -20,14 +20,20 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
-use crate::executor::StreamExecutorError;
+use crate::executor::{Barrier, StreamExecutorError};
 use crate::task::ActorId;
 
 /// A specialized Result type for streaming tasks.
 pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// The error type for streaming tasks.
-#[derive(thiserror::Error, Debug, thiserror_ext::Arc, thiserror_ext::ContextInto)]
+#[derive(
+    thiserror::Error,
+    Debug,
+    thiserror_ext::Arc,
+    thiserror_ext::ContextInto,
+    thiserror_ext::Construct,
+)]
 #[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
@@ -70,6 +76,13 @@ pub enum ErrorKind {
         actor_id: ActorId,
         #[backtrace]
         source: StreamError,
+    },
+
+    #[error("Failed to send barrier with epoch {epoch} to actor {actor_id}: {reason}", epoch = .barrier.epoch.curr)]
+    BarrierSend {
+        barrier: Barrier,
+        actor_id: ActorId,
+        reason: &'static str,
     },
 
     #[error(transparent)]

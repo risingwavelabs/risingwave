@@ -45,14 +45,14 @@ pub fn to_record_batch_with_schema(
             if column.data_type() == field.data_type() {
                 Ok(column)
             } else {
-                cast(&column, field.data_type()).map_err(|err| ArrayError::from_arrow(err))
+                cast(&column, field.data_type()).map_err(ArrayError::from_arrow)
             }
         })
         .try_collect::<_, _, ArrayError>()?;
 
     let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
     arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-        .map_err(|err| ArrayError::to_arrow(err))
+        .map_err(ArrayError::to_arrow)
 }
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
@@ -83,7 +83,7 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
         arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-            .map_err(|err| ArrayError::to_arrow(err))
+            .map_err(ArrayError::to_arrow)
     }
 }
 
@@ -252,7 +252,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
                 true,
             )))),
             DataType::Serial => Err(ArrayError::to_arrow(
-                "Serial type is not supported to convert to arrow".to_string(),
+                "Serial type is not supported to convert to arrow",
             )),
         }
     }
