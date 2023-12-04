@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "risingwave"
-version = "0.0.12"
+version = "0.1.0"
 authors = [{ name = "RisingWave Labs" }]
 description = "RisingWave Python API"
 readme = "README.md"

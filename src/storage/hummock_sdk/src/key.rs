@@ -295,13 +295,13 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 pub fn end_bound_of_vnode(vnode: VirtualNode) -> Bound<Bytes> {
-    let end_bound_index = vnode.to_index() + 1;
-    if end_bound_index < VirtualNode::COUNT {
+    if vnode == VirtualNode::MAX {
+        Unbounded
+    } else {
+        let end_bound_index = vnode.to_index() + 1;
         Excluded(Bytes::copy_from_slice(
             &VirtualNode::from_index(end_bound_index).to_be_bytes(),
         ))
-    } else {
-        Unbounded
     }
 }
 

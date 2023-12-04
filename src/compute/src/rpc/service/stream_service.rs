@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use risingwave_common::error::tonic_err;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -265,7 +264,7 @@ impl StreamService for StreamServiceImpl {
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
                 .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
-                .map_err(tonic_err)?;
+                .map_err(StreamError::from)?;
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))

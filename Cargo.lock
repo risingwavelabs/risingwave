@@ -5582,9 +5582,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.57"
+version = "0.10.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac25ee399abb46215765b1cb35bc0212377e58a061560d8b29b024fd0430e7c"
+checksum = "79a4c6c3a2b158f7f8f2a2fc5a969fa3a068df6fc9dbb4a43845436e3af7c800"
 dependencies = [
  "bitflags 2.4.0",
  "cfg-if",
@@ -5614,18 +5614,18 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.25.3+1.1.1t"
+version = "300.1.6+3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924757a6a226bf60da5f7dd0311a34d2b52283dd82ddeb103208ddc66362f80c"
+checksum = "439fac53e092cd7442a3660c85dde4643ab3b5bd39040912388dcdabf6b88085"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.92"
+version = "0.9.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7e971c2c2bba161b2d2fdf37080177eff520b3bc044787c7f1f5f9e78d869b"
+checksum = "3812c071ba60da8b5677cc12bcb1d42989a65553772897a7e0355545a819838f"
 dependencies = [
  "cc",
  "libc",
@@ -7911,7 +7911,6 @@ dependencies = [
  "auto_impl",
  "bk-tree",
  "bytes",
- "chrono",
  "clap",
  "downcast-rs",
  "dyn-clone",
@@ -8261,6 +8260,7 @@ dependencies = [
  "rustls",
  "spin 0.9.8",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
 ]
@@ -8579,6 +8579,7 @@ dependencies = [
  "sync-point",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tracing",
  "tracing-futures",
@@ -8641,6 +8642,7 @@ dependencies = [
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
+ "thiserror-ext",
  "tokio-metrics",
  "tokio-stream",
  "tracing",
@@ -10241,9 +10243,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.8"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b32ea5f1a980ddd27f9ad46dc18db583f508a4d148dd2cf1ee3d81bfd767cf"
+checksum = "778409884b05cc4a1b90b9c3a0f395a01c430355fe299d084152bdf50f3fa807"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10251,9 +10253,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.8"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cf8fd06431d331ee33484e2c83f0309dd2ad26606c3b639d5927665a1698043"
+checksum = "03162af1a5f99722388354158f3c5af20915d52a5d0d9bc4871d0fd7553e308f"
 dependencies = [
  "either",
  "proc-macro2",

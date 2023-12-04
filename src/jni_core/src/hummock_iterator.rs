@@ -28,7 +28,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
@@ -143,11 +143,7 @@ impl HummockJavaBindingIterator {
         Ok(match item {
             Some((key, value)) => Some((
                 key.user_key.table_key.0,
-                OwnedRow::new(
-                    self.row_serde
-                        .deserialize(&value)
-                        .map_err(StorageError::DeserializeRow)?,
-                ),
+                OwnedRow::new(self.row_serde.deserialize(&value)?),
             )),
             None => None,
         })
