@@ -184,7 +184,7 @@ impl SystemParamsController {
             .one(&self.db)
             .await?
         else {
-            return Err(MetaError::system_param(format!(
+            return Err(MetaError::system_params(format!(
                 "unrecognized system parameter {}",
                 name
             )));
@@ -192,7 +192,7 @@ impl SystemParamsController {
         let mut params = params_guard.clone();
         let mut param: system_parameter::ActiveModel = param.into();
         param.value =
-            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_param)?);
+            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_params)?);
         param.update(&self.db).await?;
         *params_guard = params.clone();
 

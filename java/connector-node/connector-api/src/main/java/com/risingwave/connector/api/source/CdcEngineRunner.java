@@ -15,7 +15,7 @@
 package com.risingwave.connector.api.source;
 
 public interface CdcEngineRunner {
-    void start() throws Exception;
+    boolean start() throws Exception;
 
     void stop() throws Exception;
 

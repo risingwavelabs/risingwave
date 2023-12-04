@@ -15,6 +15,7 @@
 package com.risingwave.functions;
 
 import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
@@ -52,8 +53,8 @@ class TypeUtils {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE));
         } else if (typeStr.equals("FLOAT8") || typeStr.equals("DOUBLE PRECISION")) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
-        } else if (typeStr.startsWith("DECIMAL") || typeStr.startsWith("NUMERIC")) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
+        } else if (typeStr.equals("DECIMAL") || typeStr.equals("NUMERIC")) {
+            return Field.nullable(name, new ArrowType.LargeBinary());
         } else if (typeStr.equals("DATE")) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (typeStr.equals("TIME") || typeStr.equals("TIME WITHOUT TIME ZONE")) {
@@ -109,7 +110,7 @@ class TypeUtils {
         } else if (param == Double.class || param == double.class) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (param == BigDecimal.class) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
+            return Field.nullable(name, new ArrowType.LargeBinary());
         } else if (param == LocalDate.class) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (param == LocalTime.class) {
@@ -133,7 +134,7 @@ class TypeUtils {
                 var subhint = field.getAnnotation(DataTypeHint.class);
                 fields.add(classToField(field.getType(), subhint, field.getName()));
             }
-            return new Field("", FieldType.nullable(new ArrowType.Struct()), fields);
+            return new Field(name, FieldType.nullable(new ArrowType.Struct()), fields);
             // TODO: more types
             // throw new IllegalArgumentException("Unsupported type: " + param);
         }
@@ -239,12 +240,12 @@ class TypeUtils {
                     vector.set(i, (double) values[i]);
                 }
             }
-        } else if (fieldVector instanceof DecimalVector) {
-            var vector = (DecimalVector) fieldVector;
+        } else if (fieldVector instanceof LargeVarBinaryVector) {
+            var vector = (LargeVarBinaryVector) fieldVector;
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, (BigDecimal) values[i]);
+                    vector.set(i, ((BigDecimal) values[i]).toString().getBytes());
                 }
             }
         } else if (fieldVector instanceof DateDayVector) {
@@ -328,9 +329,9 @@ class TypeUtils {
             } else if (vector.getDataVector() instanceof Float8Vector) {
                 TypeUtils.<Float8Vector, Double>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof DecimalVector) {
-                TypeUtils.<DecimalVector, BigDecimal>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof LargeVarBinaryVector) {
+                TypeUtils.<LargeVarBinaryVector, BigDecimal>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.toString().getBytes()));
             } else if (vector.getDataVector() instanceof DateDayVector) {
                 TypeUtils.<DateDayVector, LocalDate>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
@@ -359,22 +360,57 @@ class TypeUtils {
             } else if (vector.getDataVector() instanceof VarBinaryVector) {
                 TypeUtils.<VarBinaryVector, byte[]>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof StructVector) {
+                // flatten the `values`
+                var flattenLength = 0;
+                for (int i = 0; i < values.length; i++) {
+                    if (values[i] == null) {
+                        continue;
+                    }
+                    var len = Array.getLength(values[i]);
+                    vector.startNewValue(i);
+                    vector.endValue(i, len);
+                    flattenLength += len;
+                }
+                var flattenValues = new Object[flattenLength];
+                var ii = 0;
+                for (var list : values) {
+                    if (list == null) {
+                        continue;
+                    }
+                    var length = Array.getLength(list);
+                    for (int i = 0; i < length; i++) {
+                        flattenValues[ii++] = Array.get(list, i);
+                    }
+                }
+                fillVector(vector.getDataVector(), flattenValues);
             } else {
-                throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
+                throw new IllegalArgumentException(
+                        "Unsupported type: " + vector.getDataVector().getClass());
             }
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
             var lookup = MethodHandles.lookup();
+            // get class of the first non-null value
+            Class<?> valueClass = null;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    valueClass = values[i].getClass();
+                    break;
+                }
+            }
             for (var field : vector.getField().getChildren()) {
                 // extract field from values
                 var subvalues = new Object[values.length];
-                if (values.length != 0) {
+                if (valueClass != null) {
                     try {
-                        var javaField = values[0].getClass().getDeclaredField(field.getName());
+                        var javaField = valueClass.getDeclaredField(field.getName());
                         var varHandle = lookup.unreflectVarHandle(javaField);
                         for (int i = 0; i < values.length; i++) {
-                            subvalues[i] = varHandle.get(values[i]);
+                            if (values[i] != null) {
+                                subvalues[i] = varHandle.get(values[i]);
+                            }
                         }
                     } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new RuntimeException(e);
@@ -384,7 +420,9 @@ class TypeUtils {
                 fillVector(subvector, subvalues);
             }
             for (int i = 0; i < values.length; i++) {
-                vector.setIndexDefined(i);
+                if (values[i] != null) {
+                    vector.setIndexDefined(i);
+                }
             }
         } else {
             throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
@@ -438,6 +476,10 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.LargeUtf8 && targetClass == String.class) {
             // object is org.apache.arrow.vector.util.Text
             return obj -> obj.toString();
+        } else if (field.getType() instanceof ArrowType.LargeBinary
+                && targetClass == BigDecimal.class) {
+            // object is byte[]
+            return obj -> new BigDecimal(new String((byte[]) obj));
         } else if (field.getType() instanceof ArrowType.Date && targetClass == LocalDate.class) {
             // object is Integer
             return obj -> LocalDate.ofEpochDay((int) obj);
@@ -466,7 +508,7 @@ class TypeUtils {
             } else if (subfield.getType()
                     .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE))) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Double[]::new);
-            } else if (subfield.getType() instanceof ArrowType.Decimal) {
+            } else if (subfield.getType() instanceof ArrowType.LargeBinary) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(BigDecimal[]::new);
             } else if (subfield.getType() instanceof ArrowType.Date) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(LocalDate[]::new);
@@ -482,8 +524,17 @@ class TypeUtils {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.Binary) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(byte[][]::new);
+            } else if (subfield.getType() instanceof ArrowType.Struct) {
+                return obj -> {
+                    var list = (List<?>) obj;
+                    Object array = Array.newInstance(targetClass.getComponentType(), list.size());
+                    for (int i = 0; i < list.size(); i++) {
+                        Array.set(array, i, subfunc.apply(list.get(i)));
+                    }
+                    return array;
+                };
             }
-            throw new IllegalArgumentException("Unsupported type: " + field.getType());
+            throw new IllegalArgumentException("Unsupported type: " + subfield.getType());
         } else if (field.getType() instanceof ArrowType.Struct) {
             // object is org.apache.arrow.vector.util.JsonStringHashMap
             var subfields = field.getChildren();

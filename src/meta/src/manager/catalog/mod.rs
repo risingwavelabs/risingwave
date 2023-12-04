@@ -260,7 +260,7 @@ impl CatalogManager {
 
         if database_core.has_creation_in_database(database_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target database, try again later".into(),
+                "Some relations are creating in the target database, try again later",
             ));
         }
 
@@ -515,12 +515,12 @@ impl CatalogManager {
         }
         if database_core.has_creation_in_schema(schema_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target schema, try again later".into(),
+                "Some relations are creating in the target schema, try again later",
             ));
         }
         if !database_core.schema_is_empty(schema_id) {
             return Err(MetaError::permission_denied(
-                "The schema is not empty, try dropping them first".into(),
+                "The schema is not empty, try dropping them first",
             ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -1780,6 +1780,63 @@ impl CatalogManager {
             Some(source),
         )
         .await
+    }
+
+    pub async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        schema_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_schema_id(schema_id)?;
+
+        // 1. validate new schema name.
+        let mut schema = database_core.schemas.get(&schema_id).unwrap().clone();
+        database_core.check_schema_duplicated(&(schema.database_id, schema_name.to_string()))?;
+
+        // 2. rename schema.
+        schema.name = schema_name.to_string();
+
+        // 3. update, commit and notify.
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        schemas.insert(schema_id, schema.clone());
+        commit_meta!(self, schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Schema(schema))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_database_name(
+        &self,
+        database_id: SchemaId,
+        database_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(database_id)?;
+
+        // 1. validate new database name.
+        let database_name = database_name.to_string();
+        let mut database = database_core.databases.get(&database_id).unwrap().clone();
+        database_core.check_database_duplicated(&database_name)?;
+
+        // 2. rename database.
+        database.name = database_name;
+
+        // 3. update, commit and notify.
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        databases.insert(database_id, database.clone());
+        commit_meta!(self, databases)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Database(database))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
@@ -3086,6 +3143,7 @@ impl CatalogManager {
             .database
             .tables
             .values()
+            .filter(|table| table.get_stream_job_status() != Ok(StreamJobStatus::Creating))
             .map(|table| table.id)
             .collect()
     }

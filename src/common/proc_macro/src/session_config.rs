@@ -37,6 +37,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut struct_impl_reset = vec![];
     let mut set_match_branches = vec![];
     let mut get_match_branches = vec![];
+    let mut reset_match_branches = vec![];
     let mut show_all_list = vec![];
 
     for field in fields {
@@ -161,12 +162,13 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         });
 
         let reset_func_name = format_ident!("reset_{}", field_ident);
-        struct_impl_reset.push(quote_spanned! {
-            field_ident.span()=>
+        struct_impl_reset.push(quote! {
 
         #[allow(clippy::useless_conversion)]
-        pub fn #reset_func_name(&mut self) {
-                self.#field_ident = #default.into();
+        pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) {
+                let val = #default;
+                #report_hook
+                self.#field_ident = val.into();
             }
         });
 
@@ -202,6 +204,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #entry_name => self.#set_func_name(&value, reporter),
         });
 
+        reset_match_branches.push(quote! {
+            #entry_name => Ok(self.#reset_func_name(reporter)),
+        });
+
         if !flags.contains(&"NO_SHOW_ALL") {
             show_all_list.push(quote! {
                 VariableInfo {
@@ -230,7 +236,6 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 Default::default()
             }
 
-
             #(#struct_impl_get)*
 
             #(#struct_impl_set)*
@@ -249,6 +254,14 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             pub fn get(&self, key_name: &str) -> SessionConfigResult<String> {
                 match key_name.to_ascii_lowercase().as_ref() {
                     #(#get_match_branches)*
+                    _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
+                }
+            }
+
+            /// Reset a parameter by it's name.
+            pub fn reset(&mut self, key_name: &str, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
+                match key_name.to_ascii_lowercase().as_ref() {
+                    #(#reset_match_branches)*
                     _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
             }
