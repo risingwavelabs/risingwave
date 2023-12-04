@@ -775,6 +775,7 @@ pub(crate) async fn bind_source_pk(
         }
         (Format::Plain, _) => {
             if is_key_mq_connector(with_properties) {
+                // todo: forbid later
                 add_default_key_column(columns);
             }
             sql_defined_pk_names
