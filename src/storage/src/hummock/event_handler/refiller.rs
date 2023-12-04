@@ -498,7 +498,7 @@ impl CacheRefillTask {
             Err(e) => return tracing::error!("get old meta from cache error: {}", e),
         };
         let inheritances = Self::get_inheritance_info(context, &holders, &parent_ssts);
-        tracing::debug!("compaction inheritance: {:#?}", inheritances);
+
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
         let futures = inheritances.into_iter().map(|(unit, pblks)| {
@@ -514,16 +514,6 @@ impl CacheRefillTask {
                         .data_recent_filter()
                         .unwrap()
                         .contains(&(pblk.sst_obj_id, pblk.blk_idx))
-                        && (store
-                            .data_cache()
-                            .exists_block(pblk.sst_obj_id, pblk.blk_idx as u64)
-                            || store
-                                .data_file_cache()
-                                .exists(&SstableBlockIndex {
-                                    sst_id: pblk.sst_obj_id,
-                                    block_idx: pblk.blk_idx as u64,
-                                })
-                                .unwrap_or_default())
                 });
 
                 if refill {
