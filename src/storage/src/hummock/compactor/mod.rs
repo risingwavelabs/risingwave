@@ -308,17 +308,11 @@ pub fn start_compactor(
     let pull_task_ack = Arc::new(AtomicBool::new(true));
 
     assert_ge!(
-        compactor_context
-            .storage_opts
-            .compactor_config
-            .compactor_max_task_multiplier,
+        compactor_context.storage_opts.compactor_max_task_multiplier,
         0.0
     );
     let max_pull_task_count = (cpu_core_num as f32
-        * compactor_context
-            .storage_opts
-            .compactor_config
-            .compactor_max_task_multiplier)
+        * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
 
     let join_handle = tokio::spawn(async move {

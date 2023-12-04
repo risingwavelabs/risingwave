@@ -532,6 +532,12 @@ pub struct StorageConfig {
     #[serde(default)]
     pub compactor_memory_limit_mb: Option<usize>,
 
+    /// Compactor calculates the maximum number of tasks that can be executed on the node based on
+    /// worker_num and compactor_max_task_multiplier.
+    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
+    #[serde(default = "default::storage::compactor_max_task_multiplier")]
+    pub compactor_max_task_multiplier: f32,
+
     /// The percentage of memory available when compactor is deployed separately.
     /// non_reserved_memory_bytes = system_memory_available_bytes * compactor_memory_available_proportion
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
@@ -567,11 +573,25 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_version_pinning_duration_sec")]
     pub max_version_pinning_duration_sec: u64,
 
-    #[serde(default, flatten)]
-    pub unrecognized: Unrecognized<Self>,
-
+    #[serde(default = "default::storage::compactor_max_sst_key_count")]
+    pub compactor_max_sst_key_count: u64,
+    #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
+    pub compact_iter_recreate_timeout_ms: u64,
+    #[serde(default = "default::storage::compactor_max_sst_size")]
+    pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
+    pub compactor_fast_max_compact_delete_ratio: u32,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
+    pub compactor_fast_max_compact_task_size: u64,
+
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 
     /// The spill threshold for mem table.
     #[serde(default = "default::storage::mem_table_spill_threshold")]
@@ -579,9 +599,6 @@ pub struct StorageConfig {
 
     #[serde(default)]
     pub object_store: ObjectStoreConfig,
-
-    #[serde(default)]
-    pub compactor: CompactorConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -882,28 +899,6 @@ pub struct S3ObjectStoreConfig {
     pub object_store_req_retry_max_attempts: usize,
 }
 
-/// The subsections `[storage.object_store]`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct CompactorConfig {
-    /// Compactor calculates the maximum number of tasks that can be executed on the node based on
-    /// worker_num and compactor_max_task_multiplier.
-    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
-    #[serde(default = "default::storage::compactor_max_task_multiplier")]
-    pub compactor_max_task_multiplier: f32,
-    #[serde(default = "default::compactor::compactor_max_sst_key_count")]
-    pub compactor_max_sst_key_count: u64,
-    #[serde(default = "default::compactor::compact_iter_recreate_timeout_ms")]
-    pub compact_iter_recreate_timeout_ms: u64,
-    #[serde(default = "default::compactor::compactor_max_sst_size")]
-    pub compactor_max_sst_size: u64,
-    #[serde(default = "default::compactor::enable_fast_compaction")]
-    pub enable_fast_compaction: bool,
-    #[serde(default = "default::compactor::fast_max_compact_delete_ratio")]
-    pub fast_max_compact_delete_ratio: u32,
-    #[serde(default = "default::compactor::fast_max_compact_task_size")]
-    pub fast_max_compact_task_size: u64,
-}
-
 impl SystemConfig {
     #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
@@ -1140,16 +1135,6 @@ pub mod default {
             3 * 3600
         }
 
-        pub fn max_preload_io_retry_times() -> usize {
-            3
-        }
-
-        pub fn mem_table_spill_threshold() -> usize {
-            4 << 20
-        }
-    }
-
-    pub mod compactor {
         pub fn compactor_max_sst_key_count() -> u64 {
             2 * 1024 * 1024 // 200w
         }
@@ -1166,11 +1151,18 @@ pub mod default {
             true
         }
 
-        pub fn fast_max_compact_delete_ratio() -> u32 {
+        pub fn max_preload_io_retry_times() -> usize {
+            3
+        }
+        pub fn mem_table_spill_threshold() -> usize {
+            4 << 20
+        }
+
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
             40
         }
 
-        pub fn fast_max_compact_task_size() -> u64 {
+        pub fn compactor_fast_max_compact_task_size() -> u64 {
             2 * 1024 * 1024 * 1024 // 2g
         }
     }

@@ -376,24 +376,16 @@ pub async fn compact(
         .iter()
         .map(|table_info| table_info.total_key_count)
         .sum::<u64>();
-    let optimize_by_copy_block = context.storage_opts.compactor_config.enable_fast_compaction
+    let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
         && !has_tombstone
         && !has_ttl
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
-        && compaction_size
-            < context
-                .storage_opts
-                .compactor_config
-                .fast_max_compact_task_size
+        && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
         && delete_key_count * 100
-            < context
-                .storage_opts
-                .compactor_config
-                .fast_max_compact_delete_ratio as u64
-                * total_key_count
+            < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
         && compact_task.task_type() == TaskType::Dynamic;
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
