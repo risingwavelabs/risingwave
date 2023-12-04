@@ -417,8 +417,7 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
     /// For all types of DDL
