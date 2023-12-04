@@ -538,7 +538,7 @@ pub async fn start_service_as_election_leader(
                 .map(|t| t.id)
                 .collect_vec(),
         )
-        .await?;
+        .await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
