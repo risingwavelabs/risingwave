@@ -42,7 +42,7 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run doctest"
-RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
+RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld -Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(rw)" cargo test --doc
 
 echo "--- Show sccache stats"
 sccache --show-stats
