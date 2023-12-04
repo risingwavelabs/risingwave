@@ -32,7 +32,6 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
-#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
 
 use std::time::Duration;
 

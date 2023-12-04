@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(rw::format_error)]
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
