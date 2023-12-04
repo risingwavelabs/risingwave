@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::format;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -757,6 +758,16 @@ pub(crate) async fn bind_source_pk(
             }
         })
     };
+    let additional_column_names = columns
+        .iter()
+        .filter_map(|col| {
+            if col.column_desc.additional_column_type != AdditionalColumnType::Unspecified {
+                Some(col.name().to_string())
+            } else {
+                None
+            }
+        })
+        .collect_vec();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
@@ -820,10 +831,11 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Debezium, Encode::Json) => {
-            if key_column_name.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "INCLUDE KEY clause cannot be set for FORMAT DEBEZIUM ENCODE JSON".to_string(),
-                )));
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUM forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
             }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
@@ -834,6 +846,12 @@ pub(crate) async fn bind_source_pk(
             sql_defined_pk_names
         }
         (Format::Debezium, Encode::Avro) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUM forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -855,6 +873,12 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::DebeziumMongo, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUMMONGO forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -863,6 +887,12 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Maxwell, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT MAXWELL forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
     "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
@@ -873,6 +903,12 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Canal, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT CANAL forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
     "Primary key must be specified when creating source with FORMAT CANAL ENCODE JSON."
