@@ -43,7 +43,8 @@ impl TryFrom<&str> for HostAddr {
     type Error = anyhow::Error;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let addr = url::Url::parse(&format!("http://{}", s)).context("failed to parse address")?;
+        let s = format!("http://{s}");
+        let addr = url::Url::parse(&s).with_context(|| format!("failed to parse address: {s}"))?;
         Ok(HostAddr {
             host: addr.host().context("invalid host")?.to_string(),
             port: addr.port().context("invalid port")?,
