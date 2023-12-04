@@ -521,6 +521,19 @@ impl CacheRefillTask {
         };
         let inheritances = Self::get_inheritance_info(context, &holders, &parent_ssts);
 
+        {
+            let unit = context.config.unit;
+            let units = holders
+                .iter()
+                .map(|sst| sst.block_count() / unit + 1.min(sst.block_count() % unit))
+                .sum::<usize>();
+            tracing::info!(
+                "units: {}, inheritance units: {}",
+                units,
+                inheritances.len()
+            );
+        }
+
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
         let futures = inheritances.into_iter().map(|(unit, pblks)| {
