@@ -573,10 +573,6 @@ impl CacheRefillTask {
 
         let blocks = unit.blks.size().unwrap();
 
-        GLOBAL_CACHE_REFILL_METRICS
-            .data_refill_ideal_bytes
-            .inc_by(blocks as u64);
-
         let mut tasks = vec![];
         let mut writers = Vec::with_capacity(blocks);
         let mut ranges = Vec::with_capacity(blocks);
@@ -585,6 +581,10 @@ impl CacheRefillTask {
         let (range_first, _) = sst.calculate_block_info(unit.blks.start);
         let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
         let range = range_first.start..range_last.end;
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_ideal_bytes
+            .inc_by(range.size().unwrap() as u64);
 
         for blk in unit.blks {
             let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
