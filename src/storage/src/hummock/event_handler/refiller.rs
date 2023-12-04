@@ -696,7 +696,7 @@ pub struct SstableUnit {
 
 impl PartialEq for SstableUnit {
     fn eq(&self, other: &Self) -> bool {
-        self.sst_obj_id == other.sst_obj_id && self.unit == other.unit
+        self.sst_obj_id == other.sst_obj_id && self.uidx == other.uidx
     }
 }
 
@@ -708,7 +708,7 @@ impl Ord for SstableUnit {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
-        self.unit.cmp(&other.unit)
+        self.uidx.cmp(&other.uidx)
     }
 }
 
