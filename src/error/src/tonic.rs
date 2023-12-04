@@ -135,7 +135,6 @@ impl From<tonic::Status> for TonicStatusWrapper {
     }
 }
 
-#[allow(rw::format_error)]
 impl std::fmt::Display for TonicStatusWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "gRPC request")?;
@@ -147,6 +146,7 @@ impl std::fmt::Display for TonicStatusWrapper {
             write!(f, " to {} service", service_name)?;
         }
         write!(f, " failed: {}: ", self.0.code())?;
+        #[allow(rw::format_error)] // intentionally format the source itself
         if let Some(source) = self.source() {
             // Prefer the source chain from the `details` field.
             write!(f, "{}", source)

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rw::format_error)]
+#![allow(rw::format_error)] // test code
 
 mod opts;
 mod test;

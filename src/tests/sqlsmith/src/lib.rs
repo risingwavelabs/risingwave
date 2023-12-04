@@ -16,7 +16,7 @@
 #![feature(if_let_guard)]
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
-#![allow(rw::format_error)]
+#![allow(rw::format_error)] // test code
 
 risingwave_expr_impl::enable!();
 

@@ -17,7 +17,7 @@
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(try_blocks)]
-#![allow(rw::format_error)]
+#![allow(rw::format_error)] // test code
 
 pub mod client;
 pub mod cluster;
