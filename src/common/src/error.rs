@@ -194,7 +194,7 @@ pub enum ErrorCode {
         #[backtrace]
         ValueEncodingError,
     ),
-    #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
+    #[error("Invalid value `{config_value}` for `{config_entry}`")]
     InvalidConfigValue {
         config_entry: String,
         config_value: String,

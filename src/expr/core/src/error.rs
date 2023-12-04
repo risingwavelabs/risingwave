@@ -44,7 +44,7 @@ pub enum ExprError {
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
-    #[error("Unsupported cast: {0:?} to {1:?}")]
+    #[error("Unsupported cast: {0} to {1}")]
     UnsupportedCast(DataType, DataType),
 
     #[error("Casting to {0} out of range")]

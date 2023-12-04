@@ -57,14 +57,14 @@ pub enum ErrorKind {
         ArrayError,
     ),
 
-    #[error("Executor error: {0:?}")]
+    #[error("Executor error: {0}")]
     Executor(
         #[from]
         #[backtrace]
         StreamExecutorError,
     ),
 
-    #[error("Sink error: {0:?}")]
+    #[error("Sink error: {0}")]
     Sink(
         #[from]
         #[backtrace]
