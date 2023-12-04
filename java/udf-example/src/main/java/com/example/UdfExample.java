@@ -40,6 +40,7 @@ public class UdfExample {
             server.addFunction("gcd3", new Gcd3());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
+            server.addFunction("decimal_add", new DecimalAdd());
             server.addFunction("array_access", new ArrayAccess());
             server.addFunction("jsonb_access", new JsonbAccess());
             server.addFunction("jsonb_concat", new JsonbConcat());
@@ -123,6 +124,12 @@ public class UdfExample {
                 return null;
             }
             return new BigDecimal(new BigInteger(hex, 16));
+        }
+    }
+
+    public static class DecimalAdd implements ScalarFunction {
+        public BigDecimal eval(BigDecimal a, BigDecimal b) {
+            return a.add(b);
         }
     }
 

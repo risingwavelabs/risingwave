@@ -53,7 +53,8 @@ use crate::hummock::{
     SstableDeleteRangeIterator, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-
+const FAST_COMPACT_MAX_COMPACT_SIZE: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+const FAST_COMPACT_MAX_DELETE_RATIO: u64 = 40; // 40%
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
@@ -104,9 +105,8 @@ impl CompactorRunner {
                 task_type: task.task_type(),
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
-                split_by_table: task.split_by_state_table,
-                split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
+                table_vnode_partition: task.table_vnode_partition.clone(),
             },
             object_id_getter,
         );
@@ -369,6 +369,15 @@ pub async fn compact(
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
         .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+
+    let delete_key_count = sstable_infos
+        .iter()
+        .map(|table_info| table_info.stale_key_count)
+        .sum::<u64>();
+    let total_key_count = sstable_infos
+        .iter()
+        .map(|table_info| table_info.total_key_count)
+        .sum::<u64>();
     let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
         && !has_tombstone
@@ -376,6 +385,8 @@ pub async fn compact(
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
+        && compaction_size < FAST_COMPACT_MAX_COMPACT_SIZE
+        && delete_key_count * 100 < FAST_COMPACT_MAX_DELETE_RATIO * total_key_count
         && compact_task.task_type() == TaskType::Dynamic;
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {

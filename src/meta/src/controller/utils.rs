@@ -388,7 +388,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::permission_denied("schema is not empty".into()));
+        return Err(MetaError::permission_denied("schema is not empty"));
     }
 
     Ok(())

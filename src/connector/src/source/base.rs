@@ -30,6 +30,7 @@ use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
+use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
@@ -66,6 +67,8 @@ pub trait SourceProperties: TryFromHashmap + Clone {
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
+
+    fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
 impl<P: DeserializeOwned> TryFromHashmap for P {
@@ -424,6 +427,10 @@ impl ConnectorProperties {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }
 
+    pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
+    }
+
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
     }
@@ -736,27 +743,33 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "3306");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "123456");
-            assert_eq!(c.props.get("database.name").unwrap(), "mydb");
-            assert_eq!(c.props.get("table.name").unwrap(), "products");
+            assert_eq!(
+                c.properties.get("connector_node_addr").unwrap(),
+                "localhost"
+            );
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "3306");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "123456");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mydb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "products");
         } else {
             panic!("extract cdc config failed");
         }
 
         let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "5432");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "654321");
-            assert_eq!(c.props.get("schema.name").unwrap(), "public");
-            assert_eq!(c.props.get("database.name").unwrap(), "mypgdb");
-            assert_eq!(c.props.get("table.name").unwrap(), "orders");
+            assert_eq!(
+                c.properties.get("connector_node_addr").unwrap(),
+                "localhost"
+            );
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "5432");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "654321");
+            assert_eq!(c.properties.get("schema.name").unwrap(), "public");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mypgdb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "orders");
         } else {
             panic!("extract cdc config failed");
         }
