@@ -65,7 +65,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
-            max_sst_size: options.compactor_max_sst_size,
+            max_sst_size: options.compactor_config.compactor_max_sst_size,
         }
     }
 }
