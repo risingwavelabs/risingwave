@@ -381,14 +381,6 @@ impl LogSinker for RemoteLogSinker {
                     futures::future::Either::Right(result) => {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
 
-                        match &prev_offset {
-                            Some(TruncateOffset::Barrier { .. }) | None => {
-                                // TODO: this start epoch is actually unnecessary
-                                request_tx.start_epoch(epoch).await?;
-                            }
-                            _ => {}
-                        }
-
                         match item {
                             LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                                 let offset = TruncateOffset::Chunk { epoch, chunk_id };
@@ -577,7 +569,6 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.stream_handle.start_epoch(epoch).await?;
         self.epoch = Some(epoch);
         Ok(())
     }
