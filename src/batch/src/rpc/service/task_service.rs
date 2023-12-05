@@ -135,7 +135,7 @@ impl BatchServiceImpl {
             epoch,
             tracing_context,
             captured_execution_context,
-        } = req.into_inner();
+        } = req;
 
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
