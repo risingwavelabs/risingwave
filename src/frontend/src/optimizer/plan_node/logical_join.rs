@@ -188,56 +188,6 @@ impl LogicalJoin {
         self.output_indices() == &(0..self.internal_column_num()).collect_vec()
     }
 
-    /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
-    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
-    ///
-    /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    pub fn push_down(
-        predicate: &mut Condition,
-        left_col_num: usize,
-        right_col_num: usize,
-        push_left: bool,
-        push_right: bool,
-        push_on: bool,
-    ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
-
-        let (mut left, right, mut others) =
-            Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        if !push_left {
-            others.conjunctions.extend(left);
-            left = Condition::true_cond();
-        };
-
-        let right = if push_right {
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            );
-            right.rewrite_expr(&mut mapping)
-        } else {
-            others.conjunctions.extend(right);
-            Condition::true_cond()
-        };
-
-        let on = if push_on {
-            // Do not push now on to the on, it will be pulled up into a filter instead.
-            Condition {
-                conjunctions: others
-                    .conjunctions
-                    .extract_if(|expr| expr.count_nows() == 0)
-                    .collect(),
-            }
-        } else {
-            Condition::true_cond()
-        };
-
-        predicate.conjunctions = others.conjunctions;
-
-        (left, right, on)
-    }
-
     /// Try to simplify the outer join with the predicate on the top of the join
     ///
     /// now it is just a naive implementation for comparison expression, we can give a more general
@@ -793,12 +743,24 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+        let push_down_temporal_predicate = !self.should_be_temporal_join();
+
+        let (left_from_filter, right_from_filter, on) = push_down_into_join(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+        let (left_from_on, right_from_on) = push_down_join_condition(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
