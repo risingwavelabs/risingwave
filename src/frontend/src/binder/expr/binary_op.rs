@@ -14,7 +14,7 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, JsonbVal};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
@@ -44,6 +44,26 @@ impl Binder {
         };
 
         let bound_right = self.bind_expr_inner(right)?;
+
+        if matches!(op, BinaryOperator::PathMatch | BinaryOperator::PathExists) {
+            // jsonb @? jsonpath => jsonb_path_exists(jsonb, jsonpath, '{}', silent => true)
+            // jsonb @@ jsonpath => jsonb_path_match(jsonb, jsonpath, '{}', silent => true)
+            return Ok(FunctionCall::new_unchecked(
+                match op {
+                    BinaryOperator::PathMatch => ExprType::JsonbPathMatch,
+                    BinaryOperator::PathExists => ExprType::JsonbPathExists,
+                    _ => unreachable!(),
+                },
+                vec![
+                    bound_left,
+                    bound_right,
+                    ExprImpl::literal_jsonb(JsonbVal::empty_object()), // vars
+                    ExprImpl::literal_bool(true),                      // silent
+                ],
+                DataType::Boolean,
+            )
+            .into());
+        }
 
         func_types.extend(Self::resolve_binary_operator(
             op,
