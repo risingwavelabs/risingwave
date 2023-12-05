@@ -39,10 +39,9 @@ pub struct Scan {
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
-    /// Descriptors of all indexes on this table
     /// Table Catalog of the upstream table that the descriptor is derived from.
     pub table_catalog: Arc<TableCatalog>,
-    // Descriptors of all indexes on this table
+    /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
