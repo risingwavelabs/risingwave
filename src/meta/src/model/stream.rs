@@ -18,9 +18,7 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_common::util::table_fragments_util::{
-    compress_table_fragments, uncompress_table_fragments,
-};
+use risingwave_common::util::table_fragments_util::TableFragmentsRenderCompression;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -107,7 +105,7 @@ impl MetadataModel for TableFragments {
             ..Default::default()
         };
 
-        compress_table_fragments(&mut table_fragments);
+        table_fragments.ensure_compressed();
 
         table_fragments
     }
@@ -121,7 +119,7 @@ impl MetadataModel for TableFragments {
             .get_graph_render_type()
             .unwrap_or(GraphRenderType::RenderUnspecified)
         {
-            uncompress_table_fragments(&mut prost);
+            prost.ensure_uncompressed();
         }
 
         Self {
