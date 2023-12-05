@@ -161,6 +161,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             ?current_pk_pos,
             is_finished = state.is_finished,
             snapshot_row_count = total_snapshot_row_count,
+            chunk_size = self.chunk_size,
             "start cdc backfill"
         );
 
@@ -392,7 +393,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         Some(get_new_pos(&chunk, &pk_in_output_indices));
 
                                     tracing::trace!(
-                                        "current backfill progress: {:?}",
+                                        "got a snapshot chunk: len {}, current_pk_pos {:?}",
+                                        chunk.cardinality(),
                                         current_pk_pos
                                     );
                                     let chunk_cardinality = chunk.cardinality() as u64;

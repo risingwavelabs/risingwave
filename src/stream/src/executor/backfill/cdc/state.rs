@@ -63,6 +63,7 @@ impl<S: StateStore> CdcBackfillState<S> {
             .await?
         {
             Some(row) => {
+                tracing::info!("restored cdc backfill state: {:?}", row);
                 self.cached_state = row.into_inner().into_vec();
                 let state = self.cached_state.as_slice();
                 let state_len = state.len();
