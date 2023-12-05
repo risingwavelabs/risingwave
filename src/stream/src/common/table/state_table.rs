@@ -631,7 +631,7 @@ StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
         W: WatermarkBufferStrategy,
 {
     /// Create replicated state table from table catalog with output indices
-    pub async fn from_table_catalog_with_output_indices(
+    pub async fn from_table_catalog_with_output_column_ids(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
