@@ -105,7 +105,7 @@ impl MetadataModel for TableFragments {
             ..Default::default()
         };
 
-        table_fragments.ensure_compressed();
+        table_fragments.compress();
 
         table_fragments
     }
@@ -119,7 +119,7 @@ impl MetadataModel for TableFragments {
             .get_graph_render_type()
             .unwrap_or(GraphRenderType::RenderUnspecified)
         {
-            prost.ensure_uncompressed();
+            prost.uncompress();
         }
 
         Self {

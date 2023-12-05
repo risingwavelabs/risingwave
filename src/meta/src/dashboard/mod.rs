@@ -206,7 +206,7 @@ pub(super) mod handlers {
             if table_fragments.get_graph_render_type().unwrap_or_default()
                 == GraphRenderType::RenderTemplate
             {
-                table_fragments.ensure_uncompressed();
+                table_fragments.uncompress();
             }
         }
 

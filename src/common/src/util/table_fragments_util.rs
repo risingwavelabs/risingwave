@@ -26,7 +26,7 @@ impl PbTableFragments {
     // We decompress `PbTableFragments` using the `stream_node_template` of the `PbFragment`,
     // by re-rendering the template, then repopulating the upstream actor ids and upstream fragment id
     // contained in the `MergeNode` by `upstream_actors_by_fragment` in actor.
-    pub fn ensure_uncompressed(&mut self) {
+    pub fn uncompress(&mut self) {
         assert_eq!(
             self.graph_render_type,
             GraphRenderType::RenderTemplate as i32
@@ -76,7 +76,7 @@ impl PbTableFragments {
     // storing their templates in the `stream_node_template` in the `PbFragment`.
     // We have also made special modifications to `MergeNode`s, extracting their upstream fragment id and upstream actor ids.
     // This way, we can save some memory when conducting RPC and storage.
-    pub fn ensure_compressed(&mut self) {
+    pub fn compress(&mut self) {
         assert_eq!(
             self.graph_render_type,
             GraphRenderType::RenderUnspecified as i32

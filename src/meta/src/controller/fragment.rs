@@ -84,7 +84,7 @@ impl CatalogController {
         let mut table_fragments = table_fragments;
 
         if table_fragments.graph_render_type == GraphRenderType::RenderTemplate as i32 {
-            table_fragments.ensure_uncompressed()
+            table_fragments.uncompress()
         }
 
         let PbTableFragments {
