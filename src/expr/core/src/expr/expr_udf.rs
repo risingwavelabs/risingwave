@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Fields, Schema};
@@ -39,11 +39,15 @@ pub struct UdfExpression {
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     span: await_tree::Span,
-    /// Whether a connection error has occurred in the last call.
-    /// If true, we will not retry subsequent calls to prevent blocking the stream.
+    /// Number of remaining successful calls until retry is enabled.
+    /// If non-zero, we will not retry on connection errors to prevent blocking the stream.
+    /// On each connection error, the count will be reset to `INITIAL_RETRY_COUNT`.
+    /// On each successful call, the count will be decreased by 1.
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
-    failing: AtomicBool,
+    disable_retry_count: AtomicU8,
 }
+
+const INITIAL_RETRY_COUNT: u8 = 16;
 
 #[async_trait::async_trait]
 impl Expression for UdfExpression {
@@ -103,7 +107,8 @@ impl UdfExpression {
         )
         .expect("failed to build record batch");
 
-        let result = if self.failing.load(Ordering::Relaxed) {
+        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+        let result = if disable_retry_count != 0 {
             self.client
                 .call(&self.identifier, input)
                 .instrument_await(self.span.clone())
@@ -114,10 +119,21 @@ impl UdfExpression {
                 .instrument_await(self.span.clone())
                 .await
         };
-        self.failing.store(
-            matches!(&result, Err(e) if e.is_connection_error()),
-            Ordering::Relaxed,
-        );
+        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+        let connection_error = matches!(&result, Err(e) if e.is_connection_error());
+        if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
+            // reset count on connection error
+            self.disable_retry_count
+                .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
+        } else if !connection_error && disable_retry_count != 0 {
+            // decrease count on success, ignore if exchange failed
+            _ = self.disable_retry_count.compare_exchange(
+                disable_retry_count,
+                disable_retry_count - 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+        }
         let output = result?;
 
         if output.num_rows() != vis.count_ones() {
@@ -182,7 +198,7 @@ impl Build for UdfExpression {
             client,
             identifier: udf.identifier.clone(),
             span: format!("expr_udf_call ({})", udf.identifier).into(),
-            failing: AtomicBool::new(false),
+            disable_retry_count: AtomicU8::new(0),
         })
     }
 }
