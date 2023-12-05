@@ -21,6 +21,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
+#![feature(let_chains)]
 
 pub use table::*;
 

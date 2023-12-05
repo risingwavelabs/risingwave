@@ -113,7 +113,7 @@ pub struct SourceCtrlOpts {
     // in batch scenario
     pub chunk_size: usize,
     /// Rate limit of source
-    pub rate_limit: Option<usize>,
+    pub rate_limit: Option<u32>,
 }
 
 impl Default for SourceCtrlOpts {

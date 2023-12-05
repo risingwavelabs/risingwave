@@ -14,6 +14,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::num::NonZeroU32;
+
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 
 use anyhow::anyhow;
 use futures::future::try_join_all;
@@ -29,11 +33,7 @@ use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
-use risingwave_connector::source::{
-    create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext,
-    SourceEnumeratorContext, SplitEnumerator, SplitReader,
-};
+use risingwave_connector::source::{create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties, ConnectorState, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader, StreamChunkWithState};
 use tokio::time;
 use tokio::time::{Duration, MissedTickBehavior};
 
@@ -43,6 +43,7 @@ pub struct ConnectorSource {
     pub columns: Vec<SourceColumnDesc>,
     pub parser_config: SpecificParserConfig,
     pub connector_message_buffer_size: usize,
+    pub rate_limit: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +61,7 @@ impl ConnectorSource {
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
+        rate_limit: Option<u32>,
     ) -> Result<Self> {
         let config =
             ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
@@ -69,6 +71,7 @@ impl ConnectorSource {
             columns,
             parser_config,
             connector_message_buffer_size,
+            rate_limit,
         })
     }
 
@@ -106,6 +109,26 @@ impl ConnectorSource {
         ))
     }
 
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    async fn rate_limit_stream(stream: BoxSourceWithStateStream, rate_limit: u32) {
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+        let clock = MonotonicClock;
+        let limiter = RateLimiter::direct_with_clock(quota, &clock);
+        let max_cardinality = NonZeroU32::new(rate_limit).unwrap();
+        #[for_await]
+        for batch in stream {
+            let batch = batch?;
+            let cardinality = NonZeroU32::new(batch.chunk.cardinality() as u32).unwrap();
+            if cardinality > max_cardinality {
+                tracing::warn!("rate limit exceeded");
+                limiter.until_n_ready(max_cardinality).await.unwrap();
+            } else {
+                limiter.until_n_ready(cardinality).await.unwrap();
+            }
+            yield batch;
+        }
+    }
+
     pub async fn stream_reader(
         &self,
         state: ConnectorState,
@@ -137,37 +160,44 @@ impl ConnectorSource {
         };
 
         let support_multiple_splits = config.support_multiple_splits();
+        let stream = {
+            dispatch_source_prop!(config, prop, {
+                let readers = if support_multiple_splits {
+                    tracing::debug!(
+                        "spawning connector split reader for multiple splits {:?}",
+                        splits
+                    );
 
-        dispatch_source_prop!(config, prop, {
-            let readers = if support_multiple_splits {
-                tracing::debug!(
-                    "spawning connector split reader for multiple splits {:?}",
-                    splits
-                );
+                    let reader =
+                        create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
+                            .await?;
 
-                let reader =
-                    create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
-                        .await?;
+                    vec![reader]
+                } else {
+                    let to_reader_splits = splits.into_iter().map(|split| vec![split]);
 
-                vec![reader]
-            } else {
-                let to_reader_splits = splits.into_iter().map(|split| vec![split]);
+                    try_join_all(to_reader_splits.into_iter().map(|splits| {
+                        tracing::debug!(?splits, ?prop, "spawning connector split reader");
+                        let props = prop.clone();
+                        let data_gen_columns = data_gen_columns.clone();
+                        let parser_config = parser_config.clone();
+                        // TODO: is this reader split across multiple threads...? Realistically, we want
+                        // source_ctx to live in a single actor.
+                        let source_ctx = source_ctx.clone();
+                        create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
+                    }))
+                    .await?
+                };
 
-                try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
-                    let props = prop.clone();
-                    let data_gen_columns = data_gen_columns.clone();
-                    let parser_config = parser_config.clone();
-                    // TODO: is this reader split across multiple threads...? Realistically, we want
-                    // source_ctx to live in a single actor.
-                    let source_ctx = source_ctx.clone();
-                    create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
-                }))
-                .await?
-            };
+                Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
+            })
+        };
 
-            Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
-        })
+        if let Some(rate_limit) = self.rate_limit && let Ok(stream) = stream {
+            Ok(Self::rate_limit_stream(stream, rate_limit))
+        } else {
+            stream
+        }
     }
 }
 

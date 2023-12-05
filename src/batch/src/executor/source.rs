@@ -83,6 +83,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 .get_config()
                 .developer
                 .connector_message_buffer_size,
+            rate_limit: None,
         };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,

@@ -8437,6 +8437,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-async-stream",
+ "governor",
  "itertools 0.12.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
