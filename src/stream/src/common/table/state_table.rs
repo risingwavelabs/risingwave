@@ -26,7 +26,9 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption, ColumnId};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
+};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
@@ -43,6 +45,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
+use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
@@ -55,7 +58,6 @@ use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
-use risingwave_storage::row_serde::find_columns_by_ids;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -623,12 +625,11 @@ where
     }
 }
 
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
-StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
-    where
-        S: StateStore,
-        SD: ValueRowSerde,
-        W: WatermarkBufferStrategy,
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
 {
     /// Create replicated state table from table catalog with output indices
     pub async fn from_table_catalog_with_output_column_ids(
@@ -642,14 +643,10 @@ StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
             .iter()
             .map(|c| c.column_desc.as_ref().unwrap().into())
             .collect_vec();
-        let (_, output_indices) = find_columns_by_ids(
-            &columns[..],
-            &output_column_ids,
-        );
+        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
         Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_indices).await
     }
 }
-
 
 // point get
 impl<

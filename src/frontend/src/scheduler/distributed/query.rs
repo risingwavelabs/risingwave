@@ -563,7 +563,6 @@ pub(crate) mod tests {
             initialized_at_epoch: None,
             create_type: CreateType::Foreground,
             description: None,
-            output_indices: vec![],
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

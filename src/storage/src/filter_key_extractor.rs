@@ -552,7 +552,6 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: None,
-            ..Default::default()
         }
     }
 
