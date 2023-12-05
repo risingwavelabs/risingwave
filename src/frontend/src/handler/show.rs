@@ -499,7 +499,6 @@ mod tests {
             "country".into() => "test.Country".into(),
             "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
             "_row_id".into() => "serial".into(),
-            "_rw_key".into() => "bytea".into()
         };
 
         assert_eq!(columns, expected_columns);
