@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut, Range};
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -341,17 +341,20 @@ impl CacheRefillTask {
     }
 
     /// Get sstable inheritance info in unit level.
-    fn get_inheritance_info(
+    fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
         parent_ssts: &[impl Deref<Target = Box<Sstable>>],
-    ) -> BTreeMap<SstableUnit, Vec<SstableBlock>> {
-        let mut res = BTreeMap::default();
+    ) -> HashSet<SstableUnit> {
+        let mut res = HashSet::default();
 
         let data_file_cache = context.sstable_store.data_file_cache();
         if data_file_cache.is_none() {
             return res;
         }
+        let Some(filter) = context.sstable_store.data_recent_filter() else {
+            return res;
+        };
 
         let unit = context.config.unit;
 
@@ -396,26 +399,29 @@ impl CacheRefillTask {
 
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
-                    res.entry(SstableUnit {
+                    let su = SstableUnit {
                         sst_obj_id: u.sst.id,
-                        unit,
-                        uidx: u.uidx,
                         blks: u.blks.clone(),
-                    })
-                    .or_default()
-                    .push(SstableBlock {
-                        sst_obj_id: psst.id,
-                        blk_idx: pblk,
-                    });
+                    };
+                    if res.contains(&su) {
+                        continue;
+                    }
+                    if filter.contains(&(psst.id, pblk)) {
+                        res.insert(su);
+                    }
                 }
             }
         }
 
-        {
-            let pblks = res.values().map(|pblks| pblks.len()).sum::<usize>();
-            let size = pblks * std::mem::size_of::<SstableBlock>();
-            tracing::info!("inheritance pblks: {}, estimated size: {}B", pblks, size);
-        }
+        let hit = res.len();
+        let miss = units.len() - res.len();
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_unit_inheritance_hit_total
+            .inc_by(hit as u64);
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_unit_inheritance_miss_total
+            .inc_by(miss as u64);
+
         res
     }
 
@@ -474,12 +480,10 @@ impl CacheRefillTask {
         let mut futures = vec![];
 
         for sst in &holders {
-            for (uidx, blk_start) in (0..sst.block_count()).step_by(unit).enumerate() {
+            for blk_start in (0..sst.block_count()).step_by(unit) {
                 let blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
                 let unit = SstableUnit {
                     sst_obj_id: sst.id,
-                    unit,
-                    uidx,
                     blks: blk_start..blk_end,
                 };
                 futures.push(
@@ -516,34 +520,16 @@ impl CacheRefillTask {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
             Err(e) => return tracing::error!("get old meta from cache error: {}", e),
         };
-        let inheritances = Self::get_inheritance_info(context, &holders, &parent_ssts);
+        let units = Self::get_units_to_refill_by_inheritance(context, &holders, &parent_ssts);
 
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
-        let futures = inheritances.into_iter().map(|(unit, pblks)| {
-            let store = &sstable_store;
+        let futures = units.into_iter().map(|unit| {
             let ssts = &ssts;
             async move {
-                // refill if pblk in recent filter
-                let refill = pblks.into_iter().any(|pblk| {
-                    store
-                        .data_recent_filter()
-                        .unwrap()
-                        .contains(&(pblk.sst_obj_id, pblk.blk_idx))
-                });
-
-                if refill {
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_unit_inheritance_hit_total
-                        .inc();
-                    let sst = ssts.get(&unit.sst_obj_id).unwrap();
-                    if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
-                        tracing::error!("data file cache unit refill error: {}", e);
-                    }
-                } else {
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_unit_inheritance_miss_total
-                        .inc();
+                let sst = ssts.get(&unit.sst_obj_id).unwrap();
+                if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
+                    tracing::error!("data file cache unit refill error: {}", e);
                 }
             }
         });
@@ -665,21 +651,11 @@ pub struct SstableBlock {
     pub blk_idx: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct SstableUnit {
     pub sst_obj_id: HummockSstableObjectId,
-    pub unit: usize,
-    pub uidx: usize,
     pub blks: Range<usize>,
 }
-
-impl PartialEq for SstableUnit {
-    fn eq(&self, other: &Self) -> bool {
-        self.sst_obj_id == other.sst_obj_id && self.uidx == other.uidx
-    }
-}
-
-impl Eq for SstableUnit {}
 
 impl Ord for SstableUnit {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -687,7 +663,11 @@ impl Ord for SstableUnit {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
-        self.uidx.cmp(&other.uidx)
+        match self.blks.start.cmp(&other.blks.start) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+        self.blks.end.cmp(&other.blks.end)
     }
 }
 
@@ -700,20 +680,13 @@ impl PartialOrd for SstableUnit {
 #[derive(Debug)]
 struct Unit<'a> {
     sst: &'a Sstable,
-    _unit: usize,
-    uidx: usize,
     blks: Range<usize>,
 }
 
 impl<'a> Unit<'a> {
     fn new(sst: &'a Sstable, unit: usize, uidx: usize) -> Self {
         let blks = unit * uidx..std::cmp::min(unit * (uidx + 1), sst.block_count());
-        Self {
-            sst,
-            _unit: unit,
-            uidx,
-            blks,
-        }
+        Self { sst, blks }
     }
 
     fn smallest_key(&self) -> &Vec<u8> {
