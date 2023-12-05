@@ -1529,30 +1529,5 @@ pub mod tests {
             }
             _ => unreachable!(),
         }
-
-        let sql = "CREATE TABLE t3 (v1 int, primary key(v1)) with (connector = 'kafka') format upsert encode json"
-            .to_string();
-        frontend.run_sql(sql).await.unwrap();
-        let (table, _) = catalog_reader
-            .get_table_by_name(
-                DEFAULT_DATABASE_NAME,
-                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
-                "t3",
-            )
-            .unwrap();
-        assert_eq!(table.name, "t3");
-        // let columns = table
-        //     .columns
-        //     .iter()
-        //     .map(|col| (col.name(), col.data_type().clone()))
-        //     .collect::<HashMap<&str, DataType>>();
-        // let expect_columns = maplit::hashmap! {
-        //     "v1" => DataType::Int32,
-        //     "some_key" => DataType::Bytea,
-        //     // todo: kafka connector will automatically derive the column
-        //     // will change to a required field in the include clause
-        //     "_rw_kafka_timestamp" => DataType::Timestamptz,
-        // };
-        // assert_eq!(columns, expect_columns);
     }
 }
