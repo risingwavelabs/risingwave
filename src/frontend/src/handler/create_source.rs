@@ -778,7 +778,7 @@ pub(crate) async fn bind_source_pk(
                 }
                 // the column name have been converted to real value in `handle_addition_columns`
                 // so we don't ignore ascii case here
-                if key_column_name.eq(sql_defined_pk_names[0].as_str()) {
+                if !key_column_name.eq(sql_defined_pk_names[0].as_str()) {
                     return Err(RwError::from(ProtocolError(format!(
                         "upsert json's key column {} not match with sql defined primary key {}",
                         key_column_name, sql_defined_pk_names[0]
@@ -1370,6 +1370,7 @@ pub async fn handle_create_source(
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use risingwave_common::catalog::{
         CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
@@ -1378,8 +1379,18 @@ pub mod tests {
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::catalog::source_catalog::SourceCatalog;
     use crate::handler::create_source::debezium_cdc_source_schema;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+
+    const GET_COLUMN_FROM_CATALOG: fn(&Arc<SourceCatalog>) -> HashMap<&str, DataType> =
+        |catalog: &Arc<SourceCatalog>| -> HashMap<&str, DataType> {
+            catalog
+                .columns
+                .iter()
+                .map(|col| (col.name(), col.data_type().clone()))
+                .collect::<HashMap<&str, DataType>>()
+        };
 
     #[tokio::test]
     async fn test_create_source_handler() {
@@ -1403,11 +1414,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(source.name, "t");
 
-        let columns = source
-            .columns
-            .iter()
-            .map(|col| (col.name(), col.data_type().clone()))
-            .collect::<HashMap<&str, DataType>>();
+        let columns = GET_COLUMN_FROM_CATALOG(source);
 
         let city_type = DataType::new_struct(
             vec![DataType::Varchar, DataType::Varchar],
@@ -1469,5 +1476,83 @@ pub mod tests {
         let columns = debezium_cdc_source_schema();
         // make sure it doesn't broken by future PRs
         assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
+    }
+
+    #[tokio::test]
+    async fn test_source_addition_columns() {
+        // test derive include column for format plain
+        let sql =
+            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json"
+                .to_string();
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s");
+
+        let columns = GET_COLUMN_FROM_CATALOG(source);
+        let expect_columns = maplit::hashmap! {
+            ROWID_PREFIX => DataType::Serial,
+            "v1" => DataType::Int32,
+            "_rw_kafka_key" => DataType::Bytea,
+            // todo: kafka connector will automatically derive the column
+            // will change to a required field in the include clause
+            "_rw_kafka_timestamp" => DataType::Timestamptz,
+        };
+        assert_eq!(columns, expect_columns);
+
+        // test derive include column for format upsert
+        let sql = "CREATE SOURCE s1 (v1 int) with (connector = 'kafka') format upsert encode json"
+            .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE JSON"
+                )
+            }
+            _ => unreachable!(),
+        }
+
+        let sql = "CREATE SOURCE s2 (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format upsert encode json"
+            .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE JSON")
+            }
+            _ => unreachable!(),
+        }
+
+        let sql = "CREATE TABLE t3 (v1 int, primary key(v1)) with (connector = 'kafka') format upsert encode json"
+            .to_string();
+        frontend.run_sql(sql).await.unwrap();
+        let (table, _) = catalog_reader
+            .get_table_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "t3",
+            )
+            .unwrap();
+        assert_eq!(table.name, "t3");
+        // let columns = table
+        //     .columns
+        //     .iter()
+        //     .map(|col| (col.name(), col.data_type().clone()))
+        //     .collect::<HashMap<&str, DataType>>();
+        // let expect_columns = maplit::hashmap! {
+        //     "v1" => DataType::Int32,
+        //     "some_key" => DataType::Bytea,
+        //     // todo: kafka connector will automatically derive the column
+        //     // will change to a required field in the include clause
+        //     "_rw_kafka_timestamp" => DataType::Timestamptz,
+        // };
+        // assert_eq!(columns, expect_columns);
     }
 }

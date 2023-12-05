@@ -1582,8 +1582,16 @@ impl fmt::Display for Statement {
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
-                if !include_column_options.is_empty() {
-                    todo!()
+                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
+                    write!(f, " INCLUDE {}", display_comma_separated(
+                        include_column_options.iter().map(|(a, b)| {
+                            if let Some(b) = b {
+                                format!("{} AS {}", a, b)
+                            } else {
+                                a.to_string()
+                            }
+                        }).collect_vec().as_slice()
+                    ))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
