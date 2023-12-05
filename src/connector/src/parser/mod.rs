@@ -46,11 +46,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
-use crate::source::{
-    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
-    StreamChunkWithState,
-};
+use crate::source::{extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId, StreamChunkWithState, SourceMessage};
 
 mod avro;
 mod bytes_parser;
@@ -468,6 +464,20 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
+#[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: usize) {
+    // let mut rows = Vec::with_capacity(rate_limit);
+    #[for_await]
+    for batch in stream {
+        let batch = batch?;
+        if batch.len() > rate_limit {
+            yield batch;
+        } else {
+            yield batch;
+        }
+    }
+}
+
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
@@ -487,7 +497,11 @@ impl<P: ByteStreamSourceParser> P {
             actor_id = source_info.actor_id,
             source_id = source_info.source_id.table_id()
         );
-
+        let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
+            Box::pin(ensure_largest_at_rate_limit(data_stream, *rate_limit))
+        } else {
+            data_stream
+        };
         into_chunk_stream(self, data_stream).instrument(span)
     }
 }
