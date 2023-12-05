@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::num::NonZeroU32;
-
-use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::stream::pending;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
@@ -33,7 +32,11 @@ use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
-use risingwave_connector::source::{create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties, ConnectorState, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader, StreamChunkWithState};
+use risingwave_connector::source::{
+    create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
+    ConnectorState, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext,
+    SourceEnumeratorContext, SplitEnumerator, SplitReader, StreamChunkWithState,
+};
 use tokio::time;
 use tokio::time::{Duration, MissedTickBehavior};
 
@@ -168,9 +171,14 @@ impl ConnectorSource {
                         splits
                     );
 
-                    let reader =
-                        create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
-                            .await?;
+                    let reader = create_split_reader(
+                        *prop,
+                        splits,
+                        parser_config,
+                        source_ctx,
+                        data_gen_columns,
+                    )
+                    .await?;
 
                     vec![reader]
                 } else {
@@ -184,7 +192,13 @@ impl ConnectorSource {
                         // TODO: is this reader split across multiple threads...? Realistically, we want
                         // source_ctx to live in a single actor.
                         let source_ctx = source_ctx.clone();
-                        create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
+                        create_split_reader(
+                            *props,
+                            splits,
+                            parser_config,
+                            source_ctx,
+                            data_gen_columns,
+                        )
                     }))
                     .await?
                 };

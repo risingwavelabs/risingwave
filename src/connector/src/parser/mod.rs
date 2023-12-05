@@ -46,7 +46,11 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
-use crate::source::{extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId, StreamChunkWithState, SourceMessage};
+use crate::source::{
+    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta, SourceWithStateStream,
+    SplitId, StreamChunkWithState,
+};
 
 mod avro;
 mod bytes_parser;
