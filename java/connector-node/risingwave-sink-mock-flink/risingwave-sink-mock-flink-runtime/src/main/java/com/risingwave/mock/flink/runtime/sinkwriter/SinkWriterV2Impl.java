@@ -18,13 +18,13 @@ package com.risingwave.mock.flink.runtime.sinkwriter;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.mock.flink.runtime.RowDataImpl;
 import com.risingwave.mock.flink.runtime.context.SinkWriterContextV2;
+import com.risingwave.proto.ConnectorServiceProto;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.SinkWriter;
@@ -36,17 +36,20 @@ import org.apache.flink.table.data.RowData;
  * The SinkV2-type sink will invoke this class to write RW data to the downstream.
  * Stateful sink is currently not supported.
  */
-public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
+public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sink.SinkWriter {
 
     org.apache.flink.api.connector.sink2.Sink<RowData> sink;
+
     SinkWriter<RowData> writer;
 
     Committer<CommT> committer;
 
+    TableSchema tableSchema;
+
     public SinkWriterV2Impl(
             TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
-        super(tableSchema);
         try {
+            this.tableSchema = tableSchema;
             this.sink = sink;
             this.writer = sink.createWriter(new SinkWriterContextV2());
             if (writer instanceof StatefulSink.StatefulSinkWriter) {
@@ -83,22 +86,25 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            writeRow(new RowDataImpl(row, getTableSchema().getNumColumns()));
+    public void beginEpoch(long epoch) {}
+
+    @Override
+    public boolean write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
+            writeRow(new RowDataImpl(row, tableSchema.getNumColumns()));
         }
+        return true;
     }
 
     @Override
-    public void sync() {
-        try {
-            this.writer.flush(false);
-            if (committer != null) {
+    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
+        if (isCheckpoint) {
+            try {
+                this.writer.flush(false);
                 Collection<CommT> objects =
                         ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, CommT>) this.writer)
                                 .prepareCommit();
-                if (!objects.isEmpty()) {
+                if (committer != null && !objects.isEmpty()) {
                     List<Committer.CommitRequest<CommT>> collect =
                             objects.stream()
                                     .map(
@@ -109,14 +115,15 @@ public class SinkWriterV2Impl<CommT> extends SinkWriterBase {
                                     .collect(Collectors.toList());
                     committer.commit(collect);
                 }
+                if (!objects.isEmpty()) {
+                    throw new RuntimeException(
+                            "We need to commit Committable, But Committer is null");
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
-            if (this.writer instanceof TwoPhaseCommittingSink.PrecommittingSinkWriter) {
-                ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, ?>) this.writer)
-                        .prepareCommit();
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         }
+        return Optional.empty();
     }
 
     @Override

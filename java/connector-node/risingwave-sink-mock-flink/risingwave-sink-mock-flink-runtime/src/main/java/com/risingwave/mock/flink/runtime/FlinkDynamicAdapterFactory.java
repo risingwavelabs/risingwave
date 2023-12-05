@@ -20,10 +20,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
-import com.risingwave.connector.api.sink.SinkWriterV1;
-import com.risingwave.connector.common.FlinkDynamicAdapterConfig;
-import com.risingwave.connector.common.FlinkDynamicUtil;
-import com.risingwave.connector.common.FlinkMockSinkFactory;
+import com.risingwave.mock.flink.common.FlinkDynamicAdapterConfig;
+import com.risingwave.mock.flink.common.FlinkDynamicUtil;
+import com.risingwave.mock.flink.common.FlinkMockSinkFactory;
 import com.risingwave.mock.flink.runtime.context.DynamicTableSinkContextImpl;
 import com.risingwave.mock.flink.runtime.context.SinkWriterContextV2;
 import com.risingwave.mock.flink.runtime.sinkwriter.AsyncSinkWriterImpl;
@@ -64,8 +63,14 @@ public class FlinkDynamicAdapterFactory implements SinkFactory {
         DynamicTableSinkFactory dynamicTableSinkFactory =
                 flinkMockSinkFactory.getDynamicTableSinkFactory();
         Set<ConfigOption<?>> configOptions = new HashSet<>();
-        configOptions.addAll(dynamicTableSinkFactory.requiredOptions());
-        configOptions.addAll(dynamicTableSinkFactory.optionalOptions());
+        configOptions.addAll(
+                dynamicTableSinkFactory.requiredOptions() == null
+                        ? Collections.emptyList()
+                        : dynamicTableSinkFactory.requiredOptions());
+        configOptions.addAll(
+                dynamicTableSinkFactory.optionalOptions() == null
+                        ? Collections.emptyList()
+                        : dynamicTableSinkFactory.optionalOptions());
         config.processOption(configOptions);
 
         Schema.Builder schemaBuilder = Schema.newBuilder();
@@ -109,20 +114,20 @@ public class FlinkDynamicAdapterFactory implements SinkFactory {
                 buildDynamicTableSinkProvider(tableSchema, flinkDynamicAdapterConfig);
         if (sinkRuntimeProvider instanceof SinkProvider) {
             Sink<RowData, ?, ?, ?> sink = ((SinkProvider) sinkRuntimeProvider).createSink();
-            return new SinkWriterV1.Adapter(new SinkWriterImpl<>(tableSchema, sink));
+            return new SinkWriterImpl<>(tableSchema, sink);
         } else if (sinkRuntimeProvider instanceof SinkV2Provider) {
             org.apache.flink.api.connector.sink2.Sink<RowData> sink =
                     ((SinkV2Provider) sinkRuntimeProvider).createSink();
 
             try {
                 if (sink.createWriter(new SinkWriterContextV2()) instanceof AsyncSinkWriter) {
-                    return new SinkWriterV1.Adapter(new AsyncSinkWriterImpl(tableSchema, sink));
+                    return new AsyncSinkWriterImpl(tableSchema, sink);
                 }
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
 
-            return new SinkWriterV1.Adapter(new SinkWriterV2Impl(tableSchema, sink));
+            return new SinkWriterV2Impl(tableSchema, sink);
         } else {
             throw new TableException("Unsupported sink runtime provider.");
         }

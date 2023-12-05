@@ -18,12 +18,11 @@ package com.risingwave.mock.flink.runtime.sinkwriter;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.mock.flink.runtime.RowDataImpl;
 import com.risingwave.mock.flink.runtime.context.SinkWriterContext;
+import com.risingwave.proto.ConnectorServiceProto;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import org.apache.flink.api.connector.sink.Committer;
@@ -33,28 +32,22 @@ import org.apache.flink.table.data.RowData;
 /*
  * The Sink-type sink will invoke this class to write RW data to the downstream.
  */
-public class SinkWriterImpl<CommT> extends SinkWriterBase {
+public class SinkWriterImpl<CommT> implements com.risingwave.connector.api.sink.SinkWriter {
     Sink<RowData, CommT, ?, ?> sink;
     org.apache.flink.api.connector.sink.SinkWriter<RowData, CommT, ?> writer;
 
     Optional<? extends Committer<CommT>> committer;
 
+    TableSchema tableSchema;
+
     public SinkWriterImpl(TableSchema tableSchema, Sink<RowData, CommT, ?, ?> sink) {
-        super(tableSchema);
         try {
+            this.tableSchema = tableSchema;
             this.sink = sink;
             this.writer = sink.createWriter(new SinkWriterContext(), Collections.emptyList());
             this.committer = sink.createCommitter();
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            writeRow(new RowDataImpl(row, getTableSchema().getNumColumns()));
         }
     }
 
@@ -73,25 +66,35 @@ public class SinkWriterImpl<CommT> extends SinkWriterBase {
                             return null;
                         }
                     });
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
+        } catch (IOException | InterruptedException e) {
             throw new RuntimeException(e);
         }
     }
 
     @Override
-    public void sync() {
-        try {
-            if (committer.isEmpty()) {
-                return;
-            } else {
-                List<CommT> objects = writer.prepareCommit(true);
-                committer.get().commit(objects);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    public void beginEpoch(long epoch) {}
+
+    @Override
+    public boolean write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
+            writeRow(new RowDataImpl(row, tableSchema.getNumColumns()));
         }
+        return true;
+    }
+
+    @Override
+    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
+        if (isCheckpoint) {
+            try {
+                List<CommT> objects = writer.prepareCommit(true);
+                if (committer.isPresent()) {
+                    committer.get().commit(objects);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return Optional.empty();
     }
 
     @Override

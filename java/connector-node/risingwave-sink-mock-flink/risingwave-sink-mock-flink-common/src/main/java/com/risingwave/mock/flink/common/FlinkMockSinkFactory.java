@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.common;
+package com.risingwave.mock.flink.common;
 
 import com.risingwave.connector.api.TableSchema;
 import io.grpc.StatusRuntimeException;

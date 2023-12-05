@@ -18,8 +18,8 @@ package com.risingwave.mock.flink.http;
 
 import com.getindata.connectors.http.internal.table.sink.HttpDynamicTableSinkFactory;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.common.FlinkDynamicAdapterConfig;
-import com.risingwave.connector.common.FlinkMockSinkFactory;
+import com.risingwave.mock.flink.common.FlinkDynamicAdapterConfig;
+import com.risingwave.mock.flink.common.FlinkMockSinkFactory;
 import io.grpc.StatusRuntimeException;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 

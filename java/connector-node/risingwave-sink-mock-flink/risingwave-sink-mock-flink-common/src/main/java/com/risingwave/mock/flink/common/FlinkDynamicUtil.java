@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.common;
+package com.risingwave.mock.flink.common;
 
 import com.risingwave.connector.api.ColumnDesc;
 import com.risingwave.connector.api.TableSchema;
@@ -40,6 +40,8 @@ import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.DataType;
 
 public class FlinkDynamicUtil {
+    private static final String TIMESTAMP_LTZ_FORMAT = "TIMESTAMP\\(\\d+\\) WITH LOCAL TIME ZONE";
+
     public static DataType getCorrespondingFlinkType(Data.DataType dataType) {
         switch (dataType.getTypeName()) {
             case INT16:
@@ -65,7 +67,7 @@ public class FlinkDynamicUtil {
                 return DataTypes.TIMESTAMP();
             case TIMESTAMPTZ:
                 // Like DECIMAL
-                return DataTypes.TIMESTAMP_WITH_TIME_ZONE();
+                return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
             case DATE:
                 return DataTypes.DATE();
             case TIME:
@@ -187,8 +189,7 @@ public class FlinkDynamicUtil {
             case TIMESTAMP:
                 return flinkType.toString().contains("TIMESTAMP");
             case TIMESTAMPTZ:
-                String pattern = "TIMESTAMP\\(\\d+\\) WITH TIME ZONE";
-                Pattern regex = Pattern.compile(pattern);
+                Pattern regex = Pattern.compile(TIMESTAMP_LTZ_FORMAT);
                 Matcher matcher = regex.matcher(flinkType.toString());
                 return matcher.matches();
             default:
