@@ -52,14 +52,14 @@ services:
     depends_on:
       mysql_prepare:
         condition: service_completed_successfully
-      frontend-node-0:
+      risingwave-standalone:
         condition: service_healthy
     volumes:
       - "./compatibility-rw.sql:/compatibility-rw.sql"
     command:
       - /bin/sh
       - -c
-      - "psql postgresql://root:@frontend-node-0:4566/dev < /compatibility-rw.sql"
+      - "psql postgresql://root:@risingwave-standalone:4566/dev < /compatibility-rw.sql"
   datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on:

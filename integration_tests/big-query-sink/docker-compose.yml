@@ -15,12 +15,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
-    volumes:
-      - "../../gcp-rwctest.json:/gcp-rwctest.json"
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml

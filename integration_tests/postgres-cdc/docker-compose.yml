@@ -49,7 +49,7 @@ services:
       - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql &&
          psql postgresql://myuser:123456@postgres:5432/mydb < compatibility-pg.sql &&
          sleep 5 &&
-         psql postgresql://root:@frontend-node-0:4566/dev < compatibility-rw.sql"
+         psql postgresql://root:@risingwave-standalone:4566/dev < compatibility-rw.sql"
     volumes:
       - "./postgres_prepare.sql:/postgres_prepare.sql"
       - "./compatibility-pg.sql:/compatibility-pg.sql"
