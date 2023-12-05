@@ -24,6 +24,9 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::table_fragments_util::{
+    compress_table_fragments, uncompress_table_fragments,
+};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -52,7 +55,7 @@ use crate::manager::{
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{StreamEnvironment, TableFragments};
+use crate::model::{MetadataModel, StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -597,6 +600,13 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
+
+        // todo remove me when everything is done
+        let mut pb_table_fragments = table_fragments.to_protobuf();
+        uncompress_table_fragments(&mut pb_table_fragments);
+        compress_table_fragments(&mut pb_table_fragments);
+        let table_fragments = TableFragments::from_protobuf(pb_table_fragments);
+
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)
