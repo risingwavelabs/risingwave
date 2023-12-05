@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config
@@ -266,6 +269,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
+    #[serde(default = "default::meta::cut_table_size_limit")]
+    pub cut_table_size_limit: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -292,6 +298,8 @@ pub struct MetaConfig {
     #[serde(default)]
     pub compaction_config: CompactionConfig,
 
+    #[serde(default = "default::meta::hybird_partition_vnode_count")]
+    pub hybird_partition_vnode_count: u32,
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -578,6 +586,13 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
+    pub compactor_fast_max_compact_delete_ratio: u32,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
+    pub compactor_fast_max_compact_task_size: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -751,15 +766,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
 
-    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
-    /// the channel.
-    #[serde(default = "default::developer::stream_exchange_initial_permits")]
-    pub exchange_initial_permits: usize,
+    /// The maximum size of bytes can be buffered in the exchange channel.
+    #[serde(default = "default::developer::stream_exchange_max_bytes")]
+    pub exchange_max_bytes: usize,
 
-    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
-    /// in remote exchange.
-    #[serde(default = "default::developer::stream_exchange_batched_permits")]
-    pub exchange_batched_permits: usize,
+    /// The threshold of bytes that triggers a backward `AddPermits` message in the remote exchange.
+    #[serde(default = "default::developer::stream_exchange_ack_bytes")]
+    pub exchange_ack_bytes: usize,
 
     /// The maximum number of concurrent barriers in an exchange channel.
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
@@ -973,7 +986,7 @@ pub mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 3mi
+            10 // 10s
         }
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
@@ -1002,6 +1015,14 @@ pub mod default {
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
             60 // 1min
+        }
+
+        pub fn cut_table_size_limit() -> u64 {
+            1024 * 1024 * 1024 // 1GB
+        }
+
+        pub fn hybird_partition_vnode_count() -> u32 {
+            4
         }
 
         pub fn event_log_enabled() -> bool {
@@ -1136,6 +1157,14 @@ pub mod default {
         }
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
+        }
+
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
+            40
+        }
+
+        pub fn compactor_fast_max_compact_task_size() -> u64 {
+            2 * 1024 * 1024 * 1024 // 2g
         }
     }
 
@@ -1286,12 +1315,12 @@ pub mod default {
             256
         }
 
-        pub fn stream_exchange_initial_permits() -> usize {
-            2048
+        pub fn stream_exchange_max_bytes() -> usize {
+            1 << 20 // 1MB
         }
 
-        pub fn stream_exchange_batched_permits() -> usize {
-            256
+        pub fn stream_exchange_ack_bytes() -> usize {
+            32 << 10 // 32KB
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -192,7 +192,7 @@ impl MergeExecutor {
                                     )
                                 })
                                 .try_collect()
-                                .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
+                                .context("failed to create upstream receivers")?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.

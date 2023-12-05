@@ -95,16 +95,9 @@ impl GlobalBarrierManager {
             .await?;
 
         // unregister compaction group for dirty table fragments.
-        let _ = self.hummock_manager
-            .unregister_table_fragments_vec(
-                &to_drop_table_fragments
-            )
-            .await.inspect_err(|e|
-            warn!(
-            "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
-            to_drop_table_fragments,
-            e)
-        );
+        self.hummock_manager
+            .unregister_table_fragments_vec(&to_drop_table_fragments)
+            .await;
 
         // clean up source connector dirty changes.
         self.source_manager

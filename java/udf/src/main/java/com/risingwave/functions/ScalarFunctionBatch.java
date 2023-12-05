@@ -27,9 +27,8 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     MethodHandle methodHandle;
     Function<Object, Object>[] processInputs;
 
-    ScalarFunctionBatch(ScalarFunction function, BufferAllocator allocator) {
+    ScalarFunctionBatch(ScalarFunction function) {
         this.function = function;
-        this.allocator = allocator;
         var method = Reflection.getEvalMethod(function);
         this.methodHandle = Reflection.getMethodHandle(method);
         this.inputSchema = TypeUtils.methodToInputSchema(method);
@@ -38,7 +37,7 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     }
 
     @Override
-    Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
+    Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch, BufferAllocator allocator) {
         var row = new Object[batch.getSchema().getFields().size() + 1];
         row[0] = this.function;
         var outputValues = new Object[batch.getRowCount()];
@@ -55,7 +54,7 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         }
         var outputVector =
                 TypeUtils.createVector(
-                        this.outputSchema.getFields().get(0), this.allocator, outputValues);
+                        this.outputSchema.getFields().get(0), allocator, outputValues);
         var outputBatch = VectorSchemaRoot.of(outputVector);
         return Collections.singleton(outputBatch).iterator();
     }
