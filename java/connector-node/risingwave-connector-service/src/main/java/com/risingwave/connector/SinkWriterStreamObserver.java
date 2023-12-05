@@ -60,7 +60,6 @@ public class SinkWriterStreamObserver
                     .asRuntimeException();
         }
         if (!epochStarted) {
-            epochStarted = true;
             if (currentEpoch != null && epoch <= currentEpoch) {
                 throw FAILED_PRECONDITION
                         .withDescription(
@@ -69,6 +68,8 @@ public class SinkWriterStreamObserver
                                         context, currentEpoch, epoch))
                         .asRuntimeException();
             }
+            sink.beginEpoch(epoch);
+            epochStarted = true;
             currentEpoch = epoch;
         } else {
             if (epoch != currentEpoch) {
