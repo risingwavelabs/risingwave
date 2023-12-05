@@ -19,9 +19,8 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
-use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
@@ -91,10 +90,6 @@ pub struct LocalHummockStorage {
     write_limiter: WriteLimiterRef,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-
-    mem_table_size: IntGauge,
-
-    mem_table_item_count: IntGauge,
 
     mem_table_spill_threshold: usize,
 }
@@ -192,7 +187,7 @@ impl LocalHummockStorage {
         }
 
         let read_snapshot = read_filter_for_local(
-            MAX_EPOCH, // Use MAX epoch to make sure we read from latest
+            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
@@ -274,19 +269,12 @@ impl LocalStateStore for LocalHummockStorage {
             Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
         };
 
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
+
         Ok(())
     }
 
@@ -294,8 +282,6 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
-        self.mem_table_size.set(0);
-        self.mem_table_item_count.set(0);
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)
@@ -365,15 +351,14 @@ impl LocalStateStore for LocalHummockStorage {
 
     async fn try_flush(&mut self) -> StorageResult<()> {
         if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
-            tracing::info!(
-                "The size of mem table is {} Mb and it exceeds {} Mb and spill occurs. table_id {}",
-                self.mem_table.kv_size.size() >> 20,
-                self.mem_table_spill_threshold >> 20,
-                self.table_id.table_id()
-            );
-
-            let table_id_label = self.table_id.table_id().to_string();
             if self.spill_offset < MAX_SPILL_TIMES {
+                tracing::info!(
+                    "The size of mem table is {} Mb and it exceeds {} Mb and spill occurs. table_id {}",
+                    self.mem_table.kv_size.size() >> 20,
+                    self.mem_table_spill_threshold >> 20,
+                    self.table_id.table_id()
+                );
+                let table_id_label = self.table_id.table_id().to_string();
                 self.flush(vec![]).await?;
                 self.stats
                     .mem_table_spill_counts
@@ -533,14 +518,6 @@ impl LocalHummockStorage {
         mem_table_spill_threshold: usize,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
-        let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
-        let mem_table_item_count = stats.mem_table_item_count.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             spill_offset: 0,
@@ -557,8 +534,6 @@ impl LocalHummockStorage {
             stats,
             write_limiter,
             version_update_notifier_tx,
-            mem_table_size,
-            mem_table_item_count,
             mem_table_spill_threshold,
         }
     }

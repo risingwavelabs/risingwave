@@ -147,8 +147,8 @@ impl LocalQueryExecution {
         let catalog_reader = self.front_env.catalog_reader().clone();
         let auth_context = self.session.auth_context().clone();
         let db_name = self.session.database().to_string();
-        let search_path = self.session.config().get_search_path().clone();
-        let time_zone = self.session.config().get_timezone().to_owned();
+        let search_path = self.session.config().search_path();
+        let time_zone = self.session.config().timezone();
 
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
@@ -164,8 +164,10 @@ impl LocalQueryExecution {
             }
         };
 
+        use risingwave_expr::captured_execution_context::TIME_ZONE;
+
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, TIME_ZONE,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH,
         };
 
         let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await };

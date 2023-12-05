@@ -29,7 +29,8 @@ use super::{
     generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -591,6 +592,12 @@ impl ExprRewritable for LogicalJoin {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 
@@ -1276,7 +1283,7 @@ impl ToBatch for LogicalJoin {
                 ))
                 .into());
             }
-            if config.get_batch_enable_lookup_join() {
+            if config.batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),

@@ -398,7 +398,7 @@ where
         }
 
         if let Some(callback) = self.callback.take() {
-            callback.await.map_err(PsqlError::ExecuteError)?;
+            callback.await.map_err(PsqlError::SimpleQueryError)?;
         }
         Ok(())
     }

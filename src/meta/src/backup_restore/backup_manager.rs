@@ -21,9 +21,10 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::task::JoinHandle;
@@ -366,7 +367,15 @@ async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
 ) -> MetaResult<ObjectStoreMetaSnapshotStorage> {
-    let object_store = Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup").await);
+    let object_store = Arc::new(
+        build_remote_object_store(
+            &config.0,
+            metric,
+            "Meta Backup",
+            ObjectStoreConfig::default(),
+        )
+        .await,
+    );
     let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
     Ok(store)
 }

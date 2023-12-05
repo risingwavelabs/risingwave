@@ -21,7 +21,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The error type for UDF operations.
 #[derive(Error, Debug, Box, Construct)]
-#[thiserror_ext(type = Error)]
+#[thiserror_ext(newtype(name = Error))]
 pub enum ErrorInner {
     #[error("failed to connect to UDF service: {0}")]
     Connect(#[from] tonic::transport::Error),
@@ -46,6 +46,23 @@ pub enum ErrorInner {
 
     #[error("Flight service error: {0}")]
     ServiceError(String),
+}
+
+impl Error {
+    /// Returns true if the error is caused by a connection error.
+    pub fn is_connection_error(&self) -> bool {
+        match self.inner() {
+            // stream closed because of a broken pipe
+            ErrorInner::Flight(FlightError::Tonic(status))
+                if status.code() == tonic::Code::Unknown =>
+            {
+                true
+            }
+            // Connection refused
+            ErrorInner::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
+            _ => false,
+        }
+    }
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 8);

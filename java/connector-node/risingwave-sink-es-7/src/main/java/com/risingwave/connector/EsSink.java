@@ -15,13 +15,14 @@
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -64,6 +65,11 @@ public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
+    private static final TimeZone UTCTimeZone = TimeZone.getTimeZone("UTC");
+    private final SimpleDateFormat tDfm;
+    private final SimpleDateFormat tsDfm;
+    private final SimpleDateFormat tstzDfm;
+
     private final EsSinkConfig config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
@@ -105,6 +111,10 @@ public class EsSink extends SinkWriterBase {
         for (String primaryKey : tableSchema.getPrimaryKeys()) {
             primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
         }
+
+        tDfm = createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
+        tsDfm = createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
+        tstzDfm = createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
     }
 
     private static RestClientBuilder configureRestClientBuilder(
@@ -169,13 +179,20 @@ public class EsSink extends SinkWriterBase {
         /** This method is called after bulk execution. */
         @Override
         public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            if (response.hasFailures()) {
+                LOG.error(
+                        "Bulk of {} actions failed. Failure: {:?}",
+                        request.numberOfActions(),
+                        response.buildFailureMessage());
+            } else {
+                LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            }
         }
 
         /** This method is called when the bulk failed and raised a Throwable */
         @Override
         public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            LOG.info(
+            LOG.error(
                     "Bulk of {} actions failed. Failure: {}",
                     request.numberOfActions(),
                     failure.getMessage());
@@ -199,26 +216,65 @@ public class EsSink extends SinkWriterBase {
             var type = columnDescs.get(i).getDataType().getTypeName();
             Object col = row.get(i);
             switch (type) {
-                case DATE:
                     // es client doesn't natively support java.sql.Timestamp/Time/Date
-                    // so we need to convert Date type into a string as suggested in
+                    // so we need to convert Date/Time/Timestamp type into a string as suggested in
                     // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
+                case DATE:
                     col = col.toString();
+                    break;
+                    // construct java.sql.Time/Timestamp with milliseconds time value.
+                    // it will use system timezone by default, so we have to set timezone manually
+                case TIME:
+                    col = tDfm.format(col);
+                    break;
+                case TIMESTAMP:
+                    col = tsDfm.format(col);
+                    break;
+                case TIMESTAMPTZ:
+                    col = tstzDfm.format(col);
                     break;
                 case JSONB:
                     ObjectMapper mapper = new ObjectMapper();
-                    col =
-                            mapper.readValue(
-                                    (String) col, new TypeReference<Map<String, Object>>() {});
+                    JsonNode jsonNode = mapper.readTree((String) col);
+                    col = convertJsonNode(jsonNode);
                     break;
                 default:
                     break;
             }
-            if (col instanceof Date) {}
 
             doc.put(getTableSchema().getColumnDesc(i).getName(), col);
         }
         return doc;
+    }
+
+    private static Object convertJsonNode(JsonNode jsonNode) {
+        if (jsonNode.isObject()) {
+            Map<String, Object> resultMap = new HashMap<>();
+            jsonNode.fields()
+                    .forEachRemaining(
+                            entry -> {
+                                resultMap.put(entry.getKey(), convertJsonNode(entry.getValue()));
+                            });
+            return resultMap;
+        } else if (jsonNode.isArray()) {
+            List<Object> resultList = new ArrayList<>();
+            jsonNode.elements()
+                    .forEachRemaining(
+                            element -> {
+                                resultList.add(convertJsonNode(element));
+                            });
+            return resultList;
+        } else if (jsonNode.isNumber()) {
+            return jsonNode.numberValue();
+        } else if (jsonNode.isTextual()) {
+            return jsonNode.textValue();
+        } else if (jsonNode.isBoolean()) {
+            return jsonNode.booleanValue();
+        } else if (jsonNode.isNull()) {
+            return null;
+        } else {
+            throw new IllegalArgumentException("Unsupported JSON type");
+        }
     }
 
     /**
@@ -312,5 +368,11 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
+    }
+
+    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
+        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
+        sdf.setTimeZone(timeZone);
+        return sdf;
     }
 }

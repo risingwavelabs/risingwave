@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use arrow_array::RecordBatch;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::encode::FlightDataEncoderBuilder;
@@ -36,13 +38,21 @@ pub struct ArrowFlightUdfClient {
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
-        let client = FlightServiceClient::connect(addr.to_string()).await?;
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await?;
+        let client = FlightServiceClient::new(conn);
         Ok(Self { client })
     }
 
     /// Connect to a UDF service lazily (i.e. only when the first request is sent).
     pub fn connect_lazy(addr: &str) -> Result<Self> {
-        let conn = tonic::transport::Endpoint::new(addr.to_string())?.connect_lazy();
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(5))
+            .connect_lazy();
         let client = FlightServiceClient::new(conn);
         Ok(Self { client })
     }
@@ -109,6 +119,22 @@ impl ArrowFlightUdfClient {
         }
     }
 
+    /// Call a function, retry up to 5 times / 3s if connection is broken.
+    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+        let mut backoff = Duration::from_millis(100);
+        for i in 0..5 {
+            match self.call(id, input.clone()).await {
+                Err(err) if err.is_connection_error() && i != 4 => {
+                    tracing::error!(%err, "UDF connection error. retry...");
+                }
+                ret => return ret,
+            }
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        }
+        unreachable!()
+    }
+
     /// Call a function with streaming input and output.
     #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(
@@ -117,17 +143,14 @@ impl ArrowFlightUdfClient {
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
-        let flight_data_stream = FlightDataEncoderBuilder::new()
-            // XXX(wrj): unlimit the size of flight data to avoid splitting batch
-            //           there's a bug in arrow-flight when splitting batch with list type array
-            // FIXME: remove this when the bug is fixed in arrow-flight
-            .with_max_flight_data_size(usize::MAX)
-            .build(inputs.map(Ok))
-            .map(move |res| FlightData {
-                // TODO: fill descriptor only for the first message
-                flight_descriptor: Some(descriptor.clone()),
-                ..res.unwrap()
-            });
+        let flight_data_stream =
+            FlightDataEncoderBuilder::new()
+                .build(inputs.map(Ok))
+                .map(move |res| FlightData {
+                    // TODO: fill descriptor only for the first message
+                    flight_descriptor: Some(descriptor.clone()),
+                    ..res.unwrap()
+                });
 
         // call `do_exchange` on Flight server
         let response = self.client.clone().do_exchange(flight_data_stream).await?;

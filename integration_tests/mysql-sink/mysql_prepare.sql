@@ -18,7 +18,8 @@ CREATE TABLE data_types (
     boolean_column BOOLEAN,
     date_column DATE,
     time_column TIME,
-    timestamp_column TIMESTAMP,
+    timestamp_column DATETIME,
+    timestamptz_column TIMESTAMP,
     jsonb_column JSON,
     bytea_column BLOB
 );

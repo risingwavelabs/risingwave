@@ -24,15 +24,14 @@ use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
-use hyper::Response;
 use io::StreamReader;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
+use crate::common::AwsAuthProps;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
@@ -145,7 +144,10 @@ impl S3FileReader {
         bucket_name: &str,
         object_name: &str,
         start: usize,
-    ) -> std::result::Result<ByteStream, SdkError<GetObjectError, Response<SdkBody>>> {
+    ) -> std::result::Result<
+        ByteStream,
+        SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+    > {
         let range = if start == 0 {
             None
         } else {

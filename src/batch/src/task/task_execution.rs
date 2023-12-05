@@ -27,8 +27,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_expr::captured_execution_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
@@ -425,6 +427,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -433,14 +436,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch.clone(),
-            self.shutdown_rx.clone(),
+        let exec = captured_execution_context_scope!(
+            captured_execution_context.clone(),
+            ExecutorBuilder::new(
+                self.plan.root.as_ref().unwrap(),
+                &self.task_id,
+                self.context.clone(),
+                self.epoch.clone(),
+                self.shutdown_rx.clone(),
+            )
+            .build()
         )
-        .build()
         .await?;
 
         let sender = self.sender.clone();
@@ -472,9 +478,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                t_1.run(exec, sender, state_tx.as_mut())
-                    .instrument(span)
-                    .await;
+                captured_execution_context_scope!(
+                    captured_execution_context,
+                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span)
+                )
+                .await;
             };
 
             if let Some(batch_metrics) = batch_metrics {
@@ -581,6 +589,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         mut sender: ChanSenderImpl,
         state_tx: Option<&mut StateReporter>,
     ) {
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.inc());
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
@@ -681,6 +693,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.dec());
     }
 
     pub fn abort(&self, err_msg: String) {

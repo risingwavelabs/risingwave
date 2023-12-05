@@ -30,13 +30,19 @@ public abstract class SourceHandlerFactory {
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
-            boolean snapshotDone) {
+            boolean snapshotDone,
+            boolean isMultiTableShared) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(userProps);
         mutableUserProps.put("source.id", Long.toString(sourceId));
         var config =
                 new DbzConnectorConfig(
-                        source, sourceId, startOffset, mutableUserProps, snapshotDone);
+                        source,
+                        sourceId,
+                        startOffset,
+                        mutableUserProps,
+                        snapshotDone,
+                        isMultiTableShared);
         return new DbzSourceHandler(config);
     }
 }

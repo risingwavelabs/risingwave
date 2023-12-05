@@ -25,6 +25,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
@@ -58,11 +59,11 @@ pub struct BatchManager {
     mem_context: MemoryContext,
 
     /// Metrics for batch manager.
-    metrics: BatchManagerMetrics,
+    metrics: Arc<BatchManagerMetrics>,
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig, metrics: BatchManagerMetrics) -> Self {
+    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -86,6 +87,10 @@ impl BatchManager {
         }
     }
 
+    pub(crate) fn metrics(&self) -> Arc<BatchManagerMetrics> {
+        self.metrics.clone()
+    }
+
     pub fn memory_context_ref(&self) -> MemoryContext {
         self.mem_context.clone()
     }
@@ -98,6 +103,7 @@ impl BatchManager {
         context: ComputeNodeContext,
         state_reporter: StateReporter,
         tracing_context: TracingContext,
+        captured_execution_context: CapturedExecutionContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -108,7 +114,6 @@ impl BatchManager {
         // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
-            self.metrics.task_num.inc();
 
             let this = self.clone();
             let task_id = task_id.clone();
@@ -125,11 +130,15 @@ impl BatchManager {
                 task_id,
             );
         };
-        task.async_execute(Some(state_reporter), tracing_context)
-            .await
-            .inspect_err(|_| {
-                self.cancel_task(&task_id.to_prost());
-            })?;
+        task.async_execute(
+            Some(state_reporter),
+            tracing_context,
+            captured_execution_context,
+        )
+        .await
+        .inspect_err(|_| {
+            self.cancel_task(&task_id.to_prost());
+        })?;
         ret
     }
 
@@ -148,6 +157,9 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
+            CapturedExecutionContext {
+                time_zone: "UTC".to_string(),
+            },
         )
         .await
     }
@@ -229,7 +241,6 @@ impl BatchManager {
                 // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
-                self.metrics.task_num.dec();
                 if let Some(heartbeat_join_handle) = task.heartbeat_join_handle() {
                     heartbeat_join_handle.abort();
                 }

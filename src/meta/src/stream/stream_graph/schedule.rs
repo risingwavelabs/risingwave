@@ -110,8 +110,6 @@ crepe::crepe! {
 
     // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
-    // The downstream fragment of a `CdcTablename` edge must be singleton.
-    SingletonReq(y) <- Edge(_, y, CdcTablename);
     // Singleton requirements propagate through `NoShuffle` edges.
     SingletonReq(x) <- Edge(x, y, NoShuffle), SingletonReq(y);
     SingletonReq(y) <- Edge(x, y, NoShuffle), SingletonReq(x);
