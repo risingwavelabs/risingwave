@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Fields, Schema};
@@ -38,6 +39,10 @@ pub struct UdfExpression {
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     span: await_tree::Span,
+    /// Whether a connection error has occurred in the last call.
+    /// If true, we will not retry subsequent calls to prevent blocking the stream.
+    /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
+    failing: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -98,11 +103,23 @@ impl UdfExpression {
         )
         .expect("failed to build record batch");
 
-        let output = self
-            .client
-            .call_with_retry(&self.identifier, input)
-            .instrument_await(self.span.clone())
-            .await?;
+        let result = if self.failing.load(Ordering::Relaxed) {
+            self.client
+                .call(&self.identifier, input)
+                .instrument_await(self.span.clone())
+                .await
+        } else {
+            self.client
+                .call_with_retry(&self.identifier, input)
+                .instrument_await(self.span.clone())
+                .await
+        };
+        self.failing.store(
+            matches!(&result, Err(e) if e.is_connection_error()),
+            Ordering::Relaxed,
+        );
+        let output = result?;
+
         if output.num_rows() != vis.count_ones() {
             bail!(
                 "UDF returned {} rows, but expected {}",
@@ -165,6 +182,7 @@ impl Build for UdfExpression {
             client,
             identifier: udf.identifier.clone(),
             span: format!("expr_udf_call ({})", udf.identifier).into(),
+            failing: AtomicBool::new(false),
         })
     }
 }
