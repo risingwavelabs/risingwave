@@ -78,4 +78,3 @@
     select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2 where v1 > now();
   expected_outputs:
   - stream_plan
-  
