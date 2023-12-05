@@ -5,14 +5,6 @@
 -- Dumped from database version 12.3 (Debian 12.3-1.pgdg100+1)
 -- Dumped by pg_dump version 16.0 (Homebrew)
 
-SET statement_timeout = 0;
-SET lock_timeout = 0;
-SET client_encoding = 'UTF8';
-SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
-SET client_min_messages = warning;
-SET row_security = off;
-
 --
 -- Name: home_rentals; Type: TABLE; Schema: public; Owner: dev
 --
