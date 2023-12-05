@@ -62,7 +62,7 @@ use crate::model::{FragmentId, StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, ReplaceTableJob,
+    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, ReplaceTableJobForSink,
     SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
@@ -106,7 +106,7 @@ impl StreamingJobId {
 pub struct ReplaceTableInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
-    pub col_index_mapping: ColIndexMapping,
+    pub col_index_mapping: Option<ColIndexMapping>,
 }
 
 pub enum DdlCommand {
@@ -682,9 +682,9 @@ impl DdlController {
         ReplaceTableInfo {
             mut streaming_job,
             fragment_graph,
-            col_index_mapping,
+            ..
         }: ReplaceTableInfo,
-    ) -> MetaResult<ReplaceTableJob> {
+    ) -> MetaResult<ReplaceTableJobForSink> {
         let table_id = streaming_job.table().unwrap().id;
 
         if self.check_cycle_for_sink(sink, table_id).await? {
@@ -698,12 +698,7 @@ impl DdlController {
             .await?;
 
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(
-                env.clone(),
-                &streaming_job,
-                fragment_graph,
-                col_index_mapping.clone(),
-            )
+            .build_replace_table(env.clone(), &streaming_job, fragment_graph, None)
             .await?;
 
         let mut union_fragment_id = None;
@@ -740,11 +735,10 @@ impl DdlController {
             target_fragment_id,
         );
 
-        Ok(ReplaceTableJob {
+        Ok(ReplaceTableJobForSink {
             streaming_job,
             context: Some(replace_table_ctx),
             table_fragments: Some(table_fragments),
-            col_index_mapping,
         })
     }
 
@@ -838,7 +832,7 @@ impl DdlController {
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
-        replace_table_job: Option<ReplaceTableJob>,
+        replace_table_job: Option<ReplaceTableJobForSink>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
@@ -890,11 +884,7 @@ impl DdlController {
 
         if let Some(replace_table_job) = &replace_table_job {
             let version = self
-                .finish_replace_table(
-                    &replace_table_job.streaming_job,
-                    replace_table_job.col_index_mapping.clone(),
-                    sink_id,
-                )
+                .finish_replace_table(&replace_table_job.streaming_job, None, sink_id)
                 .await?;
 
             return Ok(version);
@@ -1046,7 +1036,7 @@ impl DdlController {
     ) -> MetaResult<(
         CreateStreamingJobContext,
         TableFragments,
-        Option<ReplaceTableJob>,
+        Option<ReplaceTableJobForSink>,
     )> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
@@ -1322,7 +1312,7 @@ impl DdlController {
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
@@ -1391,7 +1381,7 @@ impl DdlController {
         env: StreamEnvironment,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
@@ -1419,7 +1409,12 @@ impl DdlController {
                 .get_downstream_fragments(id.into())
                 .await?
                 .into_iter()
-                .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
+                .map(|(d, f)|
+                    if let Some(mapping) = &table_col_index_mapping {
+                        Some((mapping.rewrite_dispatch_strategy(&d)?, f))
+                    } else {
+                        Some((d, f))
+                    })
                 .collect::<Option<_>>()
                 .ok_or_else(|| {
                     // The `rewrite` only fails if some column is dropped.
@@ -1488,7 +1483,7 @@ impl DdlController {
     async fn finish_replace_table(
         &self,
         stream_job: &StreamingJob,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
         incoming_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(source, table, ..) = stream_job else {

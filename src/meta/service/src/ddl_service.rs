@@ -110,8 +110,11 @@ impl DdlServiceImpl {
                 &mut fragment_graph,
             );
         }
-        let table_col_index_mapping =
-            ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
+        let table_col_index_mapping = change
+            .table_col_index_mapping
+            .as_ref()
+            .map(ColIndexMapping::from_protobuf);
+
         let stream_job = StreamingJob::Table(source, table, TableJobType::General);
 
         ReplaceTableInfo {

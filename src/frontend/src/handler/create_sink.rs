@@ -24,7 +24,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -320,25 +319,11 @@ pub async fn handle_create_sink(
             }
         }
 
-        // Calculate the mapping from the original columns to the new columns.
-        let col_index_mapping = ColIndexMapping::new(
-            table_catalog
-                .columns()
-                .iter()
-                .map(|old_c| {
-                    table.columns.iter().position(|new_c| {
-                        new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
-                    })
-                })
-                .collect(),
-            table.columns.len(),
-        );
-
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
             table: Some(table),
             fragment_graph: Some(graph),
-            table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
+            table_col_index_mapping: None,
         });
     }
 
@@ -386,7 +371,7 @@ pub(crate) async fn reparse_table_for_sink(
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
+    let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
     let Statement::CreateTable {
         columns,
         constraints,
@@ -398,10 +383,10 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (mut graph, mut table, source) = generate_stream_graph_for_table(
-        &session,
+    let (graph, table, source) = generate_stream_graph_for_table(
+        session,
         table_name,
-        &table_catalog,
+        table_catalog,
         source_schema,
         handler_args,
         col_id_gen,

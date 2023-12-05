@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::ddl_service::ReplaceTablePlan;
@@ -23,8 +21,6 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::handler::create_sink::reparse_table_for_sink;
-use crate::handler::create_table::generate_stream_graph_for_table;
-use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
@@ -65,8 +61,6 @@ pub async fn handle_drop_sink(
 
     let mut affected_table_change = None;
     if let Some(target_table_id) = &sink.target_table {
-        use anyhow::Context;
-        use risingwave_common::util::column_index_mapping::ColIndexMapping;
         let table_catalog = {
             let reader = session.env().catalog_reader().read_guard();
             let table = reader.get_table_by_id(target_table_id)?;
@@ -80,25 +74,11 @@ pub async fn handle_drop_sink(
 
         table.incoming_sinks = vec![];
 
-        // Calculate the mapping from the original columns to the new columns.
-        let col_index_mapping = ColIndexMapping::new(
-            table_catalog
-                .columns()
-                .iter()
-                .map(|old_c| {
-                    table.columns.iter().position(|new_c| {
-                        new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
-                    })
-                })
-                .collect(),
-            table.columns.len(),
-        );
-
         affected_table_change = Some(ReplaceTablePlan {
             source,
             table: Some(table),
             fragment_graph: Some(graph),
-            table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
+            table_col_index_mapping: None,
         });
     }
 

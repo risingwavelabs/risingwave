@@ -2876,7 +2876,7 @@ impl CatalogManager {
         &self,
         source: &Option<Source>,
         table: &Table,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
         incoming_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
@@ -2916,17 +2916,19 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        let expr_rewriter = ReplaceTableExprRewriter {
-            table_col_index_mapping: table_col_index_mapping.clone(),
-        };
+        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+            let expr_rewriter = ReplaceTableExprRewriter {
+                table_col_index_mapping,
+            };
 
-        for index_id in &index_ids {
-            let mut index = indexes.get_mut(*index_id).unwrap();
-            index
-                .index_item
-                .iter_mut()
-                .for_each(|x| expr_rewriter.rewrite_expr(x));
-            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            for index_id in &index_ids {
+                let mut index = indexes.get_mut(*index_id).unwrap();
+                index
+                    .index_item
+                    .iter_mut()
+                    .for_each(|x| expr_rewriter.rewrite_expr(x));
+                updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            }
         }
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must

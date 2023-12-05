@@ -18,7 +18,6 @@ use std::sync::Arc;
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -176,11 +175,11 @@ pub struct ReplaceTableContext {
     pub table_properties: HashMap<String, String>,
 }
 
-pub struct ReplaceTableJob {
+// This is used to replace the downstream table during the sinking into table process.
+pub struct ReplaceTableJobForSink {
     pub streaming_job: StreamingJob,
     pub context: Option<ReplaceTableContext>,
     pub table_fragments: Option<TableFragments>,
-    pub col_index_mapping: ColIndexMapping,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
