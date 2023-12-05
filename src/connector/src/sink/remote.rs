@@ -825,11 +825,6 @@ mod test {
         sink.begin_epoch(2022).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
 
-        request_receiver
-            .recv()
-            .await
-            .expect("test failed: failed to construct start_epoch request");
-
         sink.write_batch(chunk_a.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
@@ -873,8 +868,6 @@ mod test {
 
         // begin another epoch
         sink.begin_epoch(2023).await.unwrap();
-        // simply keep the channel empty since we've tested begin_epoch
-        let _ = request_receiver.recv().await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
 
         // test another write
