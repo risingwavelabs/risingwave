@@ -116,8 +116,8 @@ impl SharedContext {
             ))),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
-                    exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
-                    exchange_batched_permits: permit::for_test::BATCHED_PERMITS,
+                    exchange_max_bytes: permit::for_test::MAX_BYTES,
+                    exchange_ack_bytes: permit::for_test::ACK_BYTES,
                     exchange_concurrent_barriers: permit::for_test::CONCURRENT_BARRIERS,
                     ..Default::default()
                 },
@@ -139,8 +139,8 @@ impl SharedContext {
         MutexGuard::map(self.channel_map.lock(), |map| {
             map.entry(ids).or_insert_with(|| {
                 let (tx, rx) = permit::channel(
-                    self.config.developer.exchange_initial_permits,
-                    self.config.developer.exchange_batched_permits,
+                    self.config.developer.exchange_max_bytes,
+                    self.config.developer.exchange_ack_bytes,
                     self.config.developer.exchange_concurrent_barriers,
                 );
                 (Some(tx), Some(rx))

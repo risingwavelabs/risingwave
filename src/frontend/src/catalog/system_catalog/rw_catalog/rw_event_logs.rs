@@ -66,6 +66,7 @@ fn event_type(e: &Event) -> String {
         Event::BarrierComplete(_) => "BARRIER_COMPLETE",
         Event::InjectBarrierFail(_) => "INJECT_BARRIER_FAIL",
         Event::CollectBarrierFail(_) => "COLLECT_BARRIER_FAIL",
+        Event::WorkerNodePanic(_) => "WORKER_NODE_PANIC",
     }
     .into()
 }

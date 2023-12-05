@@ -176,6 +176,10 @@ pub enum Token {
     QuestionMarkPipe,
     /// `?&`, do all of the strings exist as top-level keys or array elements?
     QuestionMarkAmpersand,
+    /// `@?`, does JSON path return any item for the specified JSON value?
+    AtQuestionMark,
+    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
+    AtAt,
 }
 
 impl fmt::Display for Token {
@@ -249,6 +253,8 @@ impl fmt::Display for Token {
             Token::QuestionMark => f.write_str("?"),
             Token::QuestionMarkPipe => f.write_str("?|"),
             Token::QuestionMarkAmpersand => f.write_str("?&"),
+            Token::AtQuestionMark => f.write_str("@?"),
+            Token::AtAt => f.write_str("@@"),
         }
     }
 }
@@ -780,6 +786,8 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the '@'
                     match chars.peek() {
                         Some('>') => self.consume_and_return(chars, Token::AtArrow),
+                        Some('?') => self.consume_and_return(chars, Token::AtQuestionMark),
+                        Some('@') => self.consume_and_return(chars, Token::AtAt),
                         // a regular '@' operator
                         _ => Ok(Some(Token::AtSign)),
                     }

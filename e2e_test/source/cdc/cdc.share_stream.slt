@@ -11,10 +11,6 @@ mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
 system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
 
-# enable cdc backfill in ci
-statement ok
-set cdc_backfill='true';
-
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
 create source mysql_mytest with (
