@@ -91,8 +91,8 @@ message TableFragments {
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
 
-    // Template from RENDER_TEMPLATE
-    optional stream_plan.StreamNode stream_node_template = 8;
+    // A template used to store each StreamNode within an Actor for TableFragments that have compression enabled.
+    stream_plan.StreamNode stream_node_template = 8;
   }
 
   uint32 table_id = 1;

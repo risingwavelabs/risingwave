@@ -34,7 +34,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
-use risingwave_common::util::table_fragments_util::downgrade_table_fragments;
+use risingwave_common::util::table_fragments_util::uncompress_table_fragments;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{
@@ -850,7 +850,7 @@ impl MetaClient {
 
         for table_fragments in &mut resp.table_fragments {
             if table_fragments.graph_render_type == GraphRenderType::RenderTemplate as i32 {
-                downgrade_table_fragments(table_fragments);
+                uncompress_table_fragments(table_fragments);
             }
         }
 

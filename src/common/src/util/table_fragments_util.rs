@@ -21,14 +21,20 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use crate::util::stream_graph_visitor::visit_stream_node;
 
-pub fn downgrade_table_fragments(table_fragments: &mut PbTableFragments) {
+// We decompress `PbTableFragments` using the `stream_node_template` of the `PbFragment`,
+// by re-rendering the template, then repopulating the upstream actor ids and upstream fragment id
+// contained in the `MergeNode` by `upstream_actors_by_fragment` in actor.
+pub fn uncompress_table_fragments(table_fragments: &mut PbTableFragments) {
     assert_eq!(
         table_fragments.graph_render_type,
         GraphRenderType::RenderTemplate as i32
     );
 
     for fragment in table_fragments.fragments.values_mut() {
-        assert!(fragment.stream_node_template.is_some());
+        assert!(
+            fragment.stream_node_template.is_some(),
+            "fragment.stream_node_template should be Some() when render type is RenderTemplate"
+        );
 
         for actor in &mut fragment.actors {
             let pb_nodes = {
@@ -45,18 +51,47 @@ pub fn downgrade_table_fragments(table_fragments: &mut PbTableFragments) {
                 Some(nodes)
             };
 
+            assert!(
+                actor.nodes.is_none(),
+                "actor.nodes should be None when render type is RenderTemplate"
+            );
+
             actor.nodes = pb_nodes;
+
+            assert!(
+                !actor.upstream_actors_by_fragment.is_empty(),
+                "actor.upstream_actors_by_fragment should not be empty when render type is RenderTemplate"
+            );
+
             actor.upstream_actors_by_fragment.clear();
         }
 
+        assert!(
+            fragment.stream_node_template.is_some(),
+            "fragment.stream_node_template should be Some() when render type is RenderTemplate"
+        );
         fragment.stream_node_template = None;
     }
 
     table_fragments.graph_render_type = GraphRenderType::RenderUnspecified as i32;
 }
 
-pub fn upgrade_table_fragments(table_fragments: &mut PbTableFragments) {
+// We compressed the repetitive `node_body` of `PbStreamNode` in actors in Fragment in TableFragments,
+// storing their templates in the `stream_node_template` in the `PbFragment`.
+// We have also made special modifications to `MergeNode`s, extracting their upstream fragment id and upstream actor ids.
+// This way, we can save some memory when conducting RPC and storage.
+pub fn compress_table_fragments(table_fragments: &mut PbTableFragments) {
+    assert_eq!(
+        table_fragments.graph_render_type,
+        GraphRenderType::RenderUnspecified as i32
+    );
+
     for fragment in table_fragments.fragments.values_mut() {
+        assert!(
+            fragment.stream_node_template.is_none(),
+            "fragment.stream_node_template should be None when render type is unspecific"
+        );
+
         let stream_node = {
             let actor_template = fragment
                 .actors
@@ -97,16 +132,25 @@ pub fn upgrade_table_fragments(table_fragments: &mut PbTableFragments) {
                 }
             });
 
-            actor.upstream_actors_by_fragment = upstream_actors_by_fragment;
+            assert!(
+                actor.nodes.is_some(),
+                "actor.nodes should be Some() when render type is unspecified"
+            );
 
-            // todo: can we directly set as none?
-            // actor.nodes = Some(StreamNode {
-            //     node_body: Some(NodeBody::NoOp(PbNoOpNode {})),
-            //     ..Default::default()
-            // });
             actor.nodes = None;
+
+            assert!(
+                actor.upstream_actors_by_fragment.is_empty(),
+                "actor.upstream_actors_by_fragment should be empty when render type is unspecified"
+            );
+
+            actor.upstream_actors_by_fragment = upstream_actors_by_fragment;
         }
 
+        assert!(
+            fragment.stream_node_template.is_none(),
+            "fragment.stream_node_template should be None when render type is unspecified"
+        );
         fragment.stream_node_template = Some(stream_node);
     }
 

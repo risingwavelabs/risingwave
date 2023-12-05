@@ -19,7 +19,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::util::table_fragments_util::downgrade_table_fragments;
+use risingwave_common::util::table_fragments_util::uncompress_table_fragments;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
 use risingwave_meta_model_v2::{
@@ -84,7 +84,7 @@ impl CatalogController {
         let mut table_fragments = table_fragments;
 
         if table_fragments.graph_render_type == GraphRenderType::RenderTemplate as i32 {
-            downgrade_table_fragments(&mut table_fragments);
+            uncompress_table_fragments(&mut table_fragments);
         }
 
         let PbTableFragments {

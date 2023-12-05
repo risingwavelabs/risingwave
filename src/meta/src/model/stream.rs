@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::table_fragments_util::{
-    downgrade_table_fragments, upgrade_table_fragments,
+    compress_table_fragments, uncompress_table_fragments,
 };
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
@@ -107,7 +107,7 @@ impl MetadataModel for TableFragments {
             ..Default::default()
         };
 
-        upgrade_table_fragments(&mut table_fragments);
+        compress_table_fragments(&mut table_fragments);
 
         table_fragments
     }
@@ -121,7 +121,7 @@ impl MetadataModel for TableFragments {
             .get_graph_render_type()
             .unwrap_or(GraphRenderType::RenderUnspecified)
         {
-            downgrade_table_fragments(&mut prost);
+            uncompress_table_fragments(&mut prost);
         }
 
         Self {

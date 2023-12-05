@@ -57,7 +57,7 @@ pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
     use risingwave_common::bail;
-    use risingwave_common::util::table_fragments_util::downgrade_table_fragments;
+    use risingwave_common::util::table_fragments_util::uncompress_table_fragments;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
@@ -206,7 +206,7 @@ pub(super) mod handlers {
             if table_fragments.get_graph_render_type().unwrap_or_default()
                 == GraphRenderType::RenderTemplate
             {
-                downgrade_table_fragments(table_fragments);
+                uncompress_table_fragments(table_fragments);
             }
         }
 
