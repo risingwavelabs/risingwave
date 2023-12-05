@@ -23,6 +23,6 @@ use {
     arrow_cast_deltalake as arrow_cast, arrow_schema_deltalake as arrow_schema,
 };
 
-#[allow(clippy::duplicate_mod)]
+#[expect(clippy::duplicate_mod)]
 #[path = "./arrow_impl.rs"]
 mod arrow_impl;
