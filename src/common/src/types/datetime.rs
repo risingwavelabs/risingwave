@@ -27,7 +27,7 @@ use thiserror::Error;
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
-use crate::array::ArrayResult;
+use crate::array::{ArrayError, ArrayResult};
 use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -251,6 +251,12 @@ impl InvalidParamsError {
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
         ErrorKind::DateTime { secs, nsecs }.into()
+    }
+}
+
+impl From<InvalidParamsError> for ArrayError {
+    fn from(e: InvalidParamsError) -> Self {
+        ArrayError::internal(e)
     }
 }
 
