@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This is for arrow dependency named `arrow-xxx` such as `arrow-array` in the cargo workspace.
+//!
+//! This should the default arrow version to be used in our system.
+//!
+//! The corresponding version of arrow is currently used by `udf` and `iceberg` sink.
+
 pub use arrow_impl::to_record_batch_with_schema;
 use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 
 #[allow(clippy::duplicate_mod)]
-#[path = "./arrow.rs"]
+#[path = "./arrow_impl.rs"]
 mod arrow_impl;

@@ -13,6 +13,28 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
+//!
+//! This file acts as a template file for conversion code between
+//! arrays and different version of Apache Arrow.
+//!
+//! The conversion logic will be implemented for the arrow version specified in the outer mod by
+//! `super::arrow_xxx`, such as `super::arrow_array`.
+//!
+//! When we want to implement the conversion logic for an arrow version, we first
+//! create a new mod file, and rename the corresponding arrow package name to `arrow_xxx`
+//! using the `use` clause, and then declare a sub-mod and set its file path with attribute
+//! `#[path = "./arrow_impl.rs"]` so that the code in this template file can be embedded to
+//! the new mod file, and the conversion logic can be implemented for the corresponding arrow
+//! version.
+//!
+//! Example can be seen in `arrow_default.rs`, which is also as followed:
+//! ```ignore
+//! use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+//!
+//! #[allow(clippy::duplicate_mod)]
+//! #[path = "./arrow_impl.rs"]
+//! mod arrow_impl;
+//! ```
 
 use std::fmt::Write;
 use std::sync::Arc;

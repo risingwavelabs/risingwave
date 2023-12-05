@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This is for arrow dependency named `arrow-xxx-deltalake` such as `arrow-array-deltalake`
+//! in the cargo workspace.
+//!
+//! The corresponding version of arrow is currently used by `deltalake` sink.
+
 pub use arrow_impl::to_record_batch_with_schema as to_deltalake_record_batch_with_schema;
 use {
     arrow_array_deltalake as arrow_array, arrow_buffer_deltalake as arrow_buffer,
@@ -19,5 +24,5 @@ use {
 };
 
 #[allow(clippy::duplicate_mod)]
-#[path = "./arrow.rs"]
+#[path = "./arrow_impl.rs"]
 mod arrow_impl;
