@@ -22,6 +22,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserialize, Serializer};
+use thiserror_ext::AsReport;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
@@ -766,7 +767,10 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
+                Ok(Some(
+                    ScalarImpl::from_literal(&s, self.data_type)
+                        .map_err(|e| e.to_report_string())?,
+                ))
             }
 
             /// Parse a double quoted non-array value.
@@ -793,7 +797,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                ScalarImpl::from_literal(&s, self.data_type)
+                ScalarImpl::from_literal(&s, self.data_type).map_err(|e| e.to_report_string())
             }
 
             /// Unescape a string.
