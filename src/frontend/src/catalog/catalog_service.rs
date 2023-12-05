@@ -26,8 +26,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_set_schema_request,
-    create_connection_request, create_connection_request, PbReplaceTablePlan, PbTableJobType,
+    alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
     PbTableJobType, ReplaceTablePlan,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;

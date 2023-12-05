@@ -18,13 +18,14 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -36,17 +37,13 @@ use risingwave_pb::catalog::{
     View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_set_schema_request,
-    alter_set_schema_request, alter_set_schema_request, DdlProgress, DdlProgress, DdlProgress,
-    DdlProgress, DdlProgress, TableJobType,
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, DispatcherType, FragmentTypeFlag, FragmentTypeFlag, MergeNode,
-    PbDispatcherType, StreamFragmentGraph as StreamFragmentGraphProto,
+    Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use tokio::sync::Semaphore;
@@ -148,7 +145,7 @@ impl DdlCommand {
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
-            | DdlCommand::DropStreamingJob(_, _)
+            | DdlCommand::DropStreamingJob(_, _, _)
             | DdlCommand::DropConnection(_) => true,
             // Simply ban all other commands in recovery.
             _ => false,
@@ -716,13 +713,13 @@ impl DdlController {
                 if let Some(node) = &mut actor.nodes {
                     visit_stream_node(node, |body| {
                         if let NodeBody::Merge(m) = body && m.upstream_actor_id.is_empty() {
-                            if let Some(union_fragment_id) = union_fragment_id.as_mut() {
-                                // The union fragment should be unique.
-                                assert_eq!(*union_fragment_id, *fragment_id);
-                            } else {
-                                union_fragment_id = Some(*fragment_id);
-                            }
-                        };
+                                if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                    // The union fragment should be unique.
+                                    assert_eq!(*union_fragment_id, *fragment_id);
+                                } else {
+                                    union_fragment_id = Some(*fragment_id);
+                                }
+                            };
                     })
                 };
             }
@@ -822,13 +819,13 @@ impl DdlController {
 
                 visit_stream_node(node, |node| {
                     if let NodeBody::Merge(merge_node) = node && merge_node.upstream_actor_id.is_empty() {
-                        *merge_node = MergeNode {
-                            upstream_actor_id: sink_actor_ids.clone(),
-                            upstream_fragment_id,
-                            upstream_dispatcher_type: DispatcherType::Hash as _,
-                            fields: fields.clone(),
-                        };
-                    }
+                            *merge_node = MergeNode {
+                                upstream_actor_id: sink_actor_ids.clone(),
+                                upstream_fragment_id,
+                                upstream_dispatcher_type: DispatcherType::Hash as _,
+                                fields: fields.clone(),
+                            };
+                        }
                 });
             }
         }
@@ -1418,18 +1415,18 @@ impl DdlController {
 
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
-            .fragment_manager
-            .get_downstream_fragments(id.into())
-            .await?
-            .into_iter()
-            .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
-            .collect::<Option<_>>()
-            .ok_or_else(|| {
-                // The `rewrite` only fails if some column is dropped.
-                MetaError::invalid_parameter(
-                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
-                )
-            })?;
+                .fragment_manager
+                .get_downstream_fragments(id.into())
+                .await?
+                .into_iter()
+                .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
+                .collect::<Option<_>>()
+                .ok_or_else(|| {
+                    // The `rewrite` only fails if some column is dropped.
+                    MetaError::invalid_parameter(
+                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                    )
+                })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,

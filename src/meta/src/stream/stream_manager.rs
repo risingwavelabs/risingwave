@@ -33,11 +33,8 @@ use uuid::Uuid;
 use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{
-    ClusterManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, FragmentManagerRef,
-    FragmentManagerRef, MetaSrvEnv, MetaSrvEnv, MetaSrvEnv, StreamingJob, StreamingJob,
-};
-use crate::model::{ActorId, ActorId, FragmentId, TableFragments, TableFragments, TableFragments};
+use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob};
+use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 

@@ -833,6 +833,7 @@ impl CommandContext {
                 init_split_assignment,
                 definition: _,
                 replace_table,
+                ..
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
                 for (table_id, actors) in upstream_mview_actors {
