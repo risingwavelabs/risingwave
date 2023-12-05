@@ -558,14 +558,9 @@ impl CacheRefillTask {
         let sstable_store = &context.sstable_store;
         let threshold = context.config.threshold;
 
-        // update recent filter
+        // update filter for sst id only
         if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.extend(
-                unit.blks
-                    .clone()
-                    .map(|blk| (sst.id, blk))
-                    .chain(std::iter::once((sst.id, usize::MAX))),
-            )
+            filter.insert((sst.id, usize::MAX));
         }
 
         let blocks = unit.blks.size().unwrap();
