@@ -466,15 +466,13 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
 async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: usize) {
-    // let mut rows = Vec::with_capacity(rate_limit);
     #[for_await]
     for batch in stream {
-        let batch = batch?;
-        if batch.len() > rate_limit {
-            yield batch;
-        } else {
-            yield batch;
+        let mut batch = batch?;
+        while batch.len() > rate_limit {
+            yield batch.drain(..rate_limit).collect();
         }
+        yield batch;
     }
 }
 
