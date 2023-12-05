@@ -220,10 +220,6 @@ pub struct ConfigMap {
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_rate_limit: ConfigNonZeroU64,
 
-    /// Enable backfill for CDC table to allow lock-free and incremental snapshot
-    #[parameter(default = false)]
-    cdc_backfill: bool,
-
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]

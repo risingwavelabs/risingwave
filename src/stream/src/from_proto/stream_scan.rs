@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -80,10 +79,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             StreamScanType::Rearrange => {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
+
             StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
-                let table_desc: &StorageTableDesc = node
-                    .get_table_desc()
-                    .map_err(|err| anyhow!("chain: table_desc not found! {:?}", err))?;
+                let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };

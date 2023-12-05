@@ -22,6 +22,7 @@ use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
     TaskInfoResponse,
 };
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -93,7 +94,7 @@ impl TaskService for BatchServiceImpl {
                 state_rx,
             ))),
             Err(e) => {
-                error!("failed to fire task {}", e);
+                error!(error = %e.as_report(), "failed to fire task");
                 Err(e.into())
             }
         }
@@ -146,8 +147,9 @@ impl TaskService for BatchServiceImpl {
             .await
         {
             error!(
-                "failed to build executors and trigger execution of Task {:?}: {}",
-                task_id, e
+                error = %e.as_report(),
+                ?task_id,
+                "failed to build executors and trigger execution"
             );
             return Err(e.into());
         }
@@ -158,12 +160,12 @@ impl TaskService for BatchServiceImpl {
             // therefore we would only have one data output.
             output_id: 0,
         };
-        let mut output = task.get_task_output(&pb_task_output_id).map_err(|e| {
+        let mut output = task.get_task_output(&pb_task_output_id).inspect_err(|e| {
             error!(
-                "failed to get task output of Task {:?} in local execution mode",
-                task_id
+                error = %e.as_report(),
+                ?task_id,
+                "failed to get task output in local execution mode",
             );
-            e
         })?;
         let mut writer = GrpcExchangeWriter::new(tx.clone());
         // Always spawn a task and do not block current function.

@@ -62,6 +62,7 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
@@ -428,12 +429,12 @@ pub async fn compute_node_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if let Err(_err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                    tracing::warn!(error = %err.as_report(), "Failed to join shutdown");
                                 }
                             }
                         },
