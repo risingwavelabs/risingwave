@@ -394,14 +394,6 @@ impl CacheRefillTask {
                         != std::cmp::Ordering::Greater
                 });
 
-                tracing::info!(
-                    "[inheritance] psst: {}, pblk: {}, uleft: {}, uright: {}",
-                    psst.id,
-                    pblk,
-                    uleft,
-                    uright
-                );
-
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
                     res.entry(SstableUnit {
@@ -419,6 +411,11 @@ impl CacheRefillTask {
             }
         }
 
+        {
+            let pblks = res.values().map(|pblks| pblks.len()).sum::<usize>();
+            let size = pblks * std::mem::size_of::<SstableBlock>();
+            tracing::info!("inheritance pblks: {}, estimated size: {}B", pblks, size);
+        }
         res
     }
 
@@ -520,19 +517,6 @@ impl CacheRefillTask {
             Err(e) => return tracing::error!("get old meta from cache error: {}", e),
         };
         let inheritances = Self::get_inheritance_info(context, &holders, &parent_ssts);
-
-        {
-            let unit = context.config.unit;
-            let units = holders
-                .iter()
-                .map(|sst| sst.block_count() / unit + 1.min(sst.block_count() % unit))
-                .sum::<usize>();
-            tracing::info!(
-                "units: {}, inheritance units: {}",
-                units,
-                inheritances.len()
-            );
-        }
 
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
