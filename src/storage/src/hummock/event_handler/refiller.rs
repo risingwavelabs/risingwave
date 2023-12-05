@@ -634,8 +634,8 @@ impl PartialOrd for SstableUnit {
     }
 }
 
-type OriginSender = mpsc::Sender<SstableBlock>;
-type OriginReceiver = mpsc::Receiver<SstableBlock>;
+type OriginSender = mpsc::UnboundedSender<SstableBlock>;
+type OriginReceiver = mpsc::UnboundedReceiver<SstableBlock>;
 
 struct UnitHandle {
     uidx: usize,
@@ -673,7 +673,7 @@ where
         for (sidx, sst) in ssts.iter().enumerate() {
             for blk_start in (0..sst.block_count()).step_by(unit) {
                 let blk_end = std::cmp::min(blk_start + unit, sst.block_count());
-                let (tx, rx) = mpsc::channel(1);
+                let (tx, rx) = mpsc::unbounded_channel();
                 let unit = UnitHandle {
                     sidx,
                     blks: blk_start..blk_end,
@@ -736,13 +736,13 @@ where
                 // overlapping: uleft..uright
                 for u in self.units.iter().take(uright).skip(uleft) {
                     // ignore if rx is closed
-                    let _ =
-                        u.tx.send(SstableBlock {
-                            sst_obj_id: psst.id,
-                            blk_idx: pblk,
-                        })
-                        .await;
+                    let _ = u.tx.send(SstableBlock {
+                        sst_obj_id: psst.id,
+                        blk_idx: pblk,
+                    });
                 }
+
+                tokio::task::consume_budget().await;
             }
         }
     }
