@@ -26,7 +26,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption, ColumnId};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
@@ -55,6 +55,7 @@ use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
+use risingwave_storage::row_serde::find_columns_by_ids;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -213,7 +214,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, true).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, true, vec![]).await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -222,7 +223,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, vec![]).await
     }
 
     /// Create state table from table catalog and store.
@@ -231,6 +232,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
         is_consistent_op: bool,
+        output_indices: Vec<usize>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -337,12 +339,6 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
-
-        let output_indices = table_catalog
-            .get_output_indices()
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
 
         Self {
             table_id,
@@ -626,6 +622,34 @@ where
         &self.vnodes
     }
 }
+
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
+StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+    where
+        S: StateStore,
+        SD: ValueRowSerde,
+        W: WatermarkBufferStrategy,
+{
+    /// Create replicated state table from table catalog with output indices
+    pub async fn from_table_catalog_with_output_indices(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        output_column_ids: Vec<ColumnId>,
+    ) -> Self {
+        let columns = table_catalog
+            .columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().into())
+            .collect_vec();
+        let (_, output_indices) = find_columns_by_ids(
+            &columns[..],
+            &output_column_ids,
+        );
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_indices).await
+    }
+}
+
 
 // point get
 impl<
