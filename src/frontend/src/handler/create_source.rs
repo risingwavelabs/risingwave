@@ -39,6 +39,7 @@ use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
@@ -1101,8 +1102,11 @@ pub async fn handle_create_source(
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
     // gated the feature with a session variable
-    let create_cdc_source_job =
-        is_cdc_connector(&with_properties) && session.config().cdc_backfill();
+    let create_cdc_source_job = if is_cdc_connector(&with_properties) {
+        CdcTableType::from_properties(&with_properties).can_backfill()
+    } else {
+        false
+    };
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
@@ -1301,9 +1305,6 @@ pub mod tests {
             "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
-        session
-            .set_config("cdc_backfill", "true".to_string())
-            .unwrap();
 
         frontend
             .run_sql_with_session(session.clone(), sql)
