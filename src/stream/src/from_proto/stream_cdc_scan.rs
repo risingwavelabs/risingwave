@@ -98,9 +98,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             output_indices,
             None,
             params.executor_stats,
-            Some(state_table),
-            None,
-            true,
+            state_table,
             params.env.config().developer.chunk_size,
         )
         .boxed())
