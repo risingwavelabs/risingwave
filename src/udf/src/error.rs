@@ -52,12 +52,6 @@ impl Error {
     /// Returns true if the error is caused by a connection error.
     pub fn is_connection_error(&self) -> bool {
         match self.inner() {
-            // stream closed because of a broken pipe
-            ErrorInner::Flight(FlightError::Tonic(status))
-                if status.code() == tonic::Code::Unknown =>
-            {
-                true
-            }
             // Connection refused
             ErrorInner::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
             _ => false,
