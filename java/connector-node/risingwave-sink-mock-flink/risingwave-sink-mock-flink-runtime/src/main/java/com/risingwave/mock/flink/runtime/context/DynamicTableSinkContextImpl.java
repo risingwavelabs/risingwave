@@ -16,6 +16,7 @@
 
 package com.risingwave.mock.flink.runtime.context;
 
+import java.util.Optional;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.types.DataType;
@@ -45,6 +46,11 @@ public class DynamicTableSinkContextImpl implements DynamicTableSink.Context {
     @Override
     public DynamicTableSink.DataStructureConverter createDataStructureConverter(
             DataType consumedDataType) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<int[][]> getTargetColumns() {
         throw new UnsupportedOperationException();
     }
 }

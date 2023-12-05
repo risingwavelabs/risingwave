@@ -38,13 +38,13 @@ import org.apache.flink.table.data.RowData;
  */
 public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sink.SinkWriter {
 
-    org.apache.flink.api.connector.sink2.Sink<RowData> sink;
+    final org.apache.flink.api.connector.sink2.Sink<RowData> sink;
 
-    SinkWriter<RowData> writer;
+    final SinkWriter<RowData> writer;
 
-    Committer<CommT> committer;
+    final Optional<Committer<CommT>> committer;
 
-    TableSchema tableSchema;
+    final TableSchema tableSchema;
 
     public SinkWriterV2Impl(
             TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {
@@ -56,7 +56,11 @@ public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sin
                 throw new UnsupportedOperationException("Don't support StatefulSink");
             }
             if (this.sink instanceof TwoPhaseCommittingSink) {
-                this.committer = ((TwoPhaseCommittingSink<?, CommT>) this.sink).createCommitter();
+                this.committer =
+                        Optional.ofNullable(
+                                ((TwoPhaseCommittingSink<?, CommT>) this.sink).createCommitter());
+            } else {
+                this.committer = Optional.empty();
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -104,7 +108,7 @@ public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sin
                 Collection<CommT> objects =
                         ((TwoPhaseCommittingSink.PrecommittingSinkWriter<?, CommT>) this.writer)
                                 .prepareCommit();
-                if (committer != null && !objects.isEmpty()) {
+                if (committer.isPresent()) {
                     List<Committer.CommitRequest<CommT>> collect =
                             objects.stream()
                                     .map(
@@ -113,7 +117,7 @@ public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sin
                                                         new CommitRequestImpl<>(a);
                                             })
                                     .collect(Collectors.toList());
-                    committer.commit(collect);
+                    committer.get().commit(collect);
                 }
                 if (!objects.isEmpty()) {
                     throw new RuntimeException(

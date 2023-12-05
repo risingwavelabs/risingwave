@@ -33,12 +33,12 @@ import org.apache.flink.table.data.RowData;
  * The Sink-type sink will invoke this class to write RW data to the downstream.
  */
 public class SinkWriterImpl<CommT> implements com.risingwave.connector.api.sink.SinkWriter {
-    Sink<RowData, CommT, ?, ?> sink;
-    org.apache.flink.api.connector.sink.SinkWriter<RowData, CommT, ?> writer;
+    final Sink<RowData, CommT, ?, ?> sink;
+    final org.apache.flink.api.connector.sink.SinkWriter<RowData, CommT, ?> writer;
 
-    Optional<? extends Committer<CommT>> committer;
+    final Optional<? extends Committer<CommT>> committer;
 
-    TableSchema tableSchema;
+    final TableSchema tableSchema;
 
     public SinkWriterImpl(TableSchema tableSchema, Sink<RowData, CommT, ?, ?> sink) {
         try {
@@ -89,6 +89,8 @@ public class SinkWriterImpl<CommT> implements com.risingwave.connector.api.sink.
                 List<CommT> objects = writer.prepareCommit(true);
                 if (committer.isPresent()) {
                     committer.get().commit(objects);
+                } else if (objects.isEmpty()) {
+                    throw new RuntimeException("Flink sink v1 committer is null");
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);

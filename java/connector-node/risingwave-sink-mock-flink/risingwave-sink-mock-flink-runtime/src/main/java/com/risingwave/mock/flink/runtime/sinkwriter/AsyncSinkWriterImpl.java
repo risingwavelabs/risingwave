@@ -32,10 +32,10 @@ import org.apache.flink.table.data.RowData;
  * re-creating a writer for subsequent writing. This is different from the usage in Flink.
  */
 public class AsyncSinkWriterImpl implements com.risingwave.connector.api.sink.SinkWriter {
-    org.apache.flink.api.connector.sink2.Sink<RowData> sink;
+    final org.apache.flink.api.connector.sink2.Sink<RowData> sink;
 
     SinkWriter<RowData> writer;
-    TableSchema tableSchema;
+    final TableSchema tableSchema;
 
     public AsyncSinkWriterImpl(
             TableSchema tableSchema, org.apache.flink.api.connector.sink2.Sink<RowData> sink) {

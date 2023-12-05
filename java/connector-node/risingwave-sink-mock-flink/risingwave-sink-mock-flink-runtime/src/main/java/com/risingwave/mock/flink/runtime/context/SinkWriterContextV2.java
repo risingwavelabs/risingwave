@@ -20,9 +20,11 @@ import java.util.OptionalLong;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
@@ -121,6 +123,11 @@ public class SinkWriterContextV2 implements Sink.InitContext {
     }
 
     @Override
+    public int getAttemptNumber() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public SinkWriterMetricGroup metricGroup() {
         return sinkWriterMetricGroup;
     }
@@ -133,6 +140,21 @@ public class SinkWriterContextV2 implements Sink.InitContext {
     @Override
     public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
         return initializationContext;
+    }
+
+    @Override
+    public boolean isObjectReuseEnabled() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public <IN> TypeSerializer<IN> createInputSerializer() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public JobID getJobId() {
+        throw new UnsupportedOperationException();
     }
 
     class InitializationContextImpl implements SerializationSchema.InitializationContext {
