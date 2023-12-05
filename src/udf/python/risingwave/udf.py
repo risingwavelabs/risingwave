@@ -210,7 +210,13 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
         return self._func(*args)
 
     def eval(self, *args):
-        return self._func(*args)
+        try:
+            return self._func(*args)
+        except Exception as e:
+            print(
+                f"Error when calling function: {self._name}({', '.join([str(arg) for arg in args])})"
+            )
+            raise e
 
 
 class UserDefinedTableFunctionWrapper(TableFunction):
@@ -247,7 +253,13 @@ class UserDefinedTableFunctionWrapper(TableFunction):
         return self._func(*args)
 
     def eval(self, *args):
-        return self._func(*args)
+        try:
+            return self._func(*args)
+        except Exception as e:
+            print(
+                f"Error when calling function: {self._name}({', '.join([str(arg) for arg in args])})"
+            )
+            raise e
 
 
 def _to_list(x):
