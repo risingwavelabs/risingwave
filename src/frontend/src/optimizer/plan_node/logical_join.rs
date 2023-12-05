@@ -736,12 +736,24 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+        let push_down_temporal_predicate = !self.should_be_temporal_join();
+
+        let (left_from_filter, right_from_filter, on) = push_down_into_join(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+        let (left_from_on, right_from_on) = push_down_join_condition(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);

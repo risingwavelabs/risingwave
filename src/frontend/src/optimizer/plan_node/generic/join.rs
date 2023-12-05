@@ -476,6 +476,7 @@ pub fn push_down_into_join(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition, Condition) {
     let (left, right) = push_down_to_inputs(
         predicate,
@@ -483,11 +484,23 @@ pub fn push_down_into_join(
         right_col_num,
         can_push_left_from_filter(ty),
         can_push_right_from_filter(ty),
+        push_temporal_predicate,
     );
 
     let on = if can_push_on_from_filter(ty) {
-        Condition {
-            conjunctions: std::mem::take(&mut predicate.conjunctions),
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        if push_temporal_predicate {
+            Condition { conjunctions }
+        } else {
+            // Do not push now on to the on, it will be pulled up into a filter instead.
+            let on = Condition {
+                conjunctions: conjunctions
+                    .extract_if(|expr| expr.count_nows() == 0)
+                    .collect(),
+            };
+            predicate.conjunctions = conjunctions;
+            on
         }
     } else {
         Condition::true_cond()
@@ -505,6 +518,7 @@ pub fn push_down_join_condition(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
     push_down_to_inputs(
         on_condition,
@@ -512,6 +526,7 @@ pub fn push_down_join_condition(
         right_col_num,
         can_push_left_from_on(ty),
         can_push_right_from_on(ty),
+        push_temporal_predicate,
     )
 }
 
@@ -525,11 +540,21 @@ fn push_down_to_inputs(
     right_col_num: usize,
     push_left: bool,
     push_right: bool,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
-    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let (mut left, right, mut others) = if push_temporal_predicate {
+        Condition { conjunctions }.split(left_col_num, right_col_num)
+    } else {
+        let temporal_filter_cons = conjunctions
+            .extract_if(|e| e.count_nows() != 0)
+            .collect_vec();
+        let (left, right, mut others) =
+            Condition { conjunctions }.split(left_col_num, right_col_num);
 
-    let (mut left, right, mut others) =
-        Condition { conjunctions }.split(left_col_num, right_col_num);
+        others.conjunctions.extend(temporal_filter_cons);
+        (left, right, others)
+    };
 
     if !push_left {
         others.conjunctions.extend(left);
