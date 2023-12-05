@@ -59,6 +59,7 @@ use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
+use crate::sink::table::TABLE_SINK;
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
@@ -332,7 +333,7 @@ impl SinkImpl {
         param.properties.remove(CONNECTION_NAME_KEY);
 
         let sink_type = if param.target_table.is_some() {
-            "table"
+            TABLE_SINK
         } else {
             param.properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
                 SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))

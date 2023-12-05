@@ -21,21 +21,22 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
+use risingwave_pb::catalog::{PbSource, Table};
 use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamNode};
+use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
     ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
     Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
@@ -134,8 +135,10 @@ pub fn gen_sink_plan(
             .inner_mut()
             .insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
 
-        if let Some(prev) = prev {
-            tracing::warn!("connector {} replaced by table", prev);
+        if prev.is_some() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_string(),
+            )));
         }
     }
 
@@ -270,8 +273,6 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let target_table = stmt.into_table_name.clone();
-
     let (sink, graph, target_table_catalog) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
 
@@ -302,61 +303,20 @@ pub async fn handle_create_sink(
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
         if !table_catalog.incoming_sinks.is_empty() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Create sink into table with incoming sinks has not been implemented.".to_string(),
-            )));
+            bail_not_implemented!(issue = 13818, "create sink into table with incoming sinks");
         }
 
-        // Retrieve the original table definition and parse it to AST.
-        let [mut definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
-            .context("unable to parse original table definition")?
-            .try_into()
-            .unwrap();
-        let Statement::CreateTable { source_schema, .. } = &mut definition else {
-            panic!("unexpected statement: {:?}", definition);
-        };
-        let source_schema = source_schema
-            .clone()
-            .map(|source_schema| source_schema.into_v2_with_warning());
-
-        // Create handler args as if we're creating a new table with the altered definition.
-        let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-        let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
-        let Statement::CreateTable {
-            columns,
-            constraints,
-            source_watermarks,
-            append_only,
-            ..
-        } = definition
-        else {
-            panic!("unexpected statement type: {:?}", definition);
-        };
-
-        let (mut graph, mut table, source) = generate_stream_graph_for_table(
-            &session,
-            target_table.unwrap(),
-            &table_catalog,
-            source_schema,
-            handler_args,
-            col_id_gen,
-            columns,
-            constraints,
-            source_watermarks,
-            append_only,
-        )
-        .await?;
+        let (mut graph, mut table, source) =
+            reparse_table_for_sink(&session, &table_catalog).await?;
 
         table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
         // for now we only support one incoming sink
         assert!(table.incoming_sinks.is_empty());
 
-        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
-            for fragment in graph.fragments.values_mut() {
-                if let Some(node) = &mut fragment.node {
-                    insert_merger_to_union(node);
-                }
+        for fragment in graph.fragments.values_mut() {
+            if let Some(node) = &mut fragment.node {
+                insert_merger_to_union(node);
             }
         }
 
@@ -399,6 +359,60 @@ pub async fn handle_create_sink(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+pub(crate) async fn reparse_table_for_sink(
+    session: &Arc<SessionImpl>,
+    table_catalog: &Arc<TableCatalog>,
+) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
+    // Retrieve the original table definition and parse it to AST.
+    let [definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
+        .context("unable to parse original table definition")?
+        .try_into()
+        .unwrap();
+    let Statement::CreateTable {
+        name,
+        source_schema,
+        ..
+    } = &definition
+    else {
+        panic!("unexpected statement: {:?}", definition);
+    };
+
+    let table_name = name.clone();
+    let source_schema = source_schema
+        .clone()
+        .map(|source_schema| source_schema.into_v2_with_warning());
+
+    // Create handler args as if we're creating a new table with the altered definition.
+    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
+    let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        ..
+    } = definition
+    else {
+        panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let (mut graph, mut table, source) = generate_stream_graph_for_table(
+        &session,
+        table_name,
+        &table_catalog,
+        source_schema,
+        handler_args,
+        col_id_gen,
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+    )
+    .await?;
+
+    Ok((graph, table, source))
 }
 
 pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {

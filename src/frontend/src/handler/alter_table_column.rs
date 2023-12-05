@@ -45,9 +45,7 @@ pub async fn handle_alter_table_column(
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if !original_catalog.incoming_sinks.is_empty() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with incoming sinks has not been implemented.".to_string(),
-        )));
+        bail_not_implemented!("alter table with incoming sinks");
     }
 
     // TODO(yuhao): alter table with generated columns.

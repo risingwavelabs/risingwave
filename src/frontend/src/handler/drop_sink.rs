@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::handler::create_sink::reparse_table_for_sink;
 use crate::handler::create_table::generate_stream_graph_for_table;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -66,65 +67,13 @@ pub async fn handle_drop_sink(
     if let Some(target_table_id) = &sink.target_table {
         use anyhow::Context;
         use risingwave_common::util::column_index_mapping::ColIndexMapping;
-        use risingwave_sqlparser::ast::Statement;
-        use risingwave_sqlparser::parser::Parser;
-
-        use super::create_table::ColumnIdGenerator;
-
         let table_catalog = {
             let reader = session.env().catalog_reader().read_guard();
             let table = reader.get_table_by_id(target_table_id)?;
             table.clone()
         };
 
-        // Retrieve the original table definition and parse it to AST.
-        let [definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
-            .context("unable to parse original table definition")?
-            .try_into()
-            .unwrap();
-
-        let Statement::CreateTable {
-            name,
-            source_schema,
-            ..
-        } = &definition
-        else {
-            panic!("unexpected statement: {:?}", definition);
-        };
-
-        let table_name = name.clone();
-
-        let source_schema = source_schema
-            .clone()
-            .map(|source_schema| source_schema.into_v2_with_warning());
-
-        // Create handler args as if we're creating a new table with the altered definition.
-        let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-        let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
-        let Statement::CreateTable {
-            columns,
-            constraints,
-            source_watermarks,
-            append_only,
-            ..
-        } = definition
-        else {
-            panic!("unexpected statement type: {:?}", definition);
-        };
-
-        let (graph, mut table, source) = generate_stream_graph_for_table(
-            &session,
-            table_name,
-            &table_catalog,
-            source_schema,
-            handler_args,
-            col_id_gen,
-            columns,
-            constraints,
-            source_watermarks,
-            append_only,
-        )
-        .await?;
+        let (graph, mut table, source) = reparse_table_for_sink(&session, &table_catalog).await?;
 
         // for now we only support one incoming sink
         assert_eq!(table_catalog.incoming_sinks.len(), 1);

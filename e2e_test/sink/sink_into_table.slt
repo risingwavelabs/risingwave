@@ -12,11 +12,11 @@ create table m_simple (v1 int primary key, v2 int);
 statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
 
-statement error Create sink into table with incoming sinks has not been implemented.
+statement error Feature is not yet implemented: create sink into table with incoming sinks
 create sink s_simple_2 into m_simple as select v1, v2 from t_simple;
 
 # and we can't alter a table with incoming sinks
-statement error Alter a table with incoming sinks has not been implemented.
+statement error Feature is not yet implemented: alter table with incoming sinks
 alter table m_simple add column v3 int;
 
 statement ok
