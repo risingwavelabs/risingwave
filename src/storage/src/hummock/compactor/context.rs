@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -47,7 +47,9 @@ pub struct CompactorContext {
 
     pub await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 
-    pub running_task_count: Arc<AtomicU32>,
+    pub running_task_parallelism: Arc<AtomicU32>,
+
+    pub max_task_parallelism: Arc<AtomicU32>,
 }
 
 impl CompactorContext {
@@ -75,7 +77,40 @@ impl CompactorContext {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_count: Arc::new(AtomicU32::new(0)),
+            running_task_parallelism: Arc::new(AtomicU32::new(0)),
+            max_task_parallelism: Arc::new(AtomicU32::new(u32::MAX)),
+        }
+    }
+
+    pub fn acquire_task_quota(&self, parallelism: u32) -> bool {
+        if parallelism + self.running_task_parallelism.load(Ordering::Relaxed)
+            > self.max_task_parallelism.load(Ordering::Relaxed)
+        {
+            self.running_task_parallelism
+                .fetch_add(parallelism, Ordering::Relaxed);
+            return true;
+        }
+
+        false
+    }
+
+    pub fn release_task_quota(&self, parallelism: u32) {
+        if self.running_task_parallelism.load(Ordering::Relaxed) - parallelism > 0 {
+            self.running_task_parallelism
+                .fetch_sub(parallelism, Ordering::Relaxed);
+        } else {
+            self.running_task_parallelism.store(0, Ordering::SeqCst)
+        }
+    }
+
+    pub fn get_free_quota(&self) -> u32 {
+        let running_u32 = self.running_task_parallelism.load(Ordering::Relaxed);
+        let max_u32 = self.max_task_parallelism.load(Ordering::Relaxed);
+
+        if max_u32 > running_u32 {
+            max_u32 - running_u32
+        } else {
+            0
         }
     }
 }

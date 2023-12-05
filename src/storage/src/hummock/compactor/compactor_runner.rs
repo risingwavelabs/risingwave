@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -405,6 +406,26 @@ pub async fn compact(
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
+    if !context.acquire_task_quota(parallelism as u32) {
+        tracing::warn!(
+            "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+            compact_task.task_id,
+            parallelism,
+            context.running_task_parallelism.load(Ordering::Relaxed),
+            context.max_task_parallelism.load(Ordering::Relaxed),
+        );
+        return compact_done(
+            compact_task,
+            context.clone(),
+            vec![],
+            TaskStatus::NoAvailResourceCanceled,
+        );
+    }
+
+    let _guard = scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+        context.release_task_quota(parallelism as u32);
+    });
+
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
