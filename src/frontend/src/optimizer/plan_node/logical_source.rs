@@ -20,10 +20,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
+use risingwave_common::error::Result;
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -37,8 +38,9 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -347,6 +349,15 @@ impl ExprRewritable for LogicalSource {
     }
 }
 
+impl ExprVisitable for LogicalSource {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.output_exprs
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}
+
 /// A util function to extract kafka offset timestamp range.
 ///
 /// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
@@ -536,10 +547,7 @@ impl ToBatch for LogicalSource {
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "New S3 connector for batch".to_string(),
-                TrackingIssue::from(None),
-            )));
+            bail_not_implemented!("New S3 connector for batch");
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)

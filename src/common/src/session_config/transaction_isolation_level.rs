@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::str::FromStr;
 
-use crate::error::{ErrorCode, RwError};
-use crate::session_config::{ConfigEntry, CONFIG_KEYS, TRANSACTION_ISOLATION_LEVEL};
+use crate::error::{bail_not_implemented, NotImplemented};
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
@@ -28,20 +28,11 @@ pub enum IsolationLevel {
     Serializable,
 }
 
-impl ConfigEntry for IsolationLevel {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[TRANSACTION_ISOLATION_LEVEL]
-    }
-}
+impl FromStr for IsolationLevel {
+    type Err = NotImplemented;
 
-impl TryFrom<&[&str]> for IsolationLevel {
-    type Error = RwError;
-
-    fn try_from(_value: &[&str]) -> Result<Self, Self::Error> {
-        Err(
-            ErrorCode::InternalError("Support set transaction isolation level first".to_string())
-                .into(),
-        )
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        bail_not_implemented!(issue = 10736, "isolation level");
     }
 }
 

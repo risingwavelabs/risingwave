@@ -264,7 +264,7 @@ impl SstableStore {
         self.store
             .upload(&data_path, data)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     pub async fn preload_blocks(
@@ -483,10 +483,7 @@ impl SstableStore {
                         }
 
                         let now = Instant::now();
-                        let buf = store
-                            .read(&meta_path, range)
-                            .await
-                            .map_err(HummockError::object_io_error)?;
+                        let buf = store.read(&meta_path, range).await?;
                         let meta = SstableMeta::decode(&buf[..])?;
 
                         let sst = Sstable::new(object_id, meta);
@@ -576,10 +573,7 @@ impl SstableStore {
         let range = start_pos..end_pos;
 
         Ok(BlockStream::new(
-            store
-                .streaming_read(&data_path, range)
-                .await
-                .map_err(HummockError::object_io_error)?,
+            store.streaming_read(&data_path, range).await?,
             block_index,
             metas,
         ))
@@ -829,6 +823,11 @@ impl StreamingUploadWriter {
     }
 }
 
+pub enum UnifiedSstableWriter {
+    StreamingSstableWriter(StreamingUploadWriter),
+    BatchSstableWriter(BatchUploadWriter),
+}
+
 #[async_trait::async_trait]
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
@@ -843,7 +842,7 @@ impl SstableWriter for StreamingUploadWriter {
         self.object_uploader
             .write_bytes(block_data)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
@@ -855,16 +854,13 @@ impl SstableWriter for StreamingUploadWriter {
         self.object_uploader
             .write_bytes(block)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let meta_data = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader
-            .write_bytes(meta_data)
-            .await
-            .map_err(HummockError::object_io_error)?;
+        self.object_uploader.write_bytes(meta_data).await?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
@@ -878,10 +874,7 @@ impl SstableWriter for StreamingUploadWriter {
             assert!(!meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty());
 
             // Upload data to object store.
-            self.object_uploader
-                .finish()
-                .await
-                .map_err(HummockError::object_io_error)?;
+            self.object_uploader.finish().await?;
             // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
@@ -917,6 +910,47 @@ impl StreamingSstableWriterFactory {
         StreamingSstableWriterFactory { sstable_store }
     }
 }
+pub struct UnifiedSstableWriterFactory {
+    sstable_store: SstableStoreRef,
+}
+
+impl UnifiedSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        UnifiedSstableWriterFactory { sstable_store }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriterFactory for UnifiedSstableWriterFactory {
+    type Writer = UnifiedSstableWriter;
+
+    async fn create_sst_writer(
+        &mut self,
+        object_id: HummockSstableObjectId,
+        options: SstableWriterOptions,
+    ) -> HummockResult<Self::Writer> {
+        if self.sstable_store.store().support_streaming_upload() {
+            let path = self.sstable_store.get_sst_data_path(object_id);
+            let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+            let streaming_uploader_writer = StreamingUploadWriter::new(
+                object_id,
+                self.sstable_store.clone(),
+                uploader,
+                options,
+            );
+
+            Ok(UnifiedSstableWriter::StreamingSstableWriter(
+                streaming_uploader_writer,
+            ))
+        } else {
+            let batch_uploader_writer =
+                BatchUploadWriter::new(object_id, self.sstable_store.clone(), options);
+            Ok(UnifiedSstableWriter::BatchSstableWriter(
+                batch_uploader_writer,
+            ))
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
@@ -935,6 +969,47 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
             uploader,
             options,
         ))
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriter for UnifiedSstableWriter {
+    type Output = JoinHandle<HummockResult<()>>;
+
+    async fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+        match self {
+            UnifiedSstableWriter::StreamingSstableWriter(stream) => {
+                stream.write_block(block_data, meta).await
+            }
+            UnifiedSstableWriter::BatchSstableWriter(batch) => {
+                batch.write_block(block_data, meta).await
+            }
+        }
+    }
+
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+        match self {
+            UnifiedSstableWriter::StreamingSstableWriter(stream) => {
+                stream.write_block_bytes(block, meta).await
+            }
+            UnifiedSstableWriter::BatchSstableWriter(batch) => {
+                batch.write_block_bytes(block, meta).await
+            }
+        }
+    }
+
+    async fn finish(self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
+        match self {
+            UnifiedSstableWriter::StreamingSstableWriter(stream) => stream.finish(meta).await,
+            UnifiedSstableWriter::BatchSstableWriter(batch) => batch.finish(meta).await,
+        }
+    }
+
+    fn data_len(&self) -> usize {
+        match self {
+            UnifiedSstableWriter::StreamingSstableWriter(stream) => stream.data_len(),
+            UnifiedSstableWriter::BatchSstableWriter(batch) => batch.data_len(),
+        }
     }
 }
 
@@ -1037,9 +1112,10 @@ impl BlockStream {
         }
 
         let block_meta = &self.block_metas[self.block_idx];
-        fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
-            ObjectError::internal("stream read error")
-        )));
+        fail_point!("stream_read_err", |_| Err(ObjectError::internal(
+            "stream read error"
+        )
+        .into()));
         let end = self.buff_offset + block_meta.len as usize;
         let data = if end > self.buf.len() {
             let (current_block, buf) = self
@@ -1129,9 +1205,10 @@ impl BatchBlockStream {
         }
 
         let block_meta = &self.block_metas[self.block_idx];
-        fail_point!("stream_batch_read_err", |_| Err(
-            HummockError::object_io_error(ObjectError::internal("stream read error"))
-        ));
+        fail_point!("stream_batch_read_err", |_| Err(ObjectError::internal(
+            "stream read error"
+        )
+        .into()));
         if let Some(block) = self.blocks.pop_front() {
             self.block_idx += 1;
             return Ok(Some(block));

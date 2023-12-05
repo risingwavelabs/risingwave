@@ -249,9 +249,8 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids(table_ids)
-        .await
-        .unwrap();
+        .unregister_table_ids_fail_fast(table_ids)
+        .await;
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

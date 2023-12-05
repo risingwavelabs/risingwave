@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
+use risingwave_common::config::{
+    extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::system_params_for_test;
 
@@ -78,7 +80,6 @@ pub struct StorageOpts {
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
-    pub data_file_cache_reclaim_rate_limit_mb: usize,
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub data_file_cache_catalog_bits: usize,
     pub data_file_cache_compression: String,
@@ -102,7 +103,6 @@ pub struct StorageOpts {
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
-    pub meta_file_cache_reclaim_rate_limit_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_catalog_bits: usize,
     pub meta_file_cache_compression: String,
@@ -122,15 +122,18 @@ pub struct StorageOpts {
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
 
-    pub object_store_recv_buffer_size: Option<usize>,
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
     pub max_preload_io_retry_times: usize,
+    pub compactor_fast_max_compact_delete_ratio: u32,
+    pub compactor_fast_max_compact_task_size: u64,
 
     pub mem_table_spill_threshold: usize,
+
+    pub object_store_config: ObjectStoreConfig,
 }
 
 impl Default for StorageOpts {
@@ -187,7 +190,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
-            data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
             data_file_cache_ring_buffer_capacity_mb: c
                 .storage
                 .data_file_cache
@@ -211,7 +213,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
-            meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
             meta_file_cache_ring_buffer_capacity_mb: c
                 .storage
                 .meta_file_cache
@@ -231,22 +232,28 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             object_store_streaming_read_timeout_ms: c
                 .storage
+                .object_store
                 .object_store_streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
             object_store_streaming_upload_timeout_ms: c
                 .storage
+                .object_store
                 .object_store_streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store_read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
+            object_store_read_timeout_ms: c.storage.object_store.object_store_read_timeout_ms,
+            object_store_upload_timeout_ms: c.storage.object_store.object_store_upload_timeout_ms,
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
-            object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
+            object_store_config: c.storage.object_store.clone(),
+            compactor_fast_max_compact_delete_ratio: c
+                .storage
+                .compactor_fast_max_compact_delete_ratio,
+            compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
         }
     }
 }

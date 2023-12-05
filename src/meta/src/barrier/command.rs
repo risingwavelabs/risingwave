@@ -27,8 +27,8 @@ use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, Dispatchers, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, ThrottleMutation, UpdateMutation,
+    AddMutation, Dispatcher, Dispatchers, FragmentTypeFlag, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -38,7 +38,7 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
+use crate::manager::{CatalogManagerRef, DdlType, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
@@ -76,7 +76,7 @@ pub struct Reschedule {
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
 /// we'll build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum::Display)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.
     ///
@@ -117,6 +117,7 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
         definition: String,
+        ddl_type: DdlType,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -586,12 +587,21 @@ impl CommandContext {
                 dispatchers,
                 table_fragments,
                 ..
-            } => dispatchers
-                .values()
-                .flatten()
-                .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                .chain(table_fragments.values_actor_ids())
-                .collect(),
+            } => {
+                // cdc backfill table job doesn't need to be tracked
+                if table_fragments.fragments().iter().any(|fragment| {
+                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
+                }) {
+                    Default::default()
+                } else {
+                    dispatchers
+                        .values()
+                        .flatten()
+                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                        .chain(table_fragments.values_actor_ids())
+                        .collect()
+                }
+            }
             _ => Default::default(),
         }
     }
@@ -714,9 +724,9 @@ impl CommandContext {
                 let table_id = table_fragments.table_id().table_id;
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
-                if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
-                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
-                }
+                self.hummock_manager
+                    .unregister_table_ids_fail_fast(&table_ids)
+                    .await;
 
                 // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                 // We need to cleanup the table state. So we can do it here.

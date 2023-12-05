@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, user,
-    user_privilege, view, worker_property, DataTypeArray, DatabaseId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, UserId, WorkerId,
+    actor_dispatcher, connection, function, index, object, object_dependency, schema, sink, source,
+    table, user, user_privilege, view, worker_property, ActorId, DataTypeArray, DatabaseId,
+    I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
@@ -371,7 +372,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::permission_denied("schema is not empty".into()));
+        return Err(MetaError::permission_denied("schema is not empty"));
     }
 
     Ok(())
@@ -594,4 +595,24 @@ where
         })
         .collect();
     Ok(parallel_units_map)
+}
+
+pub async fn get_actor_dispatchers<C>(
+    db: &C,
+    actor_ids: Vec<ActorId>,
+) -> MetaResult<HashMap<ActorId, Vec<actor_dispatcher::Model>>>
+where
+    C: ConnectionTrait,
+{
+    let actor_dispatchers = ActorDispatcher::find()
+        .filter(actor_dispatcher::Column::ActorId.is_in(actor_ids))
+        .all(db)
+        .await?;
+
+    Ok(actor_dispatchers
+        .into_iter()
+        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
+        .into_iter()
+        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .collect())
 }

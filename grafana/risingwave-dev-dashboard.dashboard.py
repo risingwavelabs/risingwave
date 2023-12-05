@@ -800,8 +800,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
+                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (fragment_id, table_id) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -825,6 +825,28 @@ def section_streaming(outer_panels):
                             "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the cdc backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the cdc backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -1019,7 +1041,7 @@ def section_streaming_actors(outer_panels):
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
                             "materialized view {{materialized_view_id}}",
                         ),
                     ],
@@ -1681,38 +1703,6 @@ def section_batch(outer_panels):
                         panels.target(
                             f"{metric('batch_heartbeat_worker_num')}",
                             "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Mem Table Size",
-                    "This metric shows the memory usage of mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table size total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_memory_size')}",
-                            "mem_table size - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Mem Table Count",
-                    "This metric shows the item counts in mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_item_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table counts total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_item_count')}",
-                            "mem_table count - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),

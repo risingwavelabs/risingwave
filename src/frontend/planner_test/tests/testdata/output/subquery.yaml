@@ -450,7 +450,7 @@
     create table c (v1 int, v2 int);
     select * from a left outer join b on a.v1 = b.v1 and a.v2 = (select v2 from c where v1 = 1 limit 1);
   planner_error: |-
-    Feature is not yet implemented: Subquery in join on condition is unsupported
+    Feature is not yet implemented: Subquery in join on condition
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table auction (date_time date);

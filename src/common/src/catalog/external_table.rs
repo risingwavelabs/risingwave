@@ -29,7 +29,7 @@ pub struct CdcTableDesc {
     /// Id of the upstream source in sharing cdc mode
     pub source_id: TableId,
 
-    /// The full name of the table in external database, e.g. `database_name.table.name` in MySQL
+    /// The full name of the table in external database, e.g. `database_name.table_name` in MySQL
     /// and `schema_name.table_name` in the Postgres.
     pub external_table_name: String,
     /// The key used to sort in storage.
