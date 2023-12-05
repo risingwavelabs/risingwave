@@ -18,5 +18,7 @@
 
 #![feature(error_generic_member_access)]
 #![feature(lint_reasons)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 
 pub mod tonic;

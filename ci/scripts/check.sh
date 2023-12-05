@@ -35,14 +35,14 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Build documentation"
-RUSTDOCFLAGS="-Dwarnings -Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(rw)" cargo doc --document-private-items --no-deps
+RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
 
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run doctest"
-RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld -Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(rw)" cargo test --doc
+RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 
 echo "--- Show sccache stats"
 sccache --show-stats

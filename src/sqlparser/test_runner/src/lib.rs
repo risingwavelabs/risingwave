@@ -14,6 +14,8 @@
 
 //! Data-driven tests.
 
+#![feature(register_tool)]
+#![register_tool(rw)]
 #![allow(rw::format_error)]
 
 use std::fmt::Display;

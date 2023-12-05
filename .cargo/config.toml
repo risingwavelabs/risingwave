@@ -34,12 +34,6 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
-
-    # Register the `rw` tool for referencing the custom lints in attributes like `#[allow(rw::xx)]`.
-    # This is essentially the same as `#![..]` in each crate root.
-    "-Zcrate-attr=feature(register_tool)",
-    "-Zcrate-attr=register_tool(rw)",
-
     # Uncomment the following two lines to enable `TaskLocalAlloc`.
     # "--cfg",
     # "enable_task_local_alloc",
