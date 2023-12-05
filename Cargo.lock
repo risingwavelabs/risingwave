@@ -4347,9 +4347,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2dc222074a1d88750778b7b0ed81925cb9f36443df447ab11c51d5686609b2"
+checksum = "8e2edfc17ad42a5ece82df036301d5ef0c3dc3d071e28aa8a62e461711c55d19"
 dependencies = [
  "bytes",
  "serde",
@@ -7882,6 +7882,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "sql-json-path",
  "thiserror",
  "tracing",
  "workspace-hack",
@@ -9737,6 +9738,19 @@ checksum = "9d1e996ef02c474957d681f1b05213dfb0abab947b446a62d37770b23500184a"
 dependencies = [
  "base64ct",
  "der 0.7.8",
+]
+
+[[package]]
+name = "sql-json-path"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06d900e5c1db024a5bd4535916f1779f104562a7357ff4280e8136eb50b04f35"
+dependencies = [
+ "jsonbb",
+ "nom",
+ "regex",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
