@@ -33,7 +33,7 @@ pub fn uncompress_table_fragments(table_fragments: &mut PbTableFragments) {
     for fragment in table_fragments.fragments.values_mut() {
         assert!(
             fragment.stream_node_template.is_some(),
-            "fragment.stream_node_template should be Some() when render type is RenderTemplate"
+            "fragment.stream_node_template should not be None when render type is RenderTemplate"
         );
 
         for actor in &mut fragment.actors {
@@ -57,18 +57,12 @@ pub fn uncompress_table_fragments(table_fragments: &mut PbTableFragments) {
             );
 
             actor.nodes = pb_nodes;
-
-            assert!(
-                !actor.upstream_actors_by_fragment.is_empty(),
-                "actor.upstream_actors_by_fragment should not be empty when render type is RenderTemplate"
-            );
-
             actor.upstream_actors_by_fragment.clear();
         }
 
         assert!(
             fragment.stream_node_template.is_some(),
-            "fragment.stream_node_template should be Some() when render type is RenderTemplate"
+            "fragment.stream_node_template should not be None when render type is RenderTemplate"
         );
         fragment.stream_node_template = None;
     }
@@ -134,7 +128,7 @@ pub fn compress_table_fragments(table_fragments: &mut PbTableFragments) {
 
             assert!(
                 actor.nodes.is_some(),
-                "actor.nodes should be Some() when render type is unspecified"
+                "actor.nodes should not be None when render type is unspecified"
             );
 
             actor.nodes = None;

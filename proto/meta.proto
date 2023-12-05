@@ -111,7 +111,7 @@ message TableFragments {
   // When we use RENDER_TEMPLATE, template compression is enabled during the conversion between PbTableFragments and model::TableFragments.
   // This avoids pointless repetition in each PbActor’s StreamNode within PbFragment.
   // When RENDER_TEMPLATE is activated, the stream_node_template in PbFragment should not be empty.
-  // Also, the nodes in the original actors field will be disregarded (if template compression is enabled, an irrelevant NoOp should be placed here) and rendered when converted to model::TableFragments.
+  // Also, the nodes in the original actors field will be disregarded and rendered when converted to model::TableFragments.
   GraphRenderType graph_render_type = 7;
 }
 
