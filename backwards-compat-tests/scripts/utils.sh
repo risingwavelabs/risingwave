@@ -259,7 +259,7 @@ validate_new_cluster() {
 
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
-  
+
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
   if version_le "$OLD_VERSION" "1.5.0" ; then
     echo "--- KAFKA TEST (invalid options): Validating new cluster"
