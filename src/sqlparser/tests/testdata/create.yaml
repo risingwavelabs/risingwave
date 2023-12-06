@@ -64,7 +64,7 @@
     Near " topic = 'test_topic') format;"
 - input: create sink sk1 from tt where v1 % 10 = 0 with (connector='blackhole')
   error_msg: |-
-    sql parser error: Expected WITH after the FROM clause, found: where at line:1, column:30
+    sql parser error: Expected WITH, found: where at line:1, column:30
     Near "create sink sk1 from tt"
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
   error_msg: |-
