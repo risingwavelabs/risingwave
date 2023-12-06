@@ -348,23 +348,19 @@ impl CacheRefillTask {
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
-        let data_file_cache = context.sstable_store.data_file_cache();
-        if data_file_cache.is_none() {
-            return res;
-        }
         let Some(filter) = context.sstable_store.data_recent_filter() else {
             return res;
         };
 
-        let unit = context.config.unit;
-
-        let units = ssts
-            .iter()
-            .flat_map(|sst| {
-                let units = Unit::units(sst, unit);
-                (0..units).map(|uidx| Unit::new(sst, unit, uidx))
-            })
-            .collect_vec();
+        let units = {
+            let unit = context.config.unit;
+            ssts.iter()
+                .flat_map(|sst| {
+                    let units = Unit::units(sst, unit);
+                    (0..units).map(|uidx| Unit::new(sst, unit, uidx))
+                })
+                .collect_vec()
+        };
 
         if cfg!(debug_assertions) {
             // assert units in asc order
@@ -399,15 +395,15 @@ impl CacheRefillTask {
 
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
-                    let su = SstableUnit {
+                    let unit = SstableUnit {
                         sst_obj_id: u.sst.id,
                         blks: u.blks.clone(),
                     };
-                    if res.contains(&su) {
+                    if res.contains(&unit) {
                         continue;
                     }
                     if filter.contains(&(psst.id, pblk)) {
-                        res.insert(su);
+                        res.insert(unit);
                     }
                 }
             }
