@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add `workers` option in `@udf` to specify the number of worker processes for CPU bound functions.
+- Add `workers` option in `@udf` and `@udtf` to specify the number of worker processes for CPU bound functions.
 
 ## [0.1.0] - 2023-12-01
 

@@ -130,6 +130,14 @@ class TableFunction(UserDefinedFunction):
 
     BATCH_SIZE = 1024
 
+    def __init__(self, io_threads=None, workers=None):
+        if io_threads is not None:
+            self._executor = ThreadPoolExecutor(max_workers=io_threads)
+        elif workers is not None:
+            self._executor = get_reusable_executor(max_workers=workers)
+        else:
+            self._executor = None
+
     def eval(self, *args) -> Iterator:
         """
         Method which defines the logic of the table function.
@@ -170,12 +178,28 @@ class TableFunction(UserDefinedFunction):
         builder = RecordBatchBuilder(self._result_schema)
 
         # Iterate through rows in the input RecordBatch
-        for row_index in range(batch.num_rows):
-            row = tuple(column[row_index].as_py() for column in batch)
-            for result in self.eval(*row):
-                builder.append(row_index, result)
-                if builder.len() == self.BATCH_SIZE:
-                    yield builder.build()
+        if self._executor is not None:
+            input_rows = [
+                [col[i].as_py() for col in batch] for i in range(batch.num_rows)
+            ]
+            # XXX: make the function picklable
+            func = self._func
+            tasks = [
+                self._executor.submit(lambda *args: list(func(*args)), *row)
+                for row in input_rows
+            ]
+            for row_index, task in enumerate(tasks):
+                for result in task.result():
+                    builder.append(row_index, result)
+                    if builder.len() == self.BATCH_SIZE:
+                        yield builder.build()
+        else:
+            for row_index in range(batch.num_rows):
+                row = tuple(column[row_index].as_py() for column in batch)
+                for result in self.eval(*row):
+                    builder.append(row_index, result)
+                    if builder.len() == self.BATCH_SIZE:
+                        yield builder.build()
         if builder.len() != 0:
             yield builder.build()
 
@@ -223,7 +247,10 @@ class UserDefinedTableFunctionWrapper(TableFunction):
 
     _func: Callable
 
-    def __init__(self, func, input_types, result_types, name=None):
+    def __init__(
+        self, func, input_types, result_types, name=None, io_threads=None, workers=None
+    ):
+        super().__init__(io_threads, workers)
         self._func = func
         self._name = name or (
             func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
@@ -320,6 +347,8 @@ def udtf(
     input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
     result_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
     name: Optional[str] = None,
+    io_threads: Optional[int] = None,
+    workers: Optional[int] = None,
 ) -> Callable:
     """
     Annotation for creating a user-defined table function.
@@ -328,6 +357,8 @@ def udtf(
     - input_types: A list of strings or Arrow data types that specifies the input data types.
     - result_types A list of strings or Arrow data types that specifies the return value types.
     - name: An optional string specifying the function name. If not provided, the original name will be used.
+    - io_threads: Number of I/O threads used per data chunk for I/O bound functions.
+    - workers: Number of worker processes used for CPU bound functions.
 
     Example:
     ```
@@ -338,7 +369,9 @@ def udtf(
     ```
     """
 
-    return lambda f: UserDefinedTableFunctionWrapper(f, input_types, result_types, name)
+    return lambda f: UserDefinedTableFunctionWrapper(
+        f, input_types, result_types, name, io_threads, workers
+    )
 
 
 class UdfServer(pa.flight.FlightServerBase):

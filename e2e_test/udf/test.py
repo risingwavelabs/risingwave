@@ -56,6 +56,23 @@ def square(x: int) -> int:
     return sum
 
 
+# a table function that takes a long time to execute
+# returns all primes in range [x, y)
+@udtf(input_types=["INT", "INT"], result_types="INT", workers=10)
+def primes(x: int, y: int) -> Iterator[int]:
+    def is_prime(n: int) -> bool:
+        if n <= 1:
+            return False
+        for i in range(2, n):
+            if n % i == 0:
+                return False
+        return True
+
+    for i in range(x, y):
+        if is_prime(i):
+            yield i
+
+
 @udf(input_types=["BYTEA"], result_type="STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>")
 def extract_tcp_info(tcp_packet: bytes):
     src_addr, dst_addr = struct.unpack("!4s4s", tcp_packet[12:20])
@@ -223,6 +240,7 @@ if __name__ == "__main__":
     server.add_function(gcd)
     server.add_function(gcd3)
     server.add_function(square)
+    server.add_function(primes)
     server.add_function(series)
     server.add_function(split)
     server.add_function(extract_tcp_info)
