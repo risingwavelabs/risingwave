@@ -45,7 +45,7 @@ To start a RisingWave playground, run
 docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:latest playground
 ```
 
-### standalone
+### standalone minio
 To start a RisingWave standalone mode with minio backend, run
 
 ```
@@ -53,12 +53,12 @@ To start a RisingWave standalone mode with minio backend, run
 docker-compose up
 ```
 
-### minio
+### distributed cluster minio 
 To start a RisingWave cluster with minio backend, run
 
 ```
 # Start all components
-docker-compose -f docker-compose-minio.yml up
+docker-compose -f docker-compose-distributed.yml up
 ```
 
 It will start a minio, a meta node, a compute node, a frontend, a compactor, a prometheus and a redpanda instance.

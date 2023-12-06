@@ -9,7 +9,7 @@ sources:
 sinks:
   risingwave:
     type: "risingwave"
-    host: "risingwave-standalone"
+    host: "frontend-node-0"
     port: 4566
     database: "dev"
     user: "root"
