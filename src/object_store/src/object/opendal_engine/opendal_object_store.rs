@@ -117,7 +117,7 @@ impl ObjectStore for OpendalObjectStore {
         let reader = self.op.reader_with(path).range(range).await?;
         let stream = reader
             .into_stream()
-            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpenDalError: {:?}", e))));
+            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpendalError: {:?}", e))));
 
         Ok(Box::pin(stream))
     }

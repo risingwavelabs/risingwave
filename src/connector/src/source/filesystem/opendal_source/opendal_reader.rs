@@ -22,7 +22,7 @@ use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::OpenDalSourceProperties;
+use super::OpendalSource;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -33,28 +33,25 @@ use crate::source::{
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 #[derive(Debug, Clone)]
-pub struct OpendalReader<C: OpenDalSourceProperties> {
-    connector: OpendalEnumerator<C>,
-    splits: Vec<OpendalFsSplit<C>>,
+pub struct OpendalReader<Src: OpendalSource> {
+    connector: OpendalEnumerator<Src>,
+    splits: Vec<OpendalFsSplit<Src>>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
 #[async_trait]
-impl<C: OpenDalSourceProperties> SplitReader for OpendalReader<C>
-where
-    C: Send + Clone + PartialEq + 'static + Sync,
-{
-    type Properties = C;
-    type Split = OpendalFsSplit<C>;
+impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
+    type Properties = Src::Properties;
+    type Split = OpendalFsSplit<Src>;
 
     async fn new(
-        properties: C,
-        splits: Vec<OpendalFsSplit<C>>,
+        properties: Src::Properties,
+        splits: Vec<OpendalFsSplit<Src>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let connector = Self::Properties::new_enumerator(properties)?;
+        let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
             connector,
             splits,
@@ -69,10 +66,7 @@ where
     }
 }
 
-impl<C: OpenDalSourceProperties> OpendalReader<C>
-where
-    C: Send + Clone + Sized + PartialEq + 'static,
-{
+impl<Src: OpendalSource> OpendalReader<Src> {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
@@ -111,7 +105,7 @@ where
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn stream_read_object(
         op: Operator,
-        split: OpendalFsSplit<C>,
+        split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();

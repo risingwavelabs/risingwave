@@ -28,9 +28,9 @@ use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpenDalSourceProperties, OpendalS3Properties,
+    OpendalGcs, OpendalS3, OpendalSource,
 };
-use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties};
+use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
@@ -95,12 +95,12 @@ impl ConnectorSource {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
-                let lister: OpendalEnumerator<GcsProperties> =
+                let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
-            ConnectorProperties::OpenDalS3(prop) => {
-                let lister: OpendalEnumerator<OpendalS3Properties> =
+            ConnectorProperties::OpendalS3(prop) => {
+                let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
@@ -172,7 +172,7 @@ impl ConnectorSource {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream<C: OpenDalSourceProperties>(lister: OpendalEnumerator<C>) {
+async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
     let prefix = lister
         .get_prefix()
         .as_ref()

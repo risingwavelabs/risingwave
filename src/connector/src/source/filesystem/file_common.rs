@@ -20,6 +20,7 @@ use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamp};
 use serde::{Deserialize, Serialize};
 
+use super::opendal_source::OpendalSource;
 use crate::source::{SplitId, SplitMetaData};
 
 ///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
@@ -74,34 +75,25 @@ impl FsSplit {
 ///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct OpendalFsSplit<C>
-where
-    C: Send + Clone + 'static,
-{
+pub struct OpendalFsSplit<Src: OpendalSource> {
     pub name: String,
     pub offset: usize,
     pub size: usize,
-    marker: PhantomData<C>,
+    _marker: PhantomData<Src>,
 }
 
-impl<C> From<&Object> for OpendalFsSplit<C>
-where
-    C: Send + Clone + 'static,
-{
+impl<Src: OpendalSource> From<&Object> for OpendalFsSplit<Src> {
     fn from(value: &Object) -> Self {
         Self {
             name: value.key().unwrap().to_owned(),
             offset: 0,
             size: value.size().unwrap_or_default() as usize,
-            marker: PhantomData,
+            _marker: PhantomData,
         }
     }
 }
 
-impl<C> SplitMetaData for OpendalFsSplit<C>
-where
-    C: Sized + Send + Clone + 'static,
-{
+impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
     fn id(&self) -> SplitId {
         self.name.as_str().into()
     }
@@ -121,16 +113,13 @@ where
     }
 }
 
-impl<C> OpendalFsSplit<C>
-where
-    C: Send + Clone + 'static,
-{
+impl<Src: OpendalSource> OpendalFsSplit<Src> {
     pub fn new(name: String, start: usize, size: usize) -> Self {
         Self {
             name,
             offset: start,
             size,
-            marker: PhantomData,
+            _marker: PhantomData,
         }
     }
 }

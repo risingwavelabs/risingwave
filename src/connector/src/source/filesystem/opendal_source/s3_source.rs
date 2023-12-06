@@ -20,14 +20,11 @@ use opendal::services::S3;
 use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::OpenDalSourceProperties;
+use super::OpendalSource;
 // use crate::source::filesystem::opendal_source::get_prefix;
 use crate::source::filesystem::{s3::enumerator::get_prefix, S3Properties};
 
-impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
-where
-    C: Sized + Send + Clone + PartialEq + 'static + Sync,
-{
+impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal s3 source.
     pub fn new_s3_source(
         s3_properties: S3Properties,

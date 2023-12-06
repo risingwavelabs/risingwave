@@ -43,13 +43,41 @@ pub struct GcsProperties {
 }
 
 impl SourceProperties for GcsProperties {
-    type Split = OpendalFsSplit<GcsProperties>;
-    type SplitEnumerator = OpendalEnumerator<GcsProperties>;
-    type SplitReader = OpendalReader<GcsProperties>;
+    type Split = OpendalFsSplit<OpendalGcs>;
+    type SplitEnumerator = OpendalEnumerator<OpendalGcs>;
+    type SplitReader = OpendalReader<OpendalGcs>;
 
     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
 
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
+}
+
+pub trait OpendalSource: Send + Sync + 'static + Clone + PartialEq {
+    type Properties: SourceProperties + Send + Sync;
+
+    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalS3;
+
+impl OpendalSource for OpendalS3 {
+    type Properties = OpendalS3Properties;
+
+    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalGcs;
+
+impl OpendalSource for OpendalGcs {
+    type Properties = GcsProperties;
+
+    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_gcs_source(properties)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -60,27 +88,11 @@ pub struct OpendalS3Properties {
 }
 
 impl SourceProperties for OpendalS3Properties {
-    type Split = OpendalFsSplit<OpendalS3Properties>;
-    type SplitEnumerator = OpendalEnumerator<OpendalS3Properties>;
-    type SplitReader = OpendalReader<OpendalS3Properties>;
+    type Split = OpendalFsSplit<OpendalS3>;
+    type SplitEnumerator = OpendalEnumerator<OpendalS3>;
+    type SplitReader = OpendalReader<OpendalS3>;
 
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
 
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
-}
-
-pub trait OpenDalSourceProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
-    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>>;
-}
-
-impl OpenDalSourceProperties for GcsProperties {
-    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_gcs_source(properties)
-    }
-}
-
-impl OpenDalSourceProperties for OpendalS3Properties {
-    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
-    }
 }

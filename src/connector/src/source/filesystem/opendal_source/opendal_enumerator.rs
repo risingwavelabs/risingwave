@@ -21,46 +21,37 @@ use futures::StreamExt;
 use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
-use super::OpenDalSourceProperties;
+use super::OpendalSource;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
-pub struct OpendalEnumerator<C: OpenDalSourceProperties>
-where
-    C: Send + Clone + Sized + PartialEq + 'static + Sync,
-{
+pub struct OpendalEnumerator<Src: OpendalSource> {
     pub(crate) op: Operator,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
-    pub(crate) marker: PhantomData<C>,
+    pub(crate) marker: PhantomData<Src>,
 }
 
 #[async_trait]
-impl<C: OpenDalSourceProperties> SplitEnumerator for OpendalEnumerator<C>
-where
-    C: Sized + Send + Clone + PartialEq + 'static + Sync,
-{
-    type Properties = C;
-    type Split = OpendalFsSplit<C>;
+impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
+    type Properties = Src::Properties;
+    type Split = OpendalFsSplit<Src>;
 
     async fn new(
-        properties: Self::Properties,
+        properties: Src::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<OpendalEnumerator<C>> {
-        Self::Properties::new_enumerator(properties)
+    ) -> anyhow::Result<Self> {
+        Src::new_enumerator(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<C>>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
         Ok(vec![])
     }
 }
 
-impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
-where
-    C: Send + Clone + Sized + PartialEq + 'static + Sync,
-{
+impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> anyhow::Result<ObjectMetadataIter> {
         // Currently, we need to do full list and then filter the prefix and matcher,
         // After OpenDAL implementing the list prefix, we can use the user-specified prefix.

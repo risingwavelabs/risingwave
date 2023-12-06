@@ -20,13 +20,10 @@ use opendal::services::Gcs;
 use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::{GcsProperties, OpenDalSourceProperties};
+use super::{GcsProperties, OpendalSource};
 use crate::source::filesystem::s3::enumerator::get_prefix;
 
-impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
-where
-    C: Send + Clone + PartialEq + 'static + Sync,
-{
+impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal gcs source.
     pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
         // Create gcs builder.
