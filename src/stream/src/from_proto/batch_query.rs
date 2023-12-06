@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
@@ -43,9 +42,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             return Ok(Box::new(DummyExecutor::new(info)));
         }
 
-        let table_desc: &StorageTableDesc = node
-            .get_table_desc()
-            .map_err(|err| anyhow!("batch_plan: table_desc not found! {:?}", err))?;
+        let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
         };

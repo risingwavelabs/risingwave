@@ -30,7 +30,7 @@ pub enum TraceError {
     #[error("failed to read or write {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
+    #[error("invalid magic bytes, expected {expected}, found {found}")]
     MagicBytes { expected: u32, found: u32 },
 
     #[error("try to close a non-existing record {0}")]

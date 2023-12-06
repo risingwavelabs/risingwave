@@ -29,6 +29,11 @@ use crate::array::ArrayError;
 use crate::session_config::SessionConfigError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
+/// Re-export `risingwave_error` for easy access.
+pub mod v2 {
+    pub use risingwave_error::*;
+}
+
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
@@ -189,7 +194,7 @@ pub enum ErrorCode {
         #[backtrace]
         ValueEncodingError,
     ),
-    #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
+    #[error("Invalid value `{config_value}` for `{config_entry}`")]
     InvalidConfigValue {
         config_entry: String,
         config_value: String,
@@ -260,7 +265,7 @@ impl From<JoinError> for RwError {
 
 impl From<std::net::AddrParseError> for RwError {
     fn from(addr_parse_error: std::net::AddrParseError) -> Self {
-        ErrorCode::InternalError(format!("failed to resolve address: {}", addr_parse_error)).into()
+        anyhow::anyhow!(addr_parse_error).into()
     }
 }
 
