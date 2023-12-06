@@ -26,7 +26,7 @@ use risingwave_pb::connector_service::sink_coordinator_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
-    Barrier, BeginEpoch, Request as SinkRequest, StartSink, WriteBatch,
+    Barrier, Request as SinkRequest, StartSink, WriteBatch,
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
@@ -51,13 +51,6 @@ pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
     BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
 impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
-        })
-        .await
-    }
-
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::WriteBatch(WriteBatch {
@@ -95,10 +88,6 @@ impl SinkWriterResponseReceiver {
 }
 
 impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.request_sender.start_epoch(epoch).await
-    }
-
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.request_sender
             .write_batch(epoch, batch_id, payload)
