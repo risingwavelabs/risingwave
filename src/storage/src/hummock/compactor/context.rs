@@ -15,6 +15,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use more_asserts::assert_ge;
 use parking_lot::RwLock;
 
 use super::task_progress::TaskProgressManagerRef;
@@ -83,29 +84,44 @@ impl CompactorContext {
     }
 
     pub fn acquire_task_quota(&self, parallelism: u32) -> bool {
-        if parallelism + self.running_task_parallelism.load(Ordering::Relaxed)
-            > self.max_task_parallelism.load(Ordering::Relaxed)
-        {
-            self.running_task_parallelism
-                .fetch_add(parallelism, Ordering::Relaxed);
-            return true;
+        let running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
+        let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
+
+        if parallelism + running_u32 > max_u32 {
+            return false;
         }
 
-        false
+        if self
+            .running_task_parallelism
+            .compare_exchange(
+                running_u32,
+                running_u32 + parallelism,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return false;
+        }
+
+        true
     }
 
     pub fn release_task_quota(&self, parallelism: u32) {
-        if self.running_task_parallelism.load(Ordering::Relaxed) - parallelism > 0 {
-            self.running_task_parallelism
-                .fetch_sub(parallelism, Ordering::Relaxed);
-        } else {
-            self.running_task_parallelism.store(0, Ordering::SeqCst)
-        }
+        assert_ge!(
+            self.running_task_parallelism.load(Ordering::SeqCst),
+            parallelism,
+            "running {} parallelism {}",
+            self.running_task_parallelism.load(Ordering::SeqCst),
+            parallelism
+        );
+        self.running_task_parallelism
+            .fetch_sub(parallelism, Ordering::SeqCst);
     }
 
     pub fn get_free_quota(&self) -> u32 {
-        let running_u32 = self.running_task_parallelism.load(Ordering::Relaxed);
-        let max_u32 = self.max_task_parallelism.load(Ordering::Relaxed);
+        let running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
+        let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
 
         if max_u32 > running_u32 {
             max_u32 - running_u32
