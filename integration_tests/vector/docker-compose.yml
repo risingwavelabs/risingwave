@@ -29,6 +29,7 @@ services:
     depends_on:
       - "risingwave-standalone"
     container_name: vector
+    restart: always
 
 volumes:
   risingwave-standalone:
