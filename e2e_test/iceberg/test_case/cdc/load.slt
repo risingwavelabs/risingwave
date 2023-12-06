@@ -1,9 +1,5 @@
 # CDC source basic test
 
-# enable cdc backfill in ci
-statement ok
-set cdc_backfill='true';
-
 statement ok
 create table products ( id INT,
  name STRING,
