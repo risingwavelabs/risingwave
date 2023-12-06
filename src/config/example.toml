@@ -82,8 +82,8 @@ stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
 stream_chunk_size = 256
-stream_exchange_initial_permits = 2048
-stream_exchange_batched_permits = 256
+stream_exchange_max_bytes = 1048576
+stream_exchange_ack_bytes = 32768
 stream_exchange_concurrent_barriers = 1
 stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
@@ -110,6 +110,8 @@ compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
 max_preload_io_retry_times = 3
+compactor_fast_max_compact_delete_ratio = 40
+compactor_fast_max_compact_task_size = 2147483648
 mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]

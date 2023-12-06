@@ -30,6 +30,7 @@ use parse_display::Display;
 pub use physical_table::*;
 use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
+use thiserror_ext::AsReport;
 
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
@@ -291,9 +292,9 @@ impl TableOption {
                 Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
                 Err(e) => {
                     tracing::info!(
-                        "build_table_option parse option ttl_string {} fail {}",
+                        error = %e.as_report(),
+                        "build_table_option parse option ttl_string {}",
                         ttl_string,
-                        e
                     );
                     result.retention_seconds = None;
                 }

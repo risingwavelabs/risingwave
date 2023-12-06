@@ -48,33 +48,27 @@ impl MockExternalTableReader {
         let snap0 = vec![OwnedRow::new(vec![
             Some(ScalarImpl::Int64(1)),
             Some(ScalarImpl::Float64(1.0001.into())),
-            None,
         ])];
         let snap1 = vec![
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(1)),
                 Some(ScalarImpl::Float64(10.01.into())),
-                None,
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(2)),
                 Some(ScalarImpl::Float64(2.02.into())),
-                None,
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(5)),
                 Some(ScalarImpl::Float64(1.0005.into())),
-                None,
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(6)),
                 Some(ScalarImpl::Float64(1.0006.into())),
-                None,
             ]),
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(8)),
                 Some(ScalarImpl::Float64(1.0008.into())),
-                None,
             ]),
         ];
 
