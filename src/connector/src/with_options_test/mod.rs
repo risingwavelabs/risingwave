@@ -27,15 +27,15 @@ fn connector_crate_path() -> PathBuf {
 }
 
 fn source_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("source")
+    connector_crate_path().join("src/source")
 }
 
 fn sink_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("sink")
+    connector_crate_path().join("sink_impl/src/sink")
 }
 
 fn common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("common.rs")
+    connector_crate_path().join("src/common.rs")
 }
 
 pub fn generate_with_options_yaml_source() -> String {
