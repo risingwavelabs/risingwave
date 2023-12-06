@@ -181,7 +181,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         self.high.clear();
     }
 
-    /// Get total count of entries in the cahce.
+    /// Get total count of entries in the cache.
     pub fn len(&self) -> usize {
         self.low.len() + self.middle.len() + self.high.len()
     }
