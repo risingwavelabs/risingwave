@@ -58,7 +58,6 @@ pub struct SourceDescBuilder {
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
-    rate_limit: Option<u32>,
 }
 
 impl SourceDescBuilder {
@@ -72,7 +71,6 @@ impl SourceDescBuilder {
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
-        rate_limit: Option<u32>,
     ) -> Self {
         Self {
             columns,
@@ -83,7 +81,6 @@ impl SourceDescBuilder {
             connector_params,
             connector_message_buffer_size,
             pk_indices,
-            rate_limit,
         }
     }
 
@@ -118,7 +115,6 @@ impl SourceDescBuilder {
             columns.clone(),
             self.connector_message_buffer_size,
             psrser_config,
-            self.rate_limit,
         )?;
 
         Ok(SourceDesc {
@@ -213,7 +209,6 @@ pub mod test_utils {
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
             pk_indices,
-            rate_limit: None,
         }
     }
 }

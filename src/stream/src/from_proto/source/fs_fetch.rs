@@ -56,7 +56,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
-            source.rate_limit.map(|x| x as _),
         );
 
         let source_ctrl_opts = SourceCtrlOpts {

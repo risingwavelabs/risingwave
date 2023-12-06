@@ -71,7 +71,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     // We should consdier add back the "pk_column_ids" field removed by #8841 in
                     // StreamSource
                     params.info.pk_indices.clone(),
-                    source.rate_limit.map(|x| x as _),
                 );
 
                 let source_ctrl_opts = SourceCtrlOpts {
