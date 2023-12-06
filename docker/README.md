@@ -53,7 +53,7 @@ To start a RisingWave standalone mode with minio backend, run
 docker-compose up
 ```
 
-### distributed cluster minio 
+### distributed cluster minio
 To start a RisingWave cluster with minio backend, run
 
 ```
