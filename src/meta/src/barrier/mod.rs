@@ -106,12 +106,20 @@ pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
 pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
+/// The reason why the cluster is recovering.
+enum RecoveryReason {
+    /// After bootstrap.
+    Bootstrap,
+    /// After failure.
+    Failover(MetaError),
+}
+
 /// Status of barrier manager.
 enum BarrierManagerStatus {
     /// Barrier manager is starting.
     Starting,
     /// Barrier manager is under recovery.
-    Recovering,
+    Recovering(RecoveryReason),
     /// Barrier manager is running.
     Running,
 }
@@ -566,10 +574,19 @@ impl GlobalBarrierManager {
         (join_handle, shutdown_tx)
     }
 
-    /// Return whether the barrier manager is running.
-    pub async fn is_running(&self) -> bool {
+    /// Check the status of barrier manager, return error if it is not `Running`.
+    pub async fn check_status_running(&self) -> MetaResult<()> {
         let status = self.status.lock().await;
-        matches!(*status, BarrierManagerStatus::Running)
+        match &*status {
+            BarrierManagerStatus::Starting
+            | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
+                bail!("The cluster is bootstrapping")
+            }
+            BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
+                Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
+            }
+            BarrierManagerStatus::Running => Ok(()),
+        }
     }
 
     /// Set barrier manager status.
@@ -631,7 +648,8 @@ impl GlobalBarrierManager {
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap))
+                .await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
@@ -1010,7 +1028,10 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
+                err.clone(),
+            )))
+            .await;
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
