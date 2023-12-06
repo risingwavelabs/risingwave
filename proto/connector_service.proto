@@ -41,10 +41,6 @@ message SinkWriterStreamRequest {
     SinkPayloadFormat format = 2;
   }
 
-  message BeginEpoch {
-    uint64 epoch = 1;
-  }
-
   message WriteBatch {
     message JsonPayload {
       message RowOp {
@@ -76,9 +72,13 @@ message SinkWriterStreamRequest {
     bool is_checkpoint = 2;
   }
 
+  // reserve for previous BeginEpoch to avoid protobuf breaking change
+  // though there is no harm.
+  reserved 2;
+  reserved "begin_epoch";
+
   oneof request {
     StartSink start = 1;
-    BeginEpoch begin_epoch = 2;
     WriteBatch write_batch = 3;
     Barrier barrier = 4;
   }
