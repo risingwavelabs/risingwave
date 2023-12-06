@@ -414,16 +414,22 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn split_vnode(&self) -> (VirtualNode, &[u8]) {
+        debug_assert!(
+            self.0.as_ref().len() >= VirtualNode::SIZE,
+            "too short table key: {:?}",
+            self.0.as_ref()
+        );
+        let (vnode, inner_key) = self.0.as_ref().split_array_ref::<{ VirtualNode::SIZE }>();
+        (VirtualNode::from_be_bytes(*vnode), inner_key)
+    }
+
     pub fn vnode_part(&self) -> VirtualNode {
-        VirtualNode::from_be_bytes(
-            self.0.as_ref()[..VirtualNode::SIZE]
-                .try_into()
-                .expect("slice with incorrect length"),
-        )
+        self.split_vnode().0
     }
 
     pub fn key_part(&self) -> &[u8] {
-        &self.0.as_ref()[VirtualNode::SIZE..]
+        self.split_vnode().1
     }
 }
 
@@ -442,6 +448,16 @@ impl EstimateSize for TableKey<Bytes> {
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
+}
+
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
