@@ -167,13 +167,11 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
         // advance key and watermark in an interleave manner until nothing
         // changed after the method is called.
         loop {
-            // here we assume that before calling this method, it was an operation on key,
-            // so we call advance_watermark anyway at first.
-            if !self.advance_watermark() {
+            if !self.advance_key().await? {
                 break;
             }
 
-            if !self.advance_key().await? {
+            if !self.advance_watermark() {
                 break;
             }
         }
