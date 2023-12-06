@@ -23,6 +23,8 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
@@ -64,13 +66,54 @@ public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
+    private static final String RESPONSE_RESULT_OK = "Ok";
+
+    private static final String RESPONSE_RESULT_ERR = "Err";
+
     private final EsSinkConfig config;
     private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
     // To be shared with the listener thread, so it must be thread-safe
-    private final List<String> synchronizedErrorList;
+    private final BlockingQueue<EsWriteResultResp> blockingQueue;
+
+    private int taskCount;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
+
+    class EsWriteResultResp {
+        private String type;
+        private String errorMsg;
+
+        private Integer numberOfActions;
+
+        public boolean isOk() {
+            if (type.equals(RESPONSE_RESULT_OK)) {
+                return true;
+            } else if (type.equals(RESPONSE_RESULT_ERR)) {
+                return false;
+            } else {
+                throw new RuntimeException("Es response result type must be `Ok` or `Err`");
+            }
+        }
+
+        public EsWriteResultResp(String type, int numberOfActions) {
+            this.type = type;
+            this.numberOfActions = numberOfActions;
+        }
+
+        public EsWriteResultResp(String type, String errorMsg) {
+            this.type = type;
+            this.errorMsg = errorMsg;
+        }
+
+        public String getErrorMsg() {
+            return errorMsg;
+        }
+
+        public int getNumberOfActions() {
+            return numberOfActions;
+        }
+    }
 
     public EsSink(EsSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
@@ -83,7 +126,8 @@ public class EsSink extends SinkWriterBase {
 
         this.config = config;
 
-        this.synchronizedErrorList = Collections.synchronizedList(new ArrayList<>());
+        this.blockingQueue = new LinkedBlockingQueue<>();
+        this.taskCount = 0;
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         this.client =
@@ -158,17 +202,16 @@ public class EsSink extends SinkWriterBase {
 
     private BulkProcessor createBulkProcessor() {
         BulkProcessor.Builder builder =
-                applyBulkConfig(
-                        this.client, this.config, new BulkListener(this.synchronizedErrorList));
+                applyBulkConfig(this.client, this.config, new BulkListener(this.blockingQueue));
         return builder.build();
     }
 
     private class BulkListener implements BulkProcessor.Listener {
         // To be shared with the main thread, so it must be thread-safe
-        private final List<String> synchronizedErrorList;
+        private final BlockingQueue<EsWriteResultResp> blockingQueue;
 
-        public BulkListener(List<String> synchronizedErrorList) {
-            this.synchronizedErrorList = synchronizedErrorList;
+        public BulkListener(BlockingQueue<EsWriteResultResp> blockingQueue) {
+            this.blockingQueue = blockingQueue;
         }
 
         /** This method is called just before bulk is executed. */
@@ -185,8 +228,10 @@ public class EsSink extends SinkWriterBase {
                         String.format(
                                 "Bulk of %d actions failed. Failure: %s",
                                 request.numberOfActions(), response.buildFailureMessage());
-                synchronizedErrorList.add(errMessage);
+                blockingQueue.add(new EsWriteResultResp(RESPONSE_RESULT_ERR, errMessage));
             } else {
+                blockingQueue.add(
+                        new EsWriteResultResp(RESPONSE_RESULT_OK, request.numberOfActions()));
                 LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
         }
@@ -198,7 +243,7 @@ public class EsSink extends SinkWriterBase {
                     String.format(
                             "Bulk of %d actions failed. Failure: %s",
                             request.numberOfActions(), failure.getMessage());
-            synchronizedErrorList.add(errMessage);
+            blockingQueue.add(new EsWriteResultResp(RESPONSE_RESULT_ERR, errMessage));
         }
     }
 
@@ -298,12 +343,14 @@ public class EsSink extends SinkWriterBase {
 
         UpdateRequest updateRequest =
                 new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
+        this.taskCount++;
         bulkProcessor.add(updateRequest);
     }
 
     private void processDelete(SinkRow row) {
         final String key = buildId(row);
         DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
+        this.taskCount++;
         bulkProcessor.add(deleteRequest);
     }
 
@@ -324,17 +371,6 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
-    private void checkWriterError() {
-        StringBuilder stringBuilder = new StringBuilder();
-        for (int i = 0; i < this.synchronizedErrorList.size(); i++) {
-            stringBuilder.append(
-                    "The No." + i + " error is" + this.synchronizedErrorList.get(i) + "\n");
-        }
-        if (stringBuilder.length() > 0) {
-            throw new RuntimeException("Fail to WriterEsSink: " + stringBuilder.toString());
-        }
-    }
-
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
@@ -345,15 +381,20 @@ public class EsSink extends SinkWriterBase {
                 throw new RuntimeException(ex);
             }
         }
-        checkWriterError();
     }
 
     @Override
     public void sync() {
         try {
-            bulkProcessor.awaitClose(1, TimeUnit.SECONDS);
-            checkWriterError();
-            this.bulkProcessor = createBulkProcessor();
+            while (this.taskCount != 0) {
+                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
+                if (esWriteResultResp != null && esWriteResultResp.isOk()) {
+                    this.taskCount -= esWriteResultResp.getNumberOfActions();
+                } else if (esWriteResultResp != null && !esWriteResultResp.isOk()) {
+                    throw new RuntimeException(
+                            String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
+                }
+            }
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
