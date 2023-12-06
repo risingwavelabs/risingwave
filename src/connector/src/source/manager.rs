@@ -33,6 +33,10 @@ pub struct SourceColumnDesc {
 
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
+
+    // `additional_column_type` and `column_type` are orthogonal
+    // `additional_column_type` is used to indicate the column is from which part of the message
+    // `column_type` is used to indicate the type of the column, only used in cdc scenario
     pub additional_column_type: AdditionalColumnType,
 }
 

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId, DEFAULT_KEY_COLUMN_NAME};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::plan_common::{AdditionalColumnType, FormatType, PbEncodeType};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -52,6 +54,29 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
                 let source_info = source.get_info()?;
+
+                let mut source_columns = source.columns.clone();
+
+                {
+                    // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
+                    // for upsert and (avro | protobuf) overwrite the `_rw_key` column's ColumnDesc.additional_column_type to Key
+                    if source_info.format() == FormatType::Upsert
+                        && (source_info.row_encode() == PbEncodeType::Avro
+                            || source_info.row_encode() == PbEncodeType::Protobuf)
+                    {
+                        let _ = source_columns.iter_mut().map(|c| {
+                            let _ = c.column_desc.as_mut().map(|desc| {
+                                let is_bytea = desc
+                                    .get_column_type()
+                                    .map(|col_type| col_type.type_name == PbTypeName::Bytea as i32)
+                                    .unwrap();
+                                if desc.name == DEFAULT_KEY_COLUMN_NAME && is_bytea {
+                                    desc.additional_column_type = AdditionalColumnType::Key as i32;
+                                }
+                            });
+                        });
+                    }
+                }
 
                 let source_desc_builder = SourceDescBuilder::new(
                     source.columns.clone(),
