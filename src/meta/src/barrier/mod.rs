@@ -925,7 +925,7 @@ impl GlobalBarrierManager {
             .map_err(Into::into);
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
-            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
+            .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in

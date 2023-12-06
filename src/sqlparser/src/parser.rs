@@ -1405,6 +1405,8 @@ impl Parser {
             Token::QuestionMark => Some(BinaryOperator::Exists),
             Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
             Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
+            Token::AtQuestionMark => Some(BinaryOperator::PathExists),
+            Token::AtAt => Some(BinaryOperator::PathMatch),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1749,7 +1751,9 @@ impl Parser {
             | Token::ArrowAt
             | Token::QuestionMark
             | Token::QuestionMarkPipe
-            | Token::QuestionMarkAmpersand => Ok(P::Other),
+            | Token::QuestionMarkAmpersand
+            | Token::AtQuestionMark
+            | Token::AtAt => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {

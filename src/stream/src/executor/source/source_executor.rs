@@ -28,6 +28,7 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -238,7 +239,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
         GLOBAL_ERROR_METRICS.user_source_reader_error.report([
             "SourceReaderError".to_owned(),
-            e.to_string(),
+            e.to_report_string(),
             "SourceExecutor".to_owned(),
             self.actor_ctx.id.to_string(),
             core.source_id.to_string(),

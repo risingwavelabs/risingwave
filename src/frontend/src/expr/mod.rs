@@ -18,7 +18,7 @@ use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -163,6 +163,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_null(element_type: DataType) -> Self {
         Literal::new(None, element_type).into()
+    }
+
+    /// A literal jsonb value.
+    #[inline(always)]
+    pub fn literal_jsonb(v: JsonbVal) -> Self {
+        Literal::new(Some(v.into()), DataType::Jsonb).into()
     }
 
     /// A literal list value.

@@ -27,6 +27,7 @@ use prometheus::core::{
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
 use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 pub fn __extract_counter_builder<P: Atomic>(
@@ -188,10 +189,10 @@ impl<T: MetricVecBuilder, const N: usize> Collector for LabelGuardedMetricVec<T,
                 .remove_label_values(&labels.each_ref().map(|s| s.as_str()))
             {
                 warn!(
-                    "err when delete metrics of {:?} of labels {:?}. Err {:?}",
+                    error = %e.as_report(),
+                    "err when delete metrics of {:?} of labels {:?}",
                     self.inner.desc().first().expect("should have desc").fq_name,
                     self.labels,
-                    e,
                 );
             }
         }

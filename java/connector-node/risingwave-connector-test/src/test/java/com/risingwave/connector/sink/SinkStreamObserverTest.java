@@ -149,53 +149,11 @@ public class SinkStreamObserverTest {
                                         .setIsCheckpoint(true)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterStreamRequest startEpoch =
-                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
-                        .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
-                                        .newBuilder()
-                                        .setEpoch(0)
-                                        .build())
-                        .build();
-        ConnectorServiceProto.SinkWriterStreamRequest duplicateStartEpoch =
-                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
-                        .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
-                                        .newBuilder()
-                                        .setEpoch(0)
-                                        .build())
-                        .build();
 
         // test validation of start epoch
-        boolean exceptionThrown = false;
-        try {
-            sinkWriterStreamObserver = getMockSinkStreamObserver(createNoisyFailResponseObserver());
-            sinkWriterStreamObserver.onNext(startSink);
-            sinkWriterStreamObserver.onNext(firstSync);
-        } catch (RuntimeException e) {
-            exceptionThrown = true;
-            Assert.assertTrue(e.getMessage().toLowerCase().contains("epoch is not started"));
-        }
-        if (!exceptionThrown) {
-            Assert.fail(
-                    "Expected exception not thrown: `Epoch is not started. Invoke `StartEpoch`.`");
-        }
-
-        exceptionThrown = false;
-        try {
-            sinkWriterStreamObserver = getMockSinkStreamObserver(createNoisyFailResponseObserver());
-            sinkWriterStreamObserver.onNext(startSink);
-            sinkWriterStreamObserver.onNext(startEpoch);
-            sinkWriterStreamObserver.onNext(duplicateStartEpoch);
-        } catch (RuntimeException e) {
-            exceptionThrown = true;
-            Assert.assertTrue(
-                    e.getMessage().toLowerCase().contains("new epoch id should be larger"));
-        }
-        if (!exceptionThrown) {
-            Assert.fail(
-                    "Expected exception not thrown: `invalid epoch: new epoch ID should be larger than current epoch`");
-        }
+        sinkWriterStreamObserver = getMockSinkStreamObserver(createNoisyFailResponseObserver());
+        sinkWriterStreamObserver.onNext(startSink);
+        sinkWriterStreamObserver.onNext(firstSync);
     }
 
     @Test
@@ -208,14 +166,6 @@ public class SinkStreamObserverTest {
                                 ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .setSinkParam(fileSinkParam))
-                        .build();
-        ConnectorServiceProto.SinkWriterStreamRequest firstStartEpoch =
-                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
-                        .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
-                                        .newBuilder()
-                                        .setEpoch(0)
-                                        .build())
                         .build();
 
         ConnectorServiceProto.SinkWriterStreamRequest firstWrite =
@@ -249,22 +199,35 @@ public class SinkStreamObserverTest {
                                         .build())
                         .build();
 
-        ConnectorServiceProto.SinkWriterStreamRequest secondStartEpoch =
-                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
-                        .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
-                                        .newBuilder()
-                                        .setEpoch(1)
-                                        .build())
-                        .build();
-
         ConnectorServiceProto.SinkWriterStreamRequest secondWrite =
                 ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setWriteBatch(
                                 ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch
                                         .newBuilder()
-                                        .setEpoch(0)
+                                        .setEpoch(1)
                                         .setBatchId(2)
+                                        .setJsonPayload(
+                                                ConnectorServiceProto.SinkWriterStreamRequest
+                                                        .WriteBatch.JsonPayload.newBuilder()
+                                                        .addRowOps(
+                                                                ConnectorServiceProto
+                                                                        .SinkWriterStreamRequest
+                                                                        .WriteBatch.JsonPayload
+                                                                        .RowOp.newBuilder()
+                                                                        .setOpType(Op.INSERT)
+                                                                        .setLine(
+                                                                                "{\"id\": 2, \"name\": \"test\"}")
+                                                                        .build()))
+                                        .build())
+                        .build();
+
+        ConnectorServiceProto.SinkWriterStreamRequest secondWriteWrongEpoch =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
+                        .setWriteBatch(
+                                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch
+                                        .newBuilder()
+                                        .setEpoch(2)
+                                        .setBatchId(3)
                                         .setJsonPayload(
                                                 ConnectorServiceProto.SinkWriterStreamRequest
                                                         .WriteBatch.JsonPayload.newBuilder()
@@ -284,7 +247,6 @@ public class SinkStreamObserverTest {
         try {
             sinkWriterStreamObserver = getMockSinkStreamObserver(createNoisyFailResponseObserver());
             sinkWriterStreamObserver.onNext(startSink);
-            sinkWriterStreamObserver.onNext(firstStartEpoch);
             sinkWriterStreamObserver.onNext(firstWrite);
             sinkWriterStreamObserver.onNext(firstWrite);
         } catch (RuntimeException e) {
@@ -299,18 +261,17 @@ public class SinkStreamObserverTest {
         try {
             sinkWriterStreamObserver = getMockSinkStreamObserver(createNoisyFailResponseObserver());
             sinkWriterStreamObserver.onNext(startSink);
-            sinkWriterStreamObserver.onNext(firstStartEpoch);
             sinkWriterStreamObserver.onNext(firstWrite);
             sinkWriterStreamObserver.onNext(firstSync);
-            sinkWriterStreamObserver.onNext(secondStartEpoch);
             sinkWriterStreamObserver.onNext(secondWrite); // with mismatched epoch
+            sinkWriterStreamObserver.onNext(secondWriteWrongEpoch);
         } catch (RuntimeException e) {
             exceptionThrown = true;
             Assert.assertTrue(e.getMessage().toLowerCase().contains("invalid epoch"));
         }
         if (!exceptionThrown) {
             Assert.fail(
-                    "Expected exception not thrown: `invalid epoch: expected write to epoch 1, got 0`");
+                    "Expected exception not thrown: `invalid epoch: expected write to epoch 2, got 1`");
         }
     }
 }
