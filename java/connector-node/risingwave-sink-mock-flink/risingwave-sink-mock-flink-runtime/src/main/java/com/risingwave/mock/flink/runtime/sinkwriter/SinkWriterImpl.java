@@ -89,7 +89,7 @@ public class SinkWriterImpl<CommT> implements com.risingwave.connector.api.sink.
                 List<CommT> objects = writer.prepareCommit(true);
                 if (committer.isPresent()) {
                     committer.get().commit(objects);
-                } else if (objects.isEmpty()) {
+                } else if (!objects.isEmpty()) {
                     throw new RuntimeException("Flink sink v1 committer is null");
                 }
             } catch (Exception e) {

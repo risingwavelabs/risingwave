@@ -118,8 +118,7 @@ public class SinkWriterV2Impl<CommT> implements com.risingwave.connector.api.sin
                                             })
                                     .collect(Collectors.toList());
                     committer.get().commit(collect);
-                }
-                if (!objects.isEmpty()) {
+                } else if (!objects.isEmpty()) {
                     throw new RuntimeException(
                             "We need to commit Committable, But Committer is null");
                 }
