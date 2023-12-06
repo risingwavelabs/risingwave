@@ -831,7 +831,13 @@ impl ParseTo for CreateSinkStatement {
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
-            CreateSink::From(from_name)
+            let sink_from = CreateSink::From(from_name);
+            if p.peek_nth_any_of_keywords(0, &[Keyword::WHERE]) {
+                return Err(ParserError::ParserError(
+                    "Unexpected WHERE keyword after the FROM clause".to_string(),
+                ));
+            }
+            sink_from
         } else if p.parse_keyword(Keyword::AS) {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)
