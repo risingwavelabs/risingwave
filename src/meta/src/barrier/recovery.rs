@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
@@ -39,8 +40,9 @@ use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
-use crate::manager::WorkerId;
-use crate::model::{BarrierManagerState, MigrationPlan};
+use crate::controller::catalog::ReleaseContext;
+use crate::manager::{MetadataFucker, WorkerId};
+use crate::model::{ActorId, BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions};
 use crate::MetaResult;
 
@@ -66,57 +68,96 @@ impl GlobalBarrierManager {
         .await
     }
 
-    /// Please look at `CatalogManager::clean_dirty_tables` for more details.
-    /// This should only be called for bootstrap recovery.
-    async fn clean_dirty_tables(&self) -> MetaResult<()> {
-        let fragment_manager = self.fragment_manager.clone();
-        self.catalog_manager
-            .clean_dirty_tables(fragment_manager)
-            .await?;
-        Ok(())
-    }
+    /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
+    async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                // Please look at `CatalogManager::clean_dirty_tables` for more details.
+                fucker
+                    .catalog_manager
+                    .clean_dirty_tables(fucker.fragment_manager.clone())
+                    .await?;
 
-    /// Clean up all dirty streaming jobs.
-    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
-        let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
-        let to_drop_table_fragments = self
-            .fragment_manager
-            .list_dirty_table_fragments(|tf| !stream_job_ids.contains(&tf.table_id().table_id))
-            .await;
-        let to_drop_streaming_ids = to_drop_table_fragments
-            .iter()
-            .map(|t| t.table_id())
-            .collect();
+                // Clean dirty fragments.
+                let stream_job_ids = fucker.catalog_manager.list_stream_job_ids().await?;
+                let to_drop_table_fragments = fucker
+                    .fragment_manager
+                    .list_dirty_table_fragments(|tf| {
+                        !stream_job_ids.contains(&tf.table_id().table_id)
+                    })
+                    .await;
+                let to_drop_streaming_ids = to_drop_table_fragments
+                    .iter()
+                    .map(|t| t.table_id())
+                    .collect();
+                debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
+                fucker
+                    .fragment_manager
+                    .drop_table_fragments_vec(&to_drop_streaming_ids)
+                    .await?;
 
-        self.fragment_manager
-            .drop_table_fragments_vec(&to_drop_streaming_ids)
-            .await?;
+                // unregister compaction group for dirty table fragments.
+                self.hummock_manager
+                    .unregister_table_fragments_vec(&to_drop_table_fragments)
+                    .await;
 
-        // unregister compaction group for dirty table fragments.
-        self.hummock_manager
-            .unregister_table_fragments_vec(&to_drop_table_fragments)
-            .await;
+                // clean up source connector dirty changes.
+                self.source_manager
+                    .drop_source_change(&to_drop_table_fragments)
+                    .await;
+            }
+            MetadataFucker::V2(fucker) => {
+                let ReleaseContext {
+                    state_table_ids,
+                    source_ids,
+                    ..
+                } = fucker
+                    .catalog_controller
+                    .clean_foreground_creating_jobs()
+                    .await?;
 
-        // clean up source connector dirty changes.
-        self.source_manager
-            .drop_source_change(&to_drop_table_fragments)
-            .await;
+                // unregister compaction group for cleaned state tables.
+                self.hummock_manager
+                    .unregister_table_ids_fail_fast(
+                        &state_table_ids
+                            .into_iter()
+                            .map(|id| id as StateTableId)
+                            .collect_vec(),
+                    )
+                    .await;
+
+                // unregister cleaned sources.
+                self.source_manager
+                    .unregister_sources(source_ids.into_iter().map(|id| id as u32).collect())
+                    .await;
+            }
+        }
 
         Ok(())
     }
 
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
-        let creating_tables = self.catalog_manager.list_creating_background_mvs().await;
-        let creating_table_ids = creating_tables
-            .iter()
-            .map(|t| TableId { table_id: t.id })
-            .collect_vec();
+        match &self.metadata_fucker {
+            MetadataFucker::V1(_) => self.recover_background_mv_progress_v1().await,
+            MetadataFucker::V2(_) => self.recover_background_mv_progress_v2().await,
+        }
+    }
+
+    async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
+        let mviews = fucker.catalog_manager.list_creating_background_mvs().await;
+        let creating_mview_ids = mviews.iter().map(|m| TableId::new(m.id)).collect_vec();
+        let mview_definitions = mviews
+            .into_iter()
+            .map(|m| (TableId::new(m.id), m.definition))
+            .collect::<HashMap<_, _>>();
 
         let mut senders = HashMap::new();
         let mut receivers = Vec::new();
-        for table_id in creating_table_ids.iter().copied() {
+        for table_id in creating_mview_ids.iter().copied() {
             let (finished_tx, finished_rx) = oneshot::channel();
             senders.insert(
                 table_id,
@@ -126,34 +167,33 @@ impl GlobalBarrierManager {
                 },
             );
 
-            let fragments = self
+            let fragments = fucker
                 .fragment_manager
                 .select_table_fragments_by_table_id(&table_id)
                 .await?;
             let internal_table_ids = fragments.internal_table_ids();
-            let internal_tables = self.catalog_manager.get_tables(&internal_table_ids).await;
-            let table = self.catalog_manager.get_tables(&[table_id.table_id]).await;
+            let internal_tables = fucker.catalog_manager.get_tables(&internal_table_ids).await;
+            let table = fucker
+                .catalog_manager
+                .get_tables(&[table_id.table_id])
+                .await;
             assert_eq!(table.len(), 1, "should only have 1 materialized table");
             let table = table.into_iter().next().unwrap();
             receivers.push((table, internal_tables, finished_rx));
         }
 
-        let table_map = self
+        let table_map = fucker
             .fragment_manager
-            .get_table_id_stream_scan_actor_mapping(&creating_table_ids)
+            .get_table_id_stream_scan_actor_mapping(&creating_mview_ids)
             .await;
-        let table_fragment_map = self
+        let table_fragment_map = fucker
             .fragment_manager
-            .get_table_id_table_fragment_map(&creating_table_ids)
+            .get_table_id_table_fragment_map(&creating_mview_ids)
             .await?;
-        let upstream_mv_counts = self
+        let upstream_mv_counts = fucker
             .fragment_manager
-            .get_upstream_relation_counts(&creating_table_ids)
+            .get_upstream_relation_counts(&creating_mview_ids)
             .await;
-        let definitions: HashMap<_, _> = creating_tables
-            .into_iter()
-            .map(|t| (TableId { table_id: t.id }, t.definition))
-            .collect();
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
@@ -161,15 +201,15 @@ impl GlobalBarrierManager {
             *tracker = CreateMviewProgressTracker::recover(
                 table_map.into(),
                 upstream_mv_counts.into(),
-                definitions.into(),
+                mview_definitions.into(),
                 version_stats,
                 senders.into(),
                 table_fragment_map.into(),
-                self.fragment_manager.clone(),
+                self.metadata_fucker.clone(),
             );
         }
         for (table, internal_tables, finished) in receivers {
-            let catalog_manager = self.catalog_manager.clone();
+            let catalog_manager = fucker.catalog_manager.clone();
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", table.id);
@@ -202,6 +242,88 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
+    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
+        let MetadataFucker::V2(fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
+        let mviews = fucker
+            .catalog_controller
+            .list_background_creating_mviews()
+            .await?;
+
+        let mut senders = HashMap::new();
+        let mut receivers = Vec::new();
+        let mut table_fragment_map = HashMap::new();
+        let mut mview_definitions = HashMap::new();
+        let mut upstream_mv_counts = HashMap::new();
+        for mview in &mviews {
+            let (finished_tx, finished_rx) = oneshot::channel();
+            let table_id = TableId::new(mview.table_id as _);
+            senders.insert(
+                table_id,
+                Notifier {
+                    finished: Some(finished_tx),
+                    ..Default::default()
+                },
+            );
+
+            let table_fragments = fucker
+                .catalog_controller
+                .get_job_fragments_by_id(mview.table_id)
+                .await?;
+            let table_fragments = TableFragments::from_protobuf(table_fragments);
+            upstream_mv_counts.insert(table_id, table_fragments.dependent_table_ids());
+            table_fragment_map.insert(table_id, table_fragments);
+            mview_definitions.insert(table_id, mview.definition.clone());
+            receivers.push((mview.table_id, finished_rx));
+        }
+
+        let table_map: HashMap<TableId, HashSet<ActorId>> = table_fragment_map
+            .iter()
+            .map(|(id, tf)| (*id, tf.actor_ids().into_iter().collect()))
+            .collect();
+        let version_stats = self.hummock_manager.get_version_stats().await;
+        // If failed, enter recovery mode.
+        {
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
+                table_map.into(),
+                upstream_mv_counts.into(),
+                mview_definitions.into(),
+                version_stats,
+                senders.into(),
+                table_fragment_map.into(),
+                self.metadata_fucker.clone(),
+            );
+        }
+        for (id, finished) in receivers {
+            let catalog_controller = fucker.catalog_controller.clone();
+            tokio::spawn(async move {
+                let res: MetaResult<()> = try {
+                    tracing::debug!("recovering stream job {}", id);
+                    finished
+                        .await
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+                    tracing::debug!("finished stream job {}", id);
+                    catalog_controller.finish_streaming_job(id).await?;
+                };
+                if let Err(e) = &res {
+                    tracing::error!(
+                        "stream job {} interrupted, will retry after recovery: {e:?}",
+                        id
+                    );
+                    // NOTE(kwannoel): We should not cleanup stream jobs,
+                    // we don't know if it's just due to CN killed,
+                    // or the job has actually failed.
+                    // Users have to manually cancel the stream jobs,
+                    // if they want to clean it.
+                }
+            });
+        }
+
+        Ok(())
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -220,12 +342,9 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
-        self.clean_dirty_tables()
+        self.clean_dirty_streaming_jobs()
             .await
-            .expect("clean dirty tables should not fail");
-        self.clean_dirty_fragments()
-            .await
-            .expect("clean dirty fragments");
+            .expect("clean dirty streaming jobs");
 
         self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
@@ -247,10 +366,14 @@ impl GlobalBarrierManager {
                     // This is a quick path to accelerate the process of dropping streaming jobs. Not that
                     // some table fragments might have been cleaned as dirty, but it's fine since the drop
                     // interface is idempotent.
-                    let to_drop_tables = self.scheduled_barriers.pre_apply_drop_scheduled().await;
-                    self.fragment_manager
-                        .drop_table_fragments_vec(&to_drop_tables)
-                        .await?;
+                    if let MetadataFucker::V1(fucker) = &self.metadata_fucker {
+                        let to_drop_tables =
+                            self.scheduled_barriers.pre_apply_drop_scheduled().await;
+                        fucker
+                            .fragment_manager
+                            .drop_table_fragments_vec(&to_drop_tables)
+                            .await?;
+                    }
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
@@ -301,8 +424,7 @@ impl GlobalBarrierManager {
 
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
-                        self.fragment_manager.clone(),
-                        self.catalog_manager.clone(),
+                        self.metadata_fucker.clone(),
                         self.hummock_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
@@ -373,6 +495,24 @@ impl GlobalBarrierManager {
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        match &self.metadata_fucker {
+            MetadataFucker::V1(_) => self.migrate_actors_v1(info).await,
+            MetadataFucker::V2(_) => self.migrate_actors_v2(info).await,
+        }
+    }
+
+    async fn migrate_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
+        let MetadataFucker::V2(_fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
+        unimplemented!("implement migration funcs in sql backend")
+    }
+
+    /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
+    async fn migrate_actors_v1(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
         debug!("start migrate actors.");
 
         // 1. get expired workers.
@@ -388,7 +528,8 @@ impl GlobalBarrierManager {
         }
         let migration_plan = self.generate_migration_plan(expired_workers).await?;
         // 2. start to migrate fragment one-by-one.
-        self.fragment_manager
+        fucker
+            .fragment_manager
             .migrate_fragment_actors(&migration_plan)
             .await?;
         // 3. remove the migration plan.
@@ -399,6 +540,23 @@ impl GlobalBarrierManager {
     }
 
     async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        match &self.metadata_fucker {
+            MetadataFucker::V1(_) => self.scale_actors_v1(info).await,
+            MetadataFucker::V2(_) => self.scale_actors_v2(info).await,
+        }
+    }
+
+    async fn scale_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
+        let MetadataFucker::V2(_fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
+        unimplemented!("implement auto-scale funcs in sql backend")
+    }
+
+    async fn scale_actors_v1(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
         debug!("start scaling-in offline actors.");
 
         let expired_workers: HashSet<WorkerId> = info
@@ -413,7 +571,7 @@ impl GlobalBarrierManager {
             return Ok(false);
         }
 
-        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+        let all_worker_parallel_units = fucker.fragment_manager.all_worker_parallel_units().await;
 
         let expired_worker_parallel_units: HashMap<_, _> = all_worker_parallel_units
             .into_iter()
@@ -421,7 +579,7 @@ impl GlobalBarrierManager {
             .collect();
 
         let fragment_worker_changes = {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let guard = fucker.fragment_manager.get_fragment_read_guard().await;
             let mut policy = HashMap::new();
             for table_fragments in guard.table_fragments().values() {
                 for fragment_id in table_fragments.fragment_ids() {
@@ -467,7 +625,8 @@ impl GlobalBarrierManager {
                 e.to_string()
             );
 
-            self.fragment_manager
+            fucker
+                .fragment_manager
                 .cancel_apply_reschedules(applied_reschedules)
                 .await;
 
@@ -484,9 +643,13 @@ impl GlobalBarrierManager {
         &self,
         expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unreachable!()
+        };
+
         let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
 
-        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+        let all_worker_parallel_units = fucker.fragment_manager.all_worker_parallel_units().await;
 
         let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_parallel_units
             .into_iter()
@@ -530,7 +693,7 @@ impl GlobalBarrierManager {
         let start = Instant::now();
         // if in-used expire parallel units are not empty, should wait for newly joined worker.
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let mut new_parallel_units = self
+            let mut new_parallel_units = fucker
                 .cluster_manager
                 .list_active_streaming_parallel_units()
                 .await;
@@ -606,7 +769,22 @@ impl GlobalBarrierManager {
             }));
         }
 
-        let mut node_actors = self.fragment_manager.all_node_actors(false).await;
+        let mut node_actors = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.fragment_manager.all_node_actors(false).await,
+            MetadataFucker::V2(fucker) => {
+                let table_fragments = fucker.catalog_controller.table_fragments().await?;
+                let mut actor_maps = HashMap::new();
+                for (_, fragments) in table_fragments {
+                    let tf = TableFragments::from_protobuf(fragments);
+                    for (node_id, actor_ids) in tf.worker_actors(false) {
+                        let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                        node_actor_ids.extend(actor_ids);
+                    }
+                }
+                actor_maps
+            }
+        };
+
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;

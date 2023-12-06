@@ -34,6 +34,7 @@ pub mod catalog;
 pub mod cluster;
 pub mod fragment;
 pub mod rename;
+pub mod streaming_job;
 pub mod system_param;
 pub mod user;
 pub mod utils;
@@ -127,14 +128,14 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
             cleaned_by_watermark: value.0.cleaned_by_watermark,
-            stream_job_status: PbStreamJobStatus::from(value.0.job_status) as _,
-            create_type: PbCreateType::from(value.0.create_type) as _,
+            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            create_type: PbCreateType::Foreground as _,
             version: Some(value.0.version.0),
             optional_associated_source_id: value
                 .0
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
-            description: None,
+            description: value.0.description,
         }
     }
 }

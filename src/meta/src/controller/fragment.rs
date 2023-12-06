@@ -27,10 +27,15 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
+use risingwave_pb::meta::subscribe_response::{
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
+};
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, PbTableFragments};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, PbFragmentParallelUnitMapping, PbTableFragments,
+};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -45,7 +50,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{get_actor_dispatchers, get_parallel_unit_mapping};
-use crate::manager::ActorInfos;
+use crate::manager::{ActorInfos, LocalNotification};
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
@@ -70,6 +75,51 @@ impl CatalogControllerInner {
 }
 
 impl CatalogController {
+    pub(crate) async fn notify_fragment_mapping(
+        &self,
+        operation: NotificationOperation,
+        fragment_mappings: Vec<PbFragmentParallelUnitMapping>,
+    ) {
+        let fragment_ids = fragment_mappings
+            .iter()
+            .map(|mapping| mapping.fragment_id)
+            .collect_vec();
+        // notify all fragment mappings to frontend.
+        for fragment_mapping in fragment_mappings {
+            self.env
+                .notification_manager()
+                .notify_frontend(
+                    operation,
+                    NotificationInfo::ParallelUnitMapping(fragment_mapping),
+                )
+                .await;
+        }
+
+        // update serving vnode mappings.
+        // TODO: fix serving vnode mapping using metadata fucker.
+        match operation {
+            Operation::Add | Operation::Update => {
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
+                        fragment_ids,
+                    ))
+                    .await;
+            }
+            Operation::Delete => {
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
+                        fragment_ids,
+                    ))
+                    .await;
+            }
+            op => {
+                tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
+            }
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn extract_fragment_and_actors_from_table_fragments(
         PbTableFragments {
@@ -252,7 +302,7 @@ impl CatalogController {
             Vec<actor::Model>,
             HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         )>,
-        parallel_units_map: HashMap<u32, PbParallelUnit>,
+        parallel_units_map: &HashMap<u32, PbParallelUnit>,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
@@ -260,7 +310,7 @@ impl CatalogController {
 
         for (fragment, actors, actor_dispatcher) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
-                Self::compose_fragment(fragment, actors, actor_dispatcher, &parallel_units_map)?;
+                Self::compose_fragment(fragment, actors, actor_dispatcher, parallel_units_map)?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
@@ -553,7 +603,7 @@ impl CatalogController {
                 .timezone
                 .map(|tz| PbStreamEnvironment { timezone: tz }),
             fragment_info,
-            parallel_units_map,
+            &parallel_units_map,
         )
     }
 
@@ -604,10 +654,49 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
-        unimplemented!(
-            "This function is too heavy, we should avoid using it and implement others on demand."
-        )
+    // TODO: This function is too heavy, we should avoid using it and implement others on demand.
+    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
+        let inner = self.inner.read().await;
+        let jobs = StreamingJob::find().all(&inner.db).await?;
+        let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
+        let mut table_fragments = BTreeMap::new();
+        for job in jobs {
+            let fragment_actors = Fragment::find()
+                .find_with_related(Actor)
+                .filter(fragment::Column::JobId.eq(job.job_id))
+                .all(&inner.db)
+                .await?;
+            let mut actor_dispatchers = get_actor_dispatchers(
+                &inner.db,
+                fragment_actors
+                    .iter()
+                    .flat_map(|(_, actors)| actors.iter().map(|actor| actor.actor_id))
+                    .collect(),
+            )
+            .await?;
+            let mut fragment_info = vec![];
+            for (fragment, actors) in fragment_actors {
+                let mut dispatcher_info = HashMap::new();
+                for actor in &actors {
+                    if let Some(dispatchers) = actor_dispatchers.remove(&actor.actor_id) {
+                        dispatcher_info.insert(actor.actor_id, dispatchers);
+                    }
+                }
+                fragment_info.push((fragment, actors, dispatcher_info));
+            }
+            table_fragments.insert(
+                job.job_id as ObjectId,
+                Self::compose_table_fragments(
+                    job.job_id as _,
+                    job.job_status.into(),
+                    job.timezone.map(|tz| PbStreamEnvironment { timezone: tz }),
+                    fragment_info,
+                    &parallel_units_map,
+                )?,
+            );
+        }
+
+        Ok(table_fragments)
     }
 
     /// Check if the fragment type mask is injectable.
@@ -622,7 +711,7 @@ impl CatalogController {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
     /// collected
-    pub async fn load_all_actor(
+    pub async fn load_all_actors(
         &self,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
         check_state: impl Fn(PbActorState, ObjectId, ActorId) -> bool,

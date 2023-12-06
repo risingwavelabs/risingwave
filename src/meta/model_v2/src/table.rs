@@ -17,8 +17,8 @@ use risingwave_pb::catalog::PbHandleConflictBehavior;
 use sea_orm::entity::prelude::*;
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, FragmentId, I32Array, JobStatus,
-    ObjectId, Property, SourceId, TableId, TableVersion,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, Property,
+    SourceId, TableId, TableVersion,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
@@ -93,8 +93,6 @@ pub struct Model {
     pub dml_fragment_id: Option<FragmentId>,
     pub cardinality: Option<Cardinality>,
     pub cleaned_by_watermark: bool,
-    pub job_status: JobStatus,
-    pub create_type: CreateType,
     pub description: Option<String>,
     pub version: TableVersion,
 }

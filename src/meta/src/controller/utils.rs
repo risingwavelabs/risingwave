@@ -20,12 +20,14 @@ use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    actor_dispatcher, connection, function, index, object, object_dependency, schema, sink, source,
-    table, user, user_privilege, view, worker_property, ActorId, DataTypeArray, DatabaseId,
-    I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
+    actor_dispatcher, connection, fragment, function, index, object, object_dependency, schema,
+    sink, source, table, user, user_privilege, view, worker_property, ActorId, DataTypeArray,
+    DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId, SchemaId,
+    UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::common::PbParallelUnit;
+use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -614,5 +616,30 @@ where
         .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
         .into_iter()
         .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .collect())
+}
+
+/// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.
+pub async fn get_fragment_mappings<C>(
+    db: &C,
+    job_id: ObjectId,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
         .collect())
 }

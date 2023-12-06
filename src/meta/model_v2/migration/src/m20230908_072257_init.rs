@@ -562,8 +562,6 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Table::JobStatus).string().not_null())
-                    .col(ColumnDef::new(Table::CreateType).string().not_null())
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json().not_null())
                     .foreign_key(
@@ -1021,8 +1019,6 @@ enum Table {
     DmlFragmentId,
     Cardinality,
     CleanedByWatermark,
-    JobStatus,
-    CreateType,
     Description,
     Version,
 }

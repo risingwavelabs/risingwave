@@ -469,11 +469,6 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
-        // Add table fragments to meta store with state: `State::Initial`.
-        self.fragment_manager
-            .start_create_table_fragments(table_fragments.clone())
-            .await?;
-
         let table_id = table_fragments.table_id();
 
         let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
@@ -514,11 +509,6 @@ impl GlobalStreamManager {
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
-            .await?;
-
-        // Add table fragments to meta store with state: `State::Initial`.
-        self.fragment_manager
-            .start_create_table_fragments(table_fragments.clone())
             .await?;
 
         let dummy_table_id = table_fragments.table_id();

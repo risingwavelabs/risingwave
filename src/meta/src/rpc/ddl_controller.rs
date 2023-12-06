@@ -112,7 +112,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterName(alter_name_request::Object, String),
     AlterSourceColumn(Source),
-    AlterTableOwner(Object, UserId),
+    AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
@@ -283,7 +283,7 @@ impl DdlController {
                         .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
-                DdlCommand::AlterTableOwner(object, owner_id) => {
+                DdlCommand::AlterObjectOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
                 }
                 DdlCommand::AlterSetSchema(object, new_schema_id) => {
@@ -472,42 +472,56 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
-        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
-        let fragment_graph = self
-            .prepare_stream_job(&mut stream_job, fragment_graph)
+
+        // 1. Build fragment graph.
+        let fragment_graph =
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &stream_job)
+                .await?;
+        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
+
+        // 2. Set the graph-related fields and freeze the `stream_job`.
+        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+        stream_job.mark_initialized();
+        let stream_job = stream_job;
+
+        // 3. Persist tables.
+        self.catalog_manager
+            .start_create_stream_job_procedure(&stream_job, internal_tables.clone())
             .await?;
 
-        // Update the corresponding 'initiated_at' field.
-        stream_job.mark_initialized();
-
-        let mut internal_tables = vec![];
+        // 4. Build and persist stream job.
         let result = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
 
-            internal_tables = ctx.internal_tables();
+            // Add table fragments to meta store with state: `State::Initial`.
+            self.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
+                .await?;
 
-            match stream_job {
-                StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
+            match &stream_job {
+                StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                     Self::validate_cdc_table(table, &table_fragments).await?;
                 }
-                StreamingJob::Table(Some(ref source), ..) => {
+                StreamingJob::Table(Some(source), ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(ref sink) => {
+                StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
                 }
-                StreamingJob::Source(ref source) => {
+                StreamingJob::Source(source) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
                 _ => {}
             }
+
             (ctx, table_fragments)
         };
 
@@ -670,32 +684,6 @@ impl DdlController {
             .drop_streaming_jobs(streaming_job_ids)
             .await;
         Ok(version)
-    }
-
-    /// `prepare_stream_job` prepares a stream job and returns the stream fragment graph.
-    async fn prepare_stream_job(
-        &self,
-        stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<StreamFragmentGraph> {
-        // 1. Build fragment graph.
-        let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
-                .await?;
-
-        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
-
-        // 2. Set the graph-related fields and freeze the `stream_job`.
-        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
-        let stream_job = &*stream_job;
-
-        // 3. Mark current relation as "creating" and add reference count to dependent relations.
-        self.catalog_manager
-            .start_create_stream_job_procedure(stream_job, internal_tables)
-            .await?;
-
-        Ok(fragment_graph)
     }
 
     fn resolve_stream_parallelism(
@@ -1015,6 +1003,11 @@ impl DdlController {
                     fragment_graph,
                     table_col_index_mapping.clone(),
                 )
+                .await?;
+
+            // Add table fragments to meta store with state: `State::Initial`.
+            self.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
                 .await?;
 
             self.stream_manager

@@ -29,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -58,7 +59,7 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
-    WorkerId,
+    MetadataFucker, WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -168,11 +169,7 @@ pub struct GlobalBarrierManager {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    cluster_manager: ClusterManagerRef,
-
-    pub catalog_manager: CatalogManagerRef,
-
-    fragment_manager: FragmentManagerRef,
+    metadata_fucker: MetadataFucker,
 
     hummock_manager: HummockManagerRef,
 
@@ -533,9 +530,17 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let tracker = CreateMviewProgressTracker::new();
-        let scale_controller = Arc::new(ScaleController::new(
-            fragment_manager.clone(),
+
+        // TODO: init it with v2 if sql backend enabled.
+        let metadata_fucker = MetadataFucker::new_v1(
             cluster_manager.clone(),
+            catalog_manager,
+            fragment_manager.clone(),
+        );
+        // TODO: use metadata fucker in scale controller instead.
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager,
+            cluster_manager,
             source_manager.clone(),
             env.clone(),
         ));
@@ -544,9 +549,7 @@ impl GlobalBarrierManager {
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
             in_flight_barrier_nums,
-            cluster_manager,
-            catalog_manager,
-            fragment_manager,
+            metadata_fucker,
             hummock_manager,
             source_manager,
             scale_controller,
@@ -612,11 +615,23 @@ impl GlobalBarrierManager {
             self.in_flight_barrier_nums,
         );
 
-        if !self.enable_recovery && self.fragment_manager.has_any_table_fragments().await {
-            panic!(
-                "Some streaming jobs already exist in meta, please start with recovery enabled \
+        if !self.enable_recovery {
+            let job_exist = match &self.metadata_fucker {
+                MetadataFucker::V1(fucker) => {
+                    fucker.fragment_manager.has_any_table_fragments().await
+                }
+                MetadataFucker::V2(fucker) => fucker
+                    .catalog_controller
+                    .has_any_streaming_jobs()
+                    .await
+                    .unwrap(),
+            };
+            if job_exist {
+                panic!(
+                    "Some streaming jobs already exist in meta, please start with recovery enabled \
                 or clean up the metadata using `./risedev clean-data`"
-            );
+                );
+            }
         }
 
         let mut state = {
@@ -733,8 +748,7 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            self.fragment_manager.clone(),
-            self.catalog_manager.clone(),
+            self.metadata_fucker.clone(),
             self.hummock_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
@@ -1177,16 +1191,45 @@ impl GlobalBarrierManager {
     ) -> BarrierActorInfo {
         checkpoint_control.pre_resolve(command);
 
-        let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
-            checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
-        };
-        let all_nodes = self
-            .cluster_manager
-            .list_active_streaming_compute_nodes()
-            .await;
-        let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
+        let info = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
+                    checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
+                };
+                let all_nodes = fucker
+                    .cluster_manager
+                    .list_active_streaming_compute_nodes()
+                    .await;
+                let all_actor_infos = fucker.fragment_manager.load_all_actors(check_state).await;
 
-        let info = BarrierActorInfo::resolve(all_nodes, all_actor_infos);
+                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+            }
+            MetadataFucker::V2(fucker) => {
+                let check_state = |s: ActorState, table_id: ObjectId, actor_id: i32| {
+                    checkpoint_control.can_actor_send_or_collect(
+                        s,
+                        TableId::new(table_id as _),
+                        actor_id as _,
+                    )
+                };
+                let all_nodes = fucker
+                    .cluster_controller
+                    .list_active_streaming_workers()
+                    .await
+                    .unwrap();
+                let pu_mappings = all_nodes
+                    .iter()
+                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
+                    .collect();
+                let all_actor_infos = fucker
+                    .catalog_controller
+                    .load_all_actors(&pu_mappings, check_state)
+                    .await
+                    .unwrap();
+
+                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+            }
+        };
 
         checkpoint_control.post_resolve(command);
 
@@ -1197,18 +1240,43 @@ impl GlobalBarrierManager {
         let mut ddl_progress = self.tracker.lock().await.gen_ddl_progress();
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
-        for table in self.catalog_manager.list_persisted_creating_tables().await {
-            if table.table_type != TableType::MaterializedView as i32 {
-                continue;
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                for table in fucker
+                    .catalog_manager
+                    .list_persisted_creating_tables()
+                    .await
+                {
+                    if table.table_type != TableType::MaterializedView as i32 {
+                        continue;
+                    }
+                    if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
+                        e.insert(DdlProgress {
+                            id: table.id as u64,
+                            statement: table.definition,
+                            progress: "0.0%".into(),
+                        });
+                    }
+                }
             }
-            if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
-                e.insert(DdlProgress {
-                    id: table.id as u64,
-                    statement: table.definition,
-                    progress: "0.0%".into(),
-                });
+            MetadataFucker::V2(fucker) => {
+                let mviews = fucker
+                    .catalog_controller
+                    .list_background_creating_mviews()
+                    .await
+                    .unwrap();
+                for mview in mviews {
+                    if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
+                        e.insert(DdlProgress {
+                            id: mview.table_id as u64,
+                            statement: mview.definition,
+                            progress: "0.0%".into(),
+                        });
+                    }
+                }
             }
         }
+
         ddl_progress.into_values().collect()
     }
 }

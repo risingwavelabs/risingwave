@@ -663,7 +663,7 @@ impl DdlService for DdlServiceImpl {
         let AlterOwnerRequest { object, owner_id } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
+            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
             status: None,
