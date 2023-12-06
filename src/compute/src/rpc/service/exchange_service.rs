@@ -26,6 +26,7 @@ use risingwave_pb::task_service::{
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -63,7 +64,11 @@ impl ExchangeService for ExchangeServiceImpl {
             .expect("Failed to get task output id.");
         let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
-            error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
+            error!(
+                %peer_addr,
+                error = %e.as_report(),
+                "Failed to serve exchange RPC"
+            );
             return Err(e.into());
         }
 

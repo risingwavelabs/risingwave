@@ -2937,7 +2937,7 @@ impl HummockManager {
             .await;
         match ret {
             Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
+                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
                 return TableAlignRule::SplitToDedicatedCg((
                     new_group_id,
                     table_vnode_partition_count,

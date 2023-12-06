@@ -77,7 +77,7 @@ pub enum ErrorKind {
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
 
-    #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
+    #[error("Failed to align barrier: expected `{0:?}` but got `{1:?}`")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]

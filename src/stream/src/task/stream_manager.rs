@@ -38,6 +38,7 @@ use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -294,16 +295,17 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
-            store.sync(epoch).await.inspect_err(|e| {
+            store.sync(epoch).await.map_err(|e| {
                 tracing::error!(
-                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
                     epoch,
-                    e
+                    error = %e.as_report(),
+                    "Failed to sync state store",
                 );
+                e.into()
             })
-        })?;
+        });
         timer.observe_duration();
-        Ok(res)
+        res
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -695,7 +697,8 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
+                        // Intentionally use `?` on the report to also include the backtrace.
+                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };

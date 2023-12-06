@@ -32,11 +32,10 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
+use chrono::NaiveDateTime;
 use jni::objects::{
-    AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
-    JValueGen, JValueOwned, ReleaseMode,
+    AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JString, ReleaseMode,
 };
-use jni::signature::ReturnType;
 use jni::sys::{
     jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
 };
@@ -234,8 +233,8 @@ struct JavaClassMethodCache {
     big_decimal_ctor: OnceLock<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceLock<(GlobalRef, JMethodID)>,
 
-    date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
-    time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    date_ctor: OnceLock<(GlobalRef, JMethodID)>,
+    time_ctor: OnceLock<(GlobalRef, JMethodID)>,
 }
 
 // TODO: may only return a RowRef
@@ -675,40 +674,22 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let value = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_date()
-            .0
-            .to_string();
+        // Constructs a Date object using a milliseconds time value.
+        let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_date();
+        let datetime = value.0.and_hms_opt(0, 0, 0).unwrap();
+        let millis = datetime.timestamp_millis();
 
-        let string_value = env.new_string(value)?;
-        let (class_ref, constructor) =
+        let (date_class_ref, constructor) =
             pointer.as_ref().class_cache.date_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Date")?;
-                let init_method = env.get_static_method_id(
-                    &cls,
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/sql/Date;",
-                )?;
+                let cls = env.find_class(gen_class_name!(java.sql.Date))?;
+                let init_method =
+                    env.get_method_id(&cls, "<init>", gen_jni_sig!(void Date(long)))?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let JValueOwned::Object(date_obj) = env.call_static_method_unchecked(
-                <&JClass<'_>>::from(class_ref.as_obj()),
-                *constructor,
-                ReturnType::Object,
-                &[jvalue {
-                    l: string_value.into_raw(),
-                }],
-            )?
-            else {
-                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "valueOf".to_string(),
-                    sig: "(Ljava/lang/String;)Ljava/sql/Date;".into(),
-                }));
-            };
+            let date_class = <&JClass<'_>>::from(date_class_ref.as_obj());
+            let date_obj =
+                env.new_object_unchecked(date_class, *constructor, &[jvalue { j: millis }])?;
             Ok(date_obj)
         }
     })
@@ -721,41 +702,24 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let value = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_time()
-            .0
-            .to_string();
+        // Constructs a Time object using a milliseconds time value.
+        let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_time();
+        let epoch_date = NaiveDateTime::UNIX_EPOCH.date();
+        let datetime = epoch_date.and_time(value.0);
+        let millis = datetime.timestamp_millis();
 
-        let string_value = env.new_string(value)?;
-        let (class_ref, constructor) =
+        let (time_class_ref, constructor) =
             pointer.as_ref().class_cache.time_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Time")?;
-                let init_method = env.get_static_method_id(
-                    &cls,
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/sql/Time;",
-                )?;
+                let cls = env.find_class(gen_class_name!(java.sql.Time))?;
+                let init_method =
+                    env.get_method_id(&cls, "<init>", gen_jni_sig!(void Time(long)))?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let class = <&JClass<'_>>::from(class_ref.as_obj());
-            match env.call_static_method_unchecked(
-                class,
-                *constructor,
-                ReturnType::Object,
-                &[jvalue {
-                    l: string_value.into_raw(),
-                }],
-            )? {
-                JValueGen::Object(obj) => Ok(obj),
-                _ => Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "valueOf".to_string(),
-                    sig: "(Ljava/lang/String;)Ljava/sql/Time;".into(),
-                })),
-            }
+            let time_class = <&JClass<'_>>::from(time_class_ref.as_obj());
+            let time_obj =
+                env.new_object_unchecked(time_class, *constructor, &[jvalue { j: millis }])?;
+            Ok(time_obj)
         }
     })
 }
