@@ -181,6 +181,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         self.high.clear();
     }
 
+    /// Get total count of entries in the cahce.
+    pub fn len(&self) -> usize {
+        self.low.len() + self.middle.len() + self.high.len()
+    }
+
     pub fn is_low_cache_full(&self) -> bool {
         assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;

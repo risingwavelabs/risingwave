@@ -36,6 +36,9 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     state_table: StateTable<S>,
 
+    /// Number of rows in the state table.
+    row_count: Option<usize>,
+
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
 }
@@ -56,6 +59,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     pub fn new(state_table: StateTable<S>, cache_key_serde: CacheKeySerde) -> Self {
         Self {
             state_table,
+            row_count: None,
             cache_key_serde,
         }
     }
@@ -82,10 +86,16 @@ impl<S: StateStore> ManagedTopNState<S> {
 
     pub fn insert(&mut self, value: impl Row) {
         self.state_table.insert(value);
+        if let Some(row_count) = self.row_count.as_mut() {
+            *row_count += 1;
+        }
     }
 
     pub fn delete(&mut self, value: impl Row) {
         self.state_table.delete(value);
+        if let Some(row_count) = self.row_count.as_mut() {
+            *row_count -= 1;
+        }
     }
 
     fn get_topn_row(&self, row: OwnedRow, group_key_len: usize) -> TopNStateRow {
@@ -137,13 +147,19 @@ impl<S: StateStore> ManagedTopNState<S> {
     /// * `start_key` - The start point of the key to scan. It should be the last key of the middle
     ///   cache. It doesn't contain the group key.
     pub async fn fill_high_cache<const WITH_TIES: bool>(
-        &self,
+        &mut self,
         group_key: Option<impl GroupKey>,
         topn_cache: &mut TopNCache<WITH_TIES>,
         start_key: Option<CacheKey>,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
+        if let Some(row_count) = self.row_count && row_count == topn_cache.len() {
+            // already cached all rows
+            return Ok(())
+        }
+
         let cache = &mut topn_cache.high;
+
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
@@ -156,7 +172,11 @@ impl<S: StateStore> ManagedTopNState<S> {
             )
             .await?;
         pin_mut!(state_table_iter);
+
+        let mut table_row_count = Some(0);
         while let Some(item) = state_table_iter.next().await {
+            *table_row_count.as_mut().unwrap() += 1; // try count rows in the state table
+
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             if let Some(start_key) = start_key.as_ref()
@@ -164,12 +184,17 @@ impl<S: StateStore> ManagedTopNState<S> {
             {
                 continue;
             }
-            // let row= &topn_row.row;
             cache.insert(topn_row.cache_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
+                table_row_count = None; // cache becomes full, we cannot get precise table row count this time
                 break;
             }
         }
+
+        if let Some(row_count) = table_row_count {
+            self.row_count = Some(row_count);
+        }
+
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
