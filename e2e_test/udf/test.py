@@ -47,6 +47,15 @@ def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
 
+# a function that takes a long time to execute
+@udf(input_types=["BIGINT"], result_type="BIGINT", workers=10)
+def square(x: int) -> int:
+    sum = 0
+    for _ in range(x):
+        sum += x
+    return sum
+
+
 @udf(input_types=["BYTEA"], result_type="STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>")
 def extract_tcp_info(tcp_packet: bytes):
     src_addr, dst_addr = struct.unpack("!4s4s", tcp_packet[12:20])
@@ -213,6 +222,7 @@ if __name__ == "__main__":
     server.add_function(sleep)
     server.add_function(gcd)
     server.add_function(gcd3)
+    server.add_function(square)
     server.add_function(series)
     server.add_function(split)
     server.add_function(extract_tcp_info)

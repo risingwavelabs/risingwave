@@ -19,10 +19,13 @@ import pyarrow.parquet
 import inspect
 import traceback
 import json
-from concurrent.futures import ThreadPoolExecutor
-import concurrent
+from concurrent.futures import Executor, ThreadPoolExecutor
 from decimal import Decimal
 import signal
+
+# using loky ProcessPoolExecutor instead of concurrent.futures,
+# because the latter does not support pickling functions with decorators
+from loky import get_reusable_executor
 
 
 class UserDefinedFunction:
@@ -33,8 +36,7 @@ class UserDefinedFunction:
     _name: str
     _input_schema: pa.Schema
     _result_schema: pa.Schema
-    _io_threads: Optional[int]
-    _executor: Optional[ThreadPoolExecutor]
+    _executor: Optional[Executor]
 
     def eval_batch(self, batch: pa.RecordBatch) -> Iterator[pa.RecordBatch]:
         """
@@ -49,14 +51,13 @@ class ScalarFunction(UserDefinedFunction):
     or multiple scalar values to a new scalar value.
     """
 
-    def __init__(self, *args, **kwargs):
-        self._io_threads = kwargs.pop("io_threads")
-        self._executor = (
-            ThreadPoolExecutor(max_workers=self._io_threads)
-            if self._io_threads is not None
-            else None
-        )
-        super().__init__(*args, **kwargs)
+    def __init__(self, io_threads=None, workers=None):
+        if io_threads is not None:
+            self._executor = ThreadPoolExecutor(max_workers=io_threads)
+        elif workers is not None:
+            self._executor = get_reusable_executor(max_workers=workers)
+        else:
+            self._executor = None
 
     def eval(self, *args) -> Any:
         """
@@ -71,20 +72,14 @@ class ScalarFunction(UserDefinedFunction):
             _process_func(pa.list_(type), False)(array)
             for array, type in zip(inputs, self._input_schema.types)
         ]
+        input_rows = [[col[i] for col in inputs] for i in range(batch.num_rows)]
+
+        # evaluate the function for each row
         if self._executor is not None:
-            # evaluate the function for each row
-            tasks = [
-                self._executor.submit(self._func, *[col[i] for col in inputs])
-                for i in range(batch.num_rows)
-            ]
-            column = [
-                future.result() for future in concurrent.futures.as_completed(tasks)
-            ]
+            tasks = [self._executor.submit(self._func, *row) for row in input_rows]
+            column = [future.result() for future in tasks]
         else:
-            # evaluate the function for each row
-            column = [
-                self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)
-            ]
+            column = [self.eval(*row) for row in input_rows]
 
         column = _process_func(pa.list_(self._result_schema.types[0]), True)(column)
 
@@ -192,7 +187,10 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
 
     _func: Callable
 
-    def __init__(self, func, input_types, result_type, name=None, io_threads=None):
+    def __init__(
+        self, func, input_types, result_type, name=None, io_threads=None, workers=None
+    ):
+        super().__init__(io_threads, workers)
         self._func = func
         self._input_schema = pa.schema(
             zip(
@@ -204,7 +202,6 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
         self._name = name or (
             func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
         )
-        super().__init__(io_threads=io_threads)
 
     def __call__(self, *args):
         return self._func(*args)
@@ -274,6 +271,7 @@ def udf(
     result_type: Union[str, pa.DataType],
     name: Optional[str] = None,
     io_threads: Optional[int] = None,
+    workers: Optional[int] = None,
 ) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
@@ -283,6 +281,7 @@ def udf(
     - result_type: A string or an Arrow data type that specifies the return value type.
     - name: An optional string specifying the function name. If not provided, the original name will be used.
     - io_threads: Number of I/O threads used per data chunk for I/O bound functions.
+    - workers: Number of worker processes used for CPU bound functions.
 
     Example:
     ```
@@ -300,16 +299,21 @@ def udf(
         response = requests.get(my_endpoint + '?param=' + x)
         return response["data"]
     ```
+
+    CPU bound Example:
+    ```
+    @udf(input_types=["BIGINT"], result_type="BIGINT", workers=10)
+    def square(x: int) -> int:
+        sum = 0
+        for _ in range(x):
+            sum += x
+        return sum
+    ```
     """
 
-    if io_threads is not None and io_threads > 1:
-        return lambda f: UserDefinedScalarFunctionWrapper(
-            f, input_types, result_type, name, io_threads=io_threads
-        )
-    else:
-        return lambda f: UserDefinedScalarFunctionWrapper(
-            f, input_types, result_type, name
-        )
+    return lambda f: UserDefinedScalarFunctionWrapper(
+        f, input_types, result_type, name, io_threads, workers
+    )
 
 
 def udtf(
@@ -356,7 +360,7 @@ class UdfServer(pa.flight.FlightServerBase):
     _functions: Dict[str, UserDefinedFunction]
 
     def __init__(self, location="0.0.0.0:8815", **kwargs):
-        super(UdfServer, self).__init__("grpc://" + location, **kwargs)
+        super().__init__("grpc://" + location, **kwargs)
         self._location = location
         self._functions = {}
 
@@ -425,7 +429,7 @@ class UdfServer(pa.flight.FlightServerBase):
             f"\n\nlistening on {self._location}"
         )
         signal.signal(signal.SIGTERM, lambda s, f: self.shutdown())
-        super(UdfServer, self).serve()
+        super().serve()
 
 
 def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
