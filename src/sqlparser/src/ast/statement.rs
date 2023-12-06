@@ -832,10 +832,8 @@ impl ParseTo for CreateSinkStatement {
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
             let sink_from = CreateSink::From(from_name);
-            if p.peek_nth_any_of_keywords(0, &[Keyword::WHERE]) {
-                return Err(ParserError::ParserError(
-                    "Unexpected WHERE keyword after the FROM clause".to_string(),
-                ));
+            if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
+                p.expected("WITH after the FROM clause", p.peek_token())?
             }
             sink_from
         } else if p.parse_keyword(Keyword::AS) {
