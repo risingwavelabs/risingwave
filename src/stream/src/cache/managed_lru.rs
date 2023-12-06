@@ -24,6 +24,7 @@ use lru::{DefaultHasher, KeyRef, LruCache};
 use prometheus::IntGauge;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::util::epoch::Epoch;
+use thiserror_ext::AsReport;
 
 use crate::common::metrics::MetricsInfo;
 
@@ -59,8 +60,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
             &info.desc,
         ]) {
             warn!(
-                "unable to remove stream_memory_usage of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
+                error = %e.as_report(),
+                table_id = info.table_id,
+                actor_id = info.actor_id,
+                desc = info.desc,
+                "unable to remove stream_memory_usage",
             );
         };
         if let Err(e) = info
@@ -69,8 +73,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
         {
             warn!(
-                "unable to remove lru_evicted_watermark_time_ms of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
+                error = %e.as_report(),
+                table_id = info.table_id,
+                actor_id = info.actor_id,
+                desc = info.desc,
+                "unable to remove lru_evicted_watermark_time_ms",
             );
         }
     }

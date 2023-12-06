@@ -34,6 +34,7 @@ use risingwave_pb::plan_common::CapturedExecutionContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
+use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
@@ -644,7 +645,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                             ShutdownMsg::Init => {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
-                                error!("Batch task failed: {:?}", e);
+                                error!(error = %e.as_report(), "Batch task failed");
                                 error = Some(e);
                                 state = TaskStatus::Failed;
                                 break;
@@ -671,7 +672,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         let error = error.map(Arc::new);
         *self.failure.lock() = error.clone();
-        let err_str = error.as_ref().map(|e| e.to_string());
+        let err_str = error.as_ref().map(|e| e.to_report_string());
         if let Err(e) = sender.close(error).await {
             match e {
                 SenderError => {
@@ -689,8 +690,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
-                "The status receiver in FE has closed so the status push is failed {:}",
-                e
+                error = %e.as_report(),
+                "The status receiver in FE has closed so the status push is failed",
             );
         }
 

@@ -6,6 +6,7 @@ heartbeat_interval_ms = 1000
 connection_pool_size = 16
 metrics_level = "Info"
 telemetry_enabled = true
+grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true

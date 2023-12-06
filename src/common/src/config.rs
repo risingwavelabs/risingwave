@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config
@@ -388,6 +391,10 @@ pub struct ServerConfig {
     /// Enable heap profile dump when memory usage is high.
     #[serde(default)]
     pub heap_profiling: HeapProfilingConfig,
+
+    // Number of max pending reset stream for grpc server.
+    #[serde(default = "default::server::grpc_max_reset_stream_size")]
+    pub grpc_max_reset_stream: u32,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1048,6 +1055,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
+        }
+
+        pub fn grpc_max_reset_stream_size() -> u32 {
+            200
         }
     }
 
