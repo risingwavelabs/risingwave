@@ -1,3 +1,10 @@
+-- INFO: Credit to Mindsdb (https://github.com/mindsdb/mindsdb)
+-- This data comes from the postgresql dump maintained by mindsdb:
+--      https://docs.mindsdb.com/quickstart#3-connect-a-database-using-create-database
+-- Part of the original data in the mindsdb repo:
+--      https://github.com/mindsdb/mindsdb/blob/staging/docker/db_images/mysql/home_rentals.csv
+
+
 --
 -- PostgreSQL database dump
 --
