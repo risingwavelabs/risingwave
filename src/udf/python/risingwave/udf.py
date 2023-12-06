@@ -72,14 +72,18 @@ class ScalarFunction(UserDefinedFunction):
             _process_func(pa.list_(type), False)(array)
             for array, type in zip(inputs, self._input_schema.types)
         ]
-        input_rows = [[col[i] for col in inputs] for i in range(batch.num_rows)]
 
         # evaluate the function for each row
         if self._executor is not None:
-            tasks = [self._executor.submit(self._func, *row) for row in input_rows]
+            tasks = [
+                self._executor.submit(self._func, *[col[i] for col in inputs])
+                for i in range(batch.num_rows)
+            ]
             column = [future.result() for future in tasks]
         else:
-            column = [self.eval(*row) for row in input_rows]
+            column = [
+                self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)
+            ]
 
         column = _process_func(pa.list_(self._result_schema.types[0]), True)(column)
 
