@@ -25,10 +25,27 @@ use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 
 use crate::HummockEpoch;
 
+#[derive(Clone)]
+pub struct ReadTableWatermark {
+    pub direction: WatermarkDirection,
+    pub vnode_watermarks: BTreeMap<VirtualNode, Bytes>,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum WatermarkDirection {
     Ascending,
     Descending,
+}
+
+impl WatermarkDirection {
+    pub fn filter_by_watermark(&self, key: impl AsRef<[u8]>, watermark: impl AsRef<[u8]>) -> bool {
+        let key = key.as_ref();
+        let watermark = watermark.as_ref();
+        match self {
+            WatermarkDirection::Ascending => key < watermark,
+            WatermarkDirection::Descending => key > watermark,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
