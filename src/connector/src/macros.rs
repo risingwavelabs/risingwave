@@ -23,6 +23,7 @@ macro_rules! for_all_classified_sources {
                 { Citus }
             },
             // other sources
+            // todo: file source do not nest with mq source.
             {
                 { Kafka, $crate::source::kafka::KafkaProperties, $crate::source::kafka::KafkaSplit },
                 { Pulsar, $crate::source::pulsar::PulsarProperties, $crate::source::pulsar::PulsarSplit },

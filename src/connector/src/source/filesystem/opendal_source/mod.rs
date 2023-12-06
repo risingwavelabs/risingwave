@@ -48,8 +48,6 @@ impl SourceProperties for GcsProperties {
     type SplitReader = OpendalReader<OpendalGcs>;
 
     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
-
-    fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
 
 pub trait OpendalSource: Send + Sync + 'static + Clone + PartialEq {
@@ -93,6 +91,4 @@ impl SourceProperties for OpendalS3Properties {
     type SplitReader = OpendalReader<OpendalS3>;
 
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
-
-    fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
