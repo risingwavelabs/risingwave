@@ -12,24 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
-use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
-    BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
+    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -63,71 +58,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             StreamScanType::Rearrange => {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
-            StreamScanType::CdcBackfill => {
-                let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-
-                let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
-                assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
-                assert_eq!(table_schema.data_types(), params.info.schema.data_types());
-
-                let properties: HashMap<String, String> = table_desc
-                    .connect_properties
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                let table_type = CdcTableType::from_properties(&properties);
-                let table_reader = table_type
-                    .create_table_reader(properties.clone(), table_schema.clone())
-                    .await?;
-
-                let table_pk_order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                    .collect_vec();
-                let table_pk_indices = table_desc
-                    .pk
-                    .iter()
-                    .map(|k| k.column_index as usize)
-                    .collect_vec();
-
-                let schema_table_name = SchemaTableName::from_properties(&properties);
-                let external_table = ExternalStorageTable::new(
-                    TableId::new(table_desc.table_id),
-                    schema_table_name,
-                    table_reader,
-                    table_schema,
-                    table_pk_order_types,
-                    table_pk_indices,
-                    output_indices.clone(),
-                );
-
-                let vnodes = params.vnode_bitmap.map(Arc::new);
-                // cdc backfill should be singleton, so vnodes must be None.
-                assert_eq!(None, vnodes);
-                let state_table =
-                    StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes)
-                        .await;
-
-                CdcBackfillExecutor::new(
-                    params.actor_context.clone(),
-                    params.info,
-                    external_table,
-                    upstream,
-                    output_indices,
-                    Some(progress),
-                    params.executor_stats,
-                    Some(state_table),
-                    None,
-                    true,
-                    params.env.config().developer.chunk_size,
-                )
-                .boxed()
-            }
             StreamScanType::Backfill => {
-                let table_desc: &StorageTableDesc = node
-                    .get_table_desc()
-                    .map_err(|err| anyhow!("chain: table_desc not found! {:?}", err))?;
+                let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };
@@ -218,6 +150,11 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        Ok(FlowControlExecutor::new(executor, node.rate_limit.map(|x| x as _)).boxed())
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
+        )
+        .boxed())
     }
 }

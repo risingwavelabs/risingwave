@@ -16,6 +16,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
@@ -138,13 +139,7 @@ async fn do_handle_explain(
                         gen_batch_plan_by_statement(&session, context.clone(), stmt).map(|x| x.plan)
                     }
 
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("unsupported statement {:?}", stmt),
-                            None.into(),
-                        )
-                        .into())
-                    }
+                    _ => bail_not_implemented!("unsupported statement {:?}", stmt),
                 };
 
                 (plan, context)
@@ -173,7 +168,7 @@ async fn do_handle_explain(
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
-                                session.config().get_batch_parallelism(),
+                                session.config().batch_parallelism().0,
                                 plan.clone(),
                             )?);
                         }
@@ -221,7 +216,7 @@ pub async fn handle_explain(
     analyze: bool,
 ) -> Result<RwPgResponse> {
     if analyze {
-        return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
+        bail_not_implemented!(issue = 4856, "explain analyze");
     }
 
     let context = OptimizerContext::new(handler_args.clone(), options.clone());

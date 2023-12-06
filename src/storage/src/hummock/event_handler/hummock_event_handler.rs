@@ -21,13 +21,12 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
@@ -238,7 +237,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
-        info_in_release!("epoch has been synced: {}.", epoch);
+        debug!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -311,7 +310,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        info_in_release!("receive await sync epoch: {}", new_sync_epoch);
+        debug!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -326,7 +325,7 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
-            info_in_release!(
+            debug!(
                 "epoch {} has been synced. Current max_sync_epoch {}",
                 new_sync_epoch,
                 self.uploader.max_synced_epoch()
@@ -345,7 +344,7 @@ impl HummockEventHandler {
             return;
         }
 
-        info_in_release!(
+        debug!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
             self.uploader.max_synced_epoch()
@@ -396,7 +395,7 @@ impl HummockEventHandler {
         }
 
         self.sstable_object_id_manager
-            .remove_watermark_object_id(TrackerId::Epoch(MAX_EPOCH));
+            .remove_watermark_object_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         let _ = notifier.send(()).inspect_err(|e| {
@@ -473,7 +472,7 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
-        info_in_release!(
+        debug!(
             "update to hummock version: {}, epoch: {}",
             new_pinned_version.id(),
             new_pinned_version.max_committed_epoch()
@@ -578,6 +577,9 @@ impl HummockEventHandler {
                     self.uploader.start_merge_imms(epoch);
                 }
             }
+
+            HummockEvent::LocalSealEpoch { .. } => {}
+
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
                 let _ = sender.send(()).inspect_err(|e| {
@@ -625,7 +627,7 @@ impl HummockEventHandler {
                 )) {
                     Ok(_) => {}
                     Err(_) => {
-                        panic!(
+                        warn!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
                         )

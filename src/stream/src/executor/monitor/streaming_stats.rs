@@ -122,6 +122,10 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // CDC Backfill
+    pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub cdc_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
     // Over Window
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
@@ -684,6 +688,22 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the cdc_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let cdc_backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_upstream_output_row_count",
+            "Total number of rows that have been output from the cdc_backfill upstream",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -980,6 +1000,8 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            cdc_backfill_snapshot_read_row_count,
+            cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,

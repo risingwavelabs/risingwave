@@ -28,7 +28,6 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
-    split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -37,14 +36,12 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        split_by_table: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             level,
             target_level,
             max_select_bytes,
-            split_by_table,
             overlap_strategy,
         }
     }
@@ -64,9 +61,6 @@ impl MinOverlappingPicker {
             let mut select_file_size = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
-                    break;
-                }
-                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {
@@ -395,7 +389,7 @@ impl NonOverlapSubLevelPicker {
 
 #[cfg(test)]
 pub mod tests {
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -405,13 +399,8 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -487,13 +476,8 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -833,7 +817,7 @@ pub mod tests {
         ];
         // no limit
         let picker =
-            MinOverlappingPicker::new(2, 3, 1000, false, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(2, 3, 1000, Arc::new(RangeOverlapStrategy::default()));
         let (select_files, target_files) = picker.pick_tables(
             &levels[1].table_infos,
             &levels[2].table_infos,

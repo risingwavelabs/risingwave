@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
@@ -91,11 +92,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("Subquery in join on condition");
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
@@ -105,11 +102,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            return Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Subquery in join on condition");
         }
 
         let correlated_id = self.ctx.next_correlated_id();

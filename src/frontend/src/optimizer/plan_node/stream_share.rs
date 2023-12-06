@@ -20,6 +20,7 @@ use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
 use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::Explain;
@@ -123,3 +124,5 @@ impl StreamShare {
 }
 
 impl ExprRewritable for StreamShare {}
+
+impl ExprVisitable for StreamShare {}

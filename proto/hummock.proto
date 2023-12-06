@@ -308,11 +308,13 @@ message CompactTask {
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
-  bool split_by_state_table = 21;
-  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
-  uint32 split_weight_by_vnode = 22;
 
-  bool enable_sst_vnode_bitmap = 23;
+  // Deprecated. use table_vnode_partition instead;
+  bool split_by_state_table = 21 [deprecated = true];
+  // Deprecated. use table_vnode_partition instead;
+  uint32 split_weight_by_vnode = 22 [deprecated = true];
+  map<uint32, uint32> table_vnode_partition = 23;
+  bool enable_sst_vnode_bitmap = 24;
 }
 
 message LevelHandler {
@@ -383,6 +385,7 @@ message CompactTaskProgress {
   uint64 num_progress_key = 4;
   uint64 num_pending_read_io = 5;
   uint64 num_pending_write_io = 6;
+  optional uint64 compaction_group_id = 7;
 }
 
 message SubscribeCompactionEventRequest {
@@ -703,6 +706,18 @@ message GetCompactionScoreResponse {
   repeated PickerInfo scores = 2;
 }
 
+message ListCompactTaskAssignmentRequest {}
+
+message ListCompactTaskAssignmentResponse {
+  repeated CompactTaskAssignment task_assignment = 1;
+}
+
+message ListCompactTaskProgressRequest {}
+
+message ListCompactTaskProgressResponse {
+  repeated CompactTaskProgress task_progress = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -739,6 +754,8 @@ service HummockManagerService {
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
   rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
+  rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
+  rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
 }
 
 message CompactionConfig {

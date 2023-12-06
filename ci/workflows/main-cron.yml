@@ -52,7 +52,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "docslt"
@@ -293,7 +293,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=12 KILL_RATE=1.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -308,19 +308,21 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "misc check"
-    command: "ci/scripts/misc-check.sh"
+  # Ddl statements will randomly run with background_ddl.
+  - label: "background_ddl recovery test (deterministic simulation)"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-misc-check"
-      || build.env("CI_STEPS") =~ /(^|,)misc-check(,|$$)/
+      || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
+      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+    depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
-          files: ./**/*.sh
-    timeout_in_minutes: 5
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
@@ -790,6 +792,12 @@ steps:
 
   # Notification test.
   - key: "test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    command: |
+      bash -c 'echo test && exit -1'
+
+  # Notification test.
+  - key: "test-notify-2"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
       bash -c 'echo test && exit -1'

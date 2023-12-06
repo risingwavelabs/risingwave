@@ -626,16 +626,16 @@ impl DdlService for DdlServiceImpl {
         }
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        request: Request<AlterRelationNameRequest>,
-    ) -> Result<Response<AlterRelationNameResponse>, Status> {
-        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        request: Request<AlterNameRequest>,
+    ) -> Result<Response<AlterNameResponse>, Status> {
+        let AlterNameRequest { object, new_name } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .run_command(DdlCommand::AlterName(object.unwrap(), new_name))
             .await?;
-        Ok(Response::new(AlterRelationNameResponse {
+        Ok(Response::new(AlterNameResponse {
             status: None,
             version,
         }))
@@ -666,6 +666,24 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_set_schema(
+        &self,
+        request: Request<AlterSetSchemaRequest>,
+    ) -> Result<Response<AlterSetSchemaResponse>, Status> {
+        let AlterSetSchemaRequest {
+            object,
+            new_schema_id,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
+            .await?;
+        Ok(Response::new(AlterSetSchemaResponse {
             status: None,
             version,
         }))
@@ -721,7 +739,7 @@ impl DdlService for DdlServiceImpl {
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured".into(),
+                                "AWS client is not configured",
                             )));
                         }
                     }
@@ -885,7 +903,11 @@ fn fill_table_stream_graph_info(
                     // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
                     // group (that is, different from any other server id being used by any master or slave)
                     if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY)
-                        && matches!(CdcSourceType::from(connector.as_str()),CdcSourceType::Mysql) {
+                        && matches!(
+                            CdcSourceType::from(connector.as_str()),
+                            CdcSourceType::Mysql
+                        )
+                    {
                         let props = &mut source_node.source_inner.as_mut().unwrap().properties;
                         let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
                         props
@@ -912,7 +934,9 @@ fn fill_table_stream_graph_info(
             }
 
             // fill table id for cdc backfill
-            if let NodeBody::StreamScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
+            if let NodeBody::StreamCdcScan(node) = node_body
+                && table_job_type == TableJobType::SharedCdcSource
+            {
                 if let Some(table) = node.cdc_table_desc.as_mut() {
                     table.table_id = table_id;
                 }

@@ -31,6 +31,7 @@ use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, 
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
@@ -349,3 +350,5 @@ impl StreamNode for StreamMaterialize {
 }
 
 impl ExprRewritable for StreamMaterialize {}
+
+impl ExprVisitable for StreamMaterialize {}

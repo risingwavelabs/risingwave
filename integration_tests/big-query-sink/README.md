@@ -4,6 +4,7 @@ In this demo, we want to showcase how RisingWave is able to sink data to Bigquer
 
 1. Launch the cluster:
 
+(need put gcp key file in risingwave/gcp-rwctest.json)
 ```sh
 docker-compose up -d
 ```
@@ -14,9 +15,9 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 
 ```sql
 CREATE table '${project_id}'.'${dataset_id}'.'${table_id}'(
-    user_id int,
-    target_id string,
-    event_timestamp datetime
+    user_id INT64,
+    target_id STRING,
+    event_timestamp TIMESTAMP
 );
 ```
 

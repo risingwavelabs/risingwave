@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -258,7 +258,7 @@ fn key_value_to_full_row<S: StateStore>(
     let key = table
         .pk_serde()
         .deserialize(keyed_row.key())
-        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?;
+        .context("failed to deserialize pk")?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }

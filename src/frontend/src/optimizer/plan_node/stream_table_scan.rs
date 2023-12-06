@@ -28,7 +28,8 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
-use crate::expr::{ExprRewriter, FunctionCall};
+use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -243,9 +244,7 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill | StreamScanType::CdcBackfill => {
-                self.core.output_and_pk_column_ids()
-            }
+            StreamScanType::Backfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -346,5 +345,11 @@ impl ExprRewritable for StreamTableScan {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+    }
+}
+
+impl ExprVisitable for StreamTableScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
