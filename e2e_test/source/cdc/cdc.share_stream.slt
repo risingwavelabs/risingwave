@@ -11,10 +11,6 @@ mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
 system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
 
-# enable cdc backfill in ci
-statement ok
-set cdc_backfill='true';
-
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
 create source mysql_mytest with (
@@ -34,6 +30,10 @@ create table products_test ( id INT,
  PRIMARY KEY (id)
 ) from mysql_mytest table 'mytest.products';
 
+system ok
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
+       INSERT INTO orders VALUES (default, '2023-11-28 15:08:22', 'Bob', 10.52, 100, false);"
+
 # check the fragment distribution
 query TT
 select distribution_type,flags from rw_fragments order by fragment_id;
@@ -43,6 +43,13 @@ HASH {MVIEW}
 SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
+
+statement error
+create table non_exist ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.non_exist';
 
 
 statement ok
@@ -63,7 +70,7 @@ statement ok
 create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
 
 system ok
-mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Milk', '100ml Milk');"
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Juice', '100ml Juice');"
 
 sleep 5s
 
@@ -71,12 +78,12 @@ sleep 5s
 query I
 SELECT * from products_test_cnt
 ----
-10
+11
 
 query I
 SELECT * from orders_test_cnt
 ----
-3
+4
 
 query ITT
 SELECT * FROM products_test order by id limit 3

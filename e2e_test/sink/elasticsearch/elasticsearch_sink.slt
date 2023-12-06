@@ -1,8 +1,16 @@
 statement ok
-CREATE TABLE t7 (v1 int primary key, v2 bigint, v3 varchar);
+CREATE TABLE t7 (
+  v1 int primary key,
+  v2 bigint,
+  v3 varchar,
+  d date,
+  t time,
+  ts timestamp,
+  tz timestamptz
+);
 
 statement ok
-CREATE SINK s7 AS select t7.v1 as v1, t7.v2 as v2, t7.v3 as v3 from t7 WITH (
+CREATE SINK s7 from t7 WITH (
     connector = 'elasticsearch',
     index = 'test',
     url = 'http://elasticsearch:9200',
@@ -11,13 +19,19 @@ CREATE SINK s7 AS select t7.v1 as v1, t7.v2 as v2, t7.v3 as v3 from t7 WITH (
 );
 
 statement ok
-INSERT INTO t7 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2'), (8, 2, '8-2'), (13, 2, '13-2');
+INSERT INTO t7 VALUES
+  (1, 2, '1-2', '1970-01-01', '00:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:00Z'),
+  (2, 2, '2-2', '1970-01-01', '00:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:00Z'),
+  (3, 2, '3-2', '1970-01-01', '00:00:00.123456', '1970-01-01 00:00:00.123456', '1970-01-01 00:00:00.123456Z'),
+  (5, 2, '5-2', '1970-01-01', '20:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:00Z'),
+  (8, 2, '8-2', '1970-01-01', '20:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:00Z'),
+  (13, 2, '13-2', '1970-01-01', '20:00:00.123456', '1970-01-01 20:00:00.123456', '1970-01-01 20:00:00.123456Z');
 
 statement ok
 FLUSH;
 
 statement ok
-INSERT INTO t7 VALUES (1, 50, '1-50');
+INSERT INTO t7 VALUES (1, 50, '1-50', '2000-01-01', '00:00:00.123456', '2000-01-01 00:00:00.123456', '2000-01-01 00:00:00.123456Z');
 
 statement ok
 FLUSH;

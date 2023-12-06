@@ -32,6 +32,7 @@
 #![feature(test)]
 #![feature(arc_unwrap_or_clone)]
 #![feature(iter_array_chunks)]
+#![feature(result_flattening)]
 
 mod aggregate;
 mod scalar;
