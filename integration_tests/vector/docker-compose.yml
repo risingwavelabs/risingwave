@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
-      file: ../../docker/docker-compose-distributed.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose-distributed.yml
-      service: compute-node-0
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose-distributed.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose-distributed.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose-distributed.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose-distributed.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose-distributed.yml
@@ -39,11 +27,11 @@ services:
     volumes:
       - "./vector.yaml:/etc/vector/vector.yaml:ro"
     depends_on:
-      - "frontend-node-0"
+      - "risingwave-standalone"
     container_name: vector
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false
