@@ -353,6 +353,9 @@ statement ok
 drop function split;
 
 statement ok
+drop function float_to_decimal;
+
+statement ok
 drop function hex_to_dec;
 
 statement ok
