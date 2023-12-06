@@ -76,7 +76,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 }
 
                 let source_desc_builder = SourceDescBuilder::new(
-                    source.columns.clone(),
+                    source_columns.clone(),
                     params.env.source_metrics(),
                     source.row_id_index.map(|x| x as _),
                     source.properties.clone(),
@@ -99,8 +99,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     chunk_size: params.env.config().developer.chunk_size,
                 };
 
-                let source_column_ids: Vec<_> = source
-                    .columns
+                let source_column_ids: Vec<_> = source_columns
                     .iter()
                     .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
                     .collect();
