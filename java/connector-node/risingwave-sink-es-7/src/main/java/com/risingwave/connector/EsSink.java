@@ -73,17 +73,23 @@ public class EsSink extends SinkWriterBase {
     private final EsSinkConfig config;
     private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
-    // To be shared with the listener thread, so it must be thread-safe
+
+    // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
     private final BlockingQueue<EsWriteResultResp> blockingQueue;
 
+    // Count of write tasks in progress
     private int taskCount;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
     class EsWriteResultResp {
+
+        // Only `RESPONSE_RESULT_OK` or `RESPONSE_RESULT_ERR`
         private String type;
+
         private String errorMsg;
 
+        // Number of actions included in completed tasks
         private Integer numberOfActions;
 
         public boolean isOk() {
@@ -207,7 +213,6 @@ public class EsSink extends SinkWriterBase {
     }
 
     private class BulkListener implements BulkProcessor.Listener {
-        // To be shared with the main thread, so it must be thread-safe
         private final BlockingQueue<EsWriteResultResp> blockingQueue;
 
         public BulkListener(BlockingQueue<EsWriteResultResp> blockingQueue) {
@@ -386,6 +391,7 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void sync() {
         try {
+            this.bulkProcessor.flush();
             while (this.taskCount != 0) {
                 EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
                 if (esWriteResultResp != null && esWriteResultResp.isOk()) {
