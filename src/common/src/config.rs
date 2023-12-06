@@ -392,6 +392,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub heap_profiling: HeapProfilingConfig,
 
+    // Number of max pending reset stream for grpc server.
+    #[serde(default = "default::server::grpc_max_reset_stream_size")]
+    pub grpc_max_reset_stream: u32,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -766,13 +770,15 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
 
-    /// The maximum size of bytes can be buffered in the exchange channel.
-    #[serde(default = "default::developer::stream_exchange_max_bytes")]
-    pub exchange_max_bytes: usize,
+    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_exchange_initial_permits")]
+    pub exchange_initial_permits: usize,
 
-    /// The threshold of bytes that triggers a backward `AddPermits` message in the remote exchange.
-    #[serde(default = "default::developer::stream_exchange_ack_bytes")]
-    pub exchange_ack_bytes: usize,
+    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
+    /// in remote exchange.
+    #[serde(default = "default::developer::stream_exchange_batched_permits")]
+    pub exchange_batched_permits: usize,
 
     /// The maximum number of concurrent barriers in an exchange channel.
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
@@ -1052,6 +1058,10 @@ pub mod default {
         pub fn telemetry_enabled() -> bool {
             true
         }
+
+        pub fn grpc_max_reset_stream_size() -> u32 {
+            200
+        }
     }
 
     pub mod storage {
@@ -1315,12 +1325,12 @@ pub mod default {
             256
         }
 
-        pub fn stream_exchange_max_bytes() -> usize {
-            1 << 20 // 1MB
+        pub fn stream_exchange_initial_permits() -> usize {
+            2048
         }
 
-        pub fn stream_exchange_ack_bytes() -> usize {
-            32 << 10 // 32KB
+        pub fn stream_exchange_batched_permits() -> usize {
+            256
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {

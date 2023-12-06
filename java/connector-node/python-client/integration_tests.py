@@ -143,13 +143,6 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
         for payload in payload_input:
             request_list.append(
                 connector_service_pb2.SinkWriterStreamRequest(
-                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
-                        epoch=epoch
-                    )
-                )
-            )
-            request_list.append(
-                connector_service_pb2.SinkWriterStreamRequest(
                     write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
                         batch_id=batch_id, epoch=epoch, **payload
                     )
