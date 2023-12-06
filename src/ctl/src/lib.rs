@@ -19,7 +19,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
@@ -87,6 +87,15 @@ enum DebugCommonKind {
     User,
     Table,
     MetaMember,
+    SourceCatalog,
+    SinkCatalog,
+    IndexCatalog,
+    FunctionCatalog,
+    ViewCatalog,
+    ConnectionCatalog,
+    DatabaseCatalog,
+    SchemaCatalog,
+    TableCatalog,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -160,7 +169,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = MAX_EPOCH)]
+        #[clap(short, long = "epoch", default_value_t = HummockEpoch::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]

@@ -172,7 +172,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayContains
             | expr_node::Type::ArrayContained
             | expr_node::Type::HexToInt256
-            | expr_node::Type::JsonbCat
+            | expr_node::Type::JsonbConcat
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbExtractPath
@@ -190,6 +190,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbPathExists
+            | expr_node::Type::JsonbPathMatch
+            | expr_node::Type::JsonbPathQueryArray
+            | expr_node::Type::JsonbPathQueryFirst
             | expr_node::Type::IsJson
             | expr_node::Type::ToJsonb
             | expr_node::Type::Sind

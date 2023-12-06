@@ -888,6 +888,7 @@ impl Binder {
                 })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 ("jsonb_contains", raw_call(ExprType::JsonbContains)),
@@ -901,6 +902,10 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
+                ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
+                ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
+                ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

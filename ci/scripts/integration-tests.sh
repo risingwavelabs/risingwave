@@ -37,6 +37,9 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- install postgresql"
 sudo yum install -y postgresql15
 
+echo "--- download rwctest-key"
+aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
+
 cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"

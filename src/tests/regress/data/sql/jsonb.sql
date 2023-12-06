@@ -166,9 +166,9 @@ SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'scalar';
 SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'array';
 SELECT test_json ->> 2 FROM test_jsonb WHERE json_type = 'object';
 
---@ SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'scalar';
---@ SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'array';
---@ SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'object';
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'scalar';
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'array';
+SELECT jsonb_object_keys(test_json) FROM test_jsonb WHERE json_type = 'object';
 
 -- nulls
 SELECT (test_json->'field3') IS NULL AS expect_false FROM test_jsonb WHERE json_type = 'object';
@@ -204,11 +204,11 @@ select '"foo"'::jsonb ->> 1;
 select '"foo"'::jsonb ->> 'z';
 
 -- equality and inequality
---@ SELECT '{"x":"y"}'::jsonb = '{"x":"y"}'::jsonb;
---@ SELECT '{"x":"y"}'::jsonb = '{"x":"z"}'::jsonb;
---@ 
---@ SELECT '{"x":"y"}'::jsonb <> '{"x":"y"}'::jsonb;
---@ SELECT '{"x":"y"}'::jsonb <> '{"x":"z"}'::jsonb;
+SELECT '{"x":"y"}'::jsonb = '{"x":"y"}'::jsonb;
+SELECT '{"x":"y"}'::jsonb = '{"x":"z"}'::jsonb;
+
+SELECT '{"x":"y"}'::jsonb <> '{"x":"y"}'::jsonb;
+SELECT '{"x":"y"}'::jsonb <> '{"x":"z"}'::jsonb;
 
 -- containment
 SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
@@ -266,15 +266,15 @@ SELECT jsonb_array_length('{"f1":1,"f2":[5,6]}');
 SELECT jsonb_array_length('4');
 
 -- each
---@ SELECT jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}');
---@ SELECT jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
---@ SELECT * FROM jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
---@ SELECT * FROM jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
---@ 
+SELECT jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}');
+SELECT jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
+SELECT * FROM jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
+SELECT * FROM jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
+
 --@ SELECT jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":"null"}');
 --@ SELECT jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
---@ SELECT * FROM jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
---@ SELECT * FROM jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
+SELECT * FROM jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
+SELECT * FROM jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
 
 -- exists
 SELECT jsonb_exists('{"a":null, "b":"qq"}', 'a');
@@ -401,50 +401,50 @@ SELECT jsonb_build_object('{1,2,3}'::int[], 3);
 
 -- jsonb_object
 
---@ -- empty object, one dimension
---@ SELECT jsonb_object('{}');
---@ 
---@ -- empty object, two dimensions
---@ SELECT jsonb_object('{}', '{}');
---@ 
---@ -- one dimension
---@ SELECT jsonb_object('{a,1,b,2,3,NULL,"d e f","a b c"}');
---@ 
---@ -- same but with two dimensions
---@ SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}');
---@ 
---@ -- odd number error
---@ SELECT jsonb_object('{a,b,c}');
---@ 
---@ -- one column error
---@ SELECT jsonb_object('{{a},{b}}');
---@ 
---@ -- too many columns error
---@ SELECT jsonb_object('{{a,b,c},{b,c,d}}');
---@ 
---@ -- too many dimensions error
---@ SELECT jsonb_object('{{{a,b},{c,d}},{{b,c},{d,e}}}');
---@ 
---@ --two argument form of jsonb_object
---@ 
---@ select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c"}');
---@ 
+-- empty object, one dimension
+SELECT jsonb_object('{}'::text[]);
+
+-- empty object, two dimensions
+SELECT jsonb_object('{}', '{}');
+
+-- one dimension
+SELECT jsonb_object('{a,1,b,2,3,NULL,"d e f","a b c"}'::text[]);
+
+-- same but with two dimensions
+SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}'::text[][]);
+
+-- odd number error
+SELECT jsonb_object('{a,b,c}'::text[]);
+
+-- one column error
+SELECT jsonb_object('{{a},{b}}'::text[][]);
+
+-- too many columns error
+SELECT jsonb_object('{{a,b,c},{b,c,d}}'::text[][]);
+
+-- too many dimensions error
+SELECT jsonb_object('{{{a,b},{c,d}},{{b,c},{d,e}}}');
+
+--two argument form of jsonb_object
+
+select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c"}');
+
 --@ -- too many dimensions
 --@ SELECT jsonb_object('{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}', '{{a,1},{b,2},{3,NULL},{"d e f","a b c"}}');
---@ 
---@ -- mismatched dimensions
---@ 
---@ select jsonb_object('{a,b,c,"d e f",g}','{1,2,3,"a b c"}');
---@ 
---@ select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c",g}');
---@ 
---@ -- null key error
---@ 
---@ select jsonb_object('{a,b,NULL,"d e f"}','{1,2,3,"a b c"}');
---@ 
---@ -- empty key is allowed
---@ 
---@ select jsonb_object('{a,b,"","d e f"}','{1,2,3,"a b c"}');
+
+-- mismatched dimensions
+
+select jsonb_object('{a,b,c,"d e f",g}','{1,2,3,"a b c"}');
+
+select jsonb_object('{a,b,c,"d e f"}','{1,2,3,"a b c",g}');
+
+-- null key error
+
+select jsonb_object('{a,b,NULL,"d e f"}','{1,2,3,"a b c"}');
+
+-- empty key is allowed
+
+select jsonb_object('{a,b,"","d e f"}','{1,2,3,"a b c"}');
 
 
 
@@ -519,9 +519,9 @@ select '42'::jsonb #>> array['f2'];
 select '42'::jsonb #>> array['0'];
 
 -- array_elements
---@ SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]');
+SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]');
 --@ SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]') q;
---@ SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]');
+SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]');
 --@ SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]') q;
 
 -- populate_record
@@ -1050,41 +1050,41 @@ select jsonb_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }');
 select jsonb_pretty('{"a": "test", "b": [1, 2, 3], "c": "test3", "d":{"dd": "test4", "dd2":{"ddd": "test5"}}}');
 select jsonb_pretty('[{"f1":1,"f2":null},2,null,[[{"x":true},6,7],8],3]');
 select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
---@ 
---@ select jsonb_concat('{"d": "test", "a": [1, 2]}', '{"g": "test2", "c": {"c1":1, "c2":2}}');
---@ 
+
+select jsonb_concat('{"d": "test", "a": [1, 2]}', '{"g": "test2", "c": {"c1":1, "c2":2}}');
+
 --@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
 --@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aq":"l"}';
 --@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aa":"l"}';
 --@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{}';
---@ 
---@ select '["a", "b"]'::jsonb || '["c"]';
---@ select '["a", "b"]'::jsonb || '["c", "d"]';
---@ select '["c"]' || '["a", "b"]'::jsonb;
---@ 
---@ select '["a", "b"]'::jsonb || '"c"';
---@ select '"c"' || '["a", "b"]'::jsonb;
---@ 
---@ select '[]'::jsonb || '["a"]'::jsonb;
---@ select '[]'::jsonb || '"a"'::jsonb;
---@ select '"b"'::jsonb || '"a"'::jsonb;
---@ select '{}'::jsonb || '{"a":"b"}'::jsonb;
---@ select '[]'::jsonb || '{"a":"b"}'::jsonb;
---@ select '{"a":"b"}'::jsonb || '[]'::jsonb;
---@ 
---@ select '"a"'::jsonb || '{"a":1}';
---@ select '{"a":1}' || '"a"'::jsonb;
---@ 
---@ select '[3]'::jsonb || '{}'::jsonb;
---@ select '3'::jsonb || '[]'::jsonb;
---@ select '3'::jsonb || '4'::jsonb;
---@ select '3'::jsonb || '{}'::jsonb;
---@ 
---@ select '["a", "b"]'::jsonb || '{"c":1}';
---@ select '{"c": 1}'::jsonb || '["a", "b"]';
---@ 
---@ select '{}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
---@ 
+
+select '["a", "b"]'::jsonb || '["c"]';
+select '["a", "b"]'::jsonb || '["c", "d"]';
+select '["c"]' || '["a", "b"]'::jsonb;
+
+select '["a", "b"]'::jsonb || '"c"';
+select '"c"' || '["a", "b"]'::jsonb;
+
+select '[]'::jsonb || '["a"]'::jsonb;
+select '[]'::jsonb || '"a"'::jsonb;
+select '"b"'::jsonb || '"a"'::jsonb;
+select '{}'::jsonb || '{"a":"b"}'::jsonb;
+select '[]'::jsonb || '{"a":"b"}'::jsonb;
+select '{"a":"b"}'::jsonb || '[]'::jsonb;
+
+select '"a"'::jsonb || '{"a":1}';
+select '{"a":1}' || '"a"'::jsonb;
+
+select '[3]'::jsonb || '{}'::jsonb;
+select '3'::jsonb || '[]'::jsonb;
+select '3'::jsonb || '4'::jsonb;
+select '3'::jsonb || '{}'::jsonb;
+
+select '["a", "b"]'::jsonb || '{"c":1}';
+select '{"c": 1}'::jsonb || '["a", "b"]';
+
+select '{}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
+
 --@ select pg_column_size('{}'::jsonb || '{}'::jsonb) = pg_column_size('{}'::jsonb);
 --@ select pg_column_size('{"aa":1}'::jsonb || '{"b":2}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb);
 --@ select pg_column_size('{"aa":1, "b":2}'::jsonb || '{}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb);

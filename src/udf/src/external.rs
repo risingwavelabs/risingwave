@@ -23,6 +23,7 @@ use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
+use thiserror_ext::AsReport;
 use tonic::transport::Channel;
 
 use crate::{Error, Result};
@@ -66,8 +67,9 @@ impl ArrowFlightUdfClient {
         // check schema
         let info = response.into_inner();
         let input_num = info.total_records as usize;
-        let full_schema = Schema::try_from(info)
-            .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        let full_schema = Schema::try_from(info).map_err(|e| {
+            FlightError::DecodeError(format!("Error decoding schema: {}", e.as_report()))
+        })?;
         if input_num > full_schema.fields.len() {
             return Err(Error::service_error(format!(
                 "function {:?} schema info not consistency: input_num: {}, total_fields: {}",
@@ -125,7 +127,7 @@ impl ArrowFlightUdfClient {
         for i in 0..5 {
             match self.call(id, input.clone()).await {
                 Err(err) if err.is_connection_error() && i != 4 => {
-                    tracing::error!(%err, "UDF connection error. retry...");
+                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
                 ret => return ret,
             }

@@ -22,6 +22,7 @@ use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
     TaskInfoResponse,
 };
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -63,6 +64,7 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
+            captured_execution_context,
         } = request.into_inner();
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
@@ -79,6 +81,7 @@ impl TaskService for BatchServiceImpl {
                 ),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
+                captured_execution_context.expect("no captured execution context found"),
             )
             .await;
         match res {
@@ -91,7 +94,7 @@ impl TaskService for BatchServiceImpl {
                 state_rx,
             ))),
             Err(e) => {
-                error!("failed to fire task {}", e);
+                error!(error = %e.as_report(), "failed to fire task");
                 Err(e.into())
             }
         }
@@ -119,12 +122,15 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
+            captured_execution_context,
         } = req.into_inner();
 
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
         let epoch = epoch.expect("no epoch found");
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
+        let captured_execution_context =
+            captured_execution_context.expect("no captured execution context found");
 
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
@@ -135,10 +141,15 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        if let Err(e) = task.clone().async_execute(None, tracing_context).await {
+        if let Err(e) = task
+            .clone()
+            .async_execute(None, tracing_context, captured_execution_context)
+            .await
+        {
             error!(
-                "failed to build executors and trigger execution of Task {:?}: {}",
-                task_id, e
+                error = %e.as_report(),
+                ?task_id,
+                "failed to build executors and trigger execution"
             );
             return Err(e.into());
         }
@@ -149,12 +160,12 @@ impl TaskService for BatchServiceImpl {
             // therefore we would only have one data output.
             output_id: 0,
         };
-        let mut output = task.get_task_output(&pb_task_output_id).map_err(|e| {
+        let mut output = task.get_task_output(&pb_task_output_id).inspect_err(|e| {
             error!(
-                "failed to get task output of Task {:?} in local execution mode",
-                task_id
+                error = %e.as_report(),
+                ?task_id,
+                "failed to get task output in local execution mode",
             );
-            e
         })?;
         let mut writer = GrpcExchangeWriter::new(tx.clone());
         // Always spawn a task and do not block current function.

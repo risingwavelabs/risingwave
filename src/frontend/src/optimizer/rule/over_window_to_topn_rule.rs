@@ -139,6 +139,10 @@ impl Rule for OverWindowToTopNRule {
 
 /// Returns `None` if the conditions are too complex or invalid. `Some((limit, offset))` otherwise.
 fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<(u64, u64)> {
+    if rank_preds.is_empty() {
+        return None;
+    }
+
     // rank >= lb
     let mut lb: Option<i64> = None;
     // rank <= ub

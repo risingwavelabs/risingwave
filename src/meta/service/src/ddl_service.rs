@@ -626,16 +626,16 @@ impl DdlService for DdlServiceImpl {
         }
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        request: Request<AlterRelationNameRequest>,
-    ) -> Result<Response<AlterRelationNameResponse>, Status> {
-        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        request: Request<AlterNameRequest>,
+    ) -> Result<Response<AlterNameResponse>, Status> {
+        let AlterNameRequest { object, new_name } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .run_command(DdlCommand::AlterName(object.unwrap(), new_name))
             .await?;
-        Ok(Response::new(AlterRelationNameResponse {
+        Ok(Response::new(AlterNameResponse {
             status: None,
             version,
         }))
@@ -739,7 +739,7 @@ impl DdlService for DdlServiceImpl {
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured".into(),
+                                "AWS client is not configured",
                             )));
                         }
                     }

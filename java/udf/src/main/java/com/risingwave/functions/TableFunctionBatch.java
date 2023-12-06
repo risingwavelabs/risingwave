@@ -28,9 +28,8 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     Function<Object, Object>[] processInputs;
     int chunkSize = 1024;
 
-    TableFunctionBatch(TableFunction function, BufferAllocator allocator) {
+    TableFunctionBatch(TableFunction function) {
         this.function = function;
-        this.allocator = allocator;
         var method = Reflection.getEvalMethod(function);
         this.methodHandle = Reflection.getMethodHandle(method);
         this.inputSchema = TypeUtils.methodToInputSchema(method);
@@ -39,7 +38,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     }
 
     @Override
-    Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
+    Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch, BufferAllocator allocator) {
         var outputs = new ArrayList<VectorSchemaRoot>();
         var row = new Object[batch.getSchema().getFields().size() + 1];
         row[0] = this.function;
@@ -49,10 +48,9 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
                 () -> {
                     var fields = this.outputSchema.getFields();
                     var indexVector =
-                            TypeUtils.createVector(
-                                    fields.get(0), this.allocator, indexes.toArray());
+                            TypeUtils.createVector(fields.get(0), allocator, indexes.toArray());
                     var valueVector =
-                            TypeUtils.createVector(fields.get(1), this.allocator, values.toArray());
+                            TypeUtils.createVector(fields.get(1), allocator, values.toArray());
                     indexes.clear();
                     values.clear();
                     var outputBatch = VectorSchemaRoot.of(indexVector, valueVector);
