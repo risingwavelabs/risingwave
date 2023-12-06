@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
 
@@ -100,10 +100,11 @@ mod wrapper;
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
+mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
-pub use backfill::cdc_backfill::*;
+pub use backfill::cdc::cdc_backfill::CdcBackfillExecutor;
 pub use backfill::no_shuffle_backfill::*;
 pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
@@ -141,6 +142,7 @@ pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
@@ -152,6 +154,7 @@ pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
@@ -239,6 +242,7 @@ pub enum Mutation {
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
     Resume,
+    Throttle(HashMap<ActorId, Option<u32>>),
 }
 
 #[derive(Debug, Clone)]
@@ -474,6 +478,12 @@ impl Mutation {
             }),
             Mutation::Pause => PbMutation::Pause(PauseMutation {}),
             Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
+            Mutation::Throttle(changes) => PbMutation::Throttle(ThrottleMutation {
+                actor_throttle: changes
+                    .iter()
+                    .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
+                    .collect(),
+            }),
         }
     }
 
@@ -564,6 +574,13 @@ impl Mutation {
             }
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
+            PbMutation::Throttle(changes) => Mutation::Throttle(
+                changes
+                    .actor_throttle
+                    .iter()
+                    .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
+                    .collect(),
+            ),
         };
         Ok(mutation)
     }
@@ -686,7 +703,7 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq)]
+#[derive(Debug, EnumAsInner, PartialEq, Clone)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),

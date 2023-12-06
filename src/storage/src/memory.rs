@@ -198,6 +198,7 @@ pub mod sled {
         use bytes::Bytes;
         use risingwave_common::catalog::TableId;
         use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+        use risingwave_hummock_sdk::EpochWithGap;
 
         use crate::memory::sled::SledRangeKv;
         use crate::memory::RangeKv;
@@ -216,7 +217,7 @@ pub mod sled {
                     table_id,
                     table_key: TableKey(Bytes::from(table_key.to_vec())),
                 },
-                epoch,
+                epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
             };
 
             let left_full_key = to_full_key(&left_table_key[..]);
@@ -319,10 +320,10 @@ mod batched_iter {
                 .collect_vec();
 
             if let Some((last_key, _)) = batch.last() {
-                let full_key = FullKey::new(
+                let full_key = FullKey::new_with_gap_epoch(
                     last_key.user_key.table_id,
                     TableKey(last_key.user_key.table_key.0.clone()),
-                    last_key.epoch,
+                    last_key.epoch_with_gap,
                 );
                 self.range.0 = Bound::Excluded(full_key);
             }
@@ -515,7 +516,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             .inner
             .range(to_full_key_range(table_id, key_range), None)?
         {
-            if key.epoch > epoch {
+            if key.epoch_with_gap.pure_epoch() > epoch {
                 continue;
             }
             if Some(&key.user_key) != last_user_key.as_ref() {
@@ -524,7 +525,9 @@ impl<R: RangeKv> RangeKvStateStore<R> {
                 }
                 last_user_key = Some(key.user_key.clone());
             }
-            if let Some(limit) = limit && data.len() >= limit {
+            if let Some(limit) = limit
+                && data.len() >= limit
+            {
                 break;
             }
         }
@@ -693,7 +696,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch > self.epoch {
+            if key.epoch_with_gap.pure_epoch() > self.epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {

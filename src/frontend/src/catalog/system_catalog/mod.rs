@@ -21,15 +21,15 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     NON_RESERVED_SYS_CATALOG_ID,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_pb::user::UserInfo;
+use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::system_catalog::information_schema::*;
@@ -39,6 +39,7 @@ use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
+use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
@@ -212,17 +213,17 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
 fn get_acl_items(
     object: &Object,
     for_dml_table: bool,
-    users: &Vec<UserInfo>,
+    users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
 ) -> String {
     let mut res = String::from("{");
     let mut empty_flag = true;
     let super_privilege = available_prost_privilege(object.clone(), for_dml_table);
     for user in users {
-        let privileges = if user.get_is_super() {
+        let privileges = if user.is_super {
             vec![&super_privilege]
         } else {
-            user.get_grant_privileges()
+            user.grant_privileges
                 .iter()
                 .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
                 .collect_vec()
@@ -233,43 +234,29 @@ fn get_acl_items(
         let mut grantor_map = HashMap::new();
         privileges.iter().for_each(|&privilege| {
             privilege.action_with_opts.iter().for_each(|ao| {
-                grantor_map.entry(ao.granted_by).or_insert_with(Vec::new);
                 grantor_map
-                    .get_mut(&ao.granted_by)
-                    .unwrap()
-                    .push((ao.action, ao.with_grant_option));
+                    .entry(ao.granted_by)
+                    .or_insert_with(Vec::new)
+                    .push((ao.get_action().unwrap(), ao.with_grant_option));
             })
         });
-        for key in grantor_map.keys() {
+        for (granted_by, actions) in grantor_map {
             if empty_flag {
                 empty_flag = false;
             } else {
                 res.push(',');
             }
-            res.push_str(user.get_name());
+            res.push_str(&user.name);
             res.push('=');
-            grantor_map
-                .get(key)
-                .unwrap()
-                .iter()
-                .for_each(|(action, option)| {
-                    let str = match Action::try_from(*action).unwrap() {
-                        Action::Select => "r",
-                        Action::Insert => "a",
-                        Action::Update => "w",
-                        Action::Delete => "d",
-                        Action::Create => "C",
-                        Action::Connect => "c",
-                        _ => unreachable!(),
-                    };
-                    res.push_str(str);
-                    if *option {
-                        res.push('*');
-                    }
-                });
+            for (action, option) in actions {
+                res.push_str(&AclMode::from(action).to_string());
+                if option {
+                    res.push('*');
+                }
+            }
             res.push('/');
             // should be able to query grantor's name
-            res.push_str(username_map.get(key).as_ref().unwrap());
+            res.push_str(username_map.get(&granted_by).unwrap());
         }
     }
     res.push('}');
@@ -327,14 +314,14 @@ macro_rules! prepare_sys_catalog {
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError> {
                 let table_name = SYS_CATALOGS.table_name_by_id.get(table_id).unwrap();
                 $(
                     if $builtin_catalog.name() == *table_name {
                         $(
                             let rows = self.$func();
                             $(let rows = rows.$await;)?
-                            return rows;
+                            return Ok(rows?);
                         )?
                     }
                 )*
@@ -365,6 +352,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_KEYWORDS) },
     { BuiltinCatalog::View(&PG_ATTRDEF) },
     { BuiltinCatalog::View(&PG_ROLES) },
+    { BuiltinCatalog::View(&PG_AUTH_MEMBERS) },
     { BuiltinCatalog::View(&PG_SHDESCRIPTION) },
     { BuiltinCatalog::View(&PG_TABLESPACE) },
     { BuiltinCatalog::View(&PG_STAT_ACTIVITY) },
@@ -387,6 +375,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },
     { BuiltinCatalog::Table(&RW_USER_SECRETS), read_rw_user_secrets_info },
     { BuiltinCatalog::Table(&RW_TABLES), read_rw_table_info },
+    { BuiltinCatalog::Table(&RW_INTERNAL_TABLES), read_rw_internal_table_info },
     { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info },
     { BuiltinCatalog::Table(&RW_INDEXES), read_rw_indexes_info },
     { BuiltinCatalog::Table(&RW_SOURCES), read_rw_sources_info },
@@ -394,7 +383,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
     { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
     { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },
-    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info },
+    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info await },
     { BuiltinCatalog::Table(&RW_PARALLEL_UNITS), read_rw_parallel_units_info },
     { BuiltinCatalog::Table(&RW_TABLE_FRAGMENTS), read_rw_table_fragments_info await },
     { BuiltinCatalog::Table(&RW_FRAGMENTS), read_rw_fragment_distributions_info await },
@@ -416,6 +405,9 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMENT), read_hummock_compact_task_assignments await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_PROGRESS), read_hummock_compact_task_progress await },
+    { BuiltinCatalog::Table(&RW_EVENT_LOGS), read_event_logs await},
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 

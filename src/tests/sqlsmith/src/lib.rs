@@ -16,6 +16,9 @@
 #![feature(if_let_guard)]
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 risingwave_expr_impl::enable!();
 
@@ -277,6 +280,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -320,6 +324,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -374,6 +379,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                     ],
                 )"#]],
@@ -504,6 +510,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -554,6 +561,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -611,6 +619,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -686,6 +695,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
                         },
                     ],
                 )"#]],

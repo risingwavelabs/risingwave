@@ -15,7 +15,6 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
@@ -23,6 +22,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::task::BatchTaskContext;
 
 /// Sort Executor
@@ -84,7 +84,7 @@ impl BoxedExecutorBuilder for SortExecutor {
 }
 
 impl SortExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         let mut chunks = Vec::new_in(self.mem_context.global_allocator());
@@ -613,17 +613,11 @@ mod tests {
                 },
                 {
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![
-                            Some(1i64.to_scalar_value()),
-                            None,
-                            Some(3i64.to_scalar_value()),
-                        ]),
-                    }));
+                    list_builder.append(Some(
+                        ListValue::from_iter([Some(1i64), None, Some(3i64)]).as_scalar_ref(),
+                    ));
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                    }));
+                    list_builder.append(Some(ListValue::from_iter([2i64]).as_scalar_ref()));
                     list_builder.append(None);
                     list_builder.finish().into_ref()
                 },
@@ -675,16 +669,10 @@ mod tests {
                 },
                 {
                     list_builder.append(None);
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                    }));
-                    list_builder.append(Some(ListRef::ValueRef {
-                        val: &ListValue::new(vec![
-                            Some(1i64.to_scalar_value()),
-                            None,
-                            Some(3i64.to_scalar_value()),
-                        ]),
-                    }));
+                    list_builder.append(Some(ListValue::from_iter([2i64]).as_scalar_ref()));
+                    list_builder.append(Some(
+                        ListValue::from_iter([Some(1i64), None, Some(3i64)]).as_scalar_ref(),
+                    ));
                     list_builder.append(None);
                     list_builder.append(None);
                     list_builder.finish().into_ref()

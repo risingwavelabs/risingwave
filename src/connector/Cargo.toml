@@ -15,13 +15,13 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0dev/resolved_schema", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16ce813a225af04ade35b3b8117b137a29", features = [
     "snappy",
     "zstandard",
     "bzip",
     "xz",
 ] }
-arrow-array = "48"
+arrow-array = { workspace = true }
 async-nats = "0.32"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -31,6 +31,8 @@ aws-credential-types = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
+aws-smithy-runtime-api = { workspace = true }
+aws-smithy-types = { workspace = true }
 aws-types = { workspace = true }
 base64 = "0.21"
 byteorder = "1"
@@ -48,19 +50,20 @@ easy-ext = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.20"
+google-cloud-pubsub = "0.21"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
-itertools = "0.11"
+itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
-mysql_async = { version = "0.32", default-features = false, features = [
+mysql_async = { version = "0.33", default-features = false, features = [
     "default",
 ] }
-mysql_common = { version = "0.30", default-features = false, features = [
+mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
@@ -72,7 +75,7 @@ prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.12"
 prost-types = "0.12"
 protobuf-native = "0.2.1"
-pulsar = { version = "6.0", default-features = false, features = [
+pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
@@ -86,7 +89,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.23.3", features = ["aio", "tokio-comp", "async-std-comp"] }
+redis = { version = "0.24.0", features = ["aio", "tokio-comp", "async-std-comp"] }
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
@@ -99,7 +102,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.12.0"
+simd-json = "0.13.3"
 tempfile = "3"
 thiserror = "1"
 time = "0.3.30"
@@ -120,21 +123,36 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
+with_options = { path = "../utils/with_options" }
+yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
+expect-test = "1"
+pretty_assertions = "1"
+quote = "1"
 rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+syn = { version = "1", features = ["full"] }
 tempfile = "3"
+tracing-subscriber = "0.3"
 tracing-test = "0.2"
+walkdir = "2"
 
 [build-dependencies]
 prost-build = "0.12"
+protobuf-src = "1"
 
 [[bench]]
 name = "parser"
+harness = false
+
+[[bench]]
+name = "nexmark_integration"
 harness = false
 
 [lints]

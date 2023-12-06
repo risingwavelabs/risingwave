@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod big_query;
 pub mod blackhole;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
-pub mod doris_connector;
+pub mod doris_starrocks_connector;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -24,6 +25,7 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod starrocks;
 pub mod test_sink;
 
 use anyhow::anyhow;
@@ -51,7 +53,10 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::remote::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
+                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
             $(,$arg)*

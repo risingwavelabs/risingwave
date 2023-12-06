@@ -24,17 +24,18 @@ use lru::{DefaultHasher, KeyRef, LruCache};
 use prometheus::IntGauge;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::util::epoch::Epoch;
+use thiserror_ext::AsReport;
 
 use crate::common::metrics::MetricsInfo;
 
 const REPORT_SIZE_EVERY_N_KB_CHANGE: usize = 4096;
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `GlobalMemoryManager`.
+/// Should be used with `MemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
-    /// Should only be updated by the `GlobalMemoryManager`.
+    /// Should only be updated by the `MemoryManager`.
     watermark_epoch: Arc<AtomicU64>,
     /// The heap size of keys/values
     kv_heap_size: usize,
@@ -59,8 +60,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
             &info.desc,
         ]) {
             warn!(
-                "unable to remove stream_memory_usage of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
+                error = %e.as_report(),
+                table_id = info.table_id,
+                actor_id = info.actor_id,
+                desc = info.desc,
+                "unable to remove stream_memory_usage",
             );
         };
         if let Err(e) = info
@@ -69,8 +73,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
         {
             warn!(
-                "unable to remove lru_evicted_watermark_time_ms of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
+                error = %e.as_report(),
+                table_id = info.table_id,
+                actor_id = info.actor_id,
+                desc = info.desc,
+                "unable to remove lru_evicted_watermark_time_ms",
             );
         }
     }

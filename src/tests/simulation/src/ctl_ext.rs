@@ -24,6 +24,7 @@ use clap::Parser;
 use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -31,6 +32,7 @@ use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_pb::stream_plan::StreamNode;
+use serde::de::IntoDeserializer;
 
 use self::predicate::BoxedPredicate;
 use crate::cluster::Cluster;
@@ -422,6 +424,27 @@ impl Cluster {
             })
             .await??;
 
+        Ok(())
+    }
+
+    /// Throttle a Mv in the cluster
+    #[cfg_or_panic(madsim)]
+    pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let mut command: Vec<String> = vec![
+                    "ctl".into(),
+                    "throttle".into(),
+                    "mv".into(),
+                    table_id.table_id.to_string(),
+                ];
+                if let Some(rate_limit) = rate_limit {
+                    command.push(rate_limit.to_string());
+                }
+                let opts = risingwave_ctl::CliOpts::parse_from(command);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
         Ok(())
     }
 

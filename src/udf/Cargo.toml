@@ -19,8 +19,13 @@ cfg-or-panic = "0.2"
 futures-util = "0.3.28"
 static_assertions = "1"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+thiserror-ext = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "macros",
+] }
 tonic = { workspace = true }
+tracing = "0.1"
 
 [lints]
 workspace = true

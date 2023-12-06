@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
+use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndicesRef};
 
 mod cache;
 mod sides;
@@ -28,7 +28,7 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::ActorContextRef;
+use super::{ActorContextRef, ExecutorInfo};
 
 #[cfg(test)]
 mod tests;
@@ -42,14 +42,10 @@ mod tests;
 pub struct LookupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
+    info: ExecutorInfo,
+
     /// the data types of the produced data chunk inside lookup (before reordering)
     chunk_data_types: Vec<DataType>,
-
-    /// The schema of the lookup executor (after reordering)
-    schema: Schema,
-
-    /// The primary key indices of the schema (after reordering)
-    pk_indices: PkIndices,
 
     /// The join side of the arrangement
     arrangement: ArrangeJoinSide<S>,
@@ -93,14 +89,14 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        "LookupExecutor"
+        &self.info.identity
     }
 }

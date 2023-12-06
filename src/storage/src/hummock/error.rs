@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
-
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
-#[derive(Error, Debug)]
-enum HummockErrorInner {
+
+// TODO(error-handling): should prefer use error types than strings.
+#[derive(Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = HummockError, backtrace, report_debug))]
+pub enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}.")]
     MagicMismatch { expected: u32, found: u32 },
     #[error("Invalid format version: {0}.")]
@@ -31,11 +32,12 @@ enum HummockErrorInner {
     EncodeError(String),
     #[error("Decode error {0}.")]
     DecodeError(String),
-    #[expect(dead_code)]
-    #[error("Mock error {0}.")]
-    MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
-    ObjectIoError(Box<ObjectError>),
+    ObjectIoError(
+        #[from]
+        #[backtrace]
+        ObjectError,
+    ),
     #[error("Meta error {0}.")]
     MetaError(String),
     #[error("SharedBuffer error {0}.")]
@@ -62,19 +64,7 @@ enum HummockErrorInner {
     Other(String),
 }
 
-#[derive(Error)]
-#[error("{inner}")]
-pub struct HummockError {
-    #[from]
-    inner: HummockErrorInner,
-    backtrace: Backtrace,
-}
-
 impl HummockError {
-    pub fn object_io_error(error: ObjectError) -> HummockError {
-        HummockErrorInner::ObjectIoError(error.into()).into()
-    }
-
     pub fn invalid_format_version(v: u32) -> HummockError {
         HummockErrorInner::InvalidFormatVersion(v).into()
     }
@@ -120,15 +110,15 @@ impl HummockError {
     }
 
     pub fn is_expired_epoch(&self) -> bool {
-        matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
+        matches!(self.inner(), HummockErrorInner::ExpiredEpoch { .. })
     }
 
     pub fn is_meta_error(&self) -> bool {
-        matches!(self.inner, HummockErrorInner::MetaError(..))
+        matches!(self.inner(), HummockErrorInner::MetaError(..))
     }
 
     pub fn is_object_error(&self) -> bool {
-        matches!(self.inner, HummockErrorInner::ObjectIoError { .. })
+        matches!(self.inner(), HummockErrorInner::ObjectIoError { .. })
     }
 
     pub fn compaction_executor(error: impl ToString) -> HummockError {
@@ -166,30 +156,9 @@ impl From<prost::DecodeError> for HummockError {
     }
 }
 
-impl From<ObjectError> for HummockError {
-    fn from(error: ObjectError) -> Self {
-        HummockErrorInner::ObjectIoError(error.into()).into()
-    }
-}
-
 impl From<RecvError> for HummockError {
     fn from(error: RecvError) -> Self {
         ObjectError::from(error).into()
-    }
-}
-
-impl std::fmt::Debug for HummockError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.inner)?;
-        writeln!(f)?;
-        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner as &dyn Error) {
-            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
-        } else {
-            write!(f, "  backtrace of `HummockError`:\n{}", self.backtrace)?;
-        }
-        Ok(())
     }
 }
 

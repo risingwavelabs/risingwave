@@ -33,11 +33,12 @@ use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
     StreamExecutorResult, StreamSourceCore,
 };
 
@@ -47,12 +48,7 @@ type SplitBatch = Option<Vec<SplitImpl>>;
 
 pub struct FsFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-
-    identity: String,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
+    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -71,19 +67,15 @@ impl<S: StateStore> FsFetchExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        schema: Schema,
-        pk_indices: PkIndices,
+        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
-        executor_id: u64,
         upstream: BoxedExecutor,
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
-            identity: format!("FsFetchExecutor {:X}", executor_id),
-            schema,
-            pk_indices,
+            info,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             source_ctrl_opts,
@@ -106,7 +98,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
             pin_mut!(table_iter);
@@ -211,7 +203,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!("Fetch Error: {:?}", e);
+                    tracing::error!(error = %e.as_report(), "Fetch Error");
                     splits_on_fetch = 0;
                 }
                 Ok(msg) => {
@@ -323,15 +315,15 @@ impl<S: StateStore> Executor for FsFetchExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -341,7 +333,7 @@ impl<S: StateStore> Debug for FsFetchExecutor<S> {
             f.debug_struct("FsFetchExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.pk_indices)
+                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsFetchExecutor").finish()

@@ -24,8 +24,10 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{
-    collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
+    collect_input_refs, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
+    TableFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -309,6 +311,12 @@ impl ExprRewritable for LogicalProjectSet {
     }
 }
 
+impl ExprVisitable for LogicalProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalProjectSet {
     fn predicate_pushdown(
         &self,
@@ -385,7 +393,7 @@ impl ToStream for LogicalProjectSet {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, project_set.schema().len());
+        let out_col_change = ColIndexMapping::new(map, project_set.schema().len());
         Ok((project_set.into(), out_col_change))
     }
 

@@ -14,19 +14,27 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
+#[cfg(test)]
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
-use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_server::{
+    BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+    UserAuthenticator,
+};
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -49,7 +57,7 @@ use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -64,13 +72,15 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
+use crate::catalog::{
+    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
+};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
-use crate::handler::handle;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -86,9 +96,10 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::infer_show_object;
+use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
+pub(crate) mod current;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -129,7 +140,7 @@ pub struct FrontendEnv {
 }
 
 /// Session map identified by `(process_id, secret_key)`
-type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
     pub fn mock() -> Self {
@@ -166,7 +177,7 @@ impl FrontendEnv {
             hummock_snapshot_manager,
             server_addr,
             client_pool,
-            sessions_map: Arc::new(Mutex::new(HashMap::new())),
+            sessions_map: Arc::new(RwLock::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
@@ -326,7 +337,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(Mutex::new(HashMap::new())),
+                sessions_map: Arc::new(RwLock::new(HashMap::new())),
                 batch_config,
                 meta_config,
                 source_metrics,
@@ -412,6 +423,10 @@ impl FrontendEnv {
         &self.creating_streaming_job_tracker
     }
 
+    pub fn sessions_map(&self) -> &SessionMapRef {
+        &self.sessions_map
+    }
+
     pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
     }
@@ -425,6 +440,32 @@ impl FrontendEnv {
                 .build()
                 .unwrap(),
         ))
+    }
+
+    /// Cancel queries (i.e. batch queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_query();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel query request");
+            false
+        }
+    }
+
+    /// Cancel creating jobs (i.e. streaming queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_creating_job();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel creating request");
+            false
+        }
     }
 }
 
@@ -447,7 +488,7 @@ impl AuthContext {
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
-    // Used for user authentication.
+    /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<ConfigMap>>,
@@ -457,15 +498,21 @@ pub struct SessionImpl {
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 
+    /// Client address
+    peer_addr: AddressRef,
+
     /// Transaction state.
-    // TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
-    // async functions, there should actually be no contention.
+    /// TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
+    /// async functions, there should actually be no contention.
     txn: Arc<Mutex<transaction::State>>,
 
     /// Query cancel flag.
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
+
+    /// execution context represents the lifetime of a running SQL in the current session
+    exec_context: Mutex<Option<Weak<ExecContext>>>,
 }
 
 #[derive(Error, Debug)]
@@ -491,6 +538,7 @@ impl SessionImpl {
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
         id: SessionId,
+        peer_addr: AddressRef,
     ) -> Self {
         Self {
             env,
@@ -498,9 +546,11 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
+            peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            exec_context: Mutex::new(None),
         }
     }
 
@@ -520,6 +570,12 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            exec_context: Mutex::new(None),
+            peer_addr: Address::Tcp(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                8080,
+            ))
+            .into(),
         }
     }
 
@@ -551,33 +607,68 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value, ())
+    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+        self.config_map
+            .write()
+            .set(key, value, &mut ())
+            .map_err(Into::into)
     }
 
     pub fn set_config_report(
         &self,
         key: &str,
-        value: Vec<String>,
-        reporter: impl ConfigReporter,
+        value: Option<String>,
+        mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map.write().set(key, value, reporter)
+        if let Some(value) = value {
+            self.config_map
+                .write()
+                .set(key, value, &mut reporter)
+                .map_err(Into::into)
+        } else {
+            self.config_map
+                .write()
+                .reset(key, &mut reporter)
+                .map_err(Into::into)
+        }
     }
 
     pub fn session_id(&self) -> SessionId {
         self.id
     }
 
+    pub fn running_sql(&self) -> Option<Arc<str>> {
+        self.exec_context
+            .lock()
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .map(|context| context.running_sql.clone())
+    }
+
+    pub fn peer_addr(&self) -> &Address {
+        &self.peer_addr
+    }
+
+    pub fn elapse_since_running_sql(&self) -> Option<u128> {
+        self.exec_context
+            .lock()
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .map(|context| context.last_instant.elapsed().as_millis())
+    }
+
     pub fn check_relation_name_duplicated(
         &self,
         name: ObjectName,
-    ) -> std::result::Result<(), CheckRelationError> {
+        stmt_type: StatementType,
+        if_not_exists: bool,
+    ) -> std::result::Result<Either<(), RwPgResponse>, CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -587,9 +678,15 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
-
-        Ok(())
+        match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
+            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
+                PgResponse::builder(stmt_type)
+                    .notice(format!("relation \"{}\" already exists, skipping", name))
+                    .into(),
+            )),
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(Either::Left(())),
+        }
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -598,7 +695,7 @@ impl SessionImpl {
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -620,7 +717,7 @@ impl SessionImpl {
     ) -> Result<(DatabaseId, SchemaId)> {
         let db_name = self.database();
 
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -633,7 +730,7 @@ impl SessionImpl {
         if schema.name() != DEFAULT_SCHEMA_NAME {
             self.check_privileges(&[ObjectCheckItem::new(
                 schema.owner(),
-                Action::Create,
+                AclMode::Create,
                 Object::SchemaId(schema.id()),
             )])?;
         }
@@ -648,7 +745,7 @@ impl SessionImpl {
         connection_name: &str,
     ) -> Result<Arc<ConnectionCatalog>> {
         let db_name = self.database();
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -707,11 +804,11 @@ impl SessionImpl {
     /// Maybe we can remove it in the future.
     pub async fn run_statement(
         self: Arc<Self>,
-        sql: &str,
+        sql: Arc<str>,
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)
+        let mut stmts = Parser::parse_sql(&sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
@@ -727,7 +824,7 @@ impl SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -737,7 +834,7 @@ impl SessionImpl {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
                             target: SLOW_QUERY_LOG,
-                            sql,
+                            sql = sql.as_ref(),
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -757,7 +854,7 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().get_visible_mode() {
+        match self.config().visibility_mode() {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
@@ -779,6 +876,7 @@ impl SessionManager for SessionManagerImpl {
         &self,
         database: &str,
         user_name: &str,
+        peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
@@ -800,13 +898,8 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege = user.grant_privileges.iter().any(|privilege| {
-                privilege.object == Some(Object::DatabaseId(database_id))
-                    && privilege
-                        .action_with_opts
-                        .iter()
-                        .any(|ao| ao.action == Action::Connect as i32)
-            });
+            let has_privilege =
+                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
@@ -851,6 +944,7 @@ impl SessionManager for SessionManagerImpl {
                 )),
                 user_authenticator,
                 id,
+                peer_addr,
             )
             .into();
             self.insert_session(session_impl.clone());
@@ -866,21 +960,11 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query()
-        } else {
-            info!("Current session finished, ignoring cancel query request")
-        }
+        self.env.cancel_queries_in_session(session_id);
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job()
-        } else {
-            info!("Current session finished, ignoring cancel creating request")
-        }
+        self.env.cancel_creating_jobs_in_session(session_id);
     }
 
     fn end_session(&self, session: &Self::Session) {
@@ -901,7 +985,7 @@ impl SessionManagerImpl {
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
         let active_sessions = {
-            let mut write_guard = self.env.sessions_map.lock();
+            let mut write_guard = self.env.sessions_map.write();
             write_guard.insert(session.id(), session);
             write_guard.len()
         };
@@ -913,7 +997,7 @@ impl SessionManagerImpl {
 
     fn delete_session(&self, session_id: &SessionId) {
         let active_sessions = {
-            let mut write_guard = self.env.sessions_map.lock();
+            let mut write_guard = self.env.sessions_map.write();
             write_guard.remove(session_id);
             write_guard.len()
         };
@@ -936,9 +1020,11 @@ impl Session for SessionImpl {
         stmt: Statement,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let sql_str = stmt.to_string();
+        let string = stmt.to_string();
+        let sql_str = string.as_str();
+        let sql: Arc<str> = Arc::from(sql_str);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, vec![format]));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -955,7 +1041,7 @@ impl Session for SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql_str, e))?;
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
 
@@ -1056,7 +1142,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 
@@ -1073,6 +1159,16 @@ impl Session for SessionImpl {
             transaction::State::Explicit(_) => TransactionStatus::InTransaction,
             // TODO: failed transaction
         }
+    }
+
+    /// Init and return an `ExecContextGuard` which could be used as a guard to represent the execution flow.
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+        let exec_context = Arc::new(ExecContext {
+            running_sql: sql,
+            last_instant: Instant::now(),
+        });
+        *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        ExecContextGuard::new(exec_context)
     }
 }
 
@@ -1106,31 +1202,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         ]),
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
-            if name.eq_ignore_ascii_case("ALL") {
-                Ok(vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Setting".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Description".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ])
-            } else {
-                Ok(vec![PgFieldDescriptor::new(
-                    name.to_ascii_lowercase(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                )])
-            }
+            Ok(infer_show_variable(name))
         }
         Statement::Describe { name: _ } => Ok(vec![
             PgFieldDescriptor::new(

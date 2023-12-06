@@ -24,6 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
@@ -81,7 +82,7 @@ async fn build_pulsar_producer(
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarPropertiesProducer {
     #[serde(rename = "properties.batch.size", default = "_default_batch_size")]
     #[serde_as(as = "DisplayFromStr")]
@@ -96,7 +97,7 @@ pub struct PulsarPropertiesProducer {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarConfig {
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     #[serde_as(as = "DisplayFromStr")]
@@ -261,7 +262,10 @@ impl<'w> PulsarPayloadWriter<'w> {
         let mut success_flag = false;
         let mut connection_err = None;
 
-        for _ in 0..self.config.max_retry_num {
+        for retry_num in 0..self.config.max_retry_num {
+            if retry_num > 0 {
+                tracing::warn!("Failed to send message, at retry no. {retry_num}");
+            }
             match self.producer.send(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
@@ -347,5 +351,16 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             }
             Ok(())
         })
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            self.producer
+                .send_batch()
+                .map_err(pulsar_to_sink_err)
+                .await?;
+        }
+
+        Ok(())
     }
 }

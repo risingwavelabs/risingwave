@@ -73,26 +73,19 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Utf8(
                         distribution.distribution_type().as_str_name().into(),
                     )),
-                    Some(ScalarImpl::List(ListValue::new(
-                        distribution
-                            .state_table_ids
-                            .into_iter()
-                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
-                            .collect_vec(),
+                    Some(ScalarImpl::List(ListValue::from_iter(
+                        distribution.state_table_ids.into_iter().map(|id| id as i32),
                     ))),
-                    Some(ScalarImpl::List(ListValue::new(
+                    Some(ScalarImpl::List(ListValue::from_iter(
                         distribution
                             .upstream_fragment_ids
                             .into_iter()
-                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
-                            .collect_vec(),
+                            .map(|id| id as i32),
                     ))),
-                    Some(ScalarImpl::List(ListValue::new(
+                    Some(ScalarImpl::List(ListValue::from_iter(
                         Self::extract_fragment_type_flag(distribution.fragment_type_mask)
                             .into_iter()
-                            .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_"))
-                            .map(|t| Some(ScalarImpl::Utf8(t.into())))
-                            .collect_vec(),
+                            .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_")),
                     ))),
                     Some(ScalarImpl::Int32(distribution.parallelism as i32)),
                 ])
@@ -109,10 +102,10 @@ mod tests {
 
     #[test]
     fn test_extract_mask() {
-        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::ChainNode as u32);
+        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::StreamScan as u32);
         let result = SysCatalogReaderImpl::extract_fragment_type_flag(mask);
         assert_eq!(result.len(), 2);
         assert!(result.contains(&FragmentTypeFlag::Source));
-        assert!(result.contains(&FragmentTypeFlag::ChainNode))
+        assert!(result.contains(&FragmentTypeFlag::StreamScan))
     }
 }

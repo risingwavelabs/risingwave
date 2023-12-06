@@ -15,7 +15,7 @@
 use risingwave_pb::catalog::function::Kind;
 use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::{DataType, DataTypeArray, FunctionId};
 
@@ -77,14 +77,14 @@ impl From<Kind> for FunctionKind {
 impl From<PbFunction> for ActiveModel {
     fn from(function: PbFunction) -> Self {
         Self {
-            function_id: ActiveValue::Set(function.id as _),
-            name: ActiveValue::Set(function.name),
-            arg_types: ActiveValue::Set(DataTypeArray(function.arg_types)),
-            return_type: ActiveValue::Set(DataType(function.return_type.unwrap())),
-            language: ActiveValue::Set(function.language),
-            link: ActiveValue::Set(function.link),
-            identifier: ActiveValue::Set(function.identifier),
-            kind: ActiveValue::Set(function.kind.unwrap().into()),
+            function_id: Set(function.id as _),
+            name: Set(function.name),
+            arg_types: Set(DataTypeArray(function.arg_types)),
+            return_type: Set(DataType(function.return_type.unwrap())),
+            language: Set(function.language),
+            link: Set(function.link),
+            identifier: Set(function.identifier),
+            kind: Set(function.kind.unwrap().into()),
         }
     }
 }

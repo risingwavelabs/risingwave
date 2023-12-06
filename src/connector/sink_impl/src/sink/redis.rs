@@ -20,7 +20,6 @@ use redis::aio::Connection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::sink::encoder::template::{KEY_FORMAT, VALUE_FORMAT};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -37,7 +36,8 @@ use crate::sink::writer::{
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
-
+pub const KEY_FORMAT: &str = "key_format";
+pub const VALUE_FORMAT: &str = "value_format";
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
@@ -283,7 +283,6 @@ mod test {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_connector::sink::encoder::template::{KEY_FORMAT, VALUE_FORMAT};
 
     use super::*;
     use crate::sink::catalog::{SinkEncode, SinkFormat};

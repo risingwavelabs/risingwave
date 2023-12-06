@@ -108,7 +108,6 @@ pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
-    pub upsert_primary_key_column_name: Option<String>,
 }
 
 impl AvroParserConfig {
@@ -120,12 +119,7 @@ impl AvroParserConfig {
         if avro_config.use_schema_registry {
             let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
-            let upsert_primary_key_column_name =
-                if enable_upsert && !avro_config.upsert_primary_key.is_empty() {
-                    Some(avro_config.upsert_primary_key.clone())
-                } else {
-                    None
-                };
+
             let subject_key = if enable_upsert {
                 Some(get_subject_by_strategy(
                     &avro_config.name_strategy,
@@ -157,7 +151,6 @@ impl AvroParserConfig {
                     None
                 },
                 schema_resolver: Some(Arc::new(resolver)),
-                upsert_primary_key_column_name,
             })
         } else {
             if enable_upsert {
@@ -165,7 +158,7 @@ impl AvroParserConfig {
                     "avro upsert without schema registry is not supported".to_string(),
                 )));
             }
-            let url = url.get(0).unwrap();
+            let url = url.first().unwrap();
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => {
@@ -184,7 +177,6 @@ impl AvroParserConfig {
                 schema: Arc::new(schema),
                 key_schema: None,
                 schema_resolver: None,
-                upsert_primary_key_column_name: None,
             })
         }
     }
@@ -211,6 +203,7 @@ mod test {
     use std::ops::Sub;
     use std::path::PathBuf;
 
+    use apache_avro::schema::RecordSchema;
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
@@ -227,7 +220,7 @@ mod test {
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroAccessBuilder,
         AvroParserConfig,
     };
-    use crate::aws_auth::AwsAuthProps;
+    use crate::common::AwsAuthProps;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
@@ -262,14 +255,9 @@ mod test {
     #[ignore]
     async fn test_load_schema_from_s3() {
         let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
-        let mut s3_config_props = HashMap::new();
-        s3_config_props.insert("region".to_string(), "ap-southeast-1".to_string());
         let url = Url::parse(&schema_location).unwrap();
-        let aws_auth_config = AwsAuthProps::from_pairs(
-            s3_config_props
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str())),
-        );
+        let aws_auth_config: AwsAuthProps =
+            serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
         let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
@@ -465,12 +453,17 @@ mod test {
 
                 match build_field(inner_schema) {
                     None => {
-                        let index_of_union =
-                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&Value::Null, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(Value::Null)))
                     }
                     Some(value) => {
-                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&value, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(value)))
                     }
                 }
@@ -481,9 +474,9 @@ mod test {
 
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
-        if let Schema::Record {
+        if let Schema::Record(RecordSchema {
             name: _, fields, ..
-        } = schema.clone()
+        }) = schema.clone()
         {
             for field in &fields {
                 let value = build_field(&field.schema)
@@ -507,7 +500,6 @@ mod test {
     #[tokio::test]
     async fn test_new_avro_parser() {
         let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
     }
@@ -573,7 +565,7 @@ mod test {
                 Value::Union(0, Box::new(Value::Null)),
             ),
         ];
-        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        let null_record_value = reader.first().unwrap().as_ref().unwrap();
         match null_record_value {
             Value::Record(values) => {
                 assert_eq!(values, &null_record_expected)

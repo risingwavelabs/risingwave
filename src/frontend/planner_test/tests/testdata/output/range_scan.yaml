@@ -32,22 +32,38 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 1/0
-  batch_error: 'Expr error: Division by zero'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Division by zero
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 2147483647 + 1
-  batch_error: 'Expr error: Numeric out of range'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Numeric out of range
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -129,7 +145,11 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -319,19 +339,26 @@
     SELECT * FROM mv WHERE x < 60000;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+    └─BatchFilter { predicate: (mv.x < 60000:Int32) }
+      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - name: When the constant with larger type is out of the upper bound of the column's type, we can convert > as false condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x > 60000;
-  batch_plan: 'BatchValues { rows: [] }'
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv.x > 60000:Int32) }
+      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - name: When the constant with larger type is out of the lower bound of the column's type, we can convert < as false condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x < -60000;
-  batch_plan: 'BatchValues { rows: [] }'
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv.x < -60000:Int32) }
+      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - name: When the constant with larger type is out of the lower bound of the column's type, we can convert > as true condition.
   before:
   - create_small
@@ -339,7 +366,8 @@
     SELECT * FROM mv WHERE x > -60000;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+    └─BatchFilter { predicate: (mv.x > -60000:Int32) }
+      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
 - name: When the constant with larger type is in range of the column's type, we can convert it.
   before:
   - create_small

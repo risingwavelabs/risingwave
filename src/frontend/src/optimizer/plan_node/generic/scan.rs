@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
@@ -34,13 +34,12 @@ use crate::utils::{ColIndexMappingRewriteExt, Condition};
 #[educe(PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
-    pub is_sys_table: bool,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
-    // Descriptor of the table
+    /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
-    // Descriptors of all indexes on this table
+    /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
@@ -58,6 +57,10 @@ pub struct Scan {
 impl Scan {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.predicate.visit_expr(v);
     }
 
     /// The mapped distribution key of the scan operator.
@@ -84,7 +87,7 @@ impl Scan {
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.output_col_idx
             .iter()
-            .map(|i| self.table_desc.columns[*i].column_id)
+            .map(|i| self.get_table_columns()[*i].column_id)
             .collect()
     }
 
@@ -100,14 +103,14 @@ impl Scan {
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
+            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
             .collect()
     }
 
     pub(crate) fn column_names(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
-            .map(|&i| self.table_desc.columns[i].name.clone())
+            .map(|&i| self.get_table_columns()[i].name.clone())
             .collect()
     }
 
@@ -115,7 +118,7 @@ impl Scan {
         self.table_desc
             .order_column_indices()
             .iter()
-            .map(|&i| self.table_desc.columns[i].name.clone())
+            .map(|&i| self.get_table_columns()[i].name.clone())
             .collect()
     }
 
@@ -123,7 +126,7 @@ impl Scan {
         self.table_desc
             .order_column_indices()
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
+            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
             .collect()
     }
 
@@ -148,14 +151,17 @@ impl Scan {
 
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(&self.output_col_idx, self.table_desc.columns.len())
+        ColIndexMapping::with_remaining_columns(
+            &self.output_col_idx,
+            self.get_table_columns().len(),
+        )
     }
 
     /// Get the ids of the output columns and primary key columns.
     pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
         let mut ids = self.output_column_ids();
         for column_order in self.primary_key() {
-            let id = self.table_desc.columns[column_order.column_index].column_id;
+            let id = self.get_table_columns()[column_order.column_index].column_id;
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -216,7 +222,6 @@ impl Scan {
 
         Self::new(
             index_name.to_string(),
-            false,
             new_output_col_idx,
             index_table_desc,
             vec![],
@@ -231,7 +236,29 @@ impl Scan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String,
-        is_sys_table: bool,
+        output_col_idx: Vec<usize>, // the column index in the table
+        table_desc: Rc<TableDesc>,
+        indexes: Vec<Rc<IndexCatalog>>,
+        ctx: OptimizerContextRef,
+        predicate: Condition, // refers to column indexes of the table
+        for_system_time_as_of_proctime: bool,
+        table_cardinality: Cardinality,
+    ) -> Self {
+        Self::new_inner(
+            table_name,
+            output_col_idx,
+            table_desc,
+            indexes,
+            ctx,
+            predicate,
+            for_system_time_as_of_proctime,
+            table_cardinality,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_inner(
+        table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
@@ -258,7 +285,6 @@ impl Scan {
 
         Self {
             table_name,
-            is_sys_table,
             required_col_idx,
             output_col_idx,
             table_desc,
@@ -300,7 +326,7 @@ impl GenericPlanNode for Scan {
             .output_col_idx
             .iter()
             .map(|tb_idx| {
-                let col = &self.table_desc.columns[*tb_idx];
+                let col = &self.get_table_columns()[*tb_idx];
                 Field::from_with_table_name_prefix(col, &self.table_name)
             })
             .collect();
@@ -335,11 +361,19 @@ impl GenericPlanNode for Scan {
 }
 
 impl Scan {
+    pub fn get_table_columns(&self) -> &[ColumnDesc] {
+        &self.table_desc.columns
+    }
+
+    pub fn append_only(&self) -> bool {
+        self.table_desc.append_only
+    }
+
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx
             .iter()
-            .map(|&i| self.table_desc.columns[i].clone())
+            .map(|&i| self.get_table_columns()[i].clone())
             .collect()
     }
 

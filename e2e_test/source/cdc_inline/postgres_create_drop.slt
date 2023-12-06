@@ -1,0 +1,53 @@
+# create and drop CDC postgres tables concurrently
+control substitution on
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS tt1;
+    CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');"
+
+statement ok
+create table tt1 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:8432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:123456}',
+  database.name = '${PGDATABASE:mydb}',
+  schema.name = 'public',
+  table.name = 'tt1',
+  slot.name = 'tt1_slot',
+);
+
+statement ok
+drop table tt1;
+
+statement ok
+create table tt1 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:8432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:123456}',
+  database.name = '${PGDATABASE:mydb}',
+  schema.name = 'public',
+  table.name = 'tt1',
+  slot.name = 'tt1_slot',
+);
+
+sleep 3s
+
+query IT
+SELECT * FROM tt1;
+----
+1 2023-10-23 10:00:00+00:00
+
+statement ok
+drop table tt1;

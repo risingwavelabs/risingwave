@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
@@ -49,6 +49,10 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
 impl<PlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v);
     }
 
     pub fn new(
@@ -431,7 +435,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::with_target_size(
+        ColIndexMapping::new(
             self.output_indices.iter().map(|x| Some(*x)).collect(),
             self.internal_column_num(),
         )
@@ -476,6 +480,7 @@ pub fn push_down_into_join(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition, Condition) {
     let (left, right) = push_down_to_inputs(
         predicate,
@@ -483,19 +488,24 @@ pub fn push_down_into_join(
         right_col_num,
         can_push_left_from_filter(ty),
         can_push_right_from_filter(ty),
+        push_temporal_predicate,
     );
 
     let on = if can_push_on_from_filter(ty) {
         let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
 
-        // Do not push now on to the on, it will be pulled up into a filter instead.
-        let on = Condition {
-            conjunctions: conjunctions
-                .extract_if(|expr| expr.count_nows() == 0)
-                .collect(),
-        };
-        predicate.conjunctions = conjunctions;
-        on
+        if push_temporal_predicate {
+            Condition { conjunctions }
+        } else {
+            // Do not push now on to the on, it will be pulled up into a filter instead.
+            let on = Condition {
+                conjunctions: conjunctions
+                    .extract_if(|expr| expr.count_nows() == 0)
+                    .collect(),
+            };
+            predicate.conjunctions = conjunctions;
+            on
+        }
     } else {
         Condition::true_cond()
     };
@@ -512,6 +522,7 @@ pub fn push_down_join_condition(
     left_col_num: usize,
     right_col_num: usize,
     ty: JoinType,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
     push_down_to_inputs(
         on_condition,
@@ -519,6 +530,7 @@ pub fn push_down_join_condition(
         right_col_num,
         can_push_left_from_on(ty),
         can_push_right_from_on(ty),
+        push_temporal_predicate,
     )
 }
 
@@ -532,11 +544,21 @@ fn push_down_to_inputs(
     right_col_num: usize,
     push_left: bool,
     push_right: bool,
+    push_temporal_predicate: bool,
 ) -> (Condition, Condition) {
-    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+    let (mut left, right, mut others) = if push_temporal_predicate {
+        Condition { conjunctions }.split(left_col_num, right_col_num)
+    } else {
+        let temporal_filter_cons = conjunctions
+            .extract_if(|e| e.count_nows() != 0)
+            .collect_vec();
+        let (left, right, mut others) =
+            Condition { conjunctions }.split(left_col_num, right_col_num);
 
-    let (mut left, right, mut others) =
-        Condition { conjunctions }.split(left_col_num, right_col_num);
+        others.conjunctions.extend(temporal_filter_cons);
+        (left, right, others)
+    };
 
     if !push_left {
         others.conjunctions.extend(left);

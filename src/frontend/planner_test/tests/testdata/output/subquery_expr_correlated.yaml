@@ -210,8 +210,8 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
-  binder_error: |-
-    Bind error: failed to bind expression: y IN (SELECT y, x FROM t2 WHERE t1.x > t2.x + 1000)
+  binder_error: |
+    Failed to bind expression: y IN (SELECT y, x FROM t2 WHERE t1.x > t2.x + 1000)
 
     Caused by:
       Bind error: Subquery must return only one column
@@ -947,3 +947,27 @@
             └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
               └─StreamFilter { predicate: IsNotNull(t2.k2) }
                 └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: test correlated input ref predicate and share operator
+  sql: |
+    create table t (a int, b int, c int);
+    create table dl(c1 int, c2 int);
+    create table di(d1 int, d2 int);
+    select (select 1 from t, di where t.a = dl.c1 and t.b = di.d1 limit 1) name, (select 1 from t, di where t.a = dl.c2 and t.c = di.d2 limit 1) name2 from dl;
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(dl.c2, t.a), output: [1:Int32, 1:Int32] }
+    ├─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(dl.c1, t.a), output: [dl.c2, 1:Int32] }
+    │ ├─LogicalScan { table: dl, columns: [dl.c1, dl.c2] }
+    │ └─LogicalTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [t.a] }
+    │   └─LogicalProject { exprs: [t.a, 1:Int32] }
+    │     └─LogicalFilter { predicate: (t.b = di.d1) AND IsNotNull(t.a) }
+    │       └─LogicalShare { id: 2 }
+    │         └─LogicalJoin { type: Inner, on: ((t.b = di.d1) OR (t.c = di.d2)), output: all }
+    │           ├─LogicalScan { table: t, columns: [t.a, t.b, t.c], predicate: IsNotNull(t.a) }
+    │           └─LogicalScan { table: di, columns: [di.d1, di.d2] }
+    └─LogicalTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [t.a] }
+      └─LogicalProject { exprs: [t.a, 1:Int32] }
+        └─LogicalFilter { predicate: (t.c = di.d2) AND IsNotNull(t.a) }
+          └─LogicalShare { id: 2 }
+            └─LogicalJoin { type: Inner, on: ((t.b = di.d1) OR (t.c = di.d2)), output: all }
+              ├─LogicalScan { table: t, columns: [t.a, t.b, t.c], predicate: IsNotNull(t.a) }
+              └─LogicalScan { table: di, columns: [di.d1, di.d2] }

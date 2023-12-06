@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use either::Either;
+use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
-use crate::catalog::CatalogError;
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
-use crate::session::CheckRelationError;
 use crate::{build_graph, Binder, OptimizerContext};
 
 pub async fn handle_create_as(
@@ -42,15 +42,13 @@ pub async fn handle_create_as(
     }
     let session = handler_args.session.clone();
 
-    match session.check_relation_name_duplicated(table_name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -110,10 +108,13 @@ pub async fn handle_create_as(
             Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, source, table)
     };
 
@@ -124,7 +125,9 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.create_table(source, table, graph).await?;
+    catalog_writer
+        .create_table(source, table, graph, TableJobType::Unspecified)
+        .await?;
 
     // Generate insert
     let insert = Statement::Insert {

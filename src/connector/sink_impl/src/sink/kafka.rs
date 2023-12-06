@@ -26,9 +26,10 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
+use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
@@ -63,7 +64,7 @@ const fn _default_max_in_flight_requests_per_connection() -> usize {
     5
 }
 
-#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 enum CompressionCodec {
     None,
@@ -76,7 +77,7 @@ enum CompressionCodec {
 /// See <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 /// for the detailed meaning of these librdkafka producer properties
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesProducer {
     /// Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
     #[serde(rename = "properties.allow.auto.create.topics")]
@@ -201,13 +202,8 @@ impl RdKafkaPropertiesProducer {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaConfig {
-    #[serde(skip_serializing)]
-    pub connector: String, // Must be "kafka" here.
-
-    // #[serde(rename = "connection.name")]
-    // pub connection: String,
     #[serde(flatten)]
     pub common: KafkaCommon,
 
@@ -563,7 +559,9 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+    use crate::sink::encoder::{
+        DateHandlingMode, JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    };
     use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
@@ -728,7 +726,13 @@ mod test {
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
                 // We do not specify primary key for this schema
                 None,
-                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+                JsonEncoder::new(
+                    schema,
+                    None,
+                    DateHandlingMode::FromCe,
+                    TimestampHandlingMode::Milli,
+                    TimestamptzHandlingMode::UtcString,
+                ),
             )),
         )
         .await

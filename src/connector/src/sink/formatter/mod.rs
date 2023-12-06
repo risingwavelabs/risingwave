@@ -28,7 +28,7 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
-use super::encoder::KafkaConnectParams;
+use super::encoder::{DateHandlingMode, KafkaConnectParams, TimestamptzHandlingMode};
 use crate::sink::encoder::template::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
@@ -91,6 +91,7 @@ impl SinkFormatterImpl {
                 format_desc.encode,
             )))
         };
+        let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
@@ -98,14 +99,21 @@ impl SinkFormatterImpl {
                     JsonEncoder::new(
                         schema.clone(),
                         Some(pk_indices.clone()),
+                        DateHandlingMode::FromCe,
                         TimestampHandlingMode::Milli,
+                        timestamptz_mode,
                     )
                 });
 
                 match format_desc.encode {
                     SinkEncode::Json => {
-                        let val_encoder =
-                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        let val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                        );
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
                     }
@@ -163,10 +171,17 @@ impl SinkFormatterImpl {
                         let mut key_encoder = JsonEncoder::new(
                             schema.clone(),
                             Some(pk_indices),
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
+                            timestamptz_mode,
                         );
-                        let mut val_encoder =
-                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        let mut val_encoder = JsonEncoder::new(
+                            schema,
+                            None,
+                            DateHandlingMode::FromCe,
+                            TimestampHandlingMode::Milli,
+                            timestamptz_mode,
+                        );
 
                         if let Some(s) = format_desc.options.get("schemas.enable") {
                             match s.to_lowercase().parse::<bool>() {

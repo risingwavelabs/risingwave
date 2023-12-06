@@ -344,10 +344,10 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::SealCurrentEpoch(epoch) => {
+            Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                local_storage.seal_current_epoch(epoch);
+                local_storage.seal_current_epoch(epoch, opts);
             }
             Operation::ValidateReadEpoch(epoch) => {
                 assert_eq!(storage_type, StorageType::Global);
@@ -410,6 +410,23 @@ impl ReplayWorker {
                     panic!("wrong flush result, expect flush result, but got {:?}", res);
                 }
             }
+            Operation::TryFlush => {
+                assert_ne!(storage_type, StorageType::Global);
+                let local_storage = local_storages.get_mut(&storage_type).unwrap();
+                let res = res_rx.recv().await.expect("recv result failed");
+                let delete_range = vec![];
+                if let OperationResult::TryFlush(_) = res {
+                    let _ = local_storage.flush(delete_range).await;
+                    // todo(wcy-fdu): unify try_flush and flush interface, do not return usize.
+                    // assert_eq!(TraceResult::from(actual), expected, "try flush wrong");
+                } else {
+                    panic!(
+                        "wrong try flush result, expect flush result, but got {:?}",
+                        res
+                    );
+                }
+            }
+
             Operation::Finish => unreachable!(),
             Operation::Result(_) => unreachable!(),
         }

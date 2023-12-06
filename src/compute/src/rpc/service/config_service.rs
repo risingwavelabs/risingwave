@@ -14,11 +14,12 @@
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::error::v2::tonic::ToTonicStatus;
 use risingwave_pb::compute::config_service_server::ConfigService;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_stream::task::LocalStreamManager;
 use serde_json;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 pub struct ConfigServiceImpl {
     batch_mgr: Arc<BatchManager>,
@@ -32,9 +33,9 @@ impl ConfigService for ConfigServiceImpl {
         _request: Request<ShowConfigRequest>,
     ) -> Result<Response<ShowConfigResponse>, Status> {
         let batch_config = serde_json::to_string(self.batch_mgr.config())
-            .map_err(|e| tonic::Status::internal(format!("{}", e)))?;
+            .map_err(|e| e.to_status(Code::Internal, "compute"))?;
         let stream_config = serde_json::to_string(&self.stream_mgr.config().await)
-            .map_err(|e| tonic::Status::internal(format!("{}", e)))?;
+            .map_err(|e| e.to_status(Code::Internal, "compute"))?;
 
         let show_config_response = ShowConfigResponse {
             batch_config,

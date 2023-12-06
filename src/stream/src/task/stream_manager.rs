@@ -38,6 +38,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -123,9 +124,8 @@ impl risingwave_expr::expr::EvalErrorReport for ActorEvalErrorReport {
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
 
-    /// Indices of primary keys
-    // TODO: directly use it for `ExecutorInfo`
-    pub pk_indices: PkIndices,
+    /// Basic information about the executor.
+    pub info: ExecutorInfo,
 
     /// Executor id, unique across all actors.
     pub executor_id: u64,
@@ -136,14 +136,6 @@ pub struct ExecutorParams {
     /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
     // TODO: use it for `identity`
     pub op_info: String,
-
-    /// The output schema of the executor.
-    // TODO: directly use it for `ExecutorInfo`
-    pub schema: Schema,
-
-    /// The identity of the executor, like `HashJoin 1234ABCD`.
-    // TODO: directly use it for `ExecutorInfo`
-    pub identity: String,
 
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
@@ -167,11 +159,10 @@ pub struct ExecutorParams {
 impl Debug for ExecutorParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutorParams")
-            .field("pk_indices", &self.pk_indices)
+            .field("info", &self.info)
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
-            .field("schema", &self.schema)
             .field("input", &self.input.len())
             .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
@@ -308,8 +299,10 @@ impl LocalStreamManager {
                 Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
                 Err(e) => {
                     tracing::error!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        epoch, e);
+                        epoch,
+                        error = %e.as_report(),
+                        "Failed to sync state store",
+                    );
                     Err(e.into())
                 }
             }
@@ -520,7 +513,8 @@ impl LocalStreamManagerCore {
                     | NodeBody::HashJoin(_)
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
-                    | NodeBody::Chain(_)
+                    | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)
@@ -557,7 +551,7 @@ impl LocalStreamManagerCore {
         // same.
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
-        let schema = node.fields.iter().map(Field::from).collect();
+        let schema: Schema = node.fields.iter().map(Field::from).collect();
 
         let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
         let eval_error_report = ActorEvalErrorReport {
@@ -568,12 +562,16 @@ impl LocalStreamManagerCore {
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices: pk_indices.clone(),
+
+            info: ExecutorInfo {
+                schema: schema.clone(),
+                pk_indices: pk_indices.clone(),
+                identity: identity.clone(),
+            },
+
             executor_id,
             operator_id,
-            identity: identity.clone(),
             op_info,
-            schema,
             input,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
@@ -587,6 +585,12 @@ impl LocalStreamManagerCore {
             executor.pk_indices(),
             &pk_indices,
             "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
+        assert_eq!(
+            executor.schema(),
+            &schema,
+            "`schema` of {} not consistent with what derived by optimizer",
             executor.identity()
         );
 
@@ -696,7 +700,8 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
+                        // Intentionally use `?` on the report to also include the backtrace.
+                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };
@@ -821,7 +826,9 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor {
+            if let Some(prev_actor) = ret
+                && actor != &prev_actor
+            {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

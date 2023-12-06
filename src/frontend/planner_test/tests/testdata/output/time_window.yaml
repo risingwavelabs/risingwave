@@ -237,7 +237,7 @@
     BatchHopWindow { time_col: idx_t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(idx_t1.c3) }
-        └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all }
+        └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all, lookup table: idx_t1 }
           └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
             └─BatchScan { table: t2, columns: [t2.d1, t2.d2, t2.d3], distribution: SomeShard }
 - sql: |
@@ -268,7 +268,7 @@
       └─BatchFilter { predicate: IsNotNull(idx_t1.c3) }
         └─BatchHopWindow { time_col: t2.d3, slide: 00:10:00, size: 00:20:00, output: all }
           └─BatchFilter { predicate: IsNotNull(t2.d3) }
-            └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all }
+            └─BatchLookupJoin { type: Inner, predicate: t2.d1 = idx_t1.c2 AND IsNotNull(idx_t1.c3), output: all, lookup table: idx_t1 }
               └─BatchExchange { order: [], dist: UpstreamHashShard(t2.d1) }
                 └─BatchFilter { predicate: IsNotNull(t2.d3) }
                   └─BatchScan { table: t2, columns: [t2.d1, t2.d2, t2.d3], distribution: SomeShard }

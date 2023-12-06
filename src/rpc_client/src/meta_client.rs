@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use std::{fmt, thread};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -32,6 +32,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
@@ -47,7 +50,7 @@ use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
-use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -60,6 +63,7 @@ use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -244,10 +248,16 @@ impl MetaClient {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
                     property: Some(property.clone()),
+                    resource: Some(risingwave_pb::common::worker_node::Resource {
+                        rw_version: RW_VERSION.to_string(),
+                        total_memory_bytes: system_memory_available_bytes() as _,
+                        total_cpu_cores: total_cpu_available() as _,
+                    }),
                 })
                 .await?;
             if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+            {
                 tracing::error!("invalid worker: {}", status.message);
                 std::process::exit(1);
             }
@@ -265,16 +275,25 @@ impl MetaClient {
             .node
             .expect("AddWorkerNodeResponse::node is empty");
 
-        Ok((
-            Self {
-                worker_id: worker_node.id,
-                worker_type,
-                host_addr: addr.clone(),
-                inner: grpc_meta_client,
-                meta_config: meta_config.to_owned(),
-            },
-            system_params_resp.params.unwrap().into(),
-        ))
+        let meta_client = Self {
+            worker_id: worker_node.id,
+            worker_type,
+            host_addr: addr.clone(),
+            inner: grpc_meta_client,
+            meta_config: meta_config.to_owned(),
+        };
+
+        static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
+        REPORT_PANIC.call_once(|| {
+            let meta_client_clone = meta_client.clone();
+            std::panic::update_hook(move |default_hook, info| {
+                // Try to report panic event to meta node.
+                meta_client_clone.try_add_panic_event_blocking(info, None);
+                default_hook(info);
+            });
+        });
+
+        Ok((meta_client, system_params_resp.params.unwrap().into()))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -361,6 +380,21 @@ impl MetaClient {
     pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
+            fragment_graph: None,
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
+    }
+
+    pub async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -397,11 +431,13 @@ impl MetaClient {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
+            job_type: job_type as _,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -416,16 +452,16 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn alter_relation_name(
+    pub async fn alter_name(
         &self,
-        relation: Relation,
+        object: alter_name_request::Object,
         name: &str,
     ) -> Result<CatalogVersion> {
-        let request = AlterRelationNameRequest {
-            relation: Some(relation),
+        let request = AlterNameRequest {
+            object: Some(object),
             new_name: name.to_string(),
         };
-        let resp = self.inner.alter_relation_name(request).await?;
+        let resp = self.inner.alter_name(request).await?;
         Ok(resp.version)
     }
 
@@ -435,6 +471,28 @@ impl MetaClient {
             source: Some(source),
         };
         let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<CatalogVersion> {
+        let request = AlterOwnerRequest {
+            object: Some(object),
+            owner_id,
+        };
+        let resp = self.inner.alter_owner(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<CatalogVersion> {
+        let request = AlterSetSchemaRequest {
+            new_schema_id,
+            object: Some(object),
+        };
+        let resp = self.inner.alter_set_schema(request).await?;
         Ok(resp.version)
     }
 
@@ -635,9 +693,12 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+    pub async fn list_worker_nodes(
+        &self,
+        worker_type: Option<WorkerType>,
+    ) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
-            worker_type: worker_type as _,
+            worker_type: worker_type.map(Into::into),
             include_starting_nodes: true,
         };
         let resp = self.inner.list_all_nodes(request).await?;
@@ -763,6 +824,21 @@ impl MetaClient {
     pub async fn resume(&self) -> Result<ResumeResponse> {
         let request = ResumeRequest {};
         let resp = self.inner.resume(request).await?;
+        Ok(resp)
+    }
+
+    pub async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate: Option<u32>,
+    ) -> Result<ApplyThrottleResponse> {
+        let request = ApplyThrottleRequest {
+            kind: kind as i32,
+            id,
+            rate,
+        };
+        let resp = self.inner.apply_throttle(request).await?;
         Ok(resp)
     }
 
@@ -1121,6 +1197,65 @@ impl MetaClient {
     pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
+
+    pub async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+        let req = ListCompactTaskAssignmentRequest {};
+        let resp = self.inner.list_compact_task_assignment(req).await?;
+        Ok(resp.task_assignment)
+    }
+
+    pub async fn list_event_log(&self) -> Result<Vec<EventLog>> {
+        let req = ListEventLogRequest::default();
+        let resp = self.inner.list_event_log(req).await?;
+        Ok(resp.event_logs)
+    }
+
+    pub async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        let req = ListCompactTaskProgressRequest {};
+        let resp = self.inner.list_compact_task_progress(req).await?;
+        Ok(resp.task_progress)
+    }
+
+    #[cfg(madsim)]
+    pub fn try_add_panic_event_blocking(
+        &self,
+        panic_info: impl Display,
+        timeout_millis: Option<u64>,
+    ) {
+    }
+
+    /// If `timeout_millis` is None, default is used.
+    #[cfg(not(madsim))]
+    pub fn try_add_panic_event_blocking(
+        &self,
+        panic_info: impl Display,
+        timeout_millis: Option<u64>,
+    ) {
+        let event = event_log::EventWorkerNodePanic {
+            worker_id: self.worker_id,
+            worker_type: self.worker_type.into(),
+            host_addr: Some(self.host_addr.to_protobuf()),
+            panic_info: format!("{panic_info}"),
+        };
+        let grpc_meta_client = self.inner.clone();
+        let _ = thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let req = AddEventLogRequest {
+                event: Some(add_event_log_request::Event::WorkerNodePanic(event)),
+            };
+            rt.block_on(async {
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(timeout_millis.unwrap_or(1000)),
+                    grpc_meta_client.add_event_log(req),
+                )
+                .await;
+            });
+        })
+        .join();
+    }
 }
 
 #[async_trait]
@@ -1314,6 +1449,7 @@ struct GrpcMetaClientCore {
     serving_client: ServingServiceClient<Channel>,
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
+    event_log_client: EventLogServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1338,7 +1474,8 @@ impl GrpcMetaClientCore {
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
-        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel);
+        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
+        let event_log_client = EventLogServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1356,6 +1493,7 @@ impl GrpcMetaClientCore {
             serving_client,
             cloud_client,
             sink_coordinate_client,
+            event_log_client,
         }
     }
 }
@@ -1696,19 +1834,21 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
-            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
+             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
-            ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
+            ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
+            ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
+            ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1769,6 +1909,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
+            ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
+            ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1787,6 +1929,8 @@ macro_rules! for_all_meta_rpc {
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
+            ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
+            ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
         }
     };
 }

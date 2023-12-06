@@ -15,14 +15,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::stream::pending;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{internal_error, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
@@ -78,10 +80,7 @@ impl ConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        internal_error(format!(
-                            "Failed to find column id: {} in source: {:?}",
-                            id, self
-                        ))
+                        anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
                     .map(|col| col.clone())
             })
@@ -94,7 +93,7 @@ impl ConnectorSource {
             ConnectorProperties::S3(prop) => {
                 S3SplitEnumerator::new(*prop, Arc::new(SourceEnumeratorContext::default())).await?
             }
-            other => return Err(internal_error(format!("Unsupported source: {:?}", other))),
+            other => bail!("Unsupported source: {:?}", other),
         };
 
         Ok(build_fs_list_stream(
@@ -162,16 +161,7 @@ impl ConnectorSource {
                     // TODO: is this reader split across multiple threads...? Realistically, we want
                     // source_ctx to live in a single actor.
                     let source_ctx = source_ctx.clone();
-                    async move {
-                        create_split_reader(
-                            *props,
-                            splits,
-                            parser_config,
-                            source_ctx,
-                            data_gen_columns,
-                        )
-                        .await
-                    }
+                    create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
                 }))
                 .await?
             };
