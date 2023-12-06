@@ -85,6 +85,10 @@ impl BlockStreamIterator {
         }
     }
 
+    pub fn is_first_block(&self) -> bool {
+        self.next_block_index == 0
+    }
+
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
         let (data, meta) = match self.block_stream.next().await? {
@@ -374,7 +378,7 @@ impl CompactorRunner {
             assert!(ret != Ordering::Equal);
             if first.current_sstable().iter.is_none() {
                 let right_key = second.current_sstable().key();
-                while first.current_sstable().is_valid() {
+                while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
                     let full_key = FullKey::decode(first.current_sstable().next_block_largest());
                     // the full key may be either Excluded key or Included key, so we do not allow
                     // they equals.
@@ -464,19 +468,28 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                let largest_key = sstable_iter.current_block_largest();
-                let block_len = block.len() as u64;
-                let block_key_count = block_meta.total_key_count;
-                if self
-                    .executor
-                    .builder
-                    .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                    .await?
-                {
-                    skip_raw_block_count += 1;
-                    skip_raw_block_size += block_len;
+                if self.executor.builder.need_flush() {
+                    let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
+                    let target_key = FullKey::decode(&largest_key);
+                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
+                    let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.run(&mut iter, target_key).await?;
+                } else {
+                    let largest_key = sstable_iter.current_block_largest();
+                    let block_len = block.len() as u64;
+                    let block_key_count = block_meta.total_key_count;
+                    if self
+                        .executor
+                        .builder
+                        .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
+                        .await?
+                    {
+                        skip_raw_block_count += 1;
+                        skip_raw_block_size += block_len;
+                    }
+                    self.executor.may_report_process_key(block_key_count);
+                    self.executor.clear();
                 }
-                self.executor.may_report_process_key(block_key_count);
             }
             rest_data.next_sstable().await?;
         }

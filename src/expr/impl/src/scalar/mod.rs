@@ -50,6 +50,7 @@ mod jsonb_contains;
 mod jsonb_delete;
 mod jsonb_info;
 mod jsonb_object;
+mod jsonb_path;
 mod length;
 mod lower;
 mod md5;
