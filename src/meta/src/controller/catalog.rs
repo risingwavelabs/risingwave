@@ -309,7 +309,7 @@ impl CatalogController {
             ensure_schema_empty(schema_id, &txn).await?;
         } else {
             return Err(MetaError::permission_denied(
-                "drop schema cascade is not supported yet".into(),
+                "drop schema cascade is not supported yet".to_string(),
             ));
         }
 
