@@ -66,26 +66,52 @@ public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
-    private static final String RESPONSE_RESULT_OK = "Ok";
-
-    private static final String RESPONSE_RESULT_ERR = "Err";
-
     private final EsSinkConfig config;
     private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
 
-    // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
-    private final BlockingQueue<EsWriteResultResp> blockingQueue;
+    // Used to handle the return message of ES and throw errors
+    private final RequestTracker requestTracker;
 
-    // Count of write tasks in progress
-    private int taskCount;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
+
+    class RequestTracker {
+        // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
+        private final BlockingQueue<EsWriteResultResp> blockingQueue = new LinkedBlockingQueue<>();
+
+        // Count of write tasks in progress
+        private int taskCount = 0;
+
+        void add_err_result(String errorMsg) {
+            blockingQueue.add(new EsWriteResultResp(errorMsg));
+        }
+
+        void add_ok_result(int numberOfActions) {
+            blockingQueue.add(new EsWriteResultResp(numberOfActions));
+        }
+
+        void addWriteTask() {
+            taskCount++;
+        }
+
+        void waitAllFlush() throws InterruptedException {
+            while (this.taskCount != 0) {
+                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
+                if (esWriteResultResp != null && esWriteResultResp.isOk()) {
+                    this.taskCount -= esWriteResultResp.getNumberOfActions();
+                } else if (esWriteResultResp != null && !esWriteResultResp.isOk()) {
+                    throw new RuntimeException(
+                            String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
+                }
+            }
+        }
+    }
 
     class EsWriteResultResp {
 
         // Only `RESPONSE_RESULT_OK` or `RESPONSE_RESULT_ERR`
-        private String type;
+        private boolean isOK;
 
         private String errorMsg;
 
@@ -93,22 +119,16 @@ public class EsSink extends SinkWriterBase {
         private Integer numberOfActions;
 
         public boolean isOk() {
-            if (type.equals(RESPONSE_RESULT_OK)) {
-                return true;
-            } else if (type.equals(RESPONSE_RESULT_ERR)) {
-                return false;
-            } else {
-                throw new RuntimeException("Es response result type must be `Ok` or `Err`");
-            }
+            return isOK;
         }
 
-        public EsWriteResultResp(String type, int numberOfActions) {
-            this.type = type;
+        public EsWriteResultResp(int numberOfActions) {
+            this.isOK = true;
             this.numberOfActions = numberOfActions;
         }
 
-        public EsWriteResultResp(String type, String errorMsg) {
-            this.type = type;
+        public EsWriteResultResp(String errorMsg) {
+            this.isOK = false;
             this.errorMsg = errorMsg;
         }
 
@@ -131,9 +151,7 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
-
-        this.blockingQueue = new LinkedBlockingQueue<>();
-        this.taskCount = 0;
+        this.requestTracker = new RequestTracker();
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         this.client =
@@ -208,15 +226,15 @@ public class EsSink extends SinkWriterBase {
 
     private BulkProcessor createBulkProcessor() {
         BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener(this.blockingQueue));
+                applyBulkConfig(this.client, this.config, new BulkListener(this.requestTracker));
         return builder.build();
     }
 
     private class BulkListener implements BulkProcessor.Listener {
-        private final BlockingQueue<EsWriteResultResp> blockingQueue;
+        private final RequestTracker requestTracker;
 
-        public BulkListener(BlockingQueue<EsWriteResultResp> blockingQueue) {
-            this.blockingQueue = blockingQueue;
+        public BulkListener(RequestTracker requestTracker) {
+            this.requestTracker = requestTracker;
         }
 
         /** This method is called just before bulk is executed. */
@@ -233,10 +251,9 @@ public class EsSink extends SinkWriterBase {
                         String.format(
                                 "Bulk of %d actions failed. Failure: %s",
                                 request.numberOfActions(), response.buildFailureMessage());
-                blockingQueue.add(new EsWriteResultResp(RESPONSE_RESULT_ERR, errMessage));
+                this.requestTracker.add_err_result(errMessage);
             } else {
-                blockingQueue.add(
-                        new EsWriteResultResp(RESPONSE_RESULT_OK, request.numberOfActions()));
+                this.requestTracker.add_ok_result(request.numberOfActions());
                 LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
         }
@@ -248,7 +265,7 @@ public class EsSink extends SinkWriterBase {
                     String.format(
                             "Bulk of %d actions failed. Failure: %s",
                             request.numberOfActions(), failure.getMessage());
-            blockingQueue.add(new EsWriteResultResp(RESPONSE_RESULT_ERR, errMessage));
+            this.requestTracker.add_err_result(errMessage);
         }
     }
 
@@ -348,14 +365,14 @@ public class EsSink extends SinkWriterBase {
 
         UpdateRequest updateRequest =
                 new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
-        this.taskCount++;
+        this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
     private void processDelete(SinkRow row) {
         final String key = buildId(row);
         DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
-        this.taskCount++;
+        this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
     }
 
@@ -392,15 +409,7 @@ public class EsSink extends SinkWriterBase {
     public void sync() {
         try {
             this.bulkProcessor.flush();
-            while (this.taskCount != 0) {
-                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
-                if (esWriteResultResp != null && esWriteResultResp.isOk()) {
-                    this.taskCount -= esWriteResultResp.getNumberOfActions();
-                } else if (esWriteResultResp != null && !esWriteResultResp.isOk()) {
-                    throw new RuntimeException(
-                            String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
-                }
-            }
+            this.requestTracker.waitAllFlush();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
@@ -411,6 +420,7 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void drop() {
         try {
+            bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
             client.close();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
