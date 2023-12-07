@@ -30,7 +30,6 @@ use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
-use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -258,9 +257,19 @@ impl HummockTestEnv {
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
         self.meta_client
-            .commit_epoch(epoch, res.uncommitted_ssts)
+            .commit_epoch_with_watermark(
+                epoch,
+                res.uncommitted_ssts,
+                res.table_watermarks
+                    .into_iter()
+                    .map(|(table_id, watermark)| {
+                        (table_id.table_id as u64, watermark.to_protobuf())
+                    })
+                    .collect(),
+            )
             .await
             .unwrap();
+
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
 }
