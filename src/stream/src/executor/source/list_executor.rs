@@ -106,7 +106,7 @@ impl<S: StateStore> FsListExecutor<S> {
                         Op::Insert,
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
-                            Some(ScalarImpl::Timestamp(page_item.timestamp)),
+                            Some(ScalarImpl::Timestamptz(page_item.timestamp)),
                             Some(ScalarImpl::Int64(page_item.size)),
                         ]),
                     )
@@ -115,7 +115,7 @@ impl<S: StateStore> FsListExecutor<S> {
 
             Ok(StreamChunk::from_rows(
                 &rows,
-                &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+                &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
             ))
         });
 

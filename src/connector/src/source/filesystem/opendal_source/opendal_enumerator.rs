@@ -15,11 +15,11 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use opendal::{Metakey, Operator};
-use risingwave_common::types::Timestamp;
+use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
@@ -78,13 +78,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     let om = object.metadata();
 
                     let t = match om.last_modified() {
-                        Some(t) => t.naive_utc(),
-                        None => {
-                            let timestamp = 0;
-                            NaiveDateTime::from_timestamp_opt(timestamp, 0).unwrap()
-                        }
+                        Some(t) => t,
+                        None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
                     };
-                    let timestamp = Timestamp::new(t);
+                    let timestamp = Timestamptz::from(t);
                     let size = om.content_length() as i64;
                     let metadata = FsPageItem {
                         name,

@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 
 use anyhow::anyhow;
 use aws_sdk_s3::types::Object;
-use risingwave_common::types::{JsonbVal, Timestamp};
+use risingwave_common::types::{JsonbVal, Timestamptz};
 use serde::{Deserialize, Serialize};
 
 use super::opendal_source::OpendalSource;
@@ -137,18 +137,7 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
 pub struct FsPageItem {
     pub name: String,
     pub size: i64,
-    pub timestamp: Timestamp,
+    pub timestamp: Timestamptz,
 }
 
 pub type FsPage = Vec<FsPageItem>;
-
-impl From<&Object> for FsPageItem {
-    fn from(value: &Object) -> Self {
-        let aws_ts = value.last_modified().unwrap();
-        Self {
-            name: value.key().unwrap().to_owned(),
-            size: value.size().unwrap_or_default(),
-            timestamp: Timestamp::from_timestamp_uncheck(aws_ts.secs(), aws_ts.subsec_nanos()),
-        }
-    }
-}
