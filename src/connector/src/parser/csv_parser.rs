@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
@@ -20,7 +22,7 @@ use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
 use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
-use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 macro_rules! parse {
     ($v:ident, $t:ty) => {
@@ -156,13 +158,13 @@ impl ByteStreamSourceParser for CsvParser {
         ParserFormat::Csv
     }
 
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
-        only_parse_payload!(self, payload, writer)
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
+        // ignore other part becasue we only read payload from csv
+        only_parse_payload!(self, message.payload, writer)
     }
 }
 

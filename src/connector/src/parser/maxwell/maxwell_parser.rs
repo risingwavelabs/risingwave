@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use crate::only_parse_payload;
@@ -21,7 +23,7 @@ use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserFormat,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 #[derive(Debug)]
 pub struct MaxwellParser {
@@ -78,12 +80,11 @@ impl ByteStreamSourceParser for MaxwellParser {
         ParserFormat::Maxwell
     }
 
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
         // restrict the behaviours since there is no corresponding
         // key/value test for maxwell yet.
         only_parse_payload!(self, payload, writer)

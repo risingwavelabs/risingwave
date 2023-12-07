@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
@@ -22,7 +24,7 @@ use super::{
 };
 use crate::only_parse_payload;
 use crate::parser::ParserFormat;
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 #[derive(Debug)]
 pub struct PlainParser {
@@ -80,12 +82,11 @@ impl ByteStreamSourceParser for PlainParser {
         ParserFormat::Plain
     }
 
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
         only_parse_payload!(self, payload, writer)
     }
 }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
@@ -25,7 +27,7 @@ use crate::parser::{
     ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
     SpecificParserConfig,
 };
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 #[derive(Debug)]
 pub struct DebeziumParser {
@@ -133,21 +135,19 @@ impl ByteStreamSourceParser for DebeziumParser {
     }
 
     #[allow(clippy::unused_async)] // false positive for `async_trait`
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
-        _payload: Option<Vec<u8>>,
-        _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+        message: SourceMessage,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
-    async fn parse_one_with_txn<'a>(
+    fn parse_one_with_txn<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<ParseResult> {
-        self.parse_inner(key, payload, writer).await
+    ) -> impl Future<Output = Result<ParseResult>> + Send + 'a {
+        self.parse_inner(message, payload, writer).await
     }
 }

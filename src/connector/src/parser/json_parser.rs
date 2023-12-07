@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use apache_avro::Schema;
 use itertools::{Either, Itertools};
@@ -34,7 +35,7 @@ use crate::parser::{
     AccessBuilder, ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter,
 };
 use crate::schema::schema_registry::{handle_sr_list, Client};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
@@ -186,12 +187,11 @@ impl ByteStreamSourceParser for JsonParser {
         ParserFormat::Json
     }
 
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
         only_parse_payload!(self, payload, writer)
     }
 }

@@ -48,8 +48,8 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
-    StreamChunkWithState,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta, SourceWithStateStream,
+    SplitId, StreamChunkWithState,
 };
 
 pub mod additional_columns;
@@ -446,8 +446,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
 
@@ -460,11 +459,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one_with_txn<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<ParseResult>> + Send + 'a {
-        self.parse_one(key, payload, writer)
+        self.parse_one(message, writer)
             .map_ok(|_| ParseResult::Rows)
     }
 }
@@ -564,7 +562,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             match parser
                 .parse_one_with_txn(
                     msg.key,
-                    msg.payload,
                     builder.row_writer().with_meta(MessageMeta {
                         meta: &msg.meta,
                         split_id: &msg.split_id,

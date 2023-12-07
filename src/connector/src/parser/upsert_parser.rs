@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -26,7 +28,7 @@ use super::{
 };
 use crate::extract_key_config;
 use crate::parser::ParserFormat;
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
 
 #[derive(Debug)]
 pub struct UpsertParser {
@@ -127,12 +129,11 @@ impl ByteStreamSourceParser for UpsertParser {
         ParserFormat::Upsert
     }
 
-    async fn parse_one<'a>(
+    fn parse_one<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
+        message: SourceMessage,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
-        self.parse_inner(key, payload, writer).await
+    ) -> impl Future<Output = Result<()>> + Send + 'a {
+        self.parse_inner(message, payload, writer).await
     }
 }
