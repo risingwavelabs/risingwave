@@ -14,7 +14,8 @@
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
+use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -24,12 +25,140 @@ use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 use tracing::debug;
 
+use crate::key::{vnode_range, TableKeyRange};
 use crate::HummockEpoch;
 
 #[derive(Clone)]
 pub struct ReadTableWatermark {
     pub direction: WatermarkDirection,
     pub vnode_watermarks: BTreeMap<VirtualNode, Bytes>,
+}
+
+impl ReadTableWatermark {
+    pub fn merge_other(&mut self, other: ReadTableWatermark) {
+        assert_eq!(self.direction, other.direction);
+        for (vnode, watermark) in other.vnode_watermarks {
+            match self.vnode_watermarks.entry(vnode) {
+                btree_map::Entry::Vacant(entry) => {
+                    entry.insert(watermark);
+                }
+                btree_map::Entry::Occupied(mut entry) => {
+                    let prev_watermark = entry.get();
+                    let overwrite = match self.direction {
+                        WatermarkDirection::Ascending => watermark > prev_watermark,
+                        WatermarkDirection::Descending => watermark < prev_watermark,
+                    };
+                    if overwrite {
+                        entry.insert(watermark);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TableWatermarksIndex {
+    watermark_direction: WatermarkDirection,
+    index: HashMap<VirtualNode, BTreeMap<HummockEpoch, Bytes>>,
+    latest_epoch: HummockEpoch,
+    committed_epoch: HummockEpoch,
+}
+
+impl TableWatermarksIndex {
+    pub fn new(watermark_direction: WatermarkDirection, committed_epoch: HummockEpoch) -> Self {
+        Self {
+            watermark_direction,
+            index: Default::default(),
+            latest_epoch: committed_epoch,
+            committed_epoch,
+        }
+    }
+
+    pub fn table_watermark(&self, vnode: VirtualNode, epoch: HummockEpoch) -> Option<Bytes> {
+        self.index.get(&vnode).and_then(|epoch_watermarks| {
+            epoch_watermarks
+                .upper_bound(Included(&epoch))
+                .value()
+                .cloned()
+        })
+    }
+
+    pub fn latest_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.table_watermark(vnode, HummockEpoch::MAX)
+    }
+
+    pub fn range_watermarks(
+        &self,
+        epoch: HummockEpoch,
+        table_key_range: &TableKeyRange,
+    ) -> Option<ReadTableWatermark> {
+        let mut ret = BTreeMap::new();
+        let (left, right) = vnode_range(table_key_range);
+        for i in left..right {
+            let vnode = VirtualNode::from_index(i);
+            if let Some(watermark) = self.table_watermark(vnode, epoch) {
+                assert!(ret.insert(vnode, watermark).is_none());
+            }
+        }
+        if ret.is_empty() {
+            None
+        } else {
+            Some(ReadTableWatermark {
+                direction: self.direction(),
+                vnode_watermarks: ret,
+            })
+        }
+    }
+
+    pub fn direction(&self) -> WatermarkDirection {
+        self.watermark_direction
+    }
+
+    pub fn add_epoch_watermark(
+        &mut self,
+        epoch: HummockEpoch,
+        vnode_watermark_list: &Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
+    ) {
+        assert!(epoch > self.latest_epoch);
+        assert_eq!(self.watermark_direction, direction);
+        self.latest_epoch = epoch;
+        for vnode_watermark in vnode_watermark_list {
+            for vnode in vnode_watermark.vnode_bitmap.iter_vnodes() {
+                let epoch_watermarks = self.index.entry(vnode).or_default();
+                if let Some((prev_epoch, prev_watermark)) = epoch_watermarks.last_key_value() {
+                    assert!(*prev_epoch < epoch);
+                    match self.watermark_direction {
+                        WatermarkDirection::Ascending => {
+                            assert!(vnode_watermark.watermark >= prev_watermark);
+                        }
+                        WatermarkDirection::Descending => {
+                            assert!(vnode_watermark.watermark <= prev_watermark);
+                        }
+                    };
+                };
+                assert!(self
+                    .index
+                    .entry(vnode)
+                    .or_default()
+                    .insert(epoch, vnode_watermark.watermark.clone())
+                    .is_none());
+            }
+        }
+    }
+
+    pub fn apply_committed_watermarks(&mut self, committed_index: &TableWatermarksIndex) {
+        self.committed_epoch = committed_index.committed_epoch;
+        for (vnode, committed_epoch_watermark) in &committed_index.index {
+            let epoch_watermark = self.index.entry(*vnode).or_default();
+            // keep only watermark higher than committed epoch
+            *epoch_watermark = epoch_watermark.split_off(&committed_index.committed_epoch);
+            for (epoch, watermark) in committed_epoch_watermark {
+                epoch_watermark.insert(*epoch, watermark.clone());
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -152,6 +281,20 @@ impl TableWatermarks {
                 WatermarkDirection::Descending
             },
         }
+    }
+
+    pub fn build_index(&self, committed_epoch: HummockEpoch) -> TableWatermarksIndex {
+        let mut ret = TableWatermarksIndex {
+            index: HashMap::new(),
+            watermark_direction: self.direction,
+            latest_epoch: HummockEpoch::MIN,
+            committed_epoch: HummockEpoch::MIN,
+        };
+        for (epoch, vnode_watermark_list) in &self.watermarks {
+            ret.add_epoch_watermark(*epoch, vnode_watermark_list, self.direction);
+        }
+        ret.committed_epoch = committed_epoch;
+        ret
     }
 }
 

@@ -32,7 +32,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::PbTableWatermarksExt;
+use crate::table_watermark::{PbTableWatermarksExt, TableWatermarks, TableWatermarksIndex};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -188,6 +188,19 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
+    }
+
+    pub fn build_table_watermarks_index(&self) -> HashMap<TableId, TableWatermarksIndex> {
+        self.table_watermarks
+            .iter()
+            .map(|(table_id, table_watermarks)| {
+                (
+                    TableId::from(*table_id as u32),
+                    TableWatermarks::from_protobuf(table_watermarks)
+                        .build_index(self.max_committed_epoch),
+                )
+            })
+            .collect()
     }
 }
 

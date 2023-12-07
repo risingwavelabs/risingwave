@@ -31,7 +31,7 @@ use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -550,13 +550,15 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = OrderedMergeIteratorInner<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
-pub type HummockStorageIteratorPayloadInner<'a> = UnorderedMergeIteratorInner<
-    HummockIteratorUnion<
-        Forward,
-        StagingDataIterator,
-        SstableIterator,
-        ConcatIteratorInner<SstableIterator>,
-        MemTableHummockIterator<'a>,
+pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
+    UnorderedMergeIteratorInner<
+        HummockIteratorUnion<
+            Forward,
+            StagingDataIterator,
+            SstableIterator,
+            ConcatIteratorInner<SstableIterator>,
+            MemTableHummockIterator<'a>,
+        >,
     >,
 >;
 
