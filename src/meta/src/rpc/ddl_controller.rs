@@ -736,6 +736,7 @@ impl DdlController {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
+        let expr_context = env.to_expr_context();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -779,7 +780,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(merge_updates.is_empty());
 
@@ -1060,6 +1061,7 @@ impl DdlController {
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
+        let expr_context = env.to_expr_context();
 
         let old_table_fragments = self
             .fragment_manager
@@ -1112,7 +1114,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(dispatchers.is_empty());
 

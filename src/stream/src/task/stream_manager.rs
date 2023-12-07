@@ -667,6 +667,7 @@ impl LocalStreamManagerCore {
                 .map(|b| b.try_into())
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
+            let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
                 .create_nodes(
@@ -688,6 +689,7 @@ impl LocalStreamManagerCore {
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
+                expr_context,
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
