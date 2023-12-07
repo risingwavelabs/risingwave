@@ -78,7 +78,6 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
-    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -149,8 +148,8 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
-            split_by_state_table: group.compaction_config.split_by_state_table,
-            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
+            table_vnode_partition: BTreeMap::default(),
+            ..Default::default()
         };
         Some(compact_task)
     }
@@ -238,7 +237,6 @@ pub fn create_compaction_task(
         input,
         target_file_size,
         compaction_task_type,
-        enable_split_by_table: false,
     }
 }
 

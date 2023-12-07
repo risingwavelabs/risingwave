@@ -32,6 +32,7 @@ use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
+use thiserror_ext::AsReport;
 
 use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
@@ -961,29 +962,29 @@ impl ScalarImpl {
     ///
     /// For example, the user can input `1` or `true` directly, but they have to use
     /// `'2022-01-01'::date`.
-    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, String> {
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, BoxedError> {
         Ok(match t {
             DataType::Boolean => str_to_bool(s)?.into(),
-            DataType::Int16 => i16::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int32 => i32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int64 => i64::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int256 => Int256::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int16 => i16::from_str(s)?.into(),
+            DataType::Int32 => i32::from_str(s)?.into(),
+            DataType::Int64 => i64::from_str(s)?.into(),
+            DataType::Int256 => Int256::from_str(s)?.into(),
             DataType::Serial => return Err("not supported".into()),
-            DataType::Decimal => Decimal::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float32 => F32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float64 => F64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Decimal => Decimal::from_str(s)?.into(),
+            DataType::Float32 => F32::from_str(s)?.into(),
+            DataType::Float64 => F64::from_str(s)?.into(),
             DataType::Varchar => s.into(),
-            DataType::Date => Date::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Timestamp => Timestamp::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Date => Date::from_str(s)?.into(),
+            DataType::Timestamp => Timestamp::from_str(s)?.into(),
             // We only handle the case with timezone here, and leave the implicit session timezone case
             // for later phase.
-            DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
+            DataType::Time => Time::from_str(s)?.into(),
+            DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List { .. } => ListValue::from_str(s, t)?.into(),
             // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
             DataType::Struct(_) => return Err("not supported".into()),
-            DataType::Jsonb => JsonbVal::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
         })
     }
@@ -1106,18 +1107,19 @@ impl ScalarImpl {
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
                 Time::with_secs_nano(secs, nano)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamp => Self::Timestamp({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
                 Timestamp::with_secs_nsecs(secs, nsecs)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),

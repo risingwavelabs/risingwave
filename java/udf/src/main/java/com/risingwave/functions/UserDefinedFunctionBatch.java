@@ -28,7 +28,6 @@ import org.apache.arrow.vector.types.pojo.Schema;
 abstract class UserDefinedFunctionBatch {
     protected Schema inputSchema;
     protected Schema outputSchema;
-    protected BufferAllocator allocator;
 
     /** Get the input schema of the function. */
     Schema getInputSchema() {
@@ -44,9 +43,11 @@ abstract class UserDefinedFunctionBatch {
      * Evaluate the function by processing a batch of input data.
      *
      * @param batch the input data batch to process
+     * @param allocator the allocator to use for allocating output data
      * @return an iterator over the output data batches
      */
-    abstract Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch);
+    abstract Iterator<VectorSchemaRoot> evalBatch(
+            VectorSchemaRoot batch, BufferAllocator allocator);
 }
 
 /** Utility class for reflection. */

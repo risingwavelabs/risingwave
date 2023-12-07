@@ -827,6 +827,28 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the cdc backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the cdc backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Barrier Number",
                     "The number of barriers that have been ingested but not completely processed. This metric reflects the "

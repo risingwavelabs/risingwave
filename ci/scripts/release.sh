@@ -10,6 +10,21 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
   exit 0
 fi
 
+echo "--- Install aws cli"
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+
+echo "--- Install lld"
+# The lld in the CentOS 7 repository is too old and contains a bug that causes a linker error.
+# So we install a newer version here. (17.0.6, latest version at the time of writing)
+# It is manually built in the same environent and uploaded to S3.
+aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_x86_64.tar.gz .
+tar -zxvf llvm-lld-manylinux2014_x86_64.tar.gz --directory=/usr/local
+ld.lld --version
+
+echo "--- Install dependencies for openssl"
+yum install -y perl-core
+
 echo "--- Install java and maven"
 yum install -y java-11-openjdk java-11-openjdk-devel wget python3 cyrus-sasl-devel
 pip3 install toml-cli
@@ -29,15 +44,6 @@ curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/p
 unzip -o protoc-3.15.8-linux-x86_64.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
-
-echo "--- Install lld"
-yum install -y centos-release-scl-rh
-yum install -y llvm-toolset-7.0-lld
-source /opt/rh/llvm-toolset-7.0/enable
-
-echo "--- Install aws cli"
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then

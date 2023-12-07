@@ -87,6 +87,15 @@ enum DebugCommonKind {
     User,
     Table,
     MetaMember,
+    SourceCatalog,
+    SinkCatalog,
+    IndexCatalog,
+    FunctionCatalog,
+    ViewCatalog,
+    ConnectionCatalog,
+    DatabaseCatalog,
+    SchemaCatalog,
+    TableCatalog,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]

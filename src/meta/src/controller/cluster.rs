@@ -519,8 +519,8 @@ impl ClusterControllerInner {
             Ok(())
         } else {
             Err(MetaError::invalid_worker(
-                worker_id as _,
-                "worker not found".into(),
+                worker_id as u32,
+                "worker not found",
             ))
         }
     }
@@ -536,8 +536,8 @@ impl ClusterControllerInner {
             Ok(())
         } else {
             Err(MetaError::invalid_worker(
-                worker_id as _,
-                "worker not found".into(),
+                worker_id as u32,
+                "worker not found",
             ))
         }
     }
@@ -546,14 +546,12 @@ impl ClusterControllerInner {
         self.worker_extra_info
             .get(&worker_id)
             .cloned()
-            .ok_or_else(|| MetaError::invalid_worker(worker_id as _, "worker not found".into()))
+            .ok_or_else(|| MetaError::invalid_worker(worker_id as u32, "worker not found"))
     }
 
     fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
         match (self.available_transactional_ids.front(), r#type) {
-            (None, _) => Err(MetaError::unavailable(
-                "no available reusable machine id".to_string(),
-            )),
+            (None, _) => Err(MetaError::unavailable("no available reusable machine id")),
             // We only assign transactional id to compute node and frontend.
             (Some(id), PbWorkerType::ComputeNode | PbWorkerType::Frontend) => Ok(Some(*id)),
             _ => Ok(None),
