@@ -83,34 +83,49 @@ public class EsSink extends SinkWriterBase {
         // Count of write tasks in progress
         private int taskCount = 0;
 
-        void add_err_result(String errorMsg) {
+        void addErrResult(String errorMsg) {
             blockingQueue.add(new EsWriteResultResp(errorMsg));
         }
 
-        void add_ok_result(int numberOfActions) {
+        void addOkResult(int numberOfActions) {
             blockingQueue.add(new EsWriteResultResp(numberOfActions));
         }
 
         void addWriteTask() {
             taskCount++;
+            EsWriteResultResp esWriteResultResp;
+            while ((esWriteResultResp = this.blockingQueue.poll()) != null) {
+                if (this.taskCount <= 0) {
+                    throw new RuntimeException(
+                            "The num of task < 0, but blockingQueue is not empty");
+                }
+                checkEsWriteResultResp(esWriteResultResp);
+            }
         }
 
         void waitAllFlush() throws InterruptedException {
-            while (this.taskCount != 0) {
+            while (this.taskCount > 0) {
                 EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
-                if (esWriteResultResp != null && esWriteResultResp.isOk()) {
+                checkEsWriteResultResp(esWriteResultResp);
+            }
+        }
+
+        void checkEsWriteResultResp(EsWriteResultResp esWriteResultResp) {
+            if (esWriteResultResp != null) {
+                if (esWriteResultResp.isOk()) {
                     this.taskCount -= esWriteResultResp.getNumberOfActions();
-                } else if (esWriteResultResp != null && !esWriteResultResp.isOk()) {
+                } else {
                     throw new RuntimeException(
                             String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
                 }
+            } else {
+                LOG.warn("EsWriteResultResp is null, try wait again");
             }
         }
     }
 
     class EsWriteResultResp {
 
-        // Only `RESPONSE_RESULT_OK` or `RESPONSE_RESULT_ERR`
         private boolean isOK;
 
         private String errorMsg;
@@ -171,7 +186,7 @@ public class EsSink extends SinkWriterBase {
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
-        this.bulkProcessor = createBulkProcessor();
+        this.bulkProcessor = createBulkProcessor(this.requestTracker);
 
         primaryKeyIndexes = new ArrayList<Integer>();
         for (String primaryKey : tableSchema.getPrimaryKeys()) {
@@ -224,9 +239,9 @@ public class EsSink extends SinkWriterBase {
         return builder;
     }
 
-    private BulkProcessor createBulkProcessor() {
+    private BulkProcessor createBulkProcessor(RequestTracker requestTracker) {
         BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener(this.requestTracker));
+                applyBulkConfig(this.client, this.config, new BulkListener(requestTracker));
         return builder.build();
     }
 
@@ -251,9 +266,9 @@ public class EsSink extends SinkWriterBase {
                         String.format(
                                 "Bulk of %d actions failed. Failure: %s",
                                 request.numberOfActions(), response.buildFailureMessage());
-                this.requestTracker.add_err_result(errMessage);
+                this.requestTracker.addErrResult(errMessage);
             } else {
-                this.requestTracker.add_ok_result(request.numberOfActions());
+                this.requestTracker.addOkResult(request.numberOfActions());
                 LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
         }
@@ -265,7 +280,7 @@ public class EsSink extends SinkWriterBase {
                     String.format(
                             "Bulk of %d actions failed. Failure: %s",
                             request.numberOfActions(), failure.getMessage());
-            this.requestTracker.add_err_result(errMessage);
+            this.requestTracker.addErrResult(errMessage);
         }
     }
 
