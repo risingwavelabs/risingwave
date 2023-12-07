@@ -122,6 +122,15 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
             _marker: PhantomData,
         }
     }
+
+    pub fn empty_split() -> Self {
+        Self {
+            name: "empty_split".to_string(),
+            offset: 0,
+            size: 0,
+            _marker: PhantomData,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -47,7 +47,9 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
-        Ok(vec![])
+        let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
+
+        Ok(vec![empty_split])
     }
 }
 
