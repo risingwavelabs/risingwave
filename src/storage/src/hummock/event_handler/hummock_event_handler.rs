@@ -21,7 +21,6 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -36,7 +35,7 @@ use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SyncedData, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -396,7 +395,7 @@ impl HummockEventHandler {
         }
 
         self.sstable_object_id_manager
-            .remove_watermark_object_id(TrackerId::Epoch(MAX_EPOCH));
+            .remove_watermark_object_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         let _ = notifier.send(()).inspect_err(|e| {
@@ -683,21 +682,22 @@ fn send_sync_result(
     });
 }
 
-fn to_sync_result(
-    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
-) -> HummockResult<SyncResult> {
-    match staging_sstable_infos {
-        Ok(staging_sstable_infos) => {
-            let sync_size = staging_sstable_infos
+fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResult> {
+    match result {
+        Ok(sync_data) => {
+            let sync_size = sync_data
+                .staging_ssts
                 .iter()
                 .map(StagingSstableInfo::imm_size)
                 .sum();
             Ok(SyncResult {
                 sync_size,
-                uncommitted_ssts: staging_sstable_infos
+                uncommitted_ssts: sync_data
+                    .staging_ssts
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

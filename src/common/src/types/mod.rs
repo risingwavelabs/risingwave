@@ -32,6 +32,7 @@ use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
+use thiserror_ext::AsReport;
 
 use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
@@ -423,7 +424,7 @@ impl DataType {
                     .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
-            DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+            DataType::List(data_type) => ScalarImpl::List(ListValue::empty(data_type)),
         }
     }
 
@@ -457,6 +458,7 @@ impl DataType {
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
             _ => self == other,
         }
     }
@@ -913,16 +915,16 @@ impl ScalarImpl {
             DataType::Jsonb => {
                 Self::Jsonb(JsonbVal::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
             }
-            DataType::List(datatype) => {
+            DataType::List(elem_type) => {
                 // TODO: support nested list
                 if !(str.starts_with('{') && str.ends_with('}')) {
                     return Err(FromSqlError::from_text(str));
                 }
-                let mut values = vec![];
+                let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                 }
-                Self::List(ListValue::new(values))
+                Self::List(ListValue::new(builder.finish()))
             }
             DataType::Struct(s) => {
                 if !(str.starts_with('{') && str.ends_with('}')) {
@@ -960,29 +962,29 @@ impl ScalarImpl {
     ///
     /// For example, the user can input `1` or `true` directly, but they have to use
     /// `'2022-01-01'::date`.
-    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, String> {
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, BoxedError> {
         Ok(match t {
             DataType::Boolean => str_to_bool(s)?.into(),
-            DataType::Int16 => i16::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int32 => i32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int64 => i64::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int256 => Int256::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int16 => i16::from_str(s)?.into(),
+            DataType::Int32 => i32::from_str(s)?.into(),
+            DataType::Int64 => i64::from_str(s)?.into(),
+            DataType::Int256 => Int256::from_str(s)?.into(),
             DataType::Serial => return Err("not supported".into()),
-            DataType::Decimal => Decimal::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float32 => F32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float64 => F64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Decimal => Decimal::from_str(s)?.into(),
+            DataType::Float32 => F32::from_str(s)?.into(),
+            DataType::Float64 => F64::from_str(s)?.into(),
             DataType::Varchar => s.into(),
-            DataType::Date => Date::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Timestamp => Timestamp::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Date => Date::from_str(s)?.into(),
+            DataType::Timestamp => Timestamp::from_str(s)?.into(),
             // We only handle the case with timezone here, and leave the implicit session timezone case
             // for later phase.
-            DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
+            DataType::Time => Time::from_str(s)?.into(),
+            DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List { .. } => ListValue::from_str(s, t)?.into(),
             // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
             DataType::Struct(_) => return Err("not supported".into()),
-            DataType::Jsonb => JsonbVal::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
         })
     }
@@ -1105,18 +1107,19 @@ impl ScalarImpl {
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
                 Time::with_secs_nano(secs, nano)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamp => Self::Timestamp({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
                 Timestamp::with_secs_nsecs(secs, nsecs)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
@@ -1179,7 +1182,7 @@ mod tests {
         }
 
         assert_item_size_eq!(StructArray, 16); // Box<[Datum]>
-        assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(ListArray, 8); // Box<ArrayImpl>
         assert_item_size_eq!(Utf8Array, 16); // Box<str>
         assert_item_size_eq!(IntervalArray, 16);
         assert_item_size_eq!(TimestampArray, 12);
@@ -1188,6 +1191,7 @@ mod tests {
         assert_item_size_eq!(DecimalArray, 20);
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 24);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
         const_assert_eq!(std::mem::size_of::<StructType>(), 8);
         const_assert_eq!(std::mem::size_of::<DataType>(), 16);
@@ -1296,10 +1300,7 @@ mod tests {
                     ])),
                 ),
                 DataTypeName::List => (
-                    ScalarImpl::List(ListValue::new(vec![
-                        ScalarImpl::Int64(233).into(),
-                        ScalarImpl::Int64(2333).into(),
-                    ])),
+                    ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
             };

@@ -27,6 +27,7 @@ use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;
@@ -158,7 +159,7 @@ impl<S: StateStore> FsListExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::warn!("encountered an error, recovering. {:?}", e);
+                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
                     // todo: rebuild stream here
                 }
                 Ok(msg) => match msg {

@@ -21,8 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use lru::{DefaultHasher, KeyRef, LruCache};
-use prometheus::IntGauge;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
 
 use crate::common::metrics::MetricsInfo;
@@ -39,10 +39,11 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The heap size of keys/values
     kv_heap_size: usize,
     /// The metrics of memory usage
-    memory_usage_metrics: IntGauge,
+    memory_usage_metrics: LabelGuardedIntGauge<3>,
     // The metrics of evicted watermark time
-    lru_evicted_watermark_time_ms: IntGauge,
+    lru_evicted_watermark_time_ms: LabelGuardedIntGauge<3>,
     // Metrics info
+    #[expect(dead_code)]
     metrics_info: MetricsInfo,
     /// The size reported last time
     last_reported_size_bytes: usize,
@@ -50,29 +51,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
 
 impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
     fn drop(&mut self) {
-        let info = &self.metrics_info;
         self.memory_usage_metrics.set(0.into());
-
-        if let Err(e) = info.metrics.stream_memory_usage.remove_label_values(&[
-            &info.table_id,
-            &info.actor_id,
-            &info.desc,
-        ]) {
-            warn!(
-                "unable to remove stream_memory_usage of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
-            );
-        };
-        if let Err(e) = info
-            .metrics
-            .lru_evicted_watermark_time_ms
-            .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
-        {
-            warn!(
-                "unable to remove lru_evicted_watermark_time_ms of {} {} {}: {:?}",
-                info.table_id, info.actor_id, info.desc, e
-            );
-        }
     }
 }
 
@@ -296,7 +275,7 @@ pub struct MutGuard<'a, V: EstimateSize> {
     // The total size of a collection
     total_size: &'a mut usize,
     last_reported_size_bytes: &'a mut usize,
-    memory_usage_metrics: &'a mut IntGauge,
+    memory_usage_metrics: &'a mut LabelGuardedIntGauge<3>,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
@@ -304,7 +283,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         inner: &'a mut V,
         total_size: &'a mut usize,
         last_reported_size_bytes: &'a mut usize,
-        memory_usage_metrics: &'a mut IntGauge,
+        memory_usage_metrics: &'a mut LabelGuardedIntGauge<3>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {

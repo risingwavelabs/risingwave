@@ -2,7 +2,7 @@ CREATE TABLE tweet (
   id varchar,
   text varchar,
   lang varchar,
-  created_at timestamp,
+  created_at timestamp, -- #13682: shall be timestamptz from TiDB timestamp, but canal is problematic
   author_id varchar,
   PRIMARY KEY (id)
 ) WITH (

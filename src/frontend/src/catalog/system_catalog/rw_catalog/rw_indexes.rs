@@ -60,12 +60,11 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(index.id.index_id as i32)),
                         Some(ScalarImpl::Utf8(index.name.clone().into())),
                         Some(ScalarImpl::Int32(index.primary_table.id().table_id as i32)),
-                        Some(ScalarImpl::List(ListValue::new(
+                        Some(ScalarImpl::List(ListValue::from_iter(
                             index
                                 .original_columns
                                 .iter()
-                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
-                                .collect_vec(),
+                                .map(|index| index.get_id() as i16 + 1),
                         ))),
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),
