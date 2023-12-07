@@ -810,9 +810,8 @@ pub async fn build_remote_object_store(
                     .monitored(metrics),
             )
         }
-
         obs if obs.starts_with("obs://") => {
-            let obs = obs.strip_prefix("oss://").unwrap();
+            let obs = obs.strip_prefix("obs://").unwrap();
             let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
