@@ -663,8 +663,8 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: with_options.into_inner().into_iter().collect(),
-        options: options.unwrap(),
+        with_properties: with_options.into_inner().into_iter().collect(),
+        format_encode_options: options.unwrap(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
@@ -850,8 +850,8 @@ fn derive_connect_properties(
 ) -> Result<BTreeMap<String, String>> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
-    let mut connect_properties = source.properties.clone();
-    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+    let mut connect_properties = source.with_properties.clone();
+    if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY) {
         let table_name = match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
                 let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
@@ -1223,12 +1223,15 @@ mod tests {
 
         // AwsAuth params exist in options.
         assert_eq!(
-            source.options.get("aws.credentials.access_key_id").unwrap(),
+            source
+                .format_encode_options
+                .get("aws.credentials.access_key_id")
+                .unwrap(),
             "your_access_key_2"
         );
         assert_eq!(
             source
-                .options
+                .format_encode_options
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),
             "your_secret_key_2"
@@ -1237,20 +1240,20 @@ mod tests {
         // AwsAuth params exist in props.
         assert_eq!(
             source
-                .properties
+                .with_properties
                 .get("aws.credentials.access_key_id")
                 .unwrap(),
             "your_access_key_1"
         );
         assert_eq!(
             source
-                .properties
+                .with_properties
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),
             "your_secret_key_1"
         );
 
         // Options are not merged into props.
-        assert!(source.properties.get("schema.location").is_none());
+        assert!(source.with_properties.get("schema.location").is_none());
     }
 }

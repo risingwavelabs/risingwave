@@ -364,22 +364,22 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
             .unwrap_or(false)
     }
 
-    pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
             .unwrap_or(false)
     }
 
-    pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
-        let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
+    pub fn rewrite_upstream_source_key_hash_map(with_properties: &mut HashMap<String, String>) {
+        let connector = with_properties.remove(UPSTREAM_SOURCE_KEY).unwrap();
         match connector.as_str() {
             S3_V2_CONNECTOR => {
                 tracing::info!(
@@ -387,33 +387,33 @@ impl ConnectorProperties {
                     S3_V2_CONNECTOR,
                     S3_CONNECTOR
                 );
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
+                with_properties.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
             }
             _ => {
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
+                with_properties.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
             }
         }
     }
 }
 
 impl ConnectorProperties {
-    pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-        if Self::is_new_fs_connector_hash_map(&props) {
-            _ = props
+    pub fn extract(mut with_properties: HashMap<String, String>) -> Result<Self> {
+        if Self::is_new_fs_connector_hash_map(&with_properties) {
+            _ = with_properties
                 .remove(UPSTREAM_SOURCE_KEY)
                 .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
             return Ok(ConnectorProperties::S3(Box::new(
-                S3Properties::try_from_hashmap(props)?,
+                S3Properties::try_from_hashmap(with_properties)?,
             )));
         }
 
-        let connector = props
+        let connector = with_properties
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(props).map(ConnectorProperties::from),
+            PropType::try_from_hashmap(with_properties).map(ConnectorProperties::from),
             |other| Err(anyhow!("connector '{}' is not supported", other))
         )
     }

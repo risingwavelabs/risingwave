@@ -81,7 +81,7 @@ message Source {
   // specify a primary key, the vector will be empty.
   repeated int32 pk_column_ids = 7;
   // Properties specified by the user in WITH clause.
-  map<string, string> properties = 8;
+  map<string, string> with_properties = 8;
 
   uint32 owner = 9;
 
@@ -99,8 +99,8 @@ message Source {
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
 
-  // Options specified by the user in ENCODE FORMAT clause.
-  map<string, string> options = 17;
+  // Options specified by the user in FORMAT ENCODE clause.
+  map<string, string> format_encode_options = 17;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
