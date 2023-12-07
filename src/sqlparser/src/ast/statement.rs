@@ -851,10 +851,11 @@ impl ParseTo for CreateSinkStatement {
 
         // This check cannot be put into the `WithProperties::parse_to`, since other
         // statements may not need the with properties.
-        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
+        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) && into_table_name.is_none() {
             p.expected("WITH", p.peek_token())?
         }
         impl_parse_to!(with_properties: WithProperties, p);
+
         if with_properties.0.is_empty() && into_table_name.is_none() {
             return Err(ParserError::ParserError(
                 "sink properties not provided".to_string(),
