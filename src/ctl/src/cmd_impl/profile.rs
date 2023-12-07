@@ -19,6 +19,7 @@ use futures::future::try_join_all;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
 
@@ -66,7 +67,7 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
                     tracing::error!(
                         "Failed to get profiling result from {} with error {}",
                         node_name,
-                        err.to_string()
+                        err.as_report()
                     );
                 }
             }
@@ -115,7 +116,7 @@ pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::
                 tracing::error!(
                     "Failed to dump profile on {} with error {}",
                     node_name,
-                    err.to_string()
+                    err.as_report()
                 );
             }
             Ok::<_, anyhow::Error>(())

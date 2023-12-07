@@ -21,6 +21,7 @@ use risingwave_common::types::{DataType, Datum};
 use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
 use crate::ExprError;
+use thiserror_ext::AsReport;
 
 /// Report an error during evaluation.
 #[auto_impl(&, Arc)]
@@ -48,7 +49,7 @@ pub struct LogReport;
 
 impl EvalErrorReport for LogReport {
     fn report(&self, error: ExprError) {
-        tracing::error!(%error, "failed to evaluate expression");
+        tracing::error!(error=%error.as_report(), "failed to evaluate expression");
     }
 }
 
