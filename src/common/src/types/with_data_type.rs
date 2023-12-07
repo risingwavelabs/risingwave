@@ -22,7 +22,6 @@ use super::{
     Timestamp, Timestamptz, F32, F64,
 };
 
-// #[auto_impl(&, &mut, Box, Rc, Arc)]
 pub trait WithDataType {
     fn default_data_type() -> DataType;
 }
