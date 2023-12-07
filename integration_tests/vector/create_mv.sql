@@ -1,1 +1,1 @@
-FLUSH;
+SELECT 1;
