@@ -90,7 +90,11 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    // A template used to store each StreamNode within an Actor for TableFragments that have compression enabled.
+    stream_plan.StreamNode stream_node_template = 8;
   }
+
   uint32 table_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;
@@ -98,6 +102,17 @@ message TableFragments {
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamEnvironment env = 6;
+
+  enum GraphRenderType {
+    RENDER_UNSPECIFIED = 0;
+    RENDER_TEMPLATE = 1;
+  }
+
+  // When we use RENDER_TEMPLATE, template compression is enabled during the conversion between PbTableFragments and model::TableFragments.
+  // This avoids pointless repetition in each PbActor’s StreamNode within PbFragment.
+  // When RENDER_TEMPLATE is activated, the stream_node_template in PbFragment should not be empty.
+  // Also, the nodes in the original actors field will be disregarded and rendered when converted to model::TableFragments.
+  GraphRenderType graph_render_type = 7;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.

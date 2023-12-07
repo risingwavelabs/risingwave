@@ -18,10 +18,11 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::util::table_fragments_util::TableFragmentsRenderCompression;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, GraphRenderType, State};
 use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -94,18 +95,33 @@ impl MetadataModel for TableFragments {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        Self::PbType {
+        let mut table_fragments = PbTableFragments {
             table_id: self.table_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             env: Some(self.env.to_protobuf()),
-        }
+            ..Default::default()
+        };
+
+        table_fragments.compress();
+
+        table_fragments
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
+        let mut prost = prost;
+
         let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
+
+        if let GraphRenderType::RenderTemplate = prost
+            .get_graph_render_type()
+            .unwrap_or(GraphRenderType::RenderUnspecified)
+        {
+            prost.uncompress();
+        }
+
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
