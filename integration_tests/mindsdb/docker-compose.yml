@@ -21,6 +21,7 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
+
   # === MindsDB ===
   mindsdb:
     image: mindsdb/mindsdb:23.9.3.0
@@ -30,6 +31,25 @@ services:
       - 55432:55432 # postgres
     volumes:
       - "./mdb_config.json:/root/mindsdb_config.json"
+    container_name: mindsdb
+    healthcheck:
+      test:  ["CMD", "curl", "-f", "http://localhost:47334/api/util/ping"]
+      interval: 30s
+      timeout: 4s
+      retries: 100
+
+  prepare_mindsdb:
+    image: postgres
+    depends_on:
+      mindsdb: { condition: service_healthy }
+    command:
+      - /bin/sh
+      - -c
+      - psql "postgresql://mindsdb@mindsdb:55432/mindsdb" -f ./postgres_prepare.sql
+    volumes:
+      - "./prepare_mindsdb.sql:/prepare_mindsdb.sql"
+    container_name: prepare_mindsdbs
+    restart: on-failure
 
 volumes:
   risingwave-standalone:
