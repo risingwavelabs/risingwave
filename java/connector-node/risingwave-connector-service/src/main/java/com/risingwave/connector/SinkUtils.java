@@ -17,6 +17,8 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.mock.flink.http.HttpFlinkMockSinkFactory;
+import com.risingwave.mock.flink.runtime.FlinkDynamicAdapterFactory;
 import com.risingwave.proto.ConnectorServiceProto;
 import java.util.Optional;
 
@@ -45,6 +47,8 @@ public class SinkUtils {
                 return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();
+            case "http":
+                return new FlinkDynamicAdapterFactory(new HttpFlinkMockSinkFactory());
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkName)

@@ -128,6 +128,8 @@ pub struct StorageOpts {
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
     pub max_preload_io_retry_times: usize,
+    pub compactor_fast_max_compact_delete_ratio: u32,
+    pub compactor_fast_max_compact_task_size: u64,
 
     pub mem_table_spill_threshold: usize,
 
@@ -248,6 +250,10 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
             object_store_config: c.storage.object_store.clone(),
+            compactor_fast_max_compact_delete_ratio: c
+                .storage
+                .compactor_fast_max_compact_delete_ratio,
+            compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
         }
     }
 }

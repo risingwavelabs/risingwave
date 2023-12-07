@@ -135,24 +135,21 @@ impl HummockManager {
     }
 
     /// Unregisters `table_fragments` from compaction groups
-    pub async fn unregister_table_fragments_vec(
-        &self,
-        table_fragments: &[TableFragments],
-    ) -> Result<()> {
-        self.unregister_table_ids(
+    pub async fn unregister_table_fragments_vec(&self, table_fragments: &[TableFragments]) {
+        self.unregister_table_ids_fail_fast(
             &table_fragments
                 .iter()
                 .flat_map(|t| t.all_table_ids())
                 .collect_vec(),
         )
-        .await
+        .await;
     }
 
     /// Unregisters stale members and groups
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
+    pub async fn purge(&self, valid_ids: &[u32]) {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -161,8 +158,7 @@ impl HummockManager {
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(&to_unregister).await?;
-        Ok(())
+        self.unregister_table_ids_fail_fast(&to_unregister).await;
     }
 
     /// Prefer using `register_table_fragments`.
@@ -265,11 +261,8 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Prefer using `unregister_table_fragments_vec`.
-    /// Only use `unregister_table_ids` when [`TableFragments`] is unavailable.
-    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
-    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+    async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
             return Ok(());
         }
@@ -376,10 +369,17 @@ impl HummockManager {
                 HashSet::from_iter(get_compaction_group_ids(&versioning.current_version)),
                 self.env.meta_store(),
             )
-            .await
-            .inspect_err(|e| tracing::warn!("failed to purge stale compaction group config. {}", e))
-            .ok();
+            .await?;
         Ok(())
+    }
+
+    /// Prefer using `unregister_table_fragments_vec`.
+    /// Only use `unregister_table_ids_fail_fast` when [`TableFragments`] is unavailable.
+    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
+    pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
+        self.unregister_table_ids(table_ids)
+            .await
+            .unwrap_or_else(|e| panic!("unregister table ids fail: {table_ids:?} {e}"));
     }
 
     pub async fn update_compaction_config(
@@ -1082,17 +1082,15 @@ mod tests {
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1.clone()])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge(&table_fragment_2.all_table_ids().collect_vec())
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await.unwrap();
+        compaction_group_manager.purge(&[]).await;
         assert_eq!(registered_number().await, 0);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
@@ -1115,8 +1113,7 @@ mod tests {
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 0);
         assert_eq!(group_number().await, 2);
     }

@@ -1,0 +1,244 @@
+error: should not format error directly
+  --> $DIR/format_error.rs:14:23
+   |
+LL |     let _ = format!("{err}");
+   |                       ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+   = note: `-D rw::format-error` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(rw::format_error)]`
+
+error: should not format error directly
+  --> $DIR/format_error.rs:15:27
+   |
+LL |     let _ = format!("{}", err);
+   |                           ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:16:29
+   |
+LL |     let _ = format!("{:#}", err);
+   |                             ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:17:29
+   |
+LL |     let _ = format!("{:?}", err);
+   |                             ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:18:32
+   |
+LL |     let _ = format!("{e}", e = err);
+   |                                ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:19:28
+   |
+LL |     let _ = format!("{0}", err);
+   |                            ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:21:27
+   |
+LL |     let _ = format!("{}", &err);
+   |                           ^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:22:27
+   |
+LL |     let _ = format!("{}", &&err);
+   |                           ^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:23:27
+   |
+LL |     let _ = format!("{}", err.source().unwrap());
+   |                           ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:25:27
+   |
+LL |     let _ = format!("{}", &err as &dyn Error);
+   |                           ^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:26:27
+   |
+LL |     let _ = format!("{}", &err as &(dyn Error + Send));
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:27:27
+   |
+LL |     let _ = format!("{}", Box::new(&err));
+   |                           ^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:28:27
+   |
+LL |     let _ = format!("{}", Box::new(err.clone()));
+   |                           ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:30:20
+   |
+LL |     println!("{}", err);
+   |                    ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:31:17
+   |
+LL |     info!("{}", err);
+   |                 ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:32:20
+   |
+LL |     my_info!("{}", err);
+   |                    ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:34:29
+   |
+LL |     tracing::field::display(&err);
+   |                             ^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:35:27
+   |
+LL |     tracing::field::debug(err.clone());
+   |                           ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:37:5
+   |
+LL |     info!(%err, "233");
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:38:5
+   |
+LL |     info!(?err, "233");
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:39:23
+   |
+LL |     info!(%err, "{}", err);
+   |                       ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:39:5
+   |
+LL |     info!(%err, "{}", err);
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:40:13
+   |
+LL |     let _ = info_span!("span", %err);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:44:9
+   |
+LL |         err, err, err
+   |         ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:44:14
+   |
+LL |         err, err, err
+   |              ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:44:19
+   |
+LL |         err, err, err
+   |                   ^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:47:17
+   |
+LL |     let _ = err.to_string();
+   |                 ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:48:27
+   |
+LL |     let _ = (err.clone()).to_string();
+   |                           ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:49:17
+   |
+LL |     let _ = err.to_string().to_string();
+   |                 ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:50:21
+   |
+LL |     let _ = (&&err).to_string();
+   |                     ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: aborting due to 30 previous errors
+

@@ -260,7 +260,7 @@ impl CatalogManager {
 
         if database_core.has_creation_in_database(database_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target database, try again later".into(),
+                "Some relations are creating in the target database, try again later",
             ));
         }
 
@@ -515,12 +515,12 @@ impl CatalogManager {
         }
         if database_core.has_creation_in_schema(schema_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target schema, try again later".into(),
+                "Some relations are creating in the target schema, try again later",
             ));
         }
         if !database_core.schema_is_empty(schema_id) {
             return Err(MetaError::permission_denied(
-                "The schema is not empty, try dropping them first".into(),
+                "The schema is not empty, try dropping them first",
             ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -885,7 +885,6 @@ impl CatalogManager {
             self.env.event_log_manager_ref().add_event_logs(event_logs);
         }
 
-        database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
             // If table type is internal, no need to update the ref count OR

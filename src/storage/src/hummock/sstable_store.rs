@@ -270,7 +270,7 @@ impl SstableStore {
         self.store
             .upload(&data_path, data)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     pub async fn get_stream(
@@ -619,22 +619,7 @@ impl SstableStore {
                         }
 
                         let now = Instant::now();
-                        let buf = match store
-                            .read(&meta_path, range.clone())
-                            .verbose_instrument_await("sstable_read")
-                            .await
-                        {
-                            Ok(data) => data,
-                            Err(e) => {
-                                tracing::error!(
-                                    "sstable error: {:?} when read {:?} from sst-{}",
-                                    e,
-                                    range,
-                                    object_id,
-                                );
-                                return Err(HummockError::object_io_error(e));
-                            }
-                        };
+                        let buf = store.read(&meta_path, range).await?;
                         let meta = SstableMeta::decode(&buf[..])?;
 
                         let sst = Sstable::new(object_id, meta);
@@ -994,7 +979,7 @@ impl SstableWriter for StreamingUploadWriter {
         self.object_uploader
             .write_bytes(block_data)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
@@ -1006,16 +991,13 @@ impl SstableWriter for StreamingUploadWriter {
         self.object_uploader
             .write_bytes(block)
             .await
-            .map_err(HummockError::object_io_error)
+            .map_err(Into::into)
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let meta_data = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader
-            .write_bytes(meta_data)
-            .await
-            .map_err(HummockError::object_io_error)?;
+        self.object_uploader.write_bytes(meta_data).await?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
@@ -1029,10 +1011,7 @@ impl SstableWriter for StreamingUploadWriter {
             assert!(!meta.block_metas.is_empty() || !meta.monotonic_tombstone_events.is_empty());
 
             // Upload data to object store.
-            self.object_uploader
-                .finish()
-                .await
-                .map_err(HummockError::object_io_error)?;
+            self.object_uploader.finish().await?;
             // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 

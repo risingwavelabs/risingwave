@@ -24,6 +24,7 @@ use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
+use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
 
@@ -81,10 +82,10 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!(identity, %err, "failed to evaluate expression");
+        tracing::error!(identity, error = %err.as_report(), "failed to evaluate expression");
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_string();
+        let mut err_str = err.to_report_string();
 
         if self.error_suppressor.lock().suppress_error(&err_str) {
             err_str = format!(

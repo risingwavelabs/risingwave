@@ -253,6 +253,10 @@ message ExprNode {
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
     JSONB_BUILD_OBJECT = 619;
+    JSONB_PATH_EXISTS = 620;
+    JSONB_PATH_MATCH = 621;
+    JSONB_PATH_QUERY_ARRAY = 622;
+    JSONB_PATH_QUERY_FIRST = 623;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -295,6 +299,7 @@ message TableFunction {
     JSONB_EACH = 12;
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
+    JSONB_PATH_QUERY = 15;
     // User defined table function
     UDTF = 100;
   }

@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config
@@ -389,6 +392,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub heap_profiling: HeapProfilingConfig,
 
+    // Number of max pending reset stream for grpc server.
+    #[serde(default = "default::server::grpc_max_reset_stream_size")]
+    pub grpc_max_reset_stream: u32,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -583,6 +590,13 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
+    pub compactor_fast_max_compact_delete_ratio: u32,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
+    pub compactor_fast_max_compact_task_size: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -1044,6 +1058,10 @@ pub mod default {
         pub fn telemetry_enabled() -> bool {
             true
         }
+
+        pub fn grpc_max_reset_stream_size() -> u32 {
+            200
+        }
     }
 
     pub mod storage {
@@ -1149,6 +1167,14 @@ pub mod default {
         }
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
+        }
+
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
+            40
+        }
+
+        pub fn compactor_fast_max_compact_task_size() -> u64 {
+            2 * 1024 * 1024 * 1024 // 2g
         }
     }
 
