@@ -40,6 +40,9 @@ statement ok
 create function split(varchar) returns table (word varchar, length int) as split using link 'http://localhost:8815';
 
 statement ok
+create function float_to_decimal(float8) returns decimal as float_to_decimal using link 'http://localhost:8815';
+
+statement ok
 create function hex_to_dec(varchar) returns decimal as hex_to_dec using link 'http://localhost:8815';
 
 statement ok
@@ -77,6 +80,7 @@ show functions
 array_access character varying[], integer character varying (empty) http://localhost:8815
 decimal_add numeric, numeric numeric (empty) http://localhost:8815
 extract_tcp_info bytea struct<src_ip character varying, dst_ip character varying, src_port smallint, dst_port smallint> (empty) http://localhost:8815
+float_to_decimal double precision numeric (empty) http://localhost:8815
 gcd integer, integer integer (empty) http://localhost:8815
 gcd integer, integer, integer integer (empty) http://localhost:8815
 hex_to_dec character varying numeric (empty) http://localhost:8815
@@ -109,6 +113,11 @@ query I
 select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
 ----
 233276425899864771438119478
+
+query I
+select float_to_decimal('-1e-10'::float8);
+----
+-0.0000000001000000000000000036
 
 query R
 select decimal_add(1.11, 2.22);
@@ -342,6 +351,9 @@ drop function series;
 
 statement ok
 drop function split;
+
+statement ok
+drop function float_to_decimal;
 
 statement ok
 drop function hex_to_dec;

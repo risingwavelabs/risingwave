@@ -62,6 +62,10 @@
   error_msg: |-
     sql parser error: Expected identifier, found: ; at line:1, column:123
     Near " topic = 'test_topic') format;"
+- input: create sink sk1 from tt where v1 % 10 = 0 with (connector='blackhole')
+  error_msg: |-
+    sql parser error: Expected WITH, found: where at line:1, column:30
+    Near "create sink sk1 from tt"
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
   error_msg: |-
     sql parser error: Expected ENCODE, found: ; at line:1, column:132

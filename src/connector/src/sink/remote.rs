@@ -72,6 +72,7 @@ macro_rules! def_remote_sink {
                 desc.sink_type.is_append_only()
             } }
             { DeltaLake, DeltaLakeSink, "deltalake" }
+            { HttpJava, HttpJavaSink, "http" }
         }
     };
     () => {};
