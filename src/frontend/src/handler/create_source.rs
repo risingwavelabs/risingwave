@@ -1339,7 +1339,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn test_duplicate_prop_option() {
+    async fn test_duplicate_props_options() {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
@@ -1347,13 +1347,13 @@ pub mod tests {
         connector = 'kinesis',
         aws.region='user_test_topic',
         endpoint='172.10.1.1:9090,172.10.1.2:9090',
-        aws.credentials.access_key_id = 'your_access_key',
-        aws.credentials.secret_access_key = 'your_secret_key'
+        aws.credentials.access_key_id = 'your_access_key_1',
+        aws.credentials.secret_access_key = 'your_secret_key_1'
     )
     FORMAT PLAIN ENCODE PROTOBUF (
         message = '.test.TestRecord',
-        aws.credentials.access_key_id = 'your_access_key',
-        aws.credentials.secret_access_key = 'your_secret_key',
+        aws.credentials.access_key_id = 'your_access_key_2',
+        aws.credentials.secret_access_key = 'your_secret_key_2',
         schema.location = 'file://{}',
     )"#,
             proto_file.path().to_str().unwrap()
@@ -1374,14 +1374,14 @@ pub mod tests {
         // AwsAuth params exist in options.
         assert_eq!(
             source.options.get("aws.credentials.access_key_id").unwrap(),
-            "your_access_key"
+            "your_access_key_2"
         );
         assert_eq!(
             source
                 .options
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),
-            "your_secret_key"
+            "your_secret_key_2"
         );
 
         // AwsAuth params exist in props.
@@ -1390,14 +1390,14 @@ pub mod tests {
                 .properties
                 .get("aws.credentials.access_key_id")
                 .unwrap(),
-            "your_access_key"
+            "your_access_key_1"
         );
         assert_eq!(
             source
                 .properties
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),
-            "your_secret_key"
+            "your_secret_key_1"
         );
 
         // Options are not merged into props.
