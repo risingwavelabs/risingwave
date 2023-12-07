@@ -122,6 +122,10 @@ pub fn add_hummock_backend(
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}", opendal.bucket));
             }
+            else if opendal.engine == "obs"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+obs://{}", opendal.bucket));
+            }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+oss://{}", opendal.bucket));

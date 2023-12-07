@@ -110,7 +110,9 @@ message UncommittedEpoch {
 }
 
 message VnodeWatermark {
+  // The watermark shared by multiple vnodes
   bytes watermark = 1;
+  // The set of vnodes that share the same watermark
   common.Buffer vnode_bitmap = 2;
 }
 
@@ -119,7 +121,12 @@ message TableWatermarks {
     repeated VnodeWatermark watermarks = 1;
     uint64 epoch = 2;
   }
+
+  // Table watermarks of a state table from all vnodes written in multiple epochs.
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
   repeated EpochNewWatermarks epoch_watermarks = 1;
+
+  // The direction of the table watermark.
   bool is_ascending = 2;
 }
 
