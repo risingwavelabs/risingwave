@@ -20,6 +20,15 @@ def run_sql_file(f: str, dir: str):
         sys.exit(1)
 
 
+def run_bash_file(f: str, dir: str):
+    print("Running Bash file: {}".format(f))
+    # ON_ERROR_STOP=1 will let psql return error code when the query fails.
+    # https://stackoverflow.com/questions/37072245/check-return-status-of-psql-command-in-unix-shell-scripting
+    proc = subprocess.run(["bash", f], check=True, cwd=dir)
+    if proc.returncode != 0:
+        sys.exit(1)
+
+
 def run_demo(demo: str, format: str, wait_time = 40):
     file_dir = dirname(abspath(__file__))
     project_dir = dirname(file_dir)
@@ -29,7 +38,7 @@ def run_demo(demo: str, format: str, wait_time = 40):
     subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(wait_time)
 
-    sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql', 'query_sink.sql']
+    sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
     for fname in sql_files:
         if format == 'protobuf':
             sql_file = os.path.join(demo_dir, "pb", fname)
@@ -39,11 +48,16 @@ def run_demo(demo: str, format: str, wait_time = 40):
                 sleep(10)
                 continue
             # Fallback to default version when the protobuf version doesn't exist.
+        sql_file = os.path.join(demo_dir,  fname)
         if not os.path.exists(sql_file):
             continue
-        sql_file = os.path.join(demo_dir,  fname)
         run_sql_file(sql_file, demo_dir)
         sleep(10)
+    # Run query_sink.sh if it exists.
+    query_sink_file = os.path.join(demo_dir,  'query_sink.sh')
+    if os.path.isfile(query_sink_file):
+        run_bash_file(query_sink_file, demo_dir)
+
 
 def run_kafka_cdc_demo():
     demo = "kafka-cdc-sink"
