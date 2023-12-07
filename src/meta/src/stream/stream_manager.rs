@@ -71,6 +71,9 @@ pub struct CreateStreamingJobContext {
     pub create_type: CreateType,
 
     pub ddl_type: DdlType,
+
+    /// Context provided for potential replace table, typically used when sinking into a table.
+    pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
 }
 
 impl CreateStreamingJobContext {
@@ -175,13 +178,6 @@ pub struct ReplaceTableContext {
     pub table_properties: HashMap<String, String>,
 }
 
-// This is used to replace the downstream table during the sinking into table process.
-pub struct ReplaceTableJobForSink {
-    pub streaming_job: StreamingJob,
-    pub context: Option<ReplaceTableContext>,
-    pub table_fragments: Option<TableFragments>,
-}
-
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager {
     pub env: MetaSrvEnv,
@@ -248,7 +244,6 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
-        replace_table_detail: Option<(ReplaceTableContext, TableFragments)>,
     ) -> MetaResult<()> {
         let table_id = table_fragments.table_id();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
@@ -259,12 +254,7 @@ impl GlobalStreamManager {
         let fut = async move {
             let mut revert_funcs = vec![];
             let res = stream_manager
-                .create_streaming_job_impl(
-                    &mut revert_funcs,
-                    table_fragments,
-                    ctx,
-                    replace_table_detail,
-                )
+                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
                 .await;
             match res {
                 Ok(_) => {
@@ -457,8 +447,8 @@ impl GlobalStreamManager {
             internal_tables,
             create_type,
             ddl_type,
+            replace_table_job_info,
         }: CreateStreamingJobContext,
-        replace_table_detail: Option<(ReplaceTableContext, TableFragments)>,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
@@ -487,7 +477,7 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
-        if let Some((context, table_fragments)) = replace_table_detail {
+        if let Some((_, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
                 &table_fragments,
                 &context.building_locations,
@@ -527,53 +517,25 @@ impl GlobalStreamManager {
 
         let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
-        let command = if let Some(ReplaceTablePlan {
-            old_table_fragments,
-            new_table_fragments,
-            merge_updates,
-            dispatchers: table_dispatchers,
-            init_split_assignment: table_init_split_assignment,
-        }) = replace_table_command
-        {
-            Command::CreateStreamingJob {
-                table_fragments,
-                upstream_mview_actors,
-                dispatchers,
-                init_split_assignment,
-                definition: definition.to_string(),
-                ddl_type,
-                replace_table: Some(ReplaceTablePlan {
-                    old_table_fragments,
-                    new_table_fragments,
-                    merge_updates,
-                    dispatchers: table_dispatchers,
-                    init_split_assignment: table_init_split_assignment,
-                }),
-            }
-        } else {
-            Command::CreateStreamingJob {
-                table_fragments,
-                upstream_mview_actors,
-                dispatchers,
-                init_split_assignment,
-                definition: definition.to_string(),
-                ddl_type,
-                replace_table: None,
-            }
+        let command = Command::CreateStreamingJob {
+            table_fragments,
+            upstream_mview_actors,
+            dispatchers,
+            init_split_assignment,
+            definition: definition.to_string(),
+            ddl_type,
+            replace_table: replace_table_command,
         };
 
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
             if create_type == CreateType::Foreground {
-                self.fragment_manager
-                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
-                    .await?;
+                let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
                 if let Some(dummy_table_id) = replace_table_id {
-                    self.fragment_manager
-                        .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                            dummy_table_id,
-                        )))
-                        .await?;
+                    table_ids.insert(dummy_table_id);
                 }
+                self.fragment_manager
+                    .drop_table_fragments_vec(&table_ids)
+                    .await?;
             }
 
             return Err(err);
@@ -1053,7 +1015,7 @@ mod tests {
                 .start_create_table_procedure(&table, vec![])
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, ctx, None)
+                .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], table)

@@ -59,8 +59,8 @@ use crate::model::{FragmentId, StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, ReplaceTableJobForSink,
-    SourceManagerRef, StreamFragmentGraph,
+    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -99,7 +99,7 @@ impl StreamingJobId {
     }
 }
 
-/// It’s used to describe the information of the table that needs to be replaced and it will be used during `ReplaceTable` and `CreateSink`/`DropSink` operations.
+// It’s used to describe the information of the table that needs to be replaced and it will be used during replacing table and creating sink into table operations.
 pub struct ReplaceTableInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
@@ -503,7 +503,7 @@ impl DdlController {
         let mut internal_tables = vec![];
         let result = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
-            let (ctx, table_fragments, replace_table_job) = self
+            let (ctx, table_fragments) = self
                 .build_stream_job(
                     env.clone(),
                     &stream_job,
@@ -523,7 +523,16 @@ impl DdlController {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(ref sink) => {
+                StreamingJob::Sink(ref sink, ref mut target_table) => {
+                    // When sinking into table occurs, some variables of the target table may be modified,
+                    // such as `fragment_id` being altered by `prepare_replace_table`.
+                    // At this point, it’s necessary to update the table info carried with the sink.
+                    if let Some((StreamingJob::Table(source, table, _), ..)) =
+                        &ctx.replace_table_job_info
+                    {
+                        *target_table = Some((table.clone(), source.clone()));
+                    }
+
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
                 }
@@ -533,10 +542,10 @@ impl DdlController {
                 }
                 _ => {}
             }
-            (ctx, table_fragments, replace_table_job)
+            (ctx, table_fragments)
         };
 
-        let (ctx, table_fragments, replace_table_job) = match result {
+        let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
                 self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
@@ -547,14 +556,8 @@ impl DdlController {
 
         match create_type {
             CreateType::Foreground | CreateType::Unspecified => {
-                self.create_streaming_job_inner(
-                    stream_job,
-                    table_fragments,
-                    ctx,
-                    internal_tables,
-                    replace_table_job,
-                )
-                .await
+                self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
+                    .await
             }
             CreateType::Background => {
                 let ctrl = self.clone();
@@ -566,7 +569,6 @@ impl DdlController {
                             table_fragments,
                             ctx,
                             internal_tables,
-                            replace_table_job,
                         )
                         .await;
                     match result {
@@ -631,7 +633,7 @@ impl DdlController {
             fragment_graph,
             ..
         }: ReplaceTableInfo,
-    ) -> MetaResult<ReplaceTableJobForSink> {
+    ) -> MetaResult<(StreamingJob, ReplaceTableContext, TableFragments)> {
         let fragment_graph = self
             .prepare_replace_table(&mut streaming_job, fragment_graph)
             .await?;
@@ -674,11 +676,7 @@ impl DdlController {
             target_fragment_id,
         );
 
-        Ok(ReplaceTableJobForSink {
-            streaming_job,
-            context: Some(replace_table_ctx),
-            table_fragments: Some(table_fragments),
-        })
+        Ok((streaming_job, replace_table_ctx, table_fragments))
     }
 
     fn inject_replace_table_plan_for_sink(
@@ -771,23 +769,13 @@ impl DdlController {
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
-        replace_table_job: Option<ReplaceTableJobForSink>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let mut replace_table_job = replace_table_job;
-
-        let replace_table_detail = replace_table_job.as_mut().map(|replace_table_job| {
-            let context = replace_table_job.context.take().unwrap();
-            let table_fragments = replace_table_job.table_fragments.take().unwrap();
-
-            (context, table_fragments)
-        });
-
         let result = self
             .stream_manager
-            .create_streaming_job(table_fragments, ctx, replace_table_detail)
+            .create_streaming_job(table_fragments, ctx)
             .await;
 
         if let Err(e) = result {
@@ -800,34 +788,14 @@ impl DdlController {
                 _ => {
                     self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                         .await?;
-
-                    if let Some(replace_table_job) = &replace_table_job {
-                        let _ = self
-                            .cancel_replace_table(&replace_table_job.streaming_job)
-                            .await;
-                    }
                 }
             }
             return Err(e);
         };
 
-        let sink_id = if let StreamingJob::Sink(s) = &stream_job {
-            Some(s.id as SinkId)
-        } else {
-            None
-        };
-
         tracing::debug!(id = job_id, "finishing stream job");
         let version = self.finish_stream_job(stream_job, internal_tables).await?;
         tracing::debug!(id = job_id, "finished stream job");
-
-        if let Some(replace_table_job) = &replace_table_job {
-            let version = self
-                .finish_replace_table(&replace_table_job.streaming_job, None, sink_id)
-                .await?;
-
-            return Ok(version);
-        }
 
         Ok(version)
     }
@@ -972,11 +940,7 @@ impl DdlController {
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<ReplaceTableInfo>,
-    ) -> MetaResult<(
-        CreateStreamingJobContext,
-        TableFragments,
-        Option<ReplaceTableJobForSink>,
-    )> {
+    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
@@ -1038,6 +1002,14 @@ impl DdlController {
             env.clone(),
         );
 
+        let replace_table_job_info = match affected_table_replace_info {
+            Some(replace_table_info) => Some(
+                self.inject_replace_table_job(env, &table_fragments, replace_table_info)
+                    .await?,
+            ),
+            None => None,
+        };
+
         let ctx = CreateStreamingJobContext {
             dispatchers,
             upstream_mview_actors: upstream_actors,
@@ -1049,6 +1021,7 @@ impl DdlController {
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
+            replace_table_job_info,
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1062,18 +1035,7 @@ impl DdlController {
             .mark_creating_tables(&creating_tables)
             .await;
 
-        // 5. If we have other tables that will be affected (for example, Sink into table),
-        // we need to modify them to generate a replace table plan to change their operational status.
-        let replace_table_job = if let Some(replace_table_info) = affected_table_replace_info {
-            Some(
-                self.inject_replace_table_job(env, &table_fragments, replace_table_info)
-                    .await?,
-            )
-        } else {
-            None
-        };
-
-        Ok((ctx, table_fragments, replace_table_job))
+        Ok((ctx, table_fragments))
     }
 
     /// This is NOT used by `CANCEL JOBS`.
@@ -1110,9 +1072,9 @@ impl DdlController {
                     tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
                 }
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, target_table) => {
                 self.catalog_manager
-                    .cancel_create_sink_procedure(sink)
+                    .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
             StreamingJob::Table(source, table, ..) => {
@@ -1172,10 +1134,24 @@ impl DdlController {
                     .finish_create_table_procedure(internal_tables, table)
                     .await?
             }
-            StreamingJob::Sink(sink) => {
-                self.catalog_manager
+            StreamingJob::Sink(sink, target_table) => {
+                let sink_id = sink.id;
+
+                let mut version = self
+                    .catalog_manager
                     .finish_create_sink_procedure(internal_tables, sink)
-                    .await?
+                    .await?;
+
+                if let Some((table, source)) = target_table {
+                    let streaming_job =
+                        StreamingJob::Table(source, table, TableJobType::Unspecified);
+
+                    version = self
+                        .finish_replace_table(&streaming_job, None, Some(sink_id))
+                        .await?;
+                }
+
+                version
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);

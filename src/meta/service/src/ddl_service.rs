@@ -292,7 +292,15 @@ impl DdlService for DdlServiceImpl {
             self.validate_connection(connection_id).await?;
         }
 
-        let mut stream_job = StreamingJob::Sink(sink);
+        let mut stream_job = match &affected_table_change {
+            None => StreamingJob::Sink(sink, None),
+            Some(change) => {
+                let table = change.table.clone().unwrap();
+                let source = change.source.clone();
+                StreamingJob::Sink(sink, Some((table, source)))
+            }
+        };
+
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
 
         stream_job.set_id(id);

@@ -34,8 +34,8 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
-    Source, StreamJobStatus, Table, View,
+    Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
+    Schema, Sink, Source, StreamJobStatus, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -648,7 +648,7 @@ impl CatalogManager {
                 self.start_create_table_procedure(table, internal_tables)
                     .await
             }
-            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -2813,7 +2813,11 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
+    pub async fn cancel_create_sink_procedure(
+        &self,
+        sink: &Sink,
+        target_table: &Option<(Table, Option<PbSource>)>,
+    ) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -2830,6 +2834,10 @@ impl CatalogManager {
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
+
+        if let Some((table, source)) = target_table {
+            Self::cancel_replace_table_procedure_inner(source, table, core);
+        }
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
@@ -2976,6 +2984,16 @@ impl CatalogManager {
             unreachable!("unexpected job: {stream_job:?}")
         };
         let core = &mut *self.core.lock().await;
+
+        Self::cancel_replace_table_procedure_inner(source, table, core);
+        Ok(())
+    }
+
+    fn cancel_replace_table_procedure_inner(
+        source: &Option<PbSource>,
+        table: &Table,
+        core: &mut CatalogManagerCore,
+    ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
@@ -3001,7 +3019,6 @@ impl CatalogManager {
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
-        Ok(())
     }
 
     pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
