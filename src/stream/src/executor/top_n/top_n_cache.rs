@@ -58,6 +58,11 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
+    /// Number of rows corresponding to the current group.
+    /// This is a nice-to-have information. `None` means we don't know the row count,
+    /// but it doesn't prevent us from working correctly.
+    table_row_count: Option<usize>,
+
     /// Data types for the full row.
     ///
     /// For debug formatting only.
@@ -169,6 +174,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
+            table_row_count: None,
             data_types,
         }
     }
@@ -184,6 +190,16 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// Get total count of entries in the cache.
     pub fn len(&self) -> usize {
         self.low.len() + self.middle.len() + self.high.len()
+    }
+
+    pub(super) fn update_table_row_count(&mut self, table_row_count: usize) {
+        self.table_row_count = Some(table_row_count)
+    }
+
+    fn table_row_count_matched(&self) -> bool {
+        self.table_row_count
+            .map(|n| n == self.len())
+            .unwrap_or(false)
     }
 
     pub fn is_low_cache_full(&self) -> bool {
@@ -222,6 +238,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             assert!(self.high.len() <= self.high_capacity);
         }
         self.high.len() >= self.high_capacity
+    }
+
+    fn last_cache_key_before_high(&self) -> Option<&CacheKey> {
+        let middle_last_key = self.middle.last_key_value().map(|(k, _)| k);
+        middle_last_key.or_else(|| self.low.last_key_value().map(|(k, _)| k))
     }
 
     /// Use this method instead of `self.high.insert` directly when possible.
@@ -330,19 +351,20 @@ impl TopNCacheTrait for TopNCache<false> {
             && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
             // The row is in mid
+            self.middle.remove(&cache_key);
+
             // Try to fill the high cache if it is empty
-            if self.high.is_empty() {
+            if self.high.is_empty() && !self.table_row_count_matched() {
                 managed_state
                     .fill_high_cache(
                         group_key,
                         self,
-                        Some(self.middle.last_key_value().unwrap().0.clone()),
+                        self.last_cache_key_before_high().cloned(),
                         self.high_capacity,
                     )
                     .await?;
             }
 
-            self.middle.remove(&cache_key);
             res_ops.push(Op::Delete);
             res_rows.push((&row).into());
 
@@ -365,12 +387,12 @@ impl TopNCacheTrait for TopNCache<false> {
                 self.low.insert(middle_first.0, middle_first.1);
 
                 // Try to fill the high cache if it is empty
-                if self.high.is_empty() {
+                if self.high.is_empty() && !self.table_row_count_matched() {
                     managed_state
                         .fill_high_cache(
                             group_key,
                             self,
-                            Some(self.middle.last_key_value().unwrap().0.clone()),
+                            self.last_cache_key_before_high().cloned(),
                             self.high_capacity,
                         )
                         .await?;
@@ -507,14 +529,12 @@ impl TopNCacheTrait for TopNCache<true> {
             }
 
             // Try to fill the high cache if it is empty
-            if self.high.is_empty() {
+            if self.high.is_empty() && !self.table_row_count_matched() {
                 managed_state
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle
-                            .last_key_value()
-                            .map(|(key, _value)| key.clone()),
+                        self.last_cache_key_before_high().cloned(),
                         self.high_capacity,
                     )
                     .await?;
