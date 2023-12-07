@@ -1,0 +1,124 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
+use bytes::Bytes;
+
+use super::{
+    DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, StructType, Time,
+    Timestamp, Timestamptz, F32, F64,
+};
+
+// #[auto_impl(&, &mut, Box, Rc, Arc)]
+pub trait WithDataType {
+    fn default_data_type() -> DataType;
+}
+
+impl<T> WithDataType for Option<T>
+where
+    T: WithDataType,
+{
+    fn default_data_type() -> DataType {
+        T::default_data_type()
+    }
+}
+
+macro_rules! impl_with_data_type {
+    ($t:ty, $val:expr) => {
+        impl WithDataType for $t {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+
+        impl<'a> WithDataType for &'a $t {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+
+        impl<'a> WithDataType for &'a mut $t {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+
+        impl WithDataType for Box<$t> {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+
+        impl WithDataType for Rc<$t> {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+
+        impl WithDataType for Arc<$t> {
+            fn default_data_type() -> DataType {
+                $val
+            }
+        }
+    };
+}
+
+impl_with_data_type!(bool, DataType::Boolean);
+impl_with_data_type!(i16, DataType::Int16);
+impl_with_data_type!(i32, DataType::Int32);
+impl_with_data_type!(i64, DataType::Int64);
+impl_with_data_type!(Int256, DataType::Int256);
+impl_with_data_type!(f32, DataType::Float32);
+impl_with_data_type!(F32, DataType::Float32);
+impl_with_data_type!(f64, DataType::Float64);
+impl_with_data_type!(F64, DataType::Float64);
+impl_with_data_type!(rust_decimal::Decimal, DataType::Decimal);
+impl_with_data_type!(Decimal, DataType::Decimal);
+
+impl<'a> WithDataType for &'a str {
+    fn default_data_type() -> DataType {
+        DataType::Varchar
+    }
+}
+
+impl_with_data_type!(String, DataType::Varchar);
+impl_with_data_type!(Date, DataType::Date);
+impl_with_data_type!(Time, DataType::Time);
+impl_with_data_type!(Timestamp, DataType::Timestamp);
+impl_with_data_type!(Timestamptz, DataType::Timestamptz);
+impl_with_data_type!(Interval, DataType::Interval);
+impl_with_data_type!(Vec<u8>, DataType::Bytea);
+impl_with_data_type!(Bytes, DataType::Bytea);
+impl_with_data_type!(JsonbVal, DataType::Jsonb);
+
+impl<'a> WithDataType for JsonbRef<'a> {
+    fn default_data_type() -> DataType {
+        DataType::Jsonb
+    }
+}
+
+impl<T> WithDataType for Vec<T>
+where
+    T: WithDataType,
+{
+    fn default_data_type() -> DataType {
+        DataType::List(Box::new(T::default_data_type()))
+    }
+}
+
+impl<T> WithDataType for [T]
+where
+    T: WithDataType,
+{
+    fn default_data_type() -> DataType {
+        DataType::List(Box::new(T::default_data_type()))
+    }
+}
+
+impl<T> WithDataType for T
+where
+    T: Fields,
+{
+    fn default_data_type() -> DataType {
+        DataType::Struct(StructType::new(T::fields()))
+    }
+}

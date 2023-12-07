@@ -37,6 +37,8 @@
 #![feature(round_ties_even)]
 #![recursion_limit = "256"]
 
+extern crate self as risingwave_frontend;
+
 #[cfg(test)]
 risingwave_expr_impl::enable!();
 
