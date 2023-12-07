@@ -13,7 +13,7 @@ services:
                     --connector-rpc-endpoint 0.0.0.0:50051 \
                     --backend etcd \
                     --etcd-endpoints etcd-0:2388 \
-                    --state-store hummock+s3://<bucket-name> \
+                    --state-store hummock+oss://<bucket-name> \
                     --data-directory hummock_001 \
                     --config-path /risingwave.toml\" \
                  --compute-opts=\" \
@@ -48,9 +48,36 @@ services:
       - "5690"
       - "1250"
       - "5691"
+    ports:
+      - "4566:4566"
+      - "5690:5690"
+      - "5691:5691"
     depends_on:
-      - "etcd-0"
+      - etcd-0
     env_file: multiple_object_storage.env
+    volumes:
+      - "./risingwave.toml:/risingwave.toml"
+    environment:
+      RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+    container_name: risingwave-standalone
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $$?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $$?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $$?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
+      interval: 1s
+      timeout: 5s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 28G
+        reservations:
+          memory: 28G
   etcd-0:
     extends:
       file: docker-compose.yml
