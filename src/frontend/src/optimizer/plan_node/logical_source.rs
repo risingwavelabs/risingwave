@@ -182,7 +182,7 @@ impl LogicalSource {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "last_edit_time".to_string(),
-                            data_type: DataType::Timestamp,
+                            data_type: DataType::Timestamptz,
                             sub_fields: vec![],
                             type_name: "".to_string(),
                         },

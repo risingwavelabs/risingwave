@@ -297,7 +297,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             split_offset_mapping,
                         }) => {
                             let mapping = split_offset_mapping.unwrap();
-                            for (split_id, offset) in mapping {
+                            debug_assert_eq!(mapping.len(), 1);
+                            if let Some((split_id, offset)) = mapping.into_iter().next() {
                                 let row = state_store_handler
                                     .get(split_id.clone())
                                     .await?
