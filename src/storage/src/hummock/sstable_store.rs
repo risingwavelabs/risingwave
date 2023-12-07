@@ -478,7 +478,7 @@ impl SstableStore {
                             object_id,
                             file_size
                         );
-                        return Err(HummockError::object_io_error(e));
+                        return Err(HummockError::from(e));
                     }
                 };
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
@@ -705,7 +705,7 @@ impl SstableStore {
 
         let reader = match ret {
             Ok(Ok(reader)) => reader,
-            Ok(Err(e)) => return Err(HummockError::object_io_error(e)),
+            Ok(Err(e)) => return Err(HummockError::from(e)),
             Err(e) => {
                 return Err(HummockError::other(format!(
                     "failed to get result, this read request may be canceled: {:?}",

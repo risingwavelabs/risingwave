@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
 use super::{Block, BlockCache, BlockMeta};
-use crate::hummock::{BlockHolder, HummockError, HummockResult};
+use crate::hummock::{BlockHolder, HummockResult};
 
 #[async_trait::async_trait]
 pub trait BlockStream: Send + Sync + 'static {
@@ -83,9 +83,10 @@ impl BlockDataStream {
         }
 
         let block_meta = &self.block_metas[self.block_idx];
-        fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
-            ObjectError::internal("stream read error")
-        )));
+        fail_point!("stream_read_err", |_| Err(ObjectError::internal(
+            "stream read error"
+        )
+        .into()));
         let uncompressed_size = block_meta.uncompressed_size as usize;
         let end = self.buff_offset + block_meta.len as usize;
         let data = if end > self.buf.len() {
