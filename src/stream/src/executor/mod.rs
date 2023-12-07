@@ -39,9 +39,9 @@ use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbBarrier,
-    PbDispatcher, PbStreamMessage, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, ThrottleMutation, UpdateMutation,
+    BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbAddMutation, PbBarrier,
+    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -222,30 +222,36 @@ pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateMutation {
+    pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
+    pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
+    pub vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
+    pub dropped_actors: HashSet<ActorId>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddMutation {
+    pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
+    pub added_actors: HashSet<ActorId>,
+    // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
+    pub splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub pause: bool,
+}
+
 /// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    Update {
-        dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
-        merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
-        vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
-        dropped_actors: HashSet<ActorId>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-        actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
-    },
-    Add {
-        adds: HashMap<ActorId, Vec<PbDispatcher>>,
-        added_actors: HashSet<ActorId>,
-        // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
-        splits: HashMap<ActorId, Vec<SplitImpl>>,
-        pause: bool,
-    },
+    Update(UpdateMutation),
+    Add(AddMutation),
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
-    Combined(Vec<Mutation>),
+    AddAndUpdate(AddMutation, UpdateMutation),
 }
 
 #[derive(Debug, Clone)]
@@ -311,13 +317,10 @@ impl Barrier {
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
             Some(Mutation::Stop(actors)) => Some(actors),
-            Some(Mutation::Update { dropped_actors, .. }) => Some(dropped_actors),
-            Some(Mutation::Combined(mutations)) => match &mutations[..] {
-                [Mutation::Add { .. }, Mutation::Update { dropped_actors, .. }] => {
-                    Some(dropped_actors)
-                }
-                _ => unreachable!(),
-            },
+            Some(Mutation::Update(UpdateMutation { dropped_actors, .. }))
+            | Some(Mutation::AddAndUpdate(_, UpdateMutation { dropped_actors, .. })) => {
+                Some(dropped_actors)
+            }
             _ => None,
         }
     }
@@ -329,7 +332,10 @@ impl Barrier {
     /// added for scaling are not included.
     pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
         match self.mutation.as_deref() {
-            Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
+            Some(Mutation::Add(AddMutation { added_actors, .. }))
+            | Some(Mutation::AddAndUpdate(AddMutation { added_actors, .. }, _)) => {
+                added_actors.contains(&actor_id)
+            }
             _ => false,
         }
     }
@@ -339,7 +345,7 @@ impl Barrier {
         match self.mutation.as_deref() {
             Some(
                   Mutation::Update { .. } // new actors for scaling
-                | Mutation::Add { pause: true, .. } // new streaming job, or recovery
+                | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
             ) => true,
             _ => false,
         }
@@ -360,7 +366,11 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { merges, .. } => merges.get(&(actor_id, upstream_fragment_id)),
+                Mutation::Update(UpdateMutation { merges, .. })
+                | Mutation::AddAndUpdate(_, UpdateMutation { merges, .. }) => {
+                    merges.get(&(actor_id, upstream_fragment_id))
+                }
+
                 _ => None,
             })
     }
@@ -374,7 +384,10 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
+                Mutation::Update(UpdateMutation { vnode_bitmaps, .. })
+                | Mutation::AddAndUpdate(_, UpdateMutation { vnode_bitmaps, .. }) => {
+                    vnode_bitmaps.get(&actor_id).cloned()
+                }
                 _ => None,
             })
     }
@@ -423,14 +436,14 @@ impl Mutation {
             Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 merges,
                 vnode_bitmaps,
                 dropped_actors,
                 actor_splits,
                 actor_new_dispatchers,
-            } => PbMutation::Update(UpdateMutation {
+            }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -451,12 +464,12 @@ impl Mutation {
                     })
                     .collect(),
             }),
-            Mutation::Add {
+            Mutation::Add(AddMutation {
                 adds,
                 added_actors,
                 splits,
                 pause,
-            } => PbMutation::Add(AddMutation {
+            }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -494,13 +507,15 @@ impl Mutation {
                     .collect(),
             }),
 
-            Mutation::Combined(c) => PbMutation::Combined(CombinedMutation {
-                mutations: c
-                    .iter()
-                    .map(|m| BarrierMutation {
-                        mutation: Some(m.to_protobuf()),
-                    })
-                    .collect(),
+            Mutation::AddAndUpdate(add, update) => PbMutation::Combined(CombinedMutation {
+                mutations: vec![
+                    BarrierMutation {
+                        mutation: Some(Mutation::Add(add.clone()).to_protobuf()),
+                    },
+                    BarrierMutation {
+                        mutation: Some(Mutation::Update(update.clone()).to_protobuf()),
+                    },
+                ],
             }),
         }
     }
@@ -509,7 +524,7 @@ impl Mutation {
         let mutation = match prost {
             PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
 
-            PbMutation::Update(update) => Mutation::Update {
+            PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update
                     .dispatcher_update
                     .iter()
@@ -545,9 +560,9 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
-            },
+            }),
 
-            PbMutation::Add(add) => Mutation::Add {
+            PbMutation::Add(add) => Mutation::Add(AddMutation {
                 adds: add
                     .actor_dispatchers
                     .iter()
@@ -571,7 +586,7 @@ impl Mutation {
                     })
                     .collect(),
                 pause: add.pause,
-            },
+            }),
 
             PbMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, Vec<SplitImpl>)> =
@@ -600,12 +615,25 @@ impl Mutation {
                     .collect(),
             ),
 
-            PbMutation::Combined(CombinedMutation { mutations }) => Mutation::Combined(
-                mutations
-                    .iter()
-                    .map(|m| Mutation::from_protobuf(m.mutation.as_ref().unwrap()))
-                    .try_collect()?,
-            ),
+            PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
+                [BarrierMutation {
+                    mutation: Some(add),
+                }, BarrierMutation {
+                    mutation: Some(update),
+                }] => {
+                    let Mutation::Add(add_mutation) = Mutation::from_protobuf(add)? else {
+                        unreachable!();
+                    };
+
+                    let Mutation::Update(update_mutation) = Mutation::from_protobuf(update)? else {
+                        unreachable!();
+                    };
+
+                    Mutation::AddAndUpdate(add_mutation, update_mutation)
+                }
+
+                _ => unreachable!(),
+            },
         };
         Ok(mutation)
     }

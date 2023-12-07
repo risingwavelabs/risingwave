@@ -168,7 +168,7 @@ mod tests {
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, Barrier, Executor, ExecutorInfo, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Executor, ExecutorInfo, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -227,12 +227,13 @@ mod tests {
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
-        let first_message = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-            adds: Default::default(),
-            added_actors: maplit::hashset! {actor_id},
-            splits: Default::default(),
-            pause: false,
-        });
+        let first_message =
+            Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
+                adds: Default::default(),
+                added_actors: maplit::hashset! {actor_id},
+                splits: Default::default(),
+                pause: false,
+            }));
         tx.send(first_message).unwrap();
 
         assert!(matches!(

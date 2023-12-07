@@ -23,7 +23,6 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -34,7 +33,7 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::Watermark;
+use super::{AddMutation, UpdateMutation, Watermark};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -205,25 +204,17 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
-        self.pre_mutate_dispatchers_inner(mutation, 0)
-    }
-
-    fn pre_mutate_dispatchers_inner(&mut self, mutation: &Mutation, depth: u8) -> StreamResult<()> {
-        if depth > 2 {
-            bail!("too deep mutation: {:?}", mutation);
-        }
-
         match mutation {
-            Mutation::Add { adds, .. } => {
+            Mutation::Add(AddMutation { adds, .. }) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 actor_new_dispatchers: actor_dispatchers,
                 ..
-            } => {
+            }) => {
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
@@ -234,16 +225,30 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Combined(v) => match &v[..] {
-                [Mutation::Add { .. }, Mutation::Update { .. }] => {
-                    for mutation in v {
-                        self.pre_mutate_dispatchers_inner(mutation, depth + 1)?;
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers: actor_dispatchers,
+                    ..
+                },
+            ) => {
+                if let Some(new_dispatchers) = adds.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
+                if let Some(updates) = dispatchers.get(&self.actor_id) {
+                    for update in updates {
+                        self.pre_update_dispatcher(update)?;
                     }
                 }
-                _ => unreachable!(),
-            },
+            }
             _ => {}
-        };
+        }
 
         Ok(())
     }
@@ -254,24 +259,6 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
-        self.post_mutate_dispatchers_inner(mutation, 0)?;
-
-        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
-        // should clean up them.
-        self.dispatchers.retain(|d| !d.is_empty());
-
-        Ok(())
-    }
-
-    fn post_mutate_dispatchers_inner(
-        &mut self,
-        mutation: &Mutation,
-        depth: u8,
-    ) -> StreamResult<()> {
-        if depth > 2 {
-            bail!("too deep mutation: {:?}", mutation);
-        }
-
         match mutation {
             Mutation::Stop(stops) => {
                 // Remove outputs only if this actor itself is not to be stopped.
@@ -281,11 +268,19 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 dropped_actors,
                 ..
-            } => {
+            })
+            | Mutation::AddAndUpdate(
+                _,
+                UpdateMutation {
+                    dispatchers,
+                    dropped_actors,
+                    ..
+                },
+            ) => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
@@ -298,16 +293,12 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Combined(v) => match &v[..] {
-                [Mutation::Add { .. }, Mutation::Update { .. }] => {
-                    for mutation in v {
-                        self.post_mutate_dispatchers_inner(mutation, depth + 1)?;
-                    }
-                }
-                _ => unreachable!(),
-            },
             _ => {}
         };
+
+        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
+        // should clean up them.
+        self.dispatchers.retain(|d| !d.is_empty());
 
         Ok(())
     }
@@ -1162,14 +1153,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1214,14 +1205,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
+        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 

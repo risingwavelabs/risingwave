@@ -153,7 +153,12 @@ pub enum CommandChanges {
         to_add: HashSet<ActorId>,
         to_remove: HashSet<ActorId>,
     },
-    Combined(Vec<CommandChanges>),
+    /// This is used for sinking into the table, featuring both `CreateTable` and `Actor` changes.
+    CreateSinkIntoTable {
+        sink_id: TableId,
+        to_add: HashSet<ActorId>,
+        to_remove: HashSet<ActorId>,
+    },
     /// No changes.
     None,
 }
@@ -304,10 +309,13 @@ impl CheckpointControl {
                 self.adding_actors.extend(to_add);
             }
 
-            CommandChanges::Combined(v) => {
-                for changes in v {
-                    self.pre_resolve_helper(changes);
-                }
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.pre_resolve_helper(CommandChanges::CreateTable(sink_id));
+                self.pre_resolve_helper(CommandChanges::Actor { to_add, to_remove });
             }
 
             _ => {}
@@ -331,17 +339,13 @@ impl CheckpointControl {
                 self.dropping_tables.extend(tables);
             }
 
-            CommandChanges::Actor { to_remove, .. } => {
+            CommandChanges::Actor { to_remove, .. }
+            | CommandChanges::CreateSinkIntoTable { to_remove, .. } => {
                 assert!(
                     self.removing_actors.is_disjoint(&to_remove),
                     "duplicated actor in concurrent checkpoint"
                 );
                 self.removing_actors.extend(to_remove);
-            }
-            CommandChanges::Combined(v) => {
-                for changes in v {
-                    self.post_resolve_helper(changes);
-                }
             }
             _ => {}
         }
@@ -487,10 +491,13 @@ impl CheckpointControl {
                 self.removing_actors.retain(|a| !to_remove.contains(a));
             }
             CommandChanges::None => {}
-            CommandChanges::Combined(v) => {
-                for changes in v {
-                    self.remove_changes(changes);
-                }
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.remove_changes(CommandChanges::CreateTable(sink_id));
+                self.remove_changes(CommandChanges::Actor { to_add, to_remove });
             }
         }
     }
