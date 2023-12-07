@@ -132,8 +132,8 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                         (Included(range_start), Excluded(range_end)),
                         HummockEpoch::MAX,
                         ReadOptions {
-                            // TODO: if this stream lives too long ,the connection of prefetch object may break. We may need optimize it because if a connection break too many times, we will disable prefetch for current object.
-                            prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                            // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
+                            prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
                             table_id,
                             ..Default::default()

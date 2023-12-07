@@ -1442,7 +1442,7 @@ pub mod default {
         }
 
         pub fn object_store_read_timeout_ms() -> u64 {
-            300 * 1000
+            60 * 60 * 1000
         }
 
         pub mod s3 {
