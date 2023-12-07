@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, user,
-    user_privilege, view, DataTypeArray, DatabaseId, ObjectId, PrivilegeId, SchemaId, UserId,
+    actor_dispatcher, connection, database, function, index, object, object_dependency, schema,
+    sink, source, table, user, user_privilege, view, worker_property, ActorId, DataTypeArray,
+    DatabaseId, I32Array, ObjectId, PrivilegeId, SchemaId, UserId, WorkerId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
@@ -164,6 +169,22 @@ where
     let count = User::find_by_id(user_id).count(db).await?;
     if count == 0 {
         return Err(anyhow!("user {} was concurrently dropped", user_id).into());
+    }
+    Ok(())
+}
+
+/// `check_database_name_duplicate` checks whether the database name is already used in the cluster.
+pub async fn check_database_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Database::find()
+        .filter(database::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("database", name));
     }
     Ok(())
 }
@@ -367,7 +388,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::permission_denied("schema is not empty".into()));
+        return Err(MetaError::permission_denied("schema is not empty"));
     }
 
     Ok(())
@@ -385,7 +406,7 @@ where
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id, db).await?;
+        user_info.grant_privileges = get_user_privilege(user_id, db).await?;
         user_infos.push(user_info);
     }
     Ok(user_infos)
@@ -520,14 +541,15 @@ where
         .into_iter()
         .map(|(privilege, object)| {
             let object = object.unwrap();
+            let oid = object.oid as _;
             let obj = match object.obj_type {
-                ObjectType::Database => PbObject::DatabaseId(object.oid),
-                ObjectType::Schema => PbObject::SchemaId(object.oid),
-                ObjectType::Table => PbObject::TableId(object.oid),
-                ObjectType::Source => PbObject::SourceId(object.oid),
-                ObjectType::Sink => PbObject::SinkId(object.oid),
-                ObjectType::View => PbObject::ViewId(object.oid),
-                ObjectType::Function => PbObject::FunctionId(object.oid),
+                ObjectType::Database => PbObject::DatabaseId(oid),
+                ObjectType::Schema => PbObject::SchemaId(oid),
+                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Source => PbObject::SourceId(oid),
+                ObjectType::Sink => PbObject::SinkId(oid),
+                ObjectType::View => PbObject::ViewId(oid),
+                ObjectType::Function => PbObject::FunctionId(oid),
                 ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
             };
@@ -535,7 +557,7 @@ where
                 action_with_opts: vec![PbActionWithGrantOption {
                     action: PbAction::from(privilege.action) as _,
                     with_grant_option: privilege.with_grant_option,
-                    granted_by: privilege.granted_by,
+                    granted_by: privilege.granted_by as _,
                 }],
                 object: Some(obj),
             }
@@ -552,7 +574,61 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::SourceId(id)
         | PbObject::SinkId(id)
         | PbObject::ViewId(id)
-        | PbObject::FunctionId(id) => *id,
+        | PbObject::FunctionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
+}
+
+// todo: deprecate parallel units and avoid this query.
+pub async fn get_parallel_unit_mapping<C>(db: &C) -> MetaResult<HashMap<u32, PbParallelUnit>>
+where
+    C: ConnectionTrait,
+{
+    let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
+        .select_only()
+        .columns([
+            worker_property::Column::WorkerId,
+            worker_property::Column::ParallelUnitIds,
+        ])
+        .into_tuple()
+        .all(db)
+        .await?;
+    let parallel_units_map = parallel_units
+        .into_iter()
+        .flat_map(|(worker_id, parallel_unit_ids)| {
+            parallel_unit_ids
+                .into_inner()
+                .into_iter()
+                .map(move |parallel_unit_id| {
+                    (
+                        parallel_unit_id as _,
+                        PbParallelUnit {
+                            id: parallel_unit_id as _,
+                            worker_node_id: worker_id as _,
+                        },
+                    )
+                })
+        })
+        .collect();
+    Ok(parallel_units_map)
+}
+
+pub async fn get_actor_dispatchers<C>(
+    db: &C,
+    actor_ids: Vec<ActorId>,
+) -> MetaResult<HashMap<ActorId, Vec<actor_dispatcher::Model>>>
+where
+    C: ConnectionTrait,
+{
+    let actor_dispatchers = ActorDispatcher::find()
+        .filter(actor_dispatcher::Column::ActorId.is_in(actor_ids))
+        .all(db)
+        .await?;
+
+    Ok(actor_dispatchers
+        .into_iter()
+        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
+        .into_iter()
+        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
+        .collect())
 }

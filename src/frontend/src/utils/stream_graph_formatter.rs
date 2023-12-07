@@ -148,8 +148,6 @@ impl StreamGraphFormatter {
                         DispatcherType::Broadcast => "Broadcast".to_string(),
                         DispatcherType::Simple => "Single".to_string(),
                         DispatcherType::NoShuffle => "NoShuffle".to_string(),
-                        DispatcherType::CdcTablename =>
-                            format!("CdcTableName({:?})", dist.downstream_table_name),
                     },
                     upstream_fragment_id
                 )
@@ -263,7 +261,11 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
-            stream_node::NodeBody::Chain(node) => fields.push((
+            stream_node::NodeBody::StreamScan(node) => fields.push((
+                "state table",
+                self.pretty_add_table(node.get_state_table().unwrap()),
+            )),
+            stream_node::NodeBody::StreamCdcScan(node) => fields.push((
                 "state table",
                 self.pretty_add_table(node.get_state_table().unwrap()),
             )),
@@ -295,6 +297,7 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::Project(_)
             | stream_node::NodeBody::Filter(_)
+            | stream_node::NodeBody::CdcFilter(_)
             | stream_node::NodeBody::StatelessSimpleAgg(_)
             | stream_node::NodeBody::HopWindow(_)
             | stream_node::NodeBody::Merge(_)

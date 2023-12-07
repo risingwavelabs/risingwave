@@ -18,12 +18,13 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use jni::objects::JValue;
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
-use risingwave_jni_core::{JniReceiverType, JniSenderType};
-use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
+use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
+use risingwave_pb::connector_service::{
+    GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
+};
 use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
@@ -68,11 +69,12 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        // rewrite the hostname and port for the split
-        let mut properties = conn_props.props.clone();
+        let mut properties = conn_props.properties.clone();
 
         // For citus, we need to rewrite the `table.name` to capture sharding tables
-        if matches!(T::source_type(), CdcSourceType::Citus) && let Some(server_addr) = split.server_addr() {
+        if matches!(T::source_type(), CdcSourceType::Citus)
+            && let Some(server_addr) = split.server_addr()
+        {
             let host_addr = HostAddr::from_str(&server_addr)
                 .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
             properties.insert("hostname".to_string(), host_addr.host);
@@ -99,6 +101,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             start_offset: split.start_offset().clone().unwrap_or_default(),
             properties,
             snapshot_done: split.snapshot_done(),
+            common_param: Some(SourceCommonParam {
+                is_multi_table_shared: conn_props.is_multi_table_shared,
+            }),
         };
 
         std::thread::spawn(move || {
@@ -120,14 +125,12 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
 
-            let result = env.call_static_method(
-                "com/risingwave/connector/source/core/JniDbzSourceHandler",
-                "runJniDbzSourceThread",
-                "([BJ)V",
-                &[
-                    JValue::Object(&get_event_stream_request_bytes),
-                    JValue::from(&mut tx as *mut JniSenderType<GetEventStreamResponse> as i64),
-                ],
+            let result = call_static_method!(
+                env,
+                {com.risingwave.connector.source.core.JniDbzSourceHandler},
+                {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
+                &get_event_stream_request_bytes,
+                &mut tx as *mut JniSenderType<GetEventStreamResponse>
             );
 
             match result {
@@ -140,11 +143,15 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             }
         });
 
+        // wait for the handshake message
         if let Some(res) = rx.recv().await {
             let resp: GetEventStreamResponse = res?;
             let inited = match resp.control {
                 Some(info) => info.handshake_ok,
-                None => false,
+                None => {
+                    tracing::error!(?source_id, "handshake message not received. {:?}", resp);
+                    false
+                }
             };
             if !inited {
                 return Err(anyhow!("failed to start cdc connector"));

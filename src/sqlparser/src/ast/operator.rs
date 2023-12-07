@@ -105,6 +105,8 @@ pub enum BinaryOperator {
     Exists,
     ExistsAny,
     ExistsAll,
+    PathMatch,
+    PathExists,
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -155,6 +157,8 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Exists => "?",
             BinaryOperator::ExistsAny => "?|",
             BinaryOperator::ExistsAll => "?&",
+            BinaryOperator::PathMatch => "@@",
+            BinaryOperator::PathExists => "@?",
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

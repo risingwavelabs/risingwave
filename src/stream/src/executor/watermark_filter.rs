@@ -43,37 +43,32 @@ use crate::task::ActorEvalErrorReport;
 /// This will also guarantee all later rows with event time **less than** the watermark will be
 /// filtered.
 pub struct WatermarkFilterExecutor<S: StateStore> {
+    ctx: ActorContextRef,
+    info: ExecutorInfo,
+
     input: BoxedExecutor,
     /// The expression used to calculate the watermark value.
     watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
-    ctx: ActorContextRef,
-    info: ExecutorInfo,
     table: StateTable<S>,
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
+        ctx: ActorContextRef,
+        info: ExecutorInfo,
         input: BoxedExecutor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
-        ctx: ActorContextRef,
         table: StateTable<S>,
-        executor_id: u64,
     ) -> Self {
-        let info = ExecutorInfo {
-            schema: input.info().schema,
-            pk_indices: input.info().pk_indices,
-            identity: format!("WatermarkFilterExecutor {:X}", executor_id),
-        };
-
         Self {
+            ctx,
+            info,
             input,
             watermark_expr,
             event_time_col_idx,
-            ctx,
-            info,
             table,
         }
     }
@@ -417,14 +412,20 @@ mod tests {
 
         let (tx, source) = MockSource::channel(schema, vec![0]);
 
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(),
+            identity: "WatermarkFilterExecutor".to_string(),
+        };
+
         (
             WatermarkFilterExecutor::new(
+                ActorContext::create(123),
+                info,
                 source.boxed(),
                 watermark_expr,
                 1,
-                ActorContext::create(123),
                 table,
-                0,
             )
             .boxed(),
             tx,

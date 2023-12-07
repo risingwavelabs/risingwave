@@ -144,11 +144,11 @@ message DropViewResponse {
 // - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
 // And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
 enum TableJobType {
-  UNSPECIFIED = 0;
+  TABLE_JOB_TYPE_UNSPECIFIED = 0;
   // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
-  GENERAL = 1;
+  TABLE_JOB_TYPE_GENERAL = 1;
   // table streaming job sharing a CDC source job
-  SHARED_CDC_SOURCE = 2;
+  TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
 }
 
 message CreateTableRequest {
@@ -166,18 +166,54 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
-message AlterRelationNameRequest {
-  oneof relation {
+message AlterNameRequest {
+  oneof object {
     uint32 table_id = 1;
     uint32 view_id = 2;
     uint32 index_id = 3;
     uint32 sink_id = 4;
     uint32 source_id = 5;
+    uint32 schema_id = 6;
+    uint32 database_id = 7;
   }
   string new_name = 20;
 }
 
-message AlterRelationNameResponse {
+message AlterNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterOwnerRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 schema_id = 5;
+    uint32 database_id = 6;
+  }
+  uint32 owner_id = 20;
+}
+
+message AlterSetSchemaRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 function_id = 5;
+    uint32 connection_id = 6;
+  }
+  uint32 new_schema_id = 20;
+}
+
+message AlterSetSchemaResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -353,8 +389,10 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
-  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
+  rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
+  rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

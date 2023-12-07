@@ -12,26 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use risingwave_pb::hummock::{GroupDelta as PbGroupDelta, HummockVersionDelta};
+use risingwave_pb::hummock::HummockVersionDelta;
 use sea_orm::entity::prelude::*;
 use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
 
-use crate::{CompactionGroupId, Epoch, HummockSstableObjectId, HummockVersionId};
+use crate::{Epoch, HummockVersionId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
 #[sea_orm(table_name = "hummock_version_delta")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
-    pub group_deltas: GroupDeltas,
     pub max_committed_epoch: Epoch,
     pub safe_epoch: Epoch,
     pub trivial_move: bool,
-    pub gc_object_ids: SstableObjectIds,
+    pub full_version_delta: FullVersionDelta,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -39,26 +36,16 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(SstableObjectIds, Vec<HummockSstableObjectId>);
-
-crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
+crate::derive_from_json_struct!(FullVersionDelta, HummockVersionDelta);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {
-        use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
-        Self {
-            id: value.id,
-            prev_id: value.prev_id,
-            group_deltas: value
-                .group_deltas
-                .0
-                .into_iter()
-                .map(|(cg_id, group_deltas)| (cg_id, PbGroupDeltas { group_deltas }))
-                .collect(),
-            max_committed_epoch: value.max_committed_epoch,
-            safe_epoch: value.safe_epoch,
-            trivial_move: value.trivial_move,
-            gc_object_ids: value.gc_object_ids.0,
-        }
+        let ret = value.full_version_delta.into_inner();
+        assert_eq!(value.id, ret.id as i64);
+        assert_eq!(value.prev_id, ret.prev_id as i64);
+        assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);
+        assert_eq!(value.safe_epoch, ret.safe_epoch as i64);
+        assert_eq!(value.trivial_move, ret.trivial_move);
+        ret
     }
 }

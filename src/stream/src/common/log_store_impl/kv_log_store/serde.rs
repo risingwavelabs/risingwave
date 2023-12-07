@@ -41,6 +41,7 @@ use risingwave_common::util::value_encoding::{
 };
 use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::key::{next_key, TableKey};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
@@ -579,7 +580,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 
         // sorted by epoch descending. Earlier epoch at the end
         self.not_started_streams
-            .sort_by_key(|(epoch, _)| u64::MAX - *epoch);
+            .sort_by_key(|(epoch, _)| HummockEpoch::MAX - *epoch);
 
         let (epoch, stream) = self
             .not_started_streams

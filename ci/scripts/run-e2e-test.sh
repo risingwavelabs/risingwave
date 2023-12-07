@@ -82,13 +82,18 @@ sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile
 
 echo "--- e2e, $mode, python udf"
 python3 e2e_test/udf/test.py &
-sleep 2
+sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
+sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+# FIXME: flaky test
+# sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
+
 echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
-sleep 2
+sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
 
@@ -99,6 +104,15 @@ echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
+
+echo "--- Kill cluster"
+cluster_stop
+
+echo "--- e2e, $mode, error ui"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+cluster_start
+sqllogictest -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
+sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 
 echo "--- Kill cluster"
 cluster_stop

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_hummock_sdk::HummockEpoch;
+
 use crate::CtlContext;
 
 pub async fn list_version_deltas(
@@ -21,7 +23,7 @@ pub async fn list_version_deltas(
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let resp = meta_client
-        .list_version_deltas(start_id, num_epochs, u64::MAX)
+        .list_version_deltas(start_id, num_epochs, HummockEpoch::MAX)
         .await?;
     println!("{:#?}", resp.version_deltas);
     Ok(())

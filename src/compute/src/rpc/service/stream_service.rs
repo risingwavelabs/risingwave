@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use risingwave_common::error::tonic_err;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -28,6 +27,7 @@ use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 use tracing::Instrument;
 
@@ -54,7 +54,7 @@ impl StreamService for StreamServiceImpl {
         let res = self.mgr.update_actors(&req.actors).await;
         match res {
             Err(e) => {
-                error!("failed to update stream actor {}", e);
+                error!(error = %e.as_report(), "failed to update stream actor");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(UpdateActorsResponse { status: None })),
@@ -75,7 +75,7 @@ impl StreamService for StreamServiceImpl {
             .await;
         match res {
             Err(e) => {
-                error!("failed to build actors {}", e);
+                error!(error = %e.as_report(), "failed to build actors");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(BuildActorsResponse {
@@ -95,7 +95,7 @@ impl StreamService for StreamServiceImpl {
         let res = self.mgr.update_actor_info(&req.info).await;
         match res {
             Err(e) => {
-                error!("failed to update actor info table actor {}", e);
+                error!(error = %e.as_report(), "failed to update actor info table actor");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(BroadcastActorInfoTableResponse {
@@ -187,7 +187,9 @@ impl StreamService for StreamServiceImpl {
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
-            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
+            .inspect_err(
+                |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
+            )?;
 
         let synced_sstables = match kind {
             BarrierKind::Unspecified => unreachable!(),
@@ -258,7 +260,7 @@ impl StreamService for StreamServiceImpl {
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
                 .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
-                .map_err(tonic_err)?;
+                .map_err(StreamError::from)?;
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))

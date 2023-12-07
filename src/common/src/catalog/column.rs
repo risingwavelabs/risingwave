@@ -21,7 +21,6 @@ use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
-use crate::error::ErrorCode;
 use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -117,11 +116,11 @@ impl ColumnDesc {
         }
     }
 
-    pub fn named(name: String, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+    pub fn named(name: impl Into<String>, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         ColumnDesc {
             data_type,
             column_id,
-            name,
+            name: name.into(),
             field_descs: vec![],
             type_name: String::new(),
             generated_or_default_column: None,
@@ -159,24 +158,6 @@ impl ColumnDesc {
             desc.flatten()
         }));
         descs
-    }
-
-    /// Find `column_desc` in `field_descs` by name.
-    pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
-        if let DataType::Struct { .. } = self.data_type {
-            for (index, col) in self.field_descs.iter().enumerate() {
-                if col.name == *name {
-                    return Ok((col.clone(), index as i32));
-                }
-            }
-            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!(
-                "Cannot get field from non nested column: {}",
-                self.name
-            ))
-            .into())
-        }
     }
 
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {

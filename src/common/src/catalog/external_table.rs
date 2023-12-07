@@ -23,10 +23,13 @@ use crate::util::sort_util::ColumnOrder;
 /// Compute node will use this information to connect to the external database and scan the table.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct CdcTableDesc {
-    /// Id of the upstream source in sharing cdc mode
+    /// Id of the table in RW
     pub table_id: TableId,
 
-    /// The full name of the table in external database, e.g. `database_name.table.name` in MySQL
+    /// Id of the upstream source in sharing cdc mode
+    pub source_id: TableId,
+
+    /// The full name of the table in external database, e.g. `database_name.table_name` in MySQL
     /// and `schema_name.table_name` in the Postgres.
     pub external_table_name: String,
     /// The key used to sort in storage.
@@ -39,7 +42,7 @@ pub struct CdcTableDesc {
 
     pub value_indices: Vec<usize>,
 
-    /// properties will be passed into the ChainNode
+    /// properties will be passed into the StreamScanNode
     pub connect_properties: BTreeMap<String, String>,
 }
 
@@ -58,6 +61,7 @@ impl CdcTableDesc {
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
             table_id: self.table_id.into(),
+            source_id: self.source_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             table_name: self.external_table_name.clone(),

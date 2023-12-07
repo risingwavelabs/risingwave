@@ -50,7 +50,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbDatabase> for ActiveModel {
     fn from(db: PbDatabase) -> Self {
         Self {
-            database_id: Set(db.id),
+            database_id: Set(db.id as _),
             name: Set(db.name),
         }
     }

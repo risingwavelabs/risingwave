@@ -251,7 +251,7 @@ SELECT ARRAY[ARRAY['hello'],ARRAY['world']];
 --@ SELECT ARRAY(select f2 from arrtest_f order by f2) AS "ARRAY";
 
 -- with nulls
---@ SELECT '{1,null,3}'::int[];
+SELECT '{1,null,3}'::int[];
 SELECT ARRAY[1,NULL,3];
 
 -- functions
@@ -372,12 +372,12 @@ select 33 * any (44);
 -- nulls
 select 33 = any (null::int[]);
 select null::int = any ('{1,2,3}');
---@ select 33 = any ('{1,null,3}');
---@ select 33 = any ('{1,null,33}');
+select 33 = any ('{1,null,3}');
+select 33 = any ('{1,null,33}');
 select 33 = all (null::int[]);
 select null::int = all ('{1,2,3}');
---@ select 33 = all ('{1,null,3}');
---@ select 33 = all ('{33,null,33}');
+select 33 = all ('{1,null,3}');
+select 33 = all ('{33,null,33}');
 -- nulls later in the bitmap
 --@ SELECT -1 != ALL(ARRAY(SELECT NULLIF(g.i, 900) FROM generate_series(1,1000) g(i)));
 
@@ -439,10 +439,10 @@ select array[];
 
 -- all of the following should be accepted
 select '{}'::text[];
---@ select '{{{1,2,3,4},{2,3,4,5}},{{3,4,5,6},{4,5,6,7}}}'::text[];
+select '{{{1,2,3,4},{2,3,4,5}},{{3,4,5,6},{4,5,6,7}}}'::text[][][];
 --@ select '{0 second  ,0 second}'::interval[];
---@ select '{ { "," } , { 3 } }'::text[];
---@ select '  {   {  "  0 second  "   ,  0 second  }   }'::text[];
+select '{ { "," } , { 3 } }'::text[][];
+select '  {   {  "  0 second  "   ,  0 second  }   }'::text[][];
 --@ select '{
 --@            0 second,
 --@            @ 1 hour @ 42 minutes @ 20 seconds

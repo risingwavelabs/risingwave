@@ -31,19 +31,24 @@ public class DbzCdcEngine implements CdcEngine {
     private final long id;
 
     /** If config is not valid will throw exceptions */
-    public DbzCdcEngine(long id, Properties config, DebeziumEngine.CompletionCallback callback) {
+    public DbzCdcEngine(
+            long sourceId,
+            Properties config,
+            DebeziumEngine.CompletionCallback completionCallback) {
         var dbzHeartbeatPrefix = config.getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
         var consumer =
                 new DbzCdcEventConsumer(
-                        id, dbzHeartbeatPrefix, new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+                        sourceId,
+                        dbzHeartbeatPrefix,
+                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it
-        this.id = id;
+        this.id = sourceId;
         this.consumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
                         .using(config)
-                        .using(callback)
+                        .using(completionCallback)
                         .notifying(consumer)
                         .build();
     }

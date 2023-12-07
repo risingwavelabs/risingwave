@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
@@ -32,11 +33,11 @@ use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_sqlparser::ast::display_comma_separated;
+use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
 
 use crate::catalog::IndexCatalog;
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
-use crate::session::SessionImpl;
+use crate::session::{current, SessionImpl};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -73,7 +74,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().get_timezone().into(),
+            timezone: session.config().timezone(),
         };
         Self {
             chunk_stream,
@@ -125,7 +126,9 @@ fn pg_value_format(
                 Ok(d.text_format(data_type).into())
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => Ok(d
+            .binary_format(data_type)
+            .context("failed to format binary value")?),
     }
 }
 
@@ -267,6 +270,21 @@ pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option
     with_properties
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
+}
+
+#[easy_ext::ext(SourceSchemaCompatExt)]
+impl CompatibleSourceSchema {
+    /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
+    pub fn into_v2_with_warning(self) -> ConnectorSchema {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => {
+                // TODO: should be warning
+                current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
+                inner.into_source_schema_v2()
+            }
+            CompatibleSourceSchema::V2(inner) => inner,
+        }
+    }
 }
 
 #[cfg(test)]

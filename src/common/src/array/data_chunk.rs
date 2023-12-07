@@ -919,6 +919,13 @@ impl DataChunkTestExt for DataChunk {
                                 .generate_datum(offset);
                         array_builder.append(datum);
                     }
+                    DataType::Timestamptz => {
+                        let datum =
+                            FieldGeneratorImpl::with_timestamptz(None, None, None, Self::SEED)
+                                .expect("create timestamptz generator should succeed")
+                                .generate_datum(offset);
+                        array_builder.append(datum);
+                    }
                     _ if data_type.is_numeric() => {
                         let mut data_gen = FieldGeneratorImpl::with_number_random(
                             data_type.clone(),
@@ -1107,7 +1114,7 @@ mod tests {
     #[test]
     fn test_chunk_estimated_size() {
         assert_eq!(
-            96,
+            72,
             DataChunk::from_pretty(
                 "I I I
                  1 5 2
@@ -1117,7 +1124,7 @@ mod tests {
             .estimated_heap_size()
         );
         assert_eq!(
-            64,
+            48,
             DataChunk::from_pretty(
                 "I I
                  1 2

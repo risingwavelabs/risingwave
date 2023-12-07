@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
 use tokio::time::Instant;
 
@@ -119,9 +119,9 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
-    pub split_by_table: bool,
-    pub split_weight_by_vnode: u32,
     pub use_block_based_filter: bool,
+
+    pub table_vnode_partition: BTreeMap<u32, u32>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -183,14 +183,14 @@ fn generate_splits_fast(
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.left).user_key,
-                epoch: HummockEpoch::MAX,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
             }
             .encode(),
         );
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.right).user_key,
-                epoch: HummockEpoch::MAX,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
             }
             .encode(),
         );
@@ -241,7 +241,7 @@ pub async fn generate_splits(
                         let data_size = block.len;
                         let full_key = FullKey {
                             user_key: FullKey::decode(&block.smallest_key).user_key,
-                            epoch: HummockEpoch::MAX,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
                         }
                         .encode();
                         (data_size as u64, full_key)

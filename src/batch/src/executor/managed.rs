@@ -19,9 +19,9 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, RwError};
 use tracing::Instrument;
 
+use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, Executor};
 use crate::task::{ShutdownMsg, ShutdownToken};
 
@@ -48,7 +48,7 @@ impl Executor for ManagedExecutor {
         self.child.identity()
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn execute(mut self: Box<Self>) {
         let input_desc = self.child.identity().to_string();
         let span = tracing::info_span!("batch_executor", "otel.name" = input_desc);
@@ -72,10 +72,10 @@ impl Executor for ManagedExecutor {
 
         match self.shutdown_rx.message() {
             ShutdownMsg::Abort(reason) => {
-                Err(ErrorCode::BatchError(reason.into()))?;
+                return Err(BatchError::aborted(reason));
             }
             ShutdownMsg::Cancel => {
-                Err(ErrorCode::BatchError("".into()))?;
+                return Err(BatchError::aborted("cancelled"));
             }
             ShutdownMsg::Init => {}
         }

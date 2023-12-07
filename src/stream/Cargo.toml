@@ -25,6 +25,7 @@ bytes = "1"
 educe = "0.4"
 either = "1"
 enum-as-inner = "0.6"
+fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 governor = { version = "0.6", default-features = false, features = [
@@ -33,7 +34,7 @@ governor = { version = "0.6", default-features = false, features = [
     "jitter",
 ] }
 hytra = "0.1.2"
-itertools = "0.11"
+itertools = "0.12"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
@@ -56,6 +57,7 @@ serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -81,6 +83,7 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
 risingwave_expr_impl = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
