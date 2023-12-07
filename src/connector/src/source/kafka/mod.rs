@@ -109,9 +109,6 @@ pub struct KafkaProperties {
     #[serde(rename = "scan.startup.timestamp_millis", alias = "kafka.time.offset")]
     pub time_offset: Option<String>,
 
-    #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
-    pub consumer_group: Option<String>,
-
     /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.
