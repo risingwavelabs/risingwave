@@ -200,6 +200,7 @@ impl CatalogController {
                     .cloned()
                     .collect::<BTreeSet<_>>()
             );
+            let pb_expr_context = pb_expr_context.expect("no expression context found");
 
             actors.push(actor::Model {
                 actor_id: actor_id as _,
@@ -209,7 +210,7 @@ impl CatalogController {
                 parallel_unit_id,
                 upstream_actor_ids: upstream_actors.into(),
                 vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
-                expr_context: pb_expr_context.map(ExprContext),
+                expr_context: ExprContext(pb_expr_context),
             });
             actor_dispatchers.insert(
                 actor_id as ActorId,
@@ -351,7 +352,7 @@ impl CatalogController {
             };
 
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
-            let pb_expr_context = expr_context.map(|ctx| ctx.into_inner());
+            let pb_expr_context = Some(expr_context.into_inner());
 
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
@@ -1177,9 +1178,9 @@ mod tests {
                     parallel_unit_id: parallel_unit_id as i32,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
                     vnode_bitmap,
-                    expr_context: Some(ExprContext(PbExprContext {
+                    expr_context: ExprContext(PbExprContext {
                         time_zone: String::from("America/New_York"),
-                    })),
+                    }),
                 }
             })
             .collect_vec();
@@ -1331,7 +1332,7 @@ mod tests {
                     .map(ConnectorSplits)
             );
 
-            assert_eq!(expr_context.map(|ctx| ctx.into_inner()), pb_expr_context);
+            assert_eq!(Some(expr_context.into_inner()), pb_expr_context);
         }
     }
 

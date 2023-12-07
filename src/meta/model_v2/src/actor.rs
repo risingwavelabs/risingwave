@@ -56,7 +56,7 @@ pub struct Model {
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    pub expr_context: Option<ExprContext>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
