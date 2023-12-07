@@ -484,7 +484,7 @@ enum StreamScanType {
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 
   // ARRANGEMENT_BACKFILL corresponds to the `ArrangementBackfillExecutor`.
-  ARRANGEMENT_BACKFILL = 5;
+  STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
