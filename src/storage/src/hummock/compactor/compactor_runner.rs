@@ -124,6 +124,9 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
+        let enable_vnode_bitmap = self.compact_task.enable_sst_vnode_bitmap
+            && !self.compactor.context.is_share_buffer_compact
+            && self.compact_task.target_level == 0;
         let (iter, del_iter) = self.build_sst_iter(task_progress.clone()).await?;
         let (ssts, compaction_stat) = self
             .compactor
@@ -135,6 +138,7 @@ impl CompactorRunner {
                 Some(task_progress),
                 Some(self.compact_task.task_id),
                 Some(self.split_index),
+                enable_vnode_bitmap,
             )
             .await?;
         Ok((self.split_index, ssts, compaction_stat))

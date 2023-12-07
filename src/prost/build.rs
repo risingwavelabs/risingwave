@@ -133,6 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")
         .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
         .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
+        .type_attribute("common.Buffer", "#[derive(Eq)]")
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

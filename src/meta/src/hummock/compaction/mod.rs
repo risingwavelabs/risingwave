@@ -148,6 +148,7 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
+            enable_sst_vnode_bitmap: false,
             table_vnode_partition: BTreeMap::default(),
             ..Default::default()
         };

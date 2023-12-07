@@ -967,6 +967,7 @@ impl HummockManager {
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
+            compact_task.enable_sst_vnode_bitmap = self.env.opts.enable_sst_vnode_bitmap;
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
 

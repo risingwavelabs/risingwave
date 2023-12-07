@@ -127,6 +127,7 @@ impl Compactor {
         task_progress: Option<Arc<TaskProgress>>,
         task_id: Option<HummockCompactionTaskId>,
         split_index: Option<usize>,
+        enable_vnode_bitmap: bool,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -152,6 +153,7 @@ impl Compactor {
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
+                    enable_vnode_bitmap,
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -164,6 +166,7 @@ impl Compactor {
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
+                    enable_vnode_bitmap,
                 )
                 .verbose_instrument_await("compact")
                 .await?
@@ -249,6 +252,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
+        enable_vnode_bitmap: bool,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
@@ -258,6 +262,7 @@ impl Compactor {
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
+            enable_vnode_bitmap,
             _phantom: PhantomData,
         };
 

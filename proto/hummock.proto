@@ -28,6 +28,7 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+  map<uint32, common.Buffer> vnode_bitmap_mapping = 14;
 }
 
 enum LevelType {
@@ -310,10 +311,10 @@ message CompactTask {
 
   // Deprecated. use table_vnode_partition instead;
   bool split_by_state_table = 21 [deprecated = true];
-  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   // Deprecated. use table_vnode_partition instead;
   uint32 split_weight_by_vnode = 22 [deprecated = true];
   map<uint32, uint32> table_vnode_partition = 23;
+  bool enable_sst_vnode_bitmap = 24;
 }
 
 message LevelHandler {
