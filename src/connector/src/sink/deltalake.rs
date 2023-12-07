@@ -54,8 +54,8 @@ pub struct DeltaLakeCommon {
     pub s3_access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub s3_secret_key: Option<String>,
-    #[serde(rename = "path")]
-    pub path: String,
+    #[serde(rename = "location")]
+    pub location: String,
     #[serde(rename = "s3.region")]
     pub s3_region: Option<String>,
     #[serde(rename = "s3.endpoint")]
@@ -63,7 +63,7 @@ pub struct DeltaLakeCommon {
 }
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
-        let table = match Self::get_table_url(&self.path)? {
+        let table = match Self::get_table_url(&self.location)? {
             DeltaTableUrl::S3(s3_path) => {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
@@ -416,15 +416,8 @@ impl SinkWriter for DeltaLakeSinkWriter {
 pub struct DeltaLakeSinkCommitter {
     table: DeltaTable,
 }
-
-#[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
-        tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
-    }
-
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+impl DeltaLakeSinkCommitter {
+    pub async fn commit_inner(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
 
         let deltalake_write_result = metadata
@@ -467,6 +460,18 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
     }
 }
 
+#[async_trait::async_trait]
+impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("DeltaLake commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        self.commit_inner(epoch, metadata).await
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct DeltaLakeWriteResult {
     adds: Vec<Add>,
@@ -496,5 +501,101 @@ impl DeltaLakeWriteResult {
         } else {
             Err(anyhow!("Can't create deltalake sink write result from empty data!").into())
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs;
+    use std::sync::Arc;
+
+    use datafusion::prelude::*;
+    use deltalake::kernel::DataType as SchemaDataType;
+    use deltalake::operations::create::CreateBuilder;
+    use maplit::hashmap;
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
+    use risingwave_common::catalog::{Field, Schema};
+
+    use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
+    use crate::sink::deltalake::DeltaLakeSinkCommitter;
+    use crate::sink::writer::SinkWriter;
+    use crate::source::DataType;
+
+    fn remove_dir(path: &str) {
+        if fs::metadata(path).is_ok() && fs::metadata(path).unwrap().is_dir() {
+            fs::remove_dir_all(path).unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn test_deltalake() {
+        let path = "./deltalake-test";
+        remove_dir(path);
+        CreateBuilder::new()
+            .with_location(path)
+            .with_column("id", SchemaDataType::integer(), false, Default::default())
+            .with_column("name", SchemaDataType::string(), false, Default::default())
+            .await
+            .unwrap();
+
+        let properties = hashmap! {
+            "connector".to_string() => "deltalake_rust".to_string(),
+            "force_append_only".to_string() => "true".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "location".to_string() => format!("file://{}",path),
+        };
+
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+        ]);
+
+        let deltalake_config = DeltaLakeConfig::from_hashmap(properties).unwrap();
+        let deltalake_table = deltalake_config
+            .common
+            .create_deltalake_client()
+            .await
+            .unwrap();
+
+        let mut deltalake_writer = DeltaLakeSinkWriter::new(deltalake_config, schema, vec![0])
+            .await
+            .unwrap();
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                I32Array::from_iter(vec![1, 2, 3]).into_ref(),
+                Utf8Array::from_iter(vec!["Alice", "Bob", "Clare"]).into_ref(),
+            ],
+        );
+        deltalake_writer.write(chunk).await.unwrap();
+        let mut committer = DeltaLakeSinkCommitter {
+            table: deltalake_table,
+        };
+        let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
+        committer.commit_inner(1, vec![metadata]).await.unwrap();
+
+        let ctx = SessionContext::new();
+        let table = deltalake::open_table(path).await.unwrap();
+        ctx.register_table("demo", Arc::new(table)).unwrap();
+
+        let batches = ctx
+            .sql("SELECT * FROM demo")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(3, batches.get(0).unwrap().column(0).len());
+        assert_eq!(3, batches.get(0).unwrap().column(1).len());
+        remove_dir(path);
     }
 }

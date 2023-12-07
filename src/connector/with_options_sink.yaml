@@ -74,7 +74,7 @@ DeltaLakeConfig:
   - name: s3.secret.key
     field_type: String
     required: false
-  - name: path
+  - name: location
     field_type: String
     required: true
   - name: s3.region

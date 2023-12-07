@@ -21,6 +21,8 @@ publish = false
 ahash = { version = "0.8" }
 allocator-api2 = { version = "0.2", default-features = false, features = ["alloc", "nightly"] }
 anyhow = { version = "1", features = ["backtrace"] }
+arrow-array = { version = "48", default-features = false, features = ["chrono-tz"] }
+arrow-cast = { version = "48", default-features = false, features = ["prettyprint"] }
 arrow-schema = { version = "48", default-features = false, features = ["serde"] }
 async-std = { version = "1", features = ["attributes", "tokio1"] }
 aws-credential-types = { version = "1", default-features = false, features = ["hardcoded-credentials"] }
@@ -35,9 +37,11 @@ bitflags = { version = "2", default-features = false, features = ["serde", "std"
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4", features = ["tokio"] }
+comfy-table = { version = "7" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 crypto-bigint = { version = "0.5", features = ["generic-array", "zeroize"] }
@@ -155,6 +159,7 @@ auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+chrono-tz-build = { version = "0.2", default-features = false, features = ["case-insensitive"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 either = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4" }
