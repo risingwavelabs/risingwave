@@ -120,7 +120,14 @@ def _process_func(type: pa.DataType, output: bool) -> Callable:
 
     if type.equals(UNCONSTRAINED_DECIMAL):
         if output:
-            return lambda v: str(v).encode("utf-8")
+
+            def decimal_to_str(v):
+                if not isinstance(v, Decimal):
+                    raise ValueError(f"Expected Decimal, got {v}")
+                # use `f` format to avoid scientific notation, e.g. `1e10`
+                return format(v, "f").encode("utf-8")
+
+            return decimal_to_str
         else:
             return lambda v: Decimal(v.decode("utf-8"))
 

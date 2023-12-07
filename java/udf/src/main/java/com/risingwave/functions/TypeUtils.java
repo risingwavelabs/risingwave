@@ -245,7 +245,8 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, ((BigDecimal) values[i]).toString().getBytes());
+                    // use `toPlainString` to avoid scientific notation
+                    vector.set(i, ((BigDecimal) values[i]).toPlainString().getBytes());
                 }
             }
         } else if (fieldVector instanceof DateDayVector) {
