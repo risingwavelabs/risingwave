@@ -1,0 +1,56 @@
+# This test is to verify the expr context propagation, using make_timestamptz as an example
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+set TimeZone to 'America/New_York';
+
+query T
+SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
+----
+1973-07-15 08:15:55.330-04:00
+
+statement ok
+CREATE TABLE tint(num int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 as SELECT make_timestamptz(num, num, num, num, num, num, 'Asia/Manila') from tint;
+
+statement ok
+CREATE MATERIALIZED VIEW mv2 as SELECT make_timestamptz(num, num, num, num, num, num, 'America/New_York') from tint;
+
+statement ok
+CREATE MATERIALIZED VIEW mv3 as SELECT make_timestamptz(num, num, num, num, num, num) from tint;
+
+statement ok
+insert into tint values(1);
+
+query TT
+select * from mv1;
+----
+0001-01-01 12:00:59-04:56
+
+query TT
+select * from mv2;
+----
+0001-01-01 01:01:01-04:56
+
+query TT
+select * from mv3;
+----
+0001-01-01 01:01:01-04:56
+
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP MATERIALIZED VIEW mv2;
+
+statement ok
+DROP MATERIALIZED VIEW mv3;
+
+statement ok
+DROP TABLE tint;
+
+statement ok
+set timezone to 'UTC';

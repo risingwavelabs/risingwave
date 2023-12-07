@@ -45,48 +45,6 @@ select * from ttz;
 statement ok
 drop table ttz;
 
-statement ok
-CREATE TABLE tint(num int);
-
-statement ok
-CREATE MATERIALIZED VIEW mv1 as SELECT make_timestamptz(num, num, num, num, num, num, 'Asia/Manila') from tint;
-
-statement ok
-CREATE MATERIALIZED VIEW mv2 as SELECT make_timestamptz(num, num, num, num, num, num, 'America/New_York') from tint;
-
-statement ok
-CREATE MATERIALIZED VIEW mv3 as SELECT make_timestamptz(num, num, num, num, num, num) from tint;
-
-statement ok
-insert into tint values(1);
-
-query TT
-select * from mv1;
-----
-0001-01-01 12:00:59-04:56
-
-query TT
-select * from mv2;
-----
-0001-01-01 01:01:01-04:56
-
-query TT
-select * from mv3;
-----
-0001-01-01 01:01:01-04:56
-
-statement ok
-DROP MATERIALIZED VIEW mv1;
-
-statement ok
-DROP MATERIALIZED VIEW mv2;
-
-statement ok
-DROP MATERIALIZED VIEW mv3;
-
-statement ok
-DROP TABLE tint;
-
 query error Invalid parameter time_zone: 'Nehwon/Lankhmar' is not a valid timezone
 SELECT make_timestamptz(1910, 12, 24, 0, 0, 0, 'Nehwon/Lankhmar');
 
