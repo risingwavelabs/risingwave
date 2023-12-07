@@ -43,6 +43,8 @@ pub enum FeMessage {
     CancelQuery(FeCancelMessage),
     Terminate,
     Flush,
+    // special msg to detect health check
+    HealthCheck,
 }
 
 #[derive(Debug)]
@@ -293,7 +295,18 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let len = stream.read_i32().await?;
+        let result = stream.read_i32().await;
+        let len = match result {
+            Ok(len) => len,
+            Err(err) => {
+                // Detect whether it is a health check.
+                if err.kind() == ErrorKind::UnexpectedEof {
+                    return Ok(FeMessage::HealthCheck);
+                } else {
+                    return Err(err);
+                }
+            }
+        };
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;
         if payload_len >= isize::MAX as usize {
