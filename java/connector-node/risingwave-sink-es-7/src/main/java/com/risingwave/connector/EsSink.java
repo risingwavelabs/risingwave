@@ -94,32 +94,35 @@ public class EsSink extends SinkWriterBase {
         void addWriteTask() {
             taskCount++;
             EsWriteResultResp esWriteResultResp;
-            while ((esWriteResultResp = this.blockingQueue.poll()) != null) {
-                if (this.taskCount <= 0) {
-                    throw new RuntimeException(
-                            "The num of task < 0, but blockingQueue is not empty");
+            while (true) {
+                if ((esWriteResultResp = this.blockingQueue.poll()) != null) {
+                    checkEsWriteResultResp(esWriteResultResp);
+                } else {
+                    return;
                 }
-                checkEsWriteResultResp(esWriteResultResp);
             }
         }
 
         void waitAllFlush() throws InterruptedException {
             while (this.taskCount > 0) {
-                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(1, TimeUnit.SECONDS);
-                checkEsWriteResultResp(esWriteResultResp);
+                EsWriteResultResp esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.SECONDS);
+                if (esWriteResultResp == null) {
+                    LOG.warn("EsWriteResultResp is null, try wait again");
+                } else {
+                    checkEsWriteResultResp(esWriteResultResp);
+                }
             }
         }
 
         void checkEsWriteResultResp(EsWriteResultResp esWriteResultResp) {
-            if (esWriteResultResp != null) {
-                if (esWriteResultResp.isOk()) {
-                    this.taskCount -= esWriteResultResp.getNumberOfActions();
-                } else {
-                    throw new RuntimeException(
-                            String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
-                }
+            if (esWriteResultResp.isOk()) {
+                this.taskCount -= esWriteResultResp.getNumberOfActions();
             } else {
-                LOG.warn("EsWriteResultResp is null, try wait again");
+                throw new RuntimeException(
+                        String.format("Es writer error: %s", esWriteResultResp.getErrorMsg()));
+            }
+            if (this.taskCount < 0) {
+                throw new RuntimeException("The num of task < 0, but blockingQueue is not empty");
             }
         }
     }
