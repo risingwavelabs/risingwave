@@ -19,6 +19,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
+use risingwave_pb::stream_plan::stream_scan_node::UpstreamTable;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -80,8 +81,12 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
 
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
-                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+            StreamScanType::Backfill => {
+                let upstream_table = node.get_upstream_table()?;
+                let table_desc: &StorageTableDesc = match upstream_table {
+                    UpstreamTable::TableDesc(table_desc) => table_desc,
+                    _ => unreachable!(),
+                };
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };
@@ -149,37 +154,56 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     None
                 };
 
-                if node.stream_scan_type() == StreamScanType::Backfill {
-                    let upstream_table = StorageTable::new_partial(
-                        state_store.clone(),
-                        table_id,
-                        column_descs,
-                        column_ids,
-                        table_pk_order_types,
-                        table_pk_indices,
-                        distribution,
-                        table_option,
-                        value_indices,
-                        prefix_hint_len,
-                        versioned,
-                    );
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
+                    table_id,
+                    column_descs,
+                    column_ids,
+                    table_pk_order_types,
+                    table_pk_indices,
+                    distribution,
+                    table_option,
+                    value_indices,
+                    prefix_hint_len,
+                    versioned,
+                );
 
-                    BackfillExecutor::new(
-                        params.info,
-                        upstream_table,
-                        upstream,
-                        state_table,
-                        output_indices,
-                        progress,
-                        stream.streaming_metrics.clone(),
-                        params.env.config().developer.chunk_size,
+                BackfillExecutor::new(
+                    params.info,
+                    upstream_table,
+                    upstream,
+                    state_table,
+                    output_indices,
+                    progress,
+                    stream.streaming_metrics.clone(),
+                    params.env.config().developer.chunk_size,
+                )
+                .boxed()
+            }
+            StreamScanType::ArrangementBackfill => {
+                let upstream_table = match node.get_upstream_table()? {
+                    UpstreamTable::ArrangementTable(table) => table,
+                    _ => unreachable!(),
+                };
+                let versioned = upstream_table.get_version().is_ok();
+
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
+
+                let state_table = if let Ok(table) = node.get_state_table() {
+                    Some(
+                        StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
+                            .await,
                     )
-                    .boxed()
                 } else {
-                    let upstream_table = node.get_arrangement_table().unwrap();
-                    let versioned = upstream_table.get_version().is_ok();
+                    None
+                };
 
-                    macro_rules! new_executor {
+                macro_rules! new_executor {
                         ($SD:ident) => {{
                             let upstream_table =
                                 ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
@@ -203,11 +227,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             .boxed()
                         }};
                     }
-                    if versioned {
-                        new_executor!(ColumnAwareSerde)
-                    } else {
-                        new_executor!(BasicSerde)
-                    }
+                if versioned {
+                    new_executor!(ColumnAwareSerde)
+                } else {
+                    new_executor!(BasicSerde)
                 }
             }
             StreamScanType::Unspecified => unreachable!(),
