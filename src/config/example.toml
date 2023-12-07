@@ -157,7 +157,7 @@ recent_filter_rotate_interval_ms = 10000
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
-object_store_read_timeout_ms = 3600000
+object_store_read_timeout_ms = 300000
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000

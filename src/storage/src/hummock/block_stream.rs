@@ -63,20 +63,13 @@ impl BlockDataStream {
     pub fn new(
         // The stream that provides raw data.
         byte_stream: MonitoredStreamingReader,
-
-        // Index of the SST's block where the stream starts.
-        block_index: usize,
-
         // Meta data of the SST that is streamed.
-        metas: &[BlockMeta],
+        block_metas: Vec<BlockMeta>,
     ) -> Self {
-        // Avoids panicking if `block_index` is too large.
-        let block_index = std::cmp::min(block_index, metas.len());
-
         Self {
             buf_reader: byte_stream,
             block_idx: 0,
-            block_metas: metas[block_index..].to_vec(),
+            block_metas,
             buf: Bytes::default(),
             buff_offset: 0,
         }
@@ -93,6 +86,7 @@ impl BlockDataStream {
         fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
             ObjectError::internal("stream read error")
         )));
+        let uncompressed_size = block_meta.uncompressed_size as usize;
         let end = self.buff_offset + block_meta.len as usize;
         let data = if end > self.buf.len() {
             let current_block = self.read_next_buf(block_meta.len as usize).await?;
@@ -104,9 +98,8 @@ impl BlockDataStream {
             data
         };
 
-        let block_idx = self.block_idx;
         self.block_idx += 1;
-        Ok(Some((data, block_idx)))
+        Ok(Some((data, uncompressed_size)))
     }
 
     async fn read_next_buf(&mut self, read_size: usize) -> HummockResult<Bytes> {
@@ -143,10 +136,9 @@ impl BlockDataStream {
     pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
         match self.next_block_impl().await? {
             None => Ok(None),
-            Some((buf, block_idx)) => Ok(Some(Box::new(Block::decode(
-                buf,
-                self.block_metas[block_idx].uncompressed_size as usize,
-            )?))),
+            Some((buf, uncompressed_size)) => {
+                Ok(Some(Box::new(Block::decode(buf, uncompressed_size)?)))
+            }
         }
     }
 }
@@ -191,14 +183,10 @@ impl BlockStream for LongConnectionBlockStream {
     }
 
     async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
-        let (block, index) = match self.inner.next_block_impl().await? {
-            Some((buf, index)) => {
-                let block = Box::new(Block::decode_with_copy(
-                    buf,
-                    self.inner.block_metas[index].uncompressed_size as usize,
-                    true,
-                )?);
-                (block, index + self.start_block_index)
+        let index = self.next_block_index();
+        let block = match self.inner.next_block_impl().await? {
+            Some((buf, uncompressed_size)) => {
+                Box::new(Block::decode_with_copy(buf, uncompressed_size, true)?)
             }
             None => return Ok(None),
         };

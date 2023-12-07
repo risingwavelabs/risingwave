@@ -46,6 +46,7 @@ pub struct SstableIterator {
     pub sst: TableHolder,
     preload_end_block_idx: usize,
     preload_retry_times: usize,
+    prefetch_for_large_query: bool,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -65,6 +66,7 @@ impl SstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
+            prefetch_for_large_query: options.prefetch_for_large_query,
             options,
             preload_end_block_idx: 0,
             preload_retry_times: 0,
@@ -130,7 +132,10 @@ impl SstableIterator {
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx && let Ok(preload_stream) = self
             .sstable_store
             .get_stream(self.sst.value(), idx, self.preload_end_block_idx,
-                        self.options.prefetch_for_large_query).await
+                        self.options.cache_policy,
+                        self.prefetch_for_large_query,
+                        &mut self.stats,
+            ).await
         {
             self.preload_stream = Some(preload_stream);
         }
@@ -149,6 +154,7 @@ impl SstableIterator {
                         break;
                     }
                 }
+                assert_eq!(preload_stream.next_block_index(), idx);
                 if ret.is_ok() {
                     match preload_stream.next_block().await {
                         Ok(Some(block)) => {
@@ -158,7 +164,6 @@ impl SstableIterator {
                         }
                         Ok(None) => {
                             self.preload_stream.take();
-                            break;
                         }
                         Err(e) => {
                             self.preload_stream.take();
@@ -168,20 +173,29 @@ impl SstableIterator {
                 } else {
                     self.preload_stream.take();
                 }
-                if let Err(e) = ret {
-                    assert!(self.preload_stream.is_none());
-                    if self.preload_retry_times >= self.options.max_preload_retry_times {
-                        break;
+                if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+                    if let Err(e) = ret {
+                        tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+                        if self.preload_retry_times >= self.options.max_preload_retry_times {
+                            if self.prefetch_for_large_query {
+                                self.prefetch_for_large_query = false;
+                                self.preload_retry_times = 0;
+                            } else {
+                                break;
+                            }
+                        }
+                        self.preload_retry_times += 1;
                     }
-                    self.preload_retry_times += 1;
-                    tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+
                     match self
                         .sstable_store
                         .get_stream(
                             self.sst.value(),
                             idx,
                             self.preload_end_block_idx,
-                            self.options.prefetch_for_large_query,
+                            self.options.cache_policy,
+                            self.prefetch_for_large_query,
+                            &mut self.stats,
                         )
                         .await
                     {
@@ -308,7 +322,7 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable, test_key_of,
+        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_info, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::CachePolicy;
@@ -447,7 +461,7 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let table = gen_test_sstable(
+        let sst_info = gen_test_sstable_info(
             default_builder_opt_for_test(),
             0,
             kv_iter,
@@ -455,23 +469,47 @@ mod tests {
         )
         .await;
 
-        let end_key = test_key_of(TEST_KEYS_COUNT / 2);
+        let end_key = test_key_of(TEST_KEYS_COUNT);
         let uk = UserKey::new(
             end_key.user_key.table_id,
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
+        let options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: CachePolicy::Fill(CachePriority::High),
+            must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
+            max_preload_retry_times: 0,
+            prefetch_for_large_query: false,
+        });
+        let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            table,
-            sstable_store,
-            Arc::new(SstableIteratorReadOptions {
-                cache_policy: CachePolicy::Fill(CachePriority::High),
-                must_iterated_end_user_key: Some(Bound::Included(uk)),
-                max_preload_retry_times: 0,
-                prefetch_for_large_query: true,
-            }),
+            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store.clone(),
+            options.clone(),
         );
-        let mut cnt = 0;
-        sstable_iter.rewind().await.unwrap();
+        let mut cnt = 1000;
+        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
+        while sstable_iter.is_valid() {
+            let key = sstable_iter.key();
+            let value = sstable_iter.value();
+            assert_eq!(
+                key,
+                test_key_of(cnt).to_ref(),
+                "fail at {}, get key :{:?}",
+                cnt,
+                String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap()
+            );
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+            cnt += 1;
+            sstable_iter.next().await.unwrap();
+        }
+        assert_eq!(cnt, TEST_KEYS_COUNT);
+        let mut sstable_iter = SstableIterator::create(
+            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store,
+            options.clone(),
+        );
+        let mut cnt = 1000;
+        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();

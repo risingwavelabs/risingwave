@@ -621,6 +621,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        if let Err(e) = &res {
+            tracing::error!("read failed because of: {:?}", e);
+        }
 
         let data = res?;
         self.object_store_metrics
@@ -648,12 +651,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_read(path, range)
-                .verbose_instrument_await("object_store_streaming_read")
-                .await
-        };
+        let future = self
+            .inner
+            .streaming_read(path, range)
+            .verbose_instrument_await("object_store_streaming_read");
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)

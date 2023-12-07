@@ -86,10 +86,6 @@ impl BlockStreamIterator {
         }
     }
 
-    pub fn is_first_block(&self) -> bool {
-        self.next_block_index == 0
-    }
-
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
         let (data, _) = match self.block_stream.next_block_impl().await? {
@@ -264,7 +260,7 @@ impl ConcatSstableIterator {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let block_stream = self
                 .sstable_store
-                .get_stream_by_position(sstable.value().id, 0, &sstable.value().meta.block_metas)
+                .get_stream_by_position(sstable.value().id, &sstable.value().meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
@@ -334,7 +330,6 @@ impl CompactorRunner {
             builder_factory,
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
         );
         assert_eq!(

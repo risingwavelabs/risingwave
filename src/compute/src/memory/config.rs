@@ -117,7 +117,6 @@ pub fn storage_memory_config(
     );
 
     let total_calculated_mb = block_cache_capacity_mb
-        + large_query_memory_usage_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
         + data_file_cache_ring_buffer_capacity_mb

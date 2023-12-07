@@ -72,7 +72,6 @@ where
     task_progress: Option<Arc<TaskProgress>>,
 
     last_table_id: u32,
-    is_target_level_l0_or_lbase: bool,
     table_partition_vnode: BTreeMap<u32, u32>,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
@@ -91,7 +90,6 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        is_target_level_l0_or_lbase: bool,
         table_partition_vnode: BTreeMap<u32, u32>,
     ) -> Self {
         Self {
@@ -101,7 +99,6 @@ where
             compactor_metrics,
             task_progress,
             last_table_id: 0,
-            is_target_level_l0_or_lbase,
             table_partition_vnode,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
@@ -117,7 +114,6 @@ where
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_table_id: 0,
-            is_target_level_l0_or_lbase: false,
             table_partition_vnode: BTreeMap::default(),
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
@@ -181,7 +177,7 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        let (switch_builder, vnode_changed) = self.check_table_and_vnode_change(&full_key.user_key);
+        let switch_builder = self.check_table_and_vnode_change(&full_key.user_key);
 
         // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
         // then call `seal_current` later outside the `if let` instead of calling
@@ -195,19 +191,7 @@ where
         let mut last_range_tombstone_epoch = HummockEpoch::MAX;
         if let Some(builder) = self.current_builder.as_mut() {
             if is_new_user_key {
-                if switch_builder {
-                    need_seal_current = true;
-                } else if builder.reach_capacity() {
-                    let is_split_table = self
-                        .table_partition_vnode
-                        .contains_key(&full_key.user_key.table_id.table_id());
-
-                    if !is_split_table || builder.reach_max_sst_size() {
-                        need_seal_current = true;
-                    } else {
-                        need_seal_current = self.is_target_level_l0_or_lbase && vnode_changed;
-                    }
-                }
+                need_seal_current = switch_builder || builder.reach_capacity();
             }
             if need_seal_current
                 && let Some(event) = builder.last_range_tombstone()
@@ -257,9 +241,8 @@ where
         builder.add(full_key, value).await
     }
 
-    pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {
+    pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> bool {
         let mut switch_builder = false;
-        let mut vnode_changed = false;
         if user_key.table_id.table_id != self.last_table_id {
             let new_vnode_partition_count =
                 self.table_partition_vnode.get(&user_key.table_id.table_id);
@@ -277,7 +260,6 @@ where
                 self.last_table_id = user_key.table_id.table_id;
                 switch_builder = true;
                 self.last_vnode = 0;
-                vnode_changed = true;
                 if self.split_weight_by_vnode > 1 {
                     self.largest_vnode_in_current_partition =
                         VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
@@ -291,7 +273,6 @@ where
             let key_vnode = user_key.get_vnode_id();
             if key_vnode != self.last_vnode {
                 self.last_vnode = key_vnode;
-                vnode_changed = true;
             }
             if key_vnode > self.largest_vnode_in_current_partition {
                 // vnode partition change
@@ -311,7 +292,7 @@ where
                 debug_assert!(key_vnode <= self.largest_vnode_in_current_partition);
             }
         }
-        (switch_builder, vnode_changed)
+        switch_builder
     }
 
     pub fn need_flush(&self) -> bool {
@@ -620,7 +601,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            false,
             BTreeMap::default(),
         );
         let full_key = FullKey::for_test(
@@ -717,7 +697,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            false,
             BTreeMap::default(),
         );
         del_iter.rewind().await.unwrap();
@@ -754,7 +733,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            false,
             BTreeMap::default(),
         );
         builder
@@ -874,56 +852,47 @@ mod tests {
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            false,
             table_partition_vnode,
         );
 
         let mut table_key = VirtualNode::from_index(0).to_be_bytes().to_vec();
         table_key.extend_from_slice("a".as_bytes());
 
-        let (switch_builder, vnode_changed) =
+        let switch_builder =
             builder.check_table_and_vnode_change(&UserKey::for_test(TableId::from(1), &table_key));
         assert!(switch_builder);
-        assert!(vnode_changed);
 
         {
             let mut table_key = VirtualNode::from_index(62).to_be_bytes().to_vec();
             table_key.extend_from_slice("a".as_bytes());
-            let (switch_builder, vnode_changed) = builder
+            let switch_builder = builder
                 .check_table_and_vnode_change(&UserKey::for_test(TableId::from(1), &table_key));
             assert!(!switch_builder);
-            assert!(vnode_changed);
 
             let mut table_key = VirtualNode::from_index(63).to_be_bytes().to_vec();
             table_key.extend_from_slice("a".as_bytes());
-            let (switch_builder, vnode_changed) = builder
+            let switch_builder = builder
                 .check_table_and_vnode_change(&UserKey::for_test(TableId::from(1), &table_key));
             assert!(!switch_builder);
-            assert!(vnode_changed);
 
             let mut table_key = VirtualNode::from_index(64).to_be_bytes().to_vec();
             table_key.extend_from_slice("a".as_bytes());
-            let (switch_builder, vnode_changed) = builder
+            let switch_builder = builder
                 .check_table_and_vnode_change(&UserKey::for_test(TableId::from(1), &table_key));
             assert!(switch_builder);
-            assert!(vnode_changed);
         }
 
-        let (switch_builder, vnode_changed) =
+        let switch_builder =
             builder.check_table_and_vnode_change(&UserKey::for_test(TableId::from(2), &table_key));
         assert!(switch_builder);
-        assert!(vnode_changed);
-        let (switch_builder, vnode_changed) =
+        let switch_builder =
             builder.check_table_and_vnode_change(&UserKey::for_test(TableId::from(3), &table_key));
         assert!(switch_builder);
-        assert!(vnode_changed);
-        let (switch_builder, vnode_changed) =
+        let switch_builder =
             builder.check_table_and_vnode_change(&UserKey::for_test(TableId::from(4), &table_key));
         assert!(switch_builder);
-        assert!(vnode_changed);
-        let (switch_builder, vnode_changed) =
+        let switch_builder =
             builder.check_table_and_vnode_change(&UserKey::for_test(TableId::from(5), &table_key));
         assert!(!switch_builder);
-        assert!(!vnode_changed);
     }
 }

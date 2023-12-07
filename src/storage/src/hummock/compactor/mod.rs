@@ -265,7 +265,6 @@ impl Compactor {
             builder_factory,
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
-            self.task_config.is_target_l0_or_lbase,
             self.task_config.table_vnode_partition.clone(),
         );
         let compaction_statistics = compact_and_build_sst(
