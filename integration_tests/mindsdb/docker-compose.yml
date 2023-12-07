@@ -32,16 +32,9 @@ services:
     volumes:
       - "./mdb_config.json:/root/mindsdb_config.json"
     container_name: mindsdb
-    healthcheck:
-      test:  ["CMD", "curl", "-f", "http://localhost:47334/api/util/ping"]
-      interval: 30s
-      timeout: 4s
-      retries: 100
 
   prepare_mindsdb:
     image: postgres
-    depends_on:
-      mindsdb: { condition: service_healthy }
     command:
       - /bin/sh
       - -c

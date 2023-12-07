@@ -12,7 +12,7 @@
 -- Name: home_rentals; Type: TABLE; Schema: public; Owner: dev
 --
 
-CREATE TABLE public.home_rentals (
+CREATE TABLE IF NOT EXISTS public.home_rentals (
     number_of_rooms integer,
     number_of_bathrooms integer,
     sqft integer,
