@@ -37,12 +37,15 @@ services:
     image: postgres
     depends_on:
       - risingwave-standalone
+      - mindsdb
     command:
-      - /bin/sh prepare.sh
+      - /bin/sh
+      - -c
+      - /prepare_data.sh
     volumes:
       - "./prepare_risingwave.sql:/prepare_risingwave.sql"
       - "./prepare_mindsdb.sql:/prepare_mindsdb.sql"
-      - "./prepare.sh:/prepare.sh"
+      - "./prepare_data.sh:/prepare_data.sh"
     container_name: prepare_data
     restart: on-failure
 
