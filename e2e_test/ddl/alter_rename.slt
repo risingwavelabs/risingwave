@@ -53,6 +53,15 @@ CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM v1;
 statement ok
 CREATE index idx ON t(v1);
 
+statement ok
+CREATE SCHEMA schema;
+
+statement ok
+CREATE TABLE schema.t(id INT);
+
+statement ok
+CREATE DATABASE database;
+
 query TT
 SHOW CREATE TABLE t;
 ----
@@ -192,6 +201,30 @@ public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.ki
 # the underlying source cannot have the same name with other sources
 statement error source .+ exists
 ALTER TABLE msrc1 RENAME TO src1;
+
+statement ok
+ALTER SCHEMA schema RENAME TO schema1;
+
+statement error
+ALTER SCHEMA pg_catalog RENAME TO pg_catalog1;
+
+statement error
+ALTER DATABASE dev RENAME TO dev1;
+
+statement ok
+ALTER DATABASE database RENAME TO database1;
+
+statement ok
+DROP DATABASE database1;
+
+statement ok
+SELECT * FROM schema1.t;
+
+statement ok
+DROP TABLE schema1.t;
+
+statement ok
+DROP SCHEMA schema1;
 
 statement ok
 DROP SINK sink1;

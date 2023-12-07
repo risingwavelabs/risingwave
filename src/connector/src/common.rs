@@ -265,7 +265,7 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.message_max_bytes {
             c.set("message.max.bytes", v.to_string());
         }
-        if let Some(v) = self.message_max_bytes {
+        if let Some(v) = self.receive_message_max_bytes {
             c.set("receive.message.max.bytes", v.to_string());
         }
         if let Some(v) = self.client_id.as_ref() {

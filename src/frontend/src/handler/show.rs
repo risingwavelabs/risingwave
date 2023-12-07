@@ -20,8 +20,9 @@ use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use pgwire::types::Row;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -116,11 +117,7 @@ pub async fn handle_show_object(
     let session = handler_args.session;
 
     if let Some(ShowStatementFilter::Where(..)) = filter {
-        return Err(ErrorCode::NotImplemented(
-            "WHERE clause in SHOW statement".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("WHERE clause in SHOW statement");
     }
     let row_desc = infer_show_object(&command);
 
@@ -412,11 +409,7 @@ pub fn handle_show_create_object(
             index.create_sql()
         }
         ShowCreateType::Function => {
-            return Err(ErrorCode::NotImplemented(
-                format!("show create on: {}", show_create_type),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("show create on: {}", show_create_type);
         }
     };
     let name = format!("{}.{}", schema_name, object_name);
@@ -506,7 +499,6 @@ mod tests {
             "country".into() => "test.Country".into(),
             "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
             "_row_id".into() => "serial".into(),
-            "_rw_key".into() => "bytea".into()
         };
 
         assert_eq!(columns, expected_columns);

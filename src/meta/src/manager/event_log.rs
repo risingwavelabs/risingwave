@@ -170,6 +170,7 @@ impl From<&EventLog> for ChannelId {
             Event::BarrierComplete(_) => 4,
             Event::InjectBarrierFail(_) => 5,
             Event::CollectBarrierFail(_) => 6,
+            Event::WorkerNodePanic(_) => 7,
         }
     }
 }

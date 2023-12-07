@@ -41,7 +41,7 @@ mod update;
 mod utils;
 mod values;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
@@ -69,6 +69,7 @@ pub use sort_agg::*;
 pub use sort_over_window::SortOverWindowExecutor;
 pub use source::*;
 pub use table_function::*;
+use thiserror_ext::AsReport;
 pub use top_n::TopNExecutor;
 pub use union::*;
 pub use update::*;
@@ -183,12 +184,14 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().await.map_err(|e| {
-            let err_msg = format!("Failed to build executor: {e}");
-            let plan_node_body = self.plan_node.get_node_body();
-            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
-            anyhow!(err_msg).into()
-        })
+        self.try_build()
+            .await
+            .inspect_err(|e| {
+                let plan_node = self.plan_node.get_node_body();
+                error!(error = %e.as_report(), ?plan_node, "failed to build executor");
+            })
+            .context("failed to build executor")
+            .map_err(Into::into)
     }
 
     #[async_recursion]

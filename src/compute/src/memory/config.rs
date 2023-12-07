@@ -21,7 +21,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
+const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -35,7 +35,7 @@ const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
 
 /// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
-const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
+const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 2 * 1024;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
@@ -118,6 +118,7 @@ pub fn storage_memory_config(
     );
 
     let total_calculated_mb = block_cache_capacity_mb
+        + large_query_memory_usage_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
         + data_file_cache_ring_buffer_capacity_mb
@@ -157,14 +158,14 @@ mod tests {
     #[test]
     fn test_reserve_memory_bytes() {
         // at least 512 MB
-        let (reserved, non_reserved) = reserve_memory_bytes(2 << 30);
+        let (reserved, non_reserved) = reserve_memory_bytes(1536 << 20);
         assert_eq!(reserved, 512 << 20);
-        assert_eq!(non_reserved, 1536 << 20);
+        assert_eq!(non_reserved, 1024 << 20);
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 8 << 30);
+        assert_eq!(reserved, 3 << 30);
+        assert_eq!(non_reserved, 7 << 30);
     }
 
     #[test]

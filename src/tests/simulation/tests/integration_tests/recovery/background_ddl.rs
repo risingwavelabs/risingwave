@@ -186,8 +186,9 @@ async fn test_background_join_mv_recovery() -> Result<()> {
     Ok(())
 }
 
+/// Test cancel for background ddl, foreground ddl.
 #[tokio::test]
-async fn test_background_ddl_cancel() -> Result<()> {
+async fn test_ddl_cancel() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -222,9 +223,48 @@ async fn test_background_ddl_cancel() -> Result<()> {
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
 
-    // Make sure MV can be created after all these cancels
+    // Test cancel by sigkill
+
+    let mut session2 = cluster.start_session();
+    tokio::spawn(async move {
+        session2.run(SET_RATE_LIMIT_1).await.unwrap();
+        let _ = create_mv(&mut session2).await;
+    });
+
+    // Keep searching for the process in process list
+    loop {
+        let processlist = session.run("SHOW PROCESSLIST;").await?;
+        if let Some(line) = processlist
+            .lines()
+            .find(|line| line.to_lowercase().contains("mv1"))
+        {
+            let pid = line.split_whitespace().next().unwrap();
+            let pid = pid.parse::<usize>().unwrap();
+            session.run(format!("kill {};", pid)).await?;
+            break;
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+
     session.run(RESET_RATE_LIMIT).await?;
-    create_mv(&mut session).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+
+    // Make sure MV can be created after all these cancels
+    // Keep retrying since cancel happens async.
+    loop {
+        let result = create_mv(&mut session).await;
+        match result {
+            Ok(_) => break,
+            Err(e) if e.to_string().contains("in creating procedure") => {
+                tracing::info!("create mv failed, retrying: {}", e);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+        sleep(Duration::from_secs(2)).await;
+        tracing::info!("create mv failed, retrying");
+    }
 
     // Wait for job to finish
     session.run(WAIT).await?;
@@ -301,7 +341,7 @@ async fn test_foreground_index_cancel() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_foreground_sink_cancel() -> Result<()> {
+async fn test_sink_create() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -312,24 +352,18 @@ async fn test_foreground_sink_cancel() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = session2
+        session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-            .await;
-        assert!(result.is_err());
+            .await
+            .expect("create sink should succeed");
     });
 
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    // Kill CN should stop the job
-    cancel_stream_jobs(&mut session).await?;
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
 
-    // Create MV should succeed, since the previous foreground job should be cancelled.
-    session.run(SET_RATE_LIMIT_2).await?;
-    session
-        .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-        .await?;
-
+    // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
     session.run(DROP_TABLE).await?;
 

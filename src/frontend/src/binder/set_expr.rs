@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -198,11 +199,7 @@ impl Binder {
                             match op {
                                 SetOperator::Union => {}
                                 SetOperator::Intersect | SetOperator::Except => {
-                                    return Err(ErrorCode::NotImplemented(
-                                        format!("{} all", op),
-                                        None.into(),
-                                    )
-                                    .into())
+                                    bail_not_implemented!("{} all", op);
                                 }
                             }
                         }

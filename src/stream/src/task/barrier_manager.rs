@@ -33,7 +33,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::bail;
 use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -158,14 +157,22 @@ impl LocalBarrierManager {
             match self.senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
-                        if let Err(err) = sender.send(barrier.clone()) {
+                        if let Err(_err) = sender.send(barrier.clone()) {
                             // return err to trigger recovery.
-                            bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                            return Err(StreamError::barrier_send(
+                                barrier.clone(),
+                                actor_id,
+                                "channel closed",
+                            ));
                         }
                     }
                 }
                 None => {
-                    bail!("sender for actor {} does not exist", actor_id)
+                    return Err(StreamError::barrier_send(
+                        barrier.clone(),
+                        actor_id,
+                        "sender not found",
+                    ));
                 }
             }
         }

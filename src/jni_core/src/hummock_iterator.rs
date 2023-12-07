@@ -17,17 +17,18 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
-use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range_with_vnode, TableKeyRange};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
@@ -54,10 +55,11 @@ impl HummockJavaBindingIterator {
     pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(
-            parse_remote_object_store(
+            build_remote_object_store(
                 &read_plan.object_store_url,
                 Arc::new(ObjectStoreMetrics::unused()),
                 "Hummock",
+                ObjectStoreConfig::default(),
             )
             .await,
         );
@@ -133,11 +135,7 @@ impl HummockJavaBindingIterator {
         Ok(match item {
             Some((key, value)) => Some((
                 key.user_key.table_key.0,
-                OwnedRow::new(
-                    self.row_serde
-                        .deserialize(&value)
-                        .map_err(StorageError::DeserializeRow)?,
-                ),
+                OwnedRow::new(self.row_serde.deserialize(&value)?),
             )),
             None => None,
         })
@@ -156,7 +154,5 @@ fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange 
     let left = map_bound(left_bound, r.left);
     let right = map_bound(right_bound, r.right);
 
-    let vnode_slice = vnode.to_be_bytes();
-
-    map_table_key_range(prefixed_range((left, right), &vnode_slice[..]))
+    map_table_key_range(prefixed_range_with_vnode((left, right), vnode))
 }

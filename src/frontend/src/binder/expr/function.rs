@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -68,28 +68,22 @@ impl Binder {
                     // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
                     let function_name = name.real_value();
                     if function_name != "_pg_expandarray" {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("Unsupported function name under schema: {}", schema_name),
-                            12422.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            issue = 12422,
+                            "Unsupported function name under schema: {}",
+                            schema_name
+                        );
                     }
                     function_name
                 } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("Unsupported function name under schema: {}", schema_name),
-                        12422.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        issue = 12422,
+                        "Unsupported function name under schema: {}",
+                        schema_name
+                    );
                 }
             }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("qualified function: {}", f.name),
-                    112.into(),
-                )
-                .into());
-            }
+            _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
         // agg calls
@@ -141,11 +135,11 @@ impl Binder {
             ))
             .into());
         } else if f.over.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                format!("Unrecognized window function: {}", function_name),
-                8961.into(),
-            )
-            .into());
+            bail_not_implemented!(
+                issue = 8961,
+                "Unrecognized window function: {}",
+                function_name
+            );
         }
 
         // table function
@@ -272,25 +266,13 @@ impl Binder {
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
-                    return Err(ErrorCode::NotImplemented(
-                        "subquery in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("subquery in filter clause");
                 }
                 if expr.has_agg_call() {
-                    return Err(ErrorCode::NotImplemented(
-                        "aggregation function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("aggregation function in filter clause");
                 }
                 if expr.has_table_function() {
-                    return Err(ErrorCode::NotImplemented(
-                        "table function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("table function in filter clause");
                 }
                 Condition::with_expr(expr)
             }
@@ -348,11 +330,7 @@ impl Binder {
                 .flatten_ok()
                 .try_collect()?;
             if args.iter().any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant direct arguments for ordered-set aggregation is not supported now".to_string(),
-                    None.into()
-                )
-                .into());
+                bail_not_implemented!("non-constant direct arguments for ordered-set aggregation is not supported now");
             }
             args
         };
@@ -470,12 +448,7 @@ impl Binder {
             // restrict arguments[1..] to be constant because we don't support multiple distinct key
             // indices for now
             if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
-                        .to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("non-constant arguments other than the first one for DISTINCT aggregation is not supported now");
             }
 
             // restrict ORDER BY to align with PG, which says:
@@ -520,14 +493,11 @@ impl Binder {
                 match exclusion {
                     WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
                     WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!(
-                                "window frame exclusion `{}` is not supported yet",
-                                exclusion
-                            ),
-                            9124.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            issue = 9124,
+                            "window frame exclusion `{}` is not supported yet",
+                            exclusion
+                        );
                     }
                     WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
                 }
@@ -556,14 +526,11 @@ impl Binder {
                     FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "window frame in `{}` mode is not supported yet",
-                            frame.units
-                        ),
-                        9124.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        issue = 9124,
+                        "window frame in `{}` mode is not supported yet",
+                        frame.units
+                    );
                 }
             };
             if !bounds.is_valid() {
@@ -921,6 +888,7 @@ impl Binder {
                 })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 ("jsonb_contains", raw_call(ExprType::JsonbContains)),
@@ -934,6 +902,10 @@ impl Binder {
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
+                ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
+                ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
+                ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -974,10 +946,7 @@ impl Binder {
                         .map_err(|_| no_match_err)?;
 
                     let ExprImpl::Literal(literal) = &input else {
-                        return Err(ErrorCode::NotImplemented(
-                            "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
-                        )
-                        .into());
+                        bail_not_implemented!("Only boolean literals are supported in `current_schemas`.");
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
@@ -1002,12 +971,12 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(Some(schema_name.into()));
+                            schema_names.push(schema_name.as_str());
                         }
                     }
 
                     Ok(ExprImpl::literal_list(
-                        ListValue::new(schema_names),
+                        ListValue::from_iter(schema_names),
                         DataType::Varchar,
                     ))
                 })),
@@ -1279,7 +1248,7 @@ impl Binder {
                     )
                 };
 
-                ErrorCode::NotImplemented(err_msg, 112.into()).into()
+                not_implemented!(issue = 112, "{}", err_msg).into()
             }),
         }
     }

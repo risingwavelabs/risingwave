@@ -62,6 +62,7 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
@@ -98,8 +99,7 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
-        Arc::new(config.streaming.clone());
+    let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -396,6 +396,9 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
+            .http2_max_pending_accept_reset_streams(Some(
+                config.server.grpc_max_reset_stream as usize,
+            ))
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -429,12 +432,12 @@ pub async fn compute_node_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if let Err(_err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                    tracing::warn!(error = %err.as_report(), "Failed to join shutdown");
                                 }
                             }
                         },

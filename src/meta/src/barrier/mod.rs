@@ -106,12 +106,20 @@ pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
 pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
+/// The reason why the cluster is recovering.
+enum RecoveryReason {
+    /// After bootstrap.
+    Bootstrap,
+    /// After failure.
+    Failover(MetaError),
+}
+
 /// Status of barrier manager.
 enum BarrierManagerStatus {
     /// Barrier manager is starting.
     Starting,
     /// Barrier manager is under recovery.
-    Recovering,
+    Recovering(RecoveryReason),
     /// Barrier manager is running.
     Running,
 }
@@ -566,10 +574,19 @@ impl GlobalBarrierManager {
         (join_handle, shutdown_tx)
     }
 
-    /// Return whether the barrier manager is running.
-    pub async fn is_running(&self) -> bool {
+    /// Check the status of barrier manager, return error if it is not `Running`.
+    pub async fn check_status_running(&self) -> MetaResult<()> {
         let status = self.status.lock().await;
-        matches!(*status, BarrierManagerStatus::Running)
+        match &*status {
+            BarrierManagerStatus::Starting
+            | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
+                bail!("The cluster is bootstrapping")
+            }
+            BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
+                Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
+            }
+            BarrierManagerStatus::Running => Ok(()),
+        }
     }
 
     /// Set barrier manager status.
@@ -631,7 +648,8 @@ impl GlobalBarrierManager {
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap))
+                .await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
@@ -925,7 +943,7 @@ impl GlobalBarrierManager {
             .map_err(Into::into);
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
-            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
+            .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
@@ -1010,7 +1028,10 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
+                err.clone(),
+            )))
+            .await;
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
@@ -1099,6 +1120,7 @@ impl GlobalBarrierManager {
                     let mut commands = vec![];
                     let version_stats = self.hummock_manager.get_version_stats().await;
                     let mut tracker = self.tracker.lock().await;
+                    // Add the command to tracker.
                     if let Some(command) = tracker.add(
                         TrackingCommand {
                             context: node.command_ctx.clone(),
@@ -1106,13 +1128,17 @@ impl GlobalBarrierManager {
                         },
                         &version_stats,
                     ) {
+                        // Those with no actors to track can be finished immediately.
                         commands.push(command);
                     }
+                    // Update the progress of all commands.
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                        tracing::trace!(?progress, "update progress");
-                        if let Some(command) = tracker.update(progress, &version_stats) {
-                            tracing::trace!(?progress, "update progress");
+                        // Those with actors complete can be finished immediately.
+                        if let Some(command) = tracker.update(progress, &version_stats) && !command.tracks_sink() {
+                            tracing::trace!(?progress, "finish progress");
                             commands.push(command);
+                        } else {
+                            tracing::trace!(?progress, "update progress");
                         }
                     }
                     commands

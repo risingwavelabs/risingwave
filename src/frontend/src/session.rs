@@ -617,13 +617,20 @@ impl SessionImpl {
     pub fn set_config_report(
         &self,
         key: &str,
-        value: String,
+        value: Option<String>,
         mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map
-            .write()
-            .set(key, value, &mut reporter)
-            .map_err(Into::into)
+        if let Some(value) = value {
+            self.config_map
+                .write()
+                .set(key, value, &mut reporter)
+                .map_err(Into::into)
+        } else {
+            self.config_map
+                .write()
+                .reset(key, &mut reporter)
+                .map_err(Into::into)
+        }
     }
 
     pub fn session_id(&self) -> SessionId {

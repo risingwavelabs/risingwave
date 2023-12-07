@@ -79,9 +79,9 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder,
-    CompactionDeleteRangeIterator, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
-    SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BlockedXor16FilterBuilder, CompactionDeleteRangeIterator, FilterBuilder,
+    HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
+    UnifiedSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -141,40 +141,8 @@ impl Compactor {
                 .start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = if self
-            .context
-            .sstable_store
-            .store()
-            .support_streaming_upload()
-        {
-            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_iter,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_iter,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
-        } else {
-            let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
+        let (split_table_outputs, table_stats_map) = {
+            let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             if self.task_config.use_block_based_filter {
                 self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                     factory,
@@ -298,8 +266,7 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
             self.task_config.is_target_l0_or_lbase,
-            self.task_config.split_by_table,
-            self.task_config.split_weight_by_vnode,
+            self.task_config.table_vnode_partition.clone(),
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
@@ -811,6 +778,7 @@ fn get_task_progress(
             num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
             num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
             num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
+            ..Default::default()
         });
     }
     progress_list

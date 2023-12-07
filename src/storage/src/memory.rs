@@ -20,7 +20,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
@@ -450,7 +449,7 @@ where
         Included(k) => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
@@ -460,7 +459,7 @@ where
         Unbounded => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(b"".to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
     };
     let end = match table_key_range.end_bound() {
@@ -472,14 +471,14 @@ where
         Excluded(k) => Excluded(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            MAX_EPOCH,
+            HummockEpoch::MAX,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
                     TableKey(Bytes::from(b"".to_vec())),
-                    MAX_EPOCH,
+                    HummockEpoch::MAX,
                 ))
             } else {
                 Unbounded

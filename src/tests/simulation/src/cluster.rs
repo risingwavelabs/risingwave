@@ -172,7 +172,12 @@ impl Configuration {
 
         Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 2,
+            // NOTE(kwannoel): The cancel test depends on `processlist`,
+            // which will cancel a stream job within the process.
+            // so we cannot have multiple frontend node, since a new session spawned
+            // to cancel the job could be routed to a different frontend node,
+            // in a different process.
+            frontend_nodes: 1,
             compute_nodes: 3,
             meta_nodes: 3,
             compactor_nodes: 2,
