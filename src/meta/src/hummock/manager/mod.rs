@@ -75,9 +75,9 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
-    trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
+    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
@@ -1012,10 +1012,9 @@ impl HummockManager {
 
             let compact_task_statistics = statistics_compact_task(&compact_task);
 
-            let level_type_label = format!(
-                "L{}->L{}",
-                compact_task.input_ssts[0].level_idx,
-                compact_task.input_ssts.last().unwrap().level_idx,
+            let level_type_label = build_compact_task_level_type_metrics_label(
+                compact_task.input_ssts[0].level_idx as usize,
+                compact_task.input_ssts.last().unwrap().level_idx as usize,
             );
 
             let level_count = compact_task.input_ssts.len();
