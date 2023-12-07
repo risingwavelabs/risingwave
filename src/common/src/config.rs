@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config
@@ -266,6 +269,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
+    #[serde(default = "default::meta::cut_table_size_limit")]
+    pub cut_table_size_limit: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -292,6 +298,8 @@ pub struct MetaConfig {
     #[serde(default)]
     pub compaction_config: CompactionConfig,
 
+    #[serde(default = "default::meta::hybird_partition_vnode_count")]
+    pub hybird_partition_vnode_count: u32,
     #[serde(default = "default::meta::event_log_enabled")]
     pub event_log_enabled: bool,
     /// Keeps the latest N events per channel.
@@ -383,6 +391,10 @@ pub struct ServerConfig {
     /// Enable heap profile dump when memory usage is high.
     #[serde(default)]
     pub heap_profiling: HeapProfilingConfig,
+
+    // Number of max pending reset stream for grpc server.
+    #[serde(default = "default::server::grpc_max_reset_stream_size")]
+    pub grpc_max_reset_stream: u32,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -578,6 +590,13 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
+    pub compactor_fast_max_compact_delete_ratio: u32,
+
+    #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
+    pub compactor_fast_max_compact_task_size: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -973,7 +992,7 @@ pub mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 3mi
+            10 // 10s
         }
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
@@ -1004,6 +1023,14 @@ pub mod default {
             60 // 1min
         }
 
+        pub fn cut_table_size_limit() -> u64 {
+            1024 * 1024 * 1024 // 1GB
+        }
+
+        pub fn hybird_partition_vnode_count() -> u32 {
+            4
+        }
+
         pub fn event_log_enabled() -> bool {
             true
         }
@@ -1030,6 +1057,10 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
+        }
+
+        pub fn grpc_max_reset_stream_size() -> u32 {
+            200
         }
     }
 
@@ -1136,6 +1167,14 @@ pub mod default {
         }
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
+        }
+
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
+            40
+        }
+
+        pub fn compactor_fast_max_compact_task_size() -> u64 {
+            2 * 1024 * 1024 * 1024 // 2g
         }
     }
 

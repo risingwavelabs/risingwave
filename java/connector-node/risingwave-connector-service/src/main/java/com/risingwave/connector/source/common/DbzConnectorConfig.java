@@ -79,10 +79,9 @@ public class DbzConnectorConfig {
     }
 
     private final long sourceId;
-
     private final SourceTypeE sourceType;
-
     private final Properties resolvedDbzProps;
+    private final boolean isBackfillSource;
 
     public long getSourceId() {
         return sourceId;
@@ -94,6 +93,10 @@ public class DbzConnectorConfig {
 
     public Properties getResolvedDebeziumProps() {
         return resolvedDbzProps;
+    }
+
+    public boolean isBackfillSource() {
+        return isBackfillSource;
     }
 
     public DbzConnectorConfig(
@@ -190,6 +193,7 @@ public class DbzConnectorConfig {
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+        this.isBackfillSource = isCdcBackfill;
     }
 
     private void adjustConfigForSharedCdcStream(Properties dbzProps) {

@@ -31,6 +31,7 @@ CASES_MAP = {
     'redis-sink': ['json'],
     'big-query-sink': ['json'],
     'mindsdb': ['json'],
+    'vector': ['json'],
 }
 
 def gen_pipeline_steps():

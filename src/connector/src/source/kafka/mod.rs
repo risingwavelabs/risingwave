@@ -106,7 +106,11 @@ pub struct KafkaProperties {
     #[serde(rename = "scan.startup.mode", alias = "kafka.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis", alias = "kafka.time.offset")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "kafka.time.offset",
+        alias = "scan.startup.timestamp_millis" // keep for compatibility
+    )]
     pub time_offset: Option<String>,
 
     #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]

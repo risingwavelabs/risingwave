@@ -16,8 +16,9 @@ use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
@@ -208,10 +209,7 @@ impl Binder {
     /// return first name in identifiers, must have only one name.
     fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
         if identifiers.len() > 1 {
-            return Err(internal_error(format!(
-                "{} must contain 1 argument",
-                ident_desc
-            )));
+            bail!("{} must contain 1 argument", ident_desc);
         }
         let name = identifiers.pop().unwrap().real_value();
 

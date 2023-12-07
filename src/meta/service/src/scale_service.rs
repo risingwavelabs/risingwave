@@ -126,11 +126,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        self.barrier_manager.check_status_running().await?;
 
         let RescheduleRequest {
             reschedules,
@@ -190,13 +186,9 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        let req = request.into_inner();
+        self.barrier_manager.check_status_running().await?;
 
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        let req = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 

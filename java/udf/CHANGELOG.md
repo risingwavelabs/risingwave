@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] - 2023-11-28
+## [0.1.3] - 2023-12-06
+
+### Fixed
+
+- Fix decimal type output.
+
+## [0.1.2] - 2023-12-04
+
+### Fixed
+
+- Fix index-out-of-bound error when string or string list is large.
+- Fix memory leak.
+
+## [0.1.1] - 2023-12-03
 
 ### Added
 
@@ -16,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Bump Arrow version to 14.
+
+### Fixed
+
+- Fix unconstrained decimal type.
 
 ## [0.1.0] - 2023-09-01
 

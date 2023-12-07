@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -22,11 +20,10 @@ use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::external::ExternalStorageTable;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor};
+use crate::executor::{FlowControlExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -129,7 +126,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else {
-                    let source_exec = SourceExecutor::new(
+                    SourceExecutor::new(
                         params.actor_context.clone(),
                         params.info.clone(),
                         Some(stream_source_core),
@@ -138,64 +135,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         system_params,
                         source_ctrl_opts.clone(),
                         params.env.connector_params(),
-                    );
-
-                    let table_type = CdcTableType::from_properties(&source.properties);
-                    if table_type.can_backfill()
-                        && let Some(table_desc) = source_info.external_table.clone()
-                    {
-                        let table_schema =
-                            Schema::new(table_desc.columns.iter().map(Into::into).collect());
-                        let upstream_table_name =
-                            SchemaTableName::from_properties(&source.properties);
-                        let table_pk_indices = table_desc
-                            .pk
-                            .iter()
-                            .map(|k| k.column_index as usize)
-                            .collect_vec();
-                        let table_pk_order_types = table_desc
-                            .pk
-                            .iter()
-                            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                            .collect_vec();
-
-                        let table_reader = table_type
-                            .create_table_reader(source.properties.clone(), table_schema.clone())
-                            .await?;
-                        let external_table = ExternalStorageTable::new(
-                            TableId::new(source.source_id),
-                            upstream_table_name,
-                            table_reader,
-                            table_schema.clone(),
-                            table_pk_order_types,
-                            table_pk_indices,
-                            (0..table_schema.len()).collect_vec(),
-                        );
-
-                        // use the state table from source to store the backfill state (may refactor in future)
-                        let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                            source.state_table.as_ref().unwrap(),
-                            store.clone(),
-                        )
-                        .await;
-                        // use schema from table_desc
-                        let cdc_backfill = CdcBackfillExecutor::new(
-                            params.actor_context.clone(),
-                            params.info.clone(),
-                            external_table,
-                            Box::new(source_exec),
-                            (0..table_schema.len()).collect_vec(),
-                            None,
-                            params.executor_stats,
-                            None,
-                            Some(source_state_handler),
-                            false,
-                            source_ctrl_opts.chunk_size,
-                        );
-                        cdc_backfill.boxed()
-                    } else {
-                        source_exec.boxed()
-                    }
+                    )
+                    .boxed()
                 }
             };
             let rate_limit = source.rate_limit.map(|x| x as _);

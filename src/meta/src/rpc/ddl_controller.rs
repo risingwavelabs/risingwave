@@ -235,24 +235,13 @@ impl DdlController {
         }
     }
 
-    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
-    /// when it's not running.
-    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
-        if !self.barrier_manager.is_running().await {
-            return Err(MetaError::unavailable(
-                "The cluster is starting or recovering".into(),
-            ));
-        }
-        Ok(())
-    }
-
     /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.check_barrier_manager_status().await?;
+            self.barrier_manager.check_status_running().await?;
         }
         let ctrl = self.clone();
         let fut = async move {
@@ -705,7 +694,7 @@ impl DdlController {
     ) -> MetaResult<NonZeroUsize> {
         if cluster_info.parallel_units.is_empty() {
             return Err(MetaError::unavailable(
-                "No available parallel units to schedule".to_string(),
+                "No available parallel units to schedule",
             ));
         }
 

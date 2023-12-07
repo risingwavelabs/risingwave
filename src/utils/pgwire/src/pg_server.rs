@@ -21,6 +21,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::net::{AddressRef, Listener};
@@ -179,10 +180,7 @@ pub async fn pg_serve(
             }
 
             Err(e) => {
-                tracing::error!(
-                    error = &e as &dyn std::error::Error,
-                    "failed to accept connection",
-                );
+                tracing::error!(error = %e.as_report(), "failed to accept connection",);
             }
         }
     }
@@ -202,10 +200,7 @@ pub async fn handle_connection<S, SM>(
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
             Err(e) => {
-                tracing::error!(
-                    error = &e as &dyn std::error::Error,
-                    "error when reading message"
-                );
+                tracing::error!(error = %e.as_report(), "error when reading message");
                 break;
             }
         };

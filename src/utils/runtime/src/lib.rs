@@ -35,10 +35,9 @@ use prof::*;
 ///
 /// Currently, the following env variables will be read:
 ///
-/// * `RW_WORKER_THREADS`: number of tokio worker threads. If not set, it will use tokio's default
-///   config (equivalent to CPU cores). Note: This will not effect the dedicated runtimes for each
-///   service which are controlled by their own configurations, like streaming actors, compactions,
-///   etc.
+/// * `RW_WORKER_THREADS` (alias of `TOKIO_WORKER_THREADS`): number of tokio worker threads. If
+///   not set, it will be decided by tokio. Note that this can still be overridden by per-module
+///   runtime worker thread settings in the config file.
 /// * `RW_DEADLOCK_DETECTION`: whether to enable deadlock detection. If not set, will enable in
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
@@ -51,12 +50,9 @@ where
 
     risingwave_variables::init_server_start_time();
 
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
-
-    if let Ok(worker_threads) = std::env::var("RW_WORKER_THREADS") {
-        let worker_threads = worker_threads.parse().unwrap();
-        tracing::info!("setting tokio worker threads to {}", worker_threads);
-        builder.worker_threads(worker_threads);
+    // `TOKIO` will be read by tokio. Duplicate `RW` for compatibility.
+    if let Some(worker_threads) = std::env::var_os("RW_WORKER_THREADS") {
+        std::env::set_var("TOKIO_WORKER_THREADS", worker_threads);
     }
 
     if let Ok(enable_deadlock_detection) = std::env::var("RW_DEADLOCK_DETECTION") {
@@ -77,7 +73,7 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    builder
+    tokio::runtime::Builder::new_multi_thread()
         .thread_name("risingwave-main")
         .enable_all()
         .build()

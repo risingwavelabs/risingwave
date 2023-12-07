@@ -16,10 +16,10 @@ KafkaProperties:
     field_type: String
     required: false
     alias: kafka.scan.startup.mode
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
-    alias: kafka.time.offset
+    alias: scan.startup.timestamp_millis
   - name: properties.group.id
     field_type: String
     required: false
@@ -219,9 +219,10 @@ NatsProperties:
   - name: scan.startup.mode
     field_type: String
     required: false
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
+    alias: scan.startup.timestamp_millis
   - name: stream
     field_type: String
     required: true
@@ -428,10 +429,10 @@ PulsarProperties:
     field_type: String
     required: false
     alias: pulsar.scan.startup.mode
-  - name: scan.startup.timestamp_millis
+  - name: scan.startup.timestamp.millis
     field_type: String
     required: false
-    alias: pulsar.time.offset
+    alias: scan.startup.timestamp_millis
   - name: topic
     field_type: String
     required: true
