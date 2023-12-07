@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
-use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder, NetworkEndian};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -43,7 +43,7 @@ pub enum FeMessage {
     CancelQuery(FeCancelMessage),
     Terminate,
     Flush,
-    // special msg to detect health check
+    // special msg to detect health check, which represents the client immediately closes the connection cleanly without sending any data.
     HealthCheck,
 }
 
@@ -295,18 +295,15 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let result = stream.read_i32().await;
-        let len = match result {
-            Ok(len) => len,
-            Err(err) => {
-                // Detect whether it is a health check.
-                if err.kind() == ErrorKind::UnexpectedEof {
-                    return Ok(FeMessage::HealthCheck);
-                } else {
-                    return Err(err);
-                }
-            }
+        let mut len_buffer = [0; 4];
+        let n = crate::utils::read_exact_or_eof(stream, &mut len_buffer).await?;
+        match n {
+            4 => (),
+            0 => return Ok(FeMessage::HealthCheck),
+            _ => return Err(ErrorKind::UnexpectedEof.into()),
         };
+        let len = NetworkEndian::read_i32(&len_buffer);
+
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;
         if payload_len >= isize::MAX as usize {
