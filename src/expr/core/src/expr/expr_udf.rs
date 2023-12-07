@@ -144,8 +144,7 @@ impl UdfExpression {
             );
         }
 
-        let data_chunk =
-            DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
+        let data_chunk = DataChunk::try_from(&output)?;
         let output = data_chunk.uncompact(vis.clone());
 
         let Some(array) = output.columns().first() else {
