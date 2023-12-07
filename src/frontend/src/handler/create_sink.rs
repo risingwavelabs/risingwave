@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -25,7 +25,7 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_common::{bail, bail_not_implemented};
+use risingwave_common::{bail, bail_not_implemented, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -45,6 +45,7 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -305,6 +306,12 @@ pub async fn handle_create_sink(
             bail_not_implemented!(issue = 13818, "create sink into table with incoming sinks");
         }
 
+        if check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())? {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Creating such a sink will result in circular dependency.".to_string(),
+            )));
+        }
+
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
@@ -344,6 +351,69 @@ pub async fn handle_create_sink(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+fn check_cycle_for_sink(
+    session: &SessionImpl,
+    sink_catalog: SinkCatalog,
+    table_id: catalog::TableId,
+) -> Result<bool> {
+    let reader = session.env().catalog_reader().read_guard();
+
+    let mut sinks = HashMap::new();
+    let db_name = session.database();
+    for schema in reader.iter_schemas(db_name)? {
+        for sink in schema.iter_sink() {
+            sinks.insert(sink.id.sink_id, sink.as_ref());
+        }
+    }
+    fn visit_sink(
+        session: &SessionImpl,
+        reader: &CatalogReadGuard,
+        sink_index: &HashMap<u32, &SinkCatalog>,
+        sink: &SinkCatalog,
+        visited_tables: &mut HashSet<u32>,
+    ) -> Result<bool> {
+        for table_id in &sink.dependent_relations {
+            if let Ok(table) = reader.get_table_by_id(table_id) {
+                if visit_table(session, reader, sink_index, table.as_ref(), visited_tables)? {
+                    return Ok(true);
+                }
+            } else {
+                bail!("table not found: {:?}", table_id);
+            }
+        }
+        Ok(false)
+    }
+
+    fn visit_table(
+        session: &SessionImpl,
+        reader: &CatalogReadGuard,
+        sink_index: &HashMap<u32, &SinkCatalog>,
+        table: &TableCatalog,
+        visited_tables: &mut HashSet<u32>,
+    ) -> Result<bool> {
+        if visited_tables.contains(&table.id.table_id) {
+            Ok(true)
+        } else {
+            let _ = visited_tables.insert(table.id.table_id);
+            for sink_id in &table.incoming_sinks {
+                if let Some(sink) = sink_index.get(sink_id) {
+                    if visit_sink(session, reader, sink_index, sink, visited_tables)? {
+                        return Ok(true);
+                    }
+                } else {
+                    bail!("sink not found: {:?}", sink_id);
+                }
+            }
+            Ok(false)
+        }
+    }
+
+    let mut visited_tables = HashSet::new();
+    visited_tables.insert(table_id.table_id);
+
+    visit_sink(session, &reader, &sinks, &sink_catalog, &mut visited_tables)
 }
 
 pub(crate) async fn reparse_table_for_sink(
