@@ -33,8 +33,23 @@ services:
       - "./mdb_config.json:/root/mindsdb_config.json"
     container_name: mindsdb
 
+  prepare_risingwave:
+    image: postgres
+    depends_on:
+      - risingwave-standalone
+    command:
+      - /bin/sh
+      - -c
+      - psql "postgresql://root@risingwave-standalone:55432/dev" -f ./prepare_risingwave.sql
+    volumes:
+      - "./prepare_risingwave.sql:/prepare_risingwave.sql"
+    container_name: prepare_risingwave
+    restart: on-failure
+
   prepare_mindsdb:
     image: postgres
+    depends_on:
+      - prepare_risingwave
     command:
       - /bin/sh
       - -c
