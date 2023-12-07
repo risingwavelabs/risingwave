@@ -8,7 +8,7 @@ statement ok
 create sink s6 as select * from mv6
 with (
     connector = 'deltalake_rust',
-    type = 'append-only', 
+    type = 'append-only',
     force_append_only = 'true',
     path = 's3a://deltalake/deltalake-test',
     s3.access.key = 'hummockadmin',

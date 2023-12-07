@@ -58,11 +58,11 @@ sleep 1
 
 
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2 \
-    --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \ 
-    --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \                
-    --conf 'spark.hadoop.fs.s3a.access.key=hummockadmin' \        
-    --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \        
-    --conf 'spark.hadoop.fs.s3a.endpoint=http://localhost:9301' \        
+    --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
+    --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+    --conf 'spark.hadoop.fs.s3a.access.key=hummockadmin' \
+    --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \
+    --conf 'spark.hadoop.fs.s3a.endpoint=http://localhost:9301' \
     --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
     --S --e 'INSERT OVERWRITE DIRECTORY './spark-output' USING CSV SELECT * FROM delta.`s3a://deltalake/deltalake-test`;'
 
