@@ -38,10 +38,10 @@ services:
     command:
       - /bin/sh
       - -c
-      - psql "postgresql://mindsdb@mindsdb:55432/mindsdb" -f ./postgres_prepare.sql
+      - psql "postgresql://mindsdb@mindsdb:55432/mindsdb" -f ./prepare_mindsdb.sql
     volumes:
       - "./prepare_mindsdb.sql:/prepare_mindsdb.sql"
-    container_name: prepare_mindsdbs
+    container_name: prepare_mindsdb
     restart: on-failure
 
 volumes:

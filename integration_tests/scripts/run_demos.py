@@ -29,7 +29,7 @@ def run_demo(demo: str, format: str, wait_time = 40):
     subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(wait_time)
 
-    sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
+    sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql', 'query_sink.sql']
     for fname in sql_files:
         if format == 'protobuf':
             sql_file = os.path.join(demo_dir, "pb", fname)
@@ -39,6 +39,8 @@ def run_demo(demo: str, format: str, wait_time = 40):
                 sleep(10)
                 continue
             # Fallback to default version when the protobuf version doesn't exist.
+        if not os.path.exists(sql_file):
+            continue
         sql_file = os.path.join(demo_dir,  fname)
         run_sql_file(sql_file, demo_dir)
         sleep(10)
