@@ -281,7 +281,7 @@ steps:
 
   - label: "end-to-end deltalake sink test"
     if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
-    command: "ci/scripts/ e2e-deltalake-sink-rust-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"
