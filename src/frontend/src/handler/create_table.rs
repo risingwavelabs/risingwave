@@ -462,15 +462,20 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = context.session_ctx();
-    let mut properties = context.with_options().inner().clone().into_iter().collect();
-    validate_compatibility(&source_schema, &mut properties)?;
+    let mut with_properties = context.with_options().inner().clone().into_iter().collect();
+    validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&constraints)?;
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        context.session_ctx(),
+        &source_schema,
+        &with_properties,
+        false,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -484,7 +489,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &source_info,
         &mut columns,
         sql_pk_names,
-        &properties,
+        &with_properties,
     )
     .await?;
 
@@ -513,7 +518,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
@@ -527,7 +532,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
-        properties,
+        with_properties,
         Some(
             WithOptions::try_from(source_schema.row_options())?
                 .into_inner()
@@ -560,14 +565,14 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let properties = context.with_options().inner().clone().into_iter().collect();
+    let with_properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         columns,
         column_defs,
         constraints,
-        properties,
+        with_properties,
         definition,
         source_watermarks,
         append_only,
@@ -582,7 +587,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    properties: HashMap<String, String>,
+    with_properties: HashMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -611,7 +616,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
-        properties,
+        with_properties,
         None,
         pk_column_ids,
         row_id_index,
@@ -628,8 +633,8 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
-    properties: HashMap<String, String>,
-    options: Option<HashMap<String, String>>,
+    with_properties: HashMap<String, String>,
+    format_encode_options: Option<HashMap<String, String>>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -646,9 +651,9 @@ fn gen_table_plan_inner(
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     // resolve privatelink connection for Table backed by Kafka source
-    let mut with_options = WithOptions::new(properties);
+    let mut with_properties = WithOptions::new(with_properties);
     let connection_id =
-        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, &session)?;
 
     let is_external_source = source_info.is_some();
 
@@ -663,8 +668,8 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        with_properties: with_options.into_inner().into_iter().collect(),
-        format_encode_options: options.unwrap(),
+        with_properties: with_properties.into_inner().into_iter().collect(),
+        format_encode_options: format_encode_options.unwrap(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
