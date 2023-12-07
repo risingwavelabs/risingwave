@@ -59,7 +59,7 @@ services:
   prometheus-0:
     extends:
       file: docker-compose.yml
-      service: prometheus-
+      service: prometheus-0
   message_queue:
     extends:
       file: docker-compose.yml
