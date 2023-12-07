@@ -15,7 +15,7 @@
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
 
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -23,6 +23,7 @@ use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
     Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
@@ -55,7 +56,7 @@ impl<S: StateStore> NowExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(self) {
         let Self {
-            mut barrier_receiver,
+            barrier_receiver,
             mut state_table,
             info,
             ..
@@ -70,8 +71,9 @@ impl<S: StateStore> NowExecutor<S> {
 
         const MAX_MERGE_BARRIER_SIZE: usize = 64;
 
-        while let Some(barriers) =
-            recv_multiple(&mut barrier_receiver, MAX_MERGE_BARRIER_SIZE).await
+        #[for_await]
+        for barriers in
+            UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
             let mut timestamp = None;
             if barriers.len() > 1 {
@@ -174,33 +176,8 @@ impl<S: StateStore> Executor for NowExecutor<S> {
     }
 }
 
-async fn recv_multiple<T>(rx: &mut UnboundedReceiver<T>, limit: usize) -> Option<Vec<T>> {
-    let item = rx.recv().await;
-    let mut ret = if let Some(item) = item {
-        vec![item]
-    } else {
-        return None;
-    };
-    // When rx.recv() returns None, the current function will not return None,
-    // which will trigger the next call on `rx.recv()`. The test `test_unbounded_rx_multiple_none`
-    // has tested that it is allowed to call `rx.recv()` again after it returns None.
-    while ret.len() < limit {
-        if let Some(Some(item)) = rx.recv().now_or_never() {
-            ret.push(item);
-        } else {
-            break;
-        }
-    }
-    Some(ret)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-    use std::future::{poll_fn, Future};
-    use std::pin::pin;
-    use std::task::Poll;
-
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -210,7 +187,6 @@ mod tests {
 
     use super::NowExecutor;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::now::recv_multiple;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
         Barrier, BoxedMessageStream, Executor, ExecutorInfo, Mutation, StreamExecutorResult,
@@ -454,39 +430,5 @@ mod tests {
             state_table,
         );
         (sender, Box::new(now_executor).execute())
-    }
-
-    #[tokio::test]
-    async fn test_unbounded_rx_multiple_none() {
-        let (tx, mut rx) = unbounded_channel::<()>();
-        drop(tx);
-        assert_matches!(rx.recv().await, None);
-        assert_matches!(rx.recv().await, None);
-    }
-
-    #[tokio::test]
-    async fn test_multiple_recv() {
-        let (tx, mut rx) = unbounded_channel();
-        {
-            let mut future = pin!(recv_multiple(&mut rx, 2));
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
-            tx.send(1).unwrap();
-            tx.send(2).unwrap();
-            tx.send(3).unwrap();
-            assert_eq!(Some(vec![1, 2]), future.await);
-        }
-        assert_eq!(Some(vec![3]), recv_multiple(&mut rx, 10).await);
-        {
-            let mut future = pin!(recv_multiple(&mut rx, 10));
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
-            tx.send(4).unwrap();
-            drop(tx);
-            assert_eq!(Some(vec![4]), future.await);
-        }
-        assert!(recv_multiple(&mut rx, 10).await.is_none());
     }
 }
