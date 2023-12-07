@@ -22,6 +22,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
+use tracing::debug;
 
 use crate::HummockEpoch;
 
@@ -229,6 +230,7 @@ impl PbTableWatermarks {
                 }
             }
         }
+        debug!("clear stale table watermark below epoch {}", safe_epoch);
         let mut result_epoch_watermark = Vec::with_capacity(self.epoch_watermarks.len());
         let mut unset_vnode: HashSet<VirtualNode> = (0..VirtualNode::COUNT)
             .map(VirtualNode::from_index)
