@@ -35,6 +35,7 @@ public class UdfExample {
     public static void main(String[] args) throws IOException {
         try (var server = new UdfServer("0.0.0.0", 8815)) {
             server.addFunction("int_42", new Int42());
+            server.addFunction("float_to_decimal", new FloatToDecimal());
             server.addFunction("sleep", new Sleep());
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd3());
@@ -61,6 +62,12 @@ public class UdfExample {
     public static class Int42 implements ScalarFunction {
         public int eval() {
             return 42;
+        }
+    }
+
+    public static class FloatToDecimal implements ScalarFunction {
+        public BigDecimal eval(Double f) {
+            return new BigDecimal(f);
         }
     }
 

@@ -28,56 +28,56 @@ services:
         ipv4_address: 172.21.0.3
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: compactor-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.4
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: compute-node-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.5
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: etcd-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.6
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: frontend-node-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.7
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: grafana-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.8
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: meta-node-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.9
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: minio-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.10
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: prometheus-0
     networks:
       mynetwork:
