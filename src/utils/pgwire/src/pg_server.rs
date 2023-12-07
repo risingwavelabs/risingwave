@@ -200,7 +200,11 @@ pub async fn handle_connection<S, SM>(
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
             Err(e) => {
-                tracing::error!(error = %e.as_report(), "error when reading message");
+                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    tracing::warn!("unexpected end of file and it could be a health check");
+                } else {
+                    tracing::error!(error = %e.as_report(), "error when reading message");
+                }
                 break;
             }
         };
