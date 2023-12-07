@@ -811,6 +811,16 @@ pub async fn build_remote_object_store(
             )
         }
 
+        obs if obs.starts_with("obs://") => {
+            let obs = obs.strip_prefix("oss://").unwrap();
+            let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
+
         oss if oss.starts_with("oss://") => {
             let oss = oss.strip_prefix("oss://").unwrap();
             let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
