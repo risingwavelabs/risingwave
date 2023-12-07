@@ -831,9 +831,6 @@ impl ParseTo for CreateSinkStatement {
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
-            if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
-                p.expected("WITH", p.peek_token())?
-            }
             CreateSink::From(from_name)
         } else if p.parse_keyword(Keyword::AS) {
             let query = Box::new(p.parse_query()?);
@@ -844,6 +841,11 @@ impl ParseTo for CreateSinkStatement {
 
         let emit_mode = p.parse_emit_mode()?;
 
+        // This check cannot be put into the `WithProperties::parse_to`, since other
+        // statements may not need the with properties.
+        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
+            p.expected("WITH", p.peek_token())?
+        }
         impl_parse_to!(with_properties: WithProperties, p);
         if with_properties.0.is_empty() {
             return Err(ParserError::ParserError(
