@@ -103,10 +103,21 @@ export async function getSinks() {
   return sinkList
 }
 
+type SourceWrap = Source & {
+  properties: { [key: string]: string }
+}
+
 export async function getSources() {
-  let sourceList: Source[] = (await api.get("/api/sources")).map(
+  let sourceList: SourceWrap[] = (await api.get("/api/sources")).map(
     Source.fromJSON
-  )
+  ).map((src) => Object.defineProperty(src, 'properties', {
+    get: function() {
+      return this.with_properties
+    },
+    set: function(value) {
+      this.with_properties = value
+    }
+  }))
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
