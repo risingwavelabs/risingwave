@@ -189,6 +189,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
+        1024,
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(
