@@ -235,24 +235,13 @@ impl DdlController {
         }
     }
 
-    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
-    /// when it's not running.
-    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
-        if !self.barrier_manager.is_running().await {
-            return Err(MetaError::unavailable(
-                "The cluster is starting or recovering",
-            ));
-        }
-        Ok(())
-    }
-
     /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.check_barrier_manager_status().await?;
+            self.barrier_manager.check_status_running().await?;
         }
         let ctrl = self.clone();
         let fut = async move {
@@ -472,7 +461,6 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
-        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -490,6 +478,7 @@ impl DdlController {
 
             internal_tables = ctx.internal_tables();
 
+            // Do some type-specific work for each type of stream job.
             match stream_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
                     Self::validate_cdc_table(table, &table_fragments).await?;
@@ -552,7 +541,7 @@ impl DdlController {
         }
     }
 
-    // validate the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     async fn validate_cdc_table(table: &Table, table_fragments: &TableFragments) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
@@ -587,7 +576,7 @@ impl DdlController {
         Ok(())
     }
 
-    // We persist table fragments at this step.
+    /// Let the stream manager to create the actors, and do some cleanup work after it fails or finishes.
     async fn create_streaming_job_inner(
         &self,
         stream_job: StreamingJob,
@@ -672,7 +661,9 @@ impl DdlController {
         Ok(version)
     }
 
-    /// `prepare_stream_job` prepares a stream job and returns the stream fragment graph.
+    /// Creates [`StreamFragmentGraph`] from the protobuf message
+    /// (allocate and fill ID for fragments, internal tables, and the table in the local graph),
+    /// and does some preparation work.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
@@ -737,7 +728,9 @@ impl DdlController {
         Ok(parallelism)
     }
 
-    /// `build_stream_job` builds a streaming job and returns the context and table fragments.
+    /// Builds the actor graph:
+    /// - Schedule the fragments based on their distribution
+    /// - Expand each fragment into one or several actors
     async fn build_stream_job(
         &self,
         env: StreamEnvironment,
@@ -747,6 +740,7 @@ impl DdlController {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
+        let expr_context = env.to_expr_context();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -790,7 +784,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(merge_updates.is_empty());
 
@@ -813,7 +807,7 @@ impl DdlController {
             ddl_type: stream_job.into(),
         };
 
-        // 4. Mark creating tables, including internal tables and the table of the stream job.
+        // 4. Mark tables as creating, including internal tables and the table of the stream job.
         let creating_tables = ctx
             .internal_tables()
             .into_iter()
@@ -1071,6 +1065,7 @@ impl DdlController {
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
+        let expr_context = env.to_expr_context();
 
         let old_table_fragments = self
             .fragment_manager
@@ -1123,7 +1118,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(dispatchers.is_empty());
 

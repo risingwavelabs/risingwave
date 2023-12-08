@@ -4860,9 +4860,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.4.0+0.10.0"
+version = "0.4.1+0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b4d847e67d6f8319d7c5393121556e2a987f5b744967a0f9b84e502020239d3"
+checksum = "813977c7870103e113a0332d97731f961bc48aaa8860edd318ef7d7754214436"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7323,6 +7323,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio-metrics",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "workspace-hack",
 ]
