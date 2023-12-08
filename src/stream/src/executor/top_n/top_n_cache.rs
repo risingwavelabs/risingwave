@@ -282,6 +282,10 @@ impl TopNCacheTrait for TopNCache<false> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
+        if let Some(row_count) = self.table_row_count.as_mut() {
+            *row_count += 1;
+        }
+
         if !self.is_low_cache_full() {
             self.low.insert(cache_key, (&row).into());
             return;
@@ -344,6 +348,10 @@ impl TopNCacheTrait for TopNCache<false> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
+        if let Some(row_count) = self.table_row_count.as_mut() {
+            *row_count -= 1;
+        }
+
         if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
             // The row is in high
             self.high.remove(&cache_key);
@@ -352,6 +360,8 @@ impl TopNCacheTrait for TopNCache<false> {
         {
             // The row is in mid
             self.middle.remove(&cache_key);
+            res_ops.push(Op::Delete);
+            res_rows.push((&row).into());
 
             // Try to fill the high cache if it is empty
             if self.high.is_empty() && !self.table_row_count_matched() {
@@ -365,9 +375,6 @@ impl TopNCacheTrait for TopNCache<false> {
                     .await?;
             }
 
-            res_ops.push(Op::Delete);
-            res_rows.push((&row).into());
-
             // Bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
@@ -375,6 +382,8 @@ impl TopNCacheTrait for TopNCache<false> {
                 res_rows.push(high_first.1.clone());
                 self.middle.insert(high_first.0, high_first.1);
             }
+
+            assert!(self.high.is_empty() || self.middle.len() == self.limit);
         } else {
             // The row is in low
             self.low.remove(&cache_key);
@@ -420,6 +429,10 @@ impl TopNCacheTrait for TopNCache<true> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
+        if let Some(row_count) = self.table_row_count.as_mut() {
+            *row_count += 1;
+        }
+
         assert!(
             self.low.is_empty(),
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
@@ -509,8 +522,11 @@ impl TopNCacheTrait for TopNCache<true> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
-        // Since low cache is always empty for WITH_TIES, this unwrap is safe.
+        if let Some(row_count) = self.table_row_count.as_mut() {
+            *row_count -= 1;
+        }
 
+        // Since low cache is always empty for WITH_TIES, this unwrap is safe.
         let middle_last = self.middle.last_key_value().unwrap();
         let middle_last_order_by = middle_last.0 .0.clone();
 

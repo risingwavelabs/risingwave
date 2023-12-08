@@ -137,7 +137,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     /// * `start_key` - The start point of the key to scan. It should be the last key of the middle
     ///   cache. It doesn't contain the group key.
     pub async fn fill_high_cache<const WITH_TIES: bool>(
-        &mut self,
+        &self,
         group_key: Option<impl GroupKey>,
         topn_cache: &mut TopNCache<WITH_TIES>,
         start_key: Option<CacheKey>,
