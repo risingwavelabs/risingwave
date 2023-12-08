@@ -22,7 +22,6 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
-use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
@@ -93,7 +92,7 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let with_properties = WithOptions::new(prost.with_properties.clone()).into_inner();
+        let with_properties = prost.with_properties.clone().into_iter().collect();
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
