@@ -307,15 +307,16 @@ impl StreamTableScan {
 
         match self.stream_scan_type {
             StreamScanType::ArrangementBackfill => {
-                let node_body = PbNodeBody::StreamArrangementBackfill(StreamArrangementBackfillNode {
-                    table_id: self.core.table_desc.table_id.table_id,
-                    // The column indices need to be forwarded to the downstream
-                    output_indices,
-                    upstream_column_ids,
-                    state_table: Some(catalog),
-                    arrangement_table: Some(upstream_table_catalog.to_internal_table_prost()),
-                    rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
-                });
+                let node_body =
+                    PbNodeBody::StreamArrangementBackfill(StreamArrangementBackfillNode {
+                        table_id: self.core.table_desc.table_id.table_id,
+                        // The column indices need to be forwarded to the downstream
+                        output_indices,
+                        upstream_column_ids,
+                        state_table: Some(catalog),
+                        arrangement_table: Some(upstream_table_catalog.to_internal_table_prost()),
+                        rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+                    });
                 PbStreamNode {
                     fields: self.schema().to_prost(),
                     input: vec![
