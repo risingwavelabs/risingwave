@@ -19,7 +19,7 @@ RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_mod
 
 FROM base AS rust-base
 
-RUN apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -90,7 +90,7 @@ RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/
 # We use rust-maven-plugin to build java-binding. So it's FROM rust-base
 FROM rust-base AS java-builder
 
-RUN apt-get -y install maven
+RUN apt-get update && apt-get -y install maven
 
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
