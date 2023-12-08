@@ -41,6 +41,13 @@ pub struct Scan {
     pub output_col_idx: Vec<usize>,
     /// Table Catalog of the upstream table that the descriptor is derived from.
     pub table_catalog: Arc<TableCatalog>,
+    // FIXME(kwannoel): Currently many places in the code reference this,
+    // but now we have table catalog.
+    // We should remove this and use table catalog in those call-sites instead.
+    // It's introduced in https://github.com/risingwavelabs/risingwave/pull/13622.
+    // We kept this field to avoid extensive refactor in that PR.
+    /// Table Desc (subset of table catalog).
+    pub table_desc: Rc<TableDesc>,
     /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -54,7 +61,6 @@ pub struct Scan {
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
-    pub table_desc: Rc<TableDesc>,
 }
 
 impl Scan {
