@@ -304,82 +304,54 @@ impl StreamTableScan {
 
         // This refers to the output indices of the originating stream.
         let upstream_table_catalog = self.get_upstream_state_table().clone();
+        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+            Some(upstream_table_catalog.to_internal_table_prost())
+        } else {
+            None
+        };
 
-        match self.stream_scan_type {
-            StreamScanType::ArrangementBackfill => {
-                let node_body =
-                    PbNodeBody::StreamArrangementBackfill(StreamArrangementBackfillNode {
-                        table_id: self.core.table_desc.table_id.table_id,
-                        // The column indices need to be forwarded to the downstream
-                        output_indices,
-                        upstream_column_ids,
-                        state_table: Some(catalog),
-                        arrangement_table: Some(upstream_table_catalog.to_internal_table_prost()),
-                        rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
-                    });
+        let node_body = PbNodeBody::StreamScan(StreamScanNode {
+            table_id: self.core.table_desc.table_id.table_id,
+            stream_scan_type: self.stream_scan_type as i32,
+            // The column indices need to be forwarded to the downstream
+            output_indices,
+            upstream_column_ids,
+            // The table desc used by backfill executor
+            table_desc: Some(self.core.table_desc.to_protobuf()),
+            state_table: Some(catalog),
+            arrangement_table,
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            ..Default::default()
+        });
+
+        PbStreamNode {
+            fields: self.schema().to_prost(),
+            input: vec![
+                // Upstream updates
+                // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
-                    fields: self.schema().to_prost(),
-                    input: vec![
-                        // Upstream updates
-                        // The merge node body will be filled by the `ActorBuilder` on the meta service.
-                        PbStreamNode {
-                            node_body: Some(PbNodeBody::Merge(Default::default())),
-                            identity: "Upstream".into(),
-                            fields: upstream_schema.clone(),
-                            stream_key: vec![], // not used
-                            ..Default::default()
-                        },
-                    ],
-                    node_body: Some(node_body),
-                    stream_key,
-                    operator_id: self.base.id().0 as u64,
-                    identity: self.distill_to_string(),
-                    append_only: self.append_only(),
-                }
-            }
-            _ => {
-                let node_body = PbNodeBody::StreamScan(StreamScanNode {
-                    table_id: self.core.table_desc.table_id.table_id,
-                    stream_scan_type: self.stream_scan_type as i32,
-                    // The column indices need to be forwarded to the downstream
-                    output_indices,
-                    upstream_column_ids,
-                    // The table desc used by backfill executor
-                    table_desc: Some(self.core.table_desc.to_protobuf()),
-                    state_table: Some(catalog),
-                    rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
+                    identity: "Upstream".into(),
+                    fields: upstream_schema.clone(),
+                    stream_key: vec![], // not used
                     ..Default::default()
-                });
+                },
+                // Snapshot read
                 PbStreamNode {
-                    fields: self.schema().to_prost(),
-                    input: vec![
-                        // Upstream updates
-                        // The merge node body will be filled by the `ActorBuilder` on the meta service.
-                        PbStreamNode {
-                            node_body: Some(PbNodeBody::Merge(Default::default())),
-                            identity: "Upstream".into(),
-                            fields: upstream_schema.clone(),
-                            stream_key: vec![], // not used
-                            ..Default::default()
-                        },
-                        // Snapshot read
-                        PbStreamNode {
-                            node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                            operator_id: self.batch_plan_id.0 as u64,
-                            identity: "BatchPlanNode".into(),
-                            fields: snapshot_schema,
-                            stream_key: vec![], // not used
-                            input: vec![],
-                            append_only: true,
-                        },
-                    ],
-                    node_body: Some(node_body),
-                    stream_key,
-                    operator_id: self.base.id().0 as u64,
-                    identity: self.distill_to_string(),
-                    append_only: self.append_only(),
-                }
-            }
+                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
+                    fields: snapshot_schema,
+                    stream_key: vec![], // not used
+                    input: vec![],
+                    append_only: true,
+                },
+            ],
+            node_body: Some(node_body),
+            stream_key,
+            operator_id: self.base.id().0 as u64,
+            identity: self.distill_to_string(),
+            append_only: self.append_only(),
         }
     }
 }
