@@ -46,7 +46,6 @@ pub struct SstableIterator {
     pub sst: TableHolder,
     preload_end_block_idx: usize,
     preload_retry_times: usize,
-    prefetch_for_large_query: bool,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -66,7 +65,6 @@ impl SstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            prefetch_for_large_query: options.prefetch_for_large_query,
             options,
             preload_end_block_idx: 0,
             preload_retry_times: 0,
@@ -131,9 +129,8 @@ impl SstableIterator {
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx && let Ok(preload_stream) = self
             .sstable_store
-            .get_stream(self.sst.value(), idx, self.preload_end_block_idx,
+            .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
                         self.options.cache_policy,
-                        self.prefetch_for_large_query,
                         &mut self.stats,
             ).await
         {
@@ -177,24 +174,18 @@ impl SstableIterator {
                     if let Err(e) = ret {
                         tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
                         if self.preload_retry_times >= self.options.max_preload_retry_times {
-                            if self.prefetch_for_large_query {
-                                self.prefetch_for_large_query = false;
-                                self.preload_retry_times = 0;
-                            } else {
-                                break;
-                            }
+                            break;
                         }
                         self.preload_retry_times += 1;
                     }
 
                     match self
                         .sstable_store
-                        .get_stream(
+                        .prefetch_blocks(
                             self.sst.value(),
                             idx,
                             self.preload_end_block_idx,
                             self.options.cache_policy,
-                            self.prefetch_for_large_query,
                             &mut self.stats,
                         )
                         .await

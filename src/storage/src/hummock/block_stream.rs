@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use fail::fail_point;
-use risingwave_common::cache::CachePriority;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-use super::{Block, BlockCache, BlockMeta};
+use super::{Block, BlockMeta};
 use crate::hummock::{BlockHolder, HummockResult};
 
 #[async_trait::async_trait]
@@ -141,71 +137,6 @@ impl BlockDataStream {
                 Ok(Some(Box::new(Block::decode(buf, uncompressed_size)?)))
             }
         }
-    }
-}
-
-/// An iterator that reads the blocks of an SST step by step from a given stream of bytes optimize for batch query.
-/// Because all data in batch query shall be put into block-cache, we can not assign a reference of Bytes for each block.
-/// We must copy them into new memory.
-pub struct LongConnectionBlockStream {
-    inner: BlockDataStream,
-    cache: BlockCache,
-    object_id: HummockSstableObjectId,
-    start_block_index: usize,
-    memory_usage: usize,
-    /// To avoid high frequently query cost too much memory.
-    prefetch_buffer_usage: Arc<AtomicUsize>,
-}
-
-impl LongConnectionBlockStream {
-    pub fn new(
-        inner: BlockDataStream,
-        cache: BlockCache,
-        object_id: HummockSstableObjectId,
-        start_block_index: usize,
-        memory_usage: usize,
-        prefetch_buffer_usage: Arc<AtomicUsize>,
-    ) -> Self {
-        Self {
-            inner,
-            cache,
-            object_id,
-            start_block_index,
-            memory_usage,
-            prefetch_buffer_usage,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl BlockStream for LongConnectionBlockStream {
-    fn next_block_index(&self) -> usize {
-        self.inner.next_block_index() + self.start_block_index
-    }
-
-    async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
-        let index = self.next_block_index();
-        let block = match self.inner.next_block_impl().await? {
-            Some((buf, uncompressed_size)) => {
-                Box::new(Block::decode_with_copy(buf, uncompressed_size, true)?)
-            }
-            None => return Ok(None),
-        };
-        self.cache.insert(
-            self.object_id,
-            index as u64,
-            // Here we can clone this block just because the data in `Block` is `Bytes`, so we only increase the reference, and would not really cost memory.
-            Box::new(block.as_ref().clone()),
-            CachePriority::Low,
-        );
-        Ok(Some(BlockHolder::from_owned_block(block)))
-    }
-}
-
-impl Drop for LongConnectionBlockStream {
-    fn drop(&mut self) {
-        self.prefetch_buffer_usage
-            .fetch_sub(self.memory_usage, Ordering::SeqCst);
     }
 }
 

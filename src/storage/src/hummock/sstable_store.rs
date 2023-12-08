@@ -14,7 +14,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -39,9 +39,7 @@ use super::{
     Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, FileCache, RecentFilter, Sstable,
     SstableBlockIndex, SstableMeta, SstableWriter,
 };
-use crate::hummock::block_stream::{
-    BlockDataStream, BlockStream, LongConnectionBlockStream, PrefetchBlockStream,
-};
+use crate::hummock::block_stream::{BlockDataStream, BlockStream, PrefetchBlockStream};
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::utils::LockTable;
@@ -143,7 +141,6 @@ pub struct SstableStore {
 
     recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
     prefetch_lock_table: LockTable,
-    prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
 }
 
@@ -190,7 +187,6 @@ impl SstableStore {
 
             recent_filter,
             prefetch_lock_table: LockTable::default(),
-            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity,
         }
     }
@@ -212,7 +208,6 @@ impl SstableStore {
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
             prefetch_lock_table: LockTable::default(),
-            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             recent_filter: None,
         }
@@ -271,54 +266,6 @@ impl SstableStore {
             .upload(&data_path, data)
             .await
             .map_err(Into::into)
-    }
-
-    pub async fn get_stream(
-        &self,
-        sst: &Sstable,
-        start_index: usize,
-        mut end_index: usize,
-        policy: CachePolicy,
-        long_connection_prefetch: bool,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Box<dyn BlockStream>> {
-        let object_id = sst.id;
-        let pending_data = self.prefetch_buffer_usage.load(Ordering::SeqCst);
-        if pending_data > self.prefetch_buffer_capacity || !long_connection_prefetch {
-            return self
-                .prefetch_blocks(sst, start_index, end_index, policy, stats)
-                .await;
-        }
-        if let Some(holder) = self.block_cache.get(object_id, start_index as u64) {
-            return Ok(Box::new(PrefetchBlockStream::new(
-                VecDeque::from([holder]),
-                start_index,
-            )));
-        }
-        let mut data_size = 0;
-        for idx in start_index..end_index {
-            if idx > start_index && self.block_cache.exists_block(object_id, idx as u64) {
-                end_index = idx;
-                break;
-            }
-            data_size += sst.meta.block_metas[idx].len as usize;
-        }
-
-        let inner = self
-            .get_stream_by_position(object_id, &sst.meta.block_metas[start_index..end_index])
-            .await?;
-        let memory_usage = std::cmp::min(data_size, self.store.recv_buffer_size());
-        self.prefetch_buffer_usage
-            .fetch_add(memory_usage, Ordering::SeqCst);
-
-        Ok(Box::new(LongConnectionBlockStream::new(
-            inner,
-            self.block_cache.clone(),
-            object_id,
-            start_index,
-            memory_usage,
-            self.prefetch_buffer_usage.clone(),
-        )))
     }
 
     pub fn support_prefetch(&self) -> bool {
