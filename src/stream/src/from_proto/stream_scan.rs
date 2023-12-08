@@ -14,20 +14,17 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
-use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
+use crate::common::table::state_table::StateTable;
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
+    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -53,24 +50,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let schema = if matches!(
-            node.stream_scan_type(),
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill
-        ) {
-            Schema::new(
-                output_indices
-                    .iter()
-                    .map(|i| snapshot.schema().fields()[*i].clone())
-                    .collect_vec(),
-            )
-        } else {
-            // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
-            // directly output the columns received from the upstream or snapshot.
-            let all_indices = (0..snapshot.schema().len()).collect_vec();
-            assert_eq!(output_indices, all_indices);
-            snapshot.schema().clone()
-        };
-
         let executor = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
                 let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
@@ -80,7 +59,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
 
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+            StreamScanType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
@@ -149,68 +128,34 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     None
                 };
 
-                if node.stream_scan_type() == StreamScanType::Backfill {
-                    let upstream_table = StorageTable::new_partial(
-                        state_store.clone(),
-                        table_id,
-                        column_descs,
-                        column_ids,
-                        table_pk_order_types,
-                        table_pk_indices,
-                        distribution,
-                        table_option,
-                        value_indices,
-                        prefix_hint_len,
-                        versioned,
-                    );
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
+                    table_id,
+                    column_descs,
+                    column_ids,
+                    table_pk_order_types,
+                    table_pk_indices,
+                    distribution,
+                    table_option,
+                    value_indices,
+                    prefix_hint_len,
+                    versioned,
+                );
 
-                    BackfillExecutor::new(
-                        params.info,
-                        upstream_table,
-                        upstream,
-                        state_table,
-                        output_indices,
-                        progress,
-                        stream.streaming_metrics.clone(),
-                        params.env.config().developer.chunk_size,
-                    )
-                    .boxed()
-                } else {
-                    let upstream_table = node.get_arrangement_table().unwrap();
-                    let versioned = upstream_table.get_version().is_ok();
-
-                    macro_rules! new_executor {
-                        ($SD:ident) => {{
-                            let upstream_table =
-                                ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
-                                    upstream_table,
-                                    state_store.clone(),
-                                    vnodes,
-                                    column_ids,
-                                )
-                                .await;
-                            ArrangementBackfillExecutor::<_, $SD>::new(
-                                params.info,
-                                upstream_table,
-                                upstream,
-                                state_table.unwrap(),
-                                output_indices,
-                                progress,
-                                schema,
-                                stream.streaming_metrics.clone(),
-                                params.env.config().developer.chunk_size,
-                            )
-                            .boxed()
-                        }};
-                    }
-                    if versioned {
-                        new_executor!(ColumnAwareSerde)
-                    } else {
-                        new_executor!(BasicSerde)
-                    }
-                }
+                BackfillExecutor::new(
+                    params.info,
+                    upstream_table,
+                    upstream,
+                    state_table,
+                    output_indices,
+                    progress,
+                    stream.streaming_metrics.clone(),
+                    params.env.config().developer.chunk_size,
+                )
+                .boxed()
             }
-            StreamScanType::Unspecified => unreachable!(),
+            // Arrangement backfill has a separate proto definition.
+            StreamScanType::ArrangementBackfill | StreamScanType::Unspecified => unreachable!(),
         };
         Ok(FlowControlExecutor::new(
             executor,

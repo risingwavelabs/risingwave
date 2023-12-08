@@ -16,6 +16,7 @@
 
 mod agg_common;
 mod append_only_dedup;
+mod arrangement_backfill;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
@@ -58,6 +59,7 @@ use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
+use self::arrangement_backfill::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -144,6 +146,7 @@ pub async fn create_executor(
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
         NodeBody::StreamScan => StreamScanExecutorBuilder,
+        NodeBody::StreamArrangementBackfill => ArrangementBackfillExecutorBuilder,
         NodeBody::StreamCdcScan => StreamCdcScanExecutorBuilder,
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,

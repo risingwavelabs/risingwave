@@ -265,6 +265,12 @@ impl StreamGraphFormatter {
                 "state table",
                 self.pretty_add_table(node.get_state_table().unwrap()),
             )),
+            // FIXME: add upstream state table for arrangement backfill.
+            // didn't add yet to avoid breaking frontend tests.
+            stream_node::NodeBody::StreamArrangementBackfill(node) => fields.push((
+                "state table",
+                self.pretty_add_table(node.get_state_table().unwrap()),
+            )),
             stream_node::NodeBody::StreamCdcScan(node) => fields.push((
                 "state table",
                 self.pretty_add_table(node.get_state_table().unwrap()),

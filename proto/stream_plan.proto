@@ -483,7 +483,7 @@ enum StreamScanType {
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 
-  // ARRANGEMENT_BACKFILL corresponds to the `ArrangementBackfillExecutor`.
+  // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
 }
 
@@ -522,10 +522,50 @@ message StreamScanNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+}
+
+message StreamArrangementBackfillNode {
+  uint32 table_id = 1;
+
+  // The columns from the upstream table that'll be internally required by this stream scan node.
+  // - For non-backfill stream scan node, it's the same as the output columns.
+  // - For backfill stream scan node, there're additionally primary key columns.
+  repeated int32 upstream_column_ids = 2;
+
+  // This will prune out any unnecessary pk columns.
+  //
+  // For example, consider if we have upstream mv:
+  // create materialized view mv1 as select id, i from t1 order by id, i;
+  //
+  // This will generate a mv with the following layout:
+  // StreamMaterialize {
+  //   columns: [id, i],
+  //   stream_key: [id],
+  //   pk_columns: [id, i],
+  //   pk_conflict: NoCheck
+  // }
+  // Note that pk_columns (for storage) has to include `i`,
+  // thanks to the ordering constraint in the query.
+  //
+  // Consider a downstream mv, e.g.
+  // create materialized view mv2 as select id from mv1;
+  // It will still need to snapshot_read with `id, i`,
+  // since this is the upstream's storage pk_columns.
+  //
+  // However, mv2 does not need to satisfy the ordering constraint,
+  // and `id` is enough to uniquely identify records in the stream.
+  // so we can prune out `i` from the output.
+  // This is what `output_indices` is for, it will just be [0] ([id-index]) in this case.
+  repeated uint32 output_indices = 3;
+
+  /// The state table used by Backfill operator for persisting internal state
+  catalog.Table state_table = 4;
+
+  // The rate limit for the stream scan node.
+  optional uint32 rate_limit = 5;
 
   // The state table used by ArrangementBackfill to replicate upstream mview's state table.
-  // Used iff `ChainType::ArrangementBackfill`.
-  catalog.Table arrangement_table = 10;
+  catalog.Table arrangement_table = 6;
 }
 
 message StreamCdcScanNode {
@@ -740,6 +780,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    StreamArrangementBackfillNode stream_arrangement_backfill = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
