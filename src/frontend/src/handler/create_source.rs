@@ -131,8 +131,7 @@ async fn extract_avro_table_schema(
     with_properties: &HashMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config =
-        SpecificParserConfig::new(info, with_properties, Some(format_encode_options))?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     consume_aws_config_from_options(format_encode_options);
 
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
@@ -150,10 +149,8 @@ async fn extract_avro_table_schema(
 async fn extract_upsert_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<String>>> {
-    let parser_config =
-        SpecificParserConfig::new(info, with_properties, Some(format_encode_options))?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
@@ -182,10 +179,8 @@ async fn extract_upsert_avro_table_pk_columns(
 async fn extract_debezium_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
-    let parser_config =
-        SpecificParserConfig::new(info, with_properties, Some(format_encode_options))?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
@@ -196,8 +191,9 @@ async fn extract_debezium_avro_table_schema(
     with_properties: &HashMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config =
-        SpecificParserConfig::new(info, with_properties, Some(format_encode_options))?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    consume_aws_config_from_options(format_encode_options);
+
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
@@ -222,10 +218,10 @@ async fn extract_protobuf_table_schema(
         use_schema_registry: schema.use_schema_registry,
         format: FormatType::Plain.into(),
         row_encode: EncodeType::Protobuf.into(),
+        format_encode_options: format_encode_options.clone(),
         ..Default::default()
     };
-    let parser_config =
-        SpecificParserConfig::new(&info, with_properties, Some(format_encode_options))?;
+    let parser_config = SpecificParserConfig::new(&info, with_properties)?;
     consume_aws_config_from_options(format_encode_options);
 
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
@@ -324,8 +320,8 @@ pub(crate) async fn bind_columns_from_source(
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
     let is_kafka: bool = is_kafka_connector(with_properties);
-    let mut format_encode_options =
-        WithOptions::try_from(source_schema.row_options())?.into_inner();
+    let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
+    let mut format_encode_options_to_consume = format_encode_options.clone();
 
     let get_key_message_name = |options: &mut BTreeMap<String, String>| -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
@@ -353,22 +349,23 @@ pub(crate) async fn bind_columns_from_source(
             StreamSourceInfo {
                 format: FormatType::Native as i32,
                 row_encode: EncodeType::Native as i32,
+                format_encode_options,
                 ..Default::default()
             },
         ),
         (Format::Plain, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options)?;
+                get_schema_location(&mut format_encode_options_to_consume)?;
             let protobuf_schema = ProtobufSchema {
                 message_name: consume_string_from_options(
-                    &mut format_encode_options,
+                    &mut format_encode_options_to_consume,
                     MESSAGE_NAME_KEY,
                 )?,
                 row_schema_location,
                 use_schema_registry,
             };
             let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
                 protobuf_schema.use_schema_registry,
             )?;
 
@@ -377,7 +374,7 @@ pub(crate) async fn bind_columns_from_source(
                     extract_protobuf_table_schema(
                         &protobuf_schema,
                         with_properties,
-                        &mut format_encode_options,
+                        &mut format_encode_options_to_consume,
                     )
                     .await?,
                 ),
@@ -387,22 +384,23 @@ pub(crate) async fn bind_columns_from_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
-                    key_message_name: get_key_message_name(&mut format_encode_options),
+                    key_message_name: get_key_message_name(&mut format_encode_options_to_consume),
                     name_strategy: name_strategy
                         .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
+                    format_encode_options,
                     ..Default::default()
                 },
             )
         }
         (Format::Plain, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options)?;
+            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             let columns = if create_cdc_source_job {
                 Some(debezium_cdc_source_schema())
             } else {
                 extract_json_table_schema(
                     &schema_config,
                     with_properties,
-                    &mut format_encode_options,
+                    &mut format_encode_options_to_consume,
                 )
                 .await?
             };
@@ -414,23 +412,26 @@ pub(crate) async fn bind_columns_from_source(
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
                     cdc_source_job: create_cdc_source_job,
+                    format_encode_options,
                     ..Default::default()
                 },
             )
         }
         (Format::Plain, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options)?;
+                get_schema_location(&mut format_encode_options_to_consume)?;
             let avro_schema = AvroSchema {
                 row_schema_location,
                 use_schema_registry,
             };
 
-            let key_message_name = get_key_message_name(&mut format_encode_options);
-            let message_name =
-                try_consume_string_from_options(&mut format_encode_options, MESSAGE_NAME_KEY);
+            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
+            let message_name = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                MESSAGE_NAME_KEY,
+            );
             let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
                 avro_schema.use_schema_registry,
             )?;
             let stream_source_info = StreamSourceInfo {
@@ -442,6 +443,7 @@ pub(crate) async fn bind_columns_from_source(
                 key_message_name,
                 name_strategy: name_strategy
                     .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
+                format_encode_options,
                 ..Default::default()
             };
             (
@@ -449,7 +451,7 @@ pub(crate) async fn bind_columns_from_source(
                     extract_avro_table_schema(
                         &stream_source_info,
                         with_properties,
-                        &mut format_encode_options,
+                        &mut format_encode_options_to_consume,
                     )
                     .await?,
                 ),
@@ -457,13 +459,16 @@ pub(crate) async fn bind_columns_from_source(
             )
         }
         (Format::Plain, Encode::Csv) => {
-            let chars = consume_string_from_options(&mut format_encode_options, "delimiter")?.0;
+            let chars =
+                consume_string_from_options(&mut format_encode_options_to_consume, "delimiter")?.0;
             let delimiter =
                 get_delimiter(chars.as_str()).map_err(|e| RwError::from(e.to_string()))?;
-            let has_header =
-                try_consume_string_from_options(&mut format_encode_options, "without_header")
-                    .map(|s| s.0 == "false")
-                    .unwrap_or(true);
+            let has_header = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                "without_header",
+            )
+            .map(|s| s.0 == "false")
+            .unwrap_or(true);
 
             if is_kafka && has_header {
                 return Err(RwError::from(ProtocolError(
@@ -478,6 +483,7 @@ pub(crate) async fn bind_columns_from_source(
                     row_encode: EncodeType::Csv as i32,
                     csv_delimiter: delimiter as i32,
                     csv_has_header: has_header,
+                    format_encode_options,
                     ..Default::default()
                 },
             )
@@ -487,15 +493,16 @@ pub(crate) async fn bind_columns_from_source(
             StreamSourceInfo {
                 format: FormatType::Plain as i32,
                 row_encode: EncodeType::Bytes as i32,
+                format_encode_options,
                 ..Default::default()
             },
         ),
         (Format::Upsert, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options)?;
+            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             let columns = extract_json_table_schema(
                 &schema_config,
                 with_properties,
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
             )
             .await?;
 
@@ -505,26 +512,29 @@ pub(crate) async fn bind_columns_from_source(
                     format: FormatType::Upsert as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    format_encode_options,
                     ..Default::default()
                 },
             )
         }
         (Format::Upsert, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options)?;
+                get_schema_location(&mut format_encode_options_to_consume)?;
             let avro_schema = AvroSchema {
                 row_schema_location,
                 use_schema_registry,
             };
 
             let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
                 avro_schema.use_schema_registry,
             )?
             .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
-            let key_message_name = get_key_message_name(&mut format_encode_options);
-            let message_name =
-                try_consume_string_from_options(&mut format_encode_options, MESSAGE_NAME_KEY);
+            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
+            let message_name = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                MESSAGE_NAME_KEY,
+            );
 
             let stream_source_info = StreamSourceInfo {
                 key_message_name,
@@ -534,12 +544,13 @@ pub(crate) async fn bind_columns_from_source(
                 use_schema_registry: avro_schema.use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 name_strategy,
+                format_encode_options,
                 ..Default::default()
             };
             let columns = extract_avro_table_schema(
                 &stream_source_info,
                 with_properties,
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
             )
             .await?;
 
@@ -547,25 +558,26 @@ pub(crate) async fn bind_columns_from_source(
         }
 
         (Format::Debezium, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options)?;
+            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             (
                 extract_json_table_schema(
                     &schema_config,
                     with_properties,
-                    &mut format_encode_options,
+                    &mut format_encode_options_to_consume,
                 )
                 .await?,
                 StreamSourceInfo {
                     format: FormatType::Debezium as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    format_encode_options,
                     ..Default::default()
                 },
             )
         }
         (Format::Debezium, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options)?;
+                get_schema_location(&mut format_encode_options_to_consume)?;
             if !use_schema_registry {
                 return Err(RwError::from(ProtocolError(
                     "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
@@ -577,10 +589,13 @@ pub(crate) async fn bind_columns_from_source(
 
             // no need to check whether works schema registry because debezium avro always work with
             // schema registry
-            let name_strategy = get_sr_name_strategy_check(&mut format_encode_options, true)?;
-            let message_name =
-                try_consume_string_from_options(&mut format_encode_options, MESSAGE_NAME_KEY);
-            let key_message_name = get_key_message_name(&mut format_encode_options);
+            let name_strategy =
+                get_sr_name_strategy_check(&mut format_encode_options_to_consume, true)?;
+            let message_name = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                MESSAGE_NAME_KEY,
+            );
+            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
 
             let stream_source_info = StreamSourceInfo {
                 use_schema_registry,
@@ -591,13 +606,14 @@ pub(crate) async fn bind_columns_from_source(
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
                 key_message_name,
+                format_encode_options,
                 ..Default::default()
             };
 
             let full_columns = extract_debezium_avro_table_schema(
                 &stream_source_info,
                 with_properties,
-                &mut format_encode_options,
+                &mut format_encode_options_to_consume,
             )
             .await?;
 
@@ -608,41 +624,44 @@ pub(crate) async fn bind_columns_from_source(
             StreamSourceInfo {
                 format: FormatType::DebeziumMongo as i32,
                 row_encode: EncodeType::Json as i32,
+                format_encode_options,
                 ..Default::default()
             },
         ),
 
         (Format::Maxwell, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options)?;
+            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             (
                 extract_json_table_schema(
                     &schema_config,
                     with_properties,
-                    &mut format_encode_options,
+                    &mut format_encode_options_to_consume,
                 )
                 .await?,
                 StreamSourceInfo {
                     format: FormatType::Maxwell as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    format_encode_options,
                     ..Default::default()
                 },
             )
         }
 
         (Format::Canal, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options)?;
+            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             (
                 extract_json_table_schema(
                     &schema_config,
                     with_properties,
-                    &mut format_encode_options,
+                    &mut format_encode_options_to_consume,
                 )
                 .await?,
                 StreamSourceInfo {
                     format: FormatType::Canal as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    format_encode_options,
                     ..Default::default()
                 },
             )
@@ -655,12 +674,12 @@ pub(crate) async fn bind_columns_from_source(
         }
     };
 
-    if !format_encode_options.is_empty() {
+    if !format_encode_options_to_consume.is_empty() {
         let err_string = format!(
             "Get unknown format_encode_options for {:?} {:?}: {}",
             source_schema.format,
             source_schema.row_encode,
-            format_encode_options
+            format_encode_options_to_consume
                 .keys()
                 .map(|k| k.to_string())
                 .collect::<Vec<String>>()
@@ -777,7 +796,6 @@ pub(crate) async fn bind_source_pk(
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
-    let mut format_encode_options = WithOptions::try_from(source_schema.row_options())?;
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
@@ -797,12 +815,8 @@ pub(crate) async fn bind_source_pk(
                     )));
                 }
                 sql_defined_pk_names
-            } else if let Some(extracted_pk_names) = extract_upsert_avro_table_pk_columns(
-                source_info,
-                with_properties,
-                format_encode_options.inner_mut(),
-            )
-            .await?
+            } else if let Some(extracted_pk_names) =
+                extract_upsert_avro_table_pk_columns(source_info, with_properties).await?
             {
                 extracted_pk_names
             } else {
@@ -825,12 +839,8 @@ pub(crate) async fn bind_source_pk(
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                let pk_names = extract_debezium_avro_table_pk_columns(
-                    source_info,
-                    with_properties,
-                    format_encode_options.inner_mut(),
-                )
-                .await?;
+                let pk_names =
+                    extract_debezium_avro_table_pk_columns(source_info, with_properties).await?;
                 // extract pk(s) from schema registry
                 for pk_name in &pk_names {
                     columns
@@ -1284,10 +1294,6 @@ pub async fn handle_create_source(
         columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
         pk_column_ids,
         with_properties: with_options.into_inner().into_iter().collect(),
-        format_encode_options: WithOptions::try_from(source_schema.row_options())?
-            .into_inner()
-            .into_iter()
-            .collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
@@ -1433,6 +1439,7 @@ pub mod tests {
         // AwsAuth params exist in options.
         assert_eq!(
             source
+                .info
                 .format_encode_options
                 .get("aws.credentials.access_key_id")
                 .unwrap(),
@@ -1440,6 +1447,7 @@ pub mod tests {
         );
         assert_eq!(
             source
+                .info
                 .format_encode_options
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),

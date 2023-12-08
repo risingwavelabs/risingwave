@@ -65,6 +65,8 @@ message StreamSourceInfo {
   // Whether the stream source is a cdc source streaming job.
   // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
   bool cdc_source_job = 13;
+  // Options specified by user in the FORMAT ENCODE clause.
+  map<string, string> format_encode_options = 14;
 }
 
 message Source {
@@ -98,9 +100,6 @@ message Source {
 
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
-
-  // Options specified by the user in FORMAT ENCODE clause.
-  map<string, string> format_encode_options = 17;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;

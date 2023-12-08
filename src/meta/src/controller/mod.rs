@@ -150,7 +150,6 @@ impl From<ObjectModel<source::Model>> for PbSource {
             columns: value.0.columns.0,
             pk_column_ids: value.0.pk_column_ids.0,
             with_properties: value.0.with_properties.0,
-            format_encode_options: value.0.format_encode_options.0,
             owner: value.1.owner_id as _,
             info: value.0.source_info.map(|info| info.0),
             watermark_descs: value.0.watermark_descs.0,

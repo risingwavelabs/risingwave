@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use auto_enums::auto_enum;
@@ -872,11 +872,7 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(
-        info: &StreamSourceInfo,
-        with_properties: &HashMap<String, String>,
-        format_encode_options: Option<&mut BTreeMap<String, String>>,
-    ) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -920,14 +916,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(with_properties)?.clone();
                     config.client_config = SchemaRegistryAuth::from(with_properties);
                 } else {
-                    config.aws_auth_props = format_encode_options
-                        .map(|options| {
-                            serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(options).unwrap(),
-                            )
-                            .map_err(|e| anyhow::anyhow!(e))
-                        })
-                        .transpose()?;
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Avro(config)
             }
@@ -954,14 +948,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(with_properties)?.clone();
                     config.client_config = SchemaRegistryAuth::from(with_properties);
                 } else {
-                    config.aws_auth_props = format_encode_options
-                        .map(|options| {
-                            serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(options).unwrap(),
-                            )
-                            .map_err(|e| anyhow::anyhow!(e))
-                        })
-                        .transpose()?;
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Protobuf(config)
             }

@@ -533,12 +533,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
         table_name,
         columns,
         with_properties,
-        Some(
-            WithOptions::try_from(source_schema.row_options())?
-                .into_inner()
-                .into_iter()
-                .collect(),
-        ),
         pk_column_ids,
         row_id_index,
         Some(source_info),
@@ -617,7 +611,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
         table_name,
         columns,
         with_properties,
-        None,
         pk_column_ids,
         row_id_index,
         None,
@@ -634,7 +627,6 @@ fn gen_table_plan_inner(
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
     with_properties: HashMap<String, String>,
-    format_encode_options: Option<HashMap<String, String>>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -669,7 +661,6 @@ fn gen_table_plan_inner(
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         with_properties: with_properties.into_inner().into_iter().collect(),
-        format_encode_options: format_encode_options.unwrap(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
@@ -1229,6 +1220,7 @@ mod tests {
         // AwsAuth params exist in options.
         assert_eq!(
             source
+                .info
                 .format_encode_options
                 .get("aws.credentials.access_key_id")
                 .unwrap(),
@@ -1236,6 +1228,7 @@ mod tests {
         );
         assert_eq!(
             source
+                .info
                 .format_encode_options
                 .get("aws.credentials.secret_access_key")
                 .unwrap(),

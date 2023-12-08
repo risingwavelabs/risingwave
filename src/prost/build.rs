@@ -63,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
+        ".catalog.StreamSourceInfo",
     ];
 
     // Build protobuf structs.

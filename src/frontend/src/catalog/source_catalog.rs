@@ -37,7 +37,6 @@ pub struct SourceCatalog {
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub with_properties: BTreeMap<String, String>,
-    pub format_encode_options: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
@@ -63,7 +62,6 @@ impl SourceCatalog {
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
             pk_column_ids: self.pk_col_ids.iter().map(Into::into).collect(),
             with_properties: self.with_properties.clone().into_iter().collect(),
-            format_encode_options: self.format_encode_options.clone().into_iter().collect(),
             owner: self.owner,
             info: Some(self.info.clone()),
             watermark_descs: self.watermark_descs.clone(),
@@ -96,8 +94,6 @@ impl From<&PbSource> for SourceCatalog {
             .map(Into::into)
             .collect();
         let with_properties = WithOptions::new(prost.with_properties.clone()).into_inner();
-        let format_encode_options =
-            WithOptions::new(prost.format_encode_options.clone()).into_inner();
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
@@ -125,7 +121,6 @@ impl From<&PbSource> for SourceCatalog {
             info: prost.info.clone().unwrap(),
             row_id_index,
             with_properties,
-            format_encode_options,
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),

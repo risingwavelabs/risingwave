@@ -304,7 +304,7 @@ mod tests {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &props, None)?;
+        let parser_config = SpecificParserConfig::new(&info, &props)?;
         let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?

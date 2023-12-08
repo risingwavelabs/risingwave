@@ -102,8 +102,7 @@ impl SourceDescBuilder {
     pub fn build(mut self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config =
-            SpecificParserConfig::new(&self.source_info, &self.with_properties, None)?;
+        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let is_new_fs_source =
             ConnectorProperties::is_new_fs_connector_hash_map(&self.with_properties);
@@ -132,8 +131,7 @@ impl SourceDescBuilder {
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let parser_config =
-            SpecificParserConfig::new(&self.source_info, &self.with_properties, None)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
             &parser_config.protocol_config,
