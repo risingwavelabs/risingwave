@@ -52,16 +52,20 @@ impl Rule for ApplyLimitTransposeRule {
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
+        if max_one_row {
+            return None;
+        }
+
         let logical_limit: &LogicalLimit = right.as_logical_limit()?;
+        if logical_limit.check_exceeding {
+            return None;
+        }
+
         let limit_input = logical_limit.input();
         let limit = logical_limit.limit();
         let offset = logical_limit.offset();
 
         let apply_left_len = left.schema().len();
-
-        if max_one_row {
-            return None;
-        }
 
         let new_apply = LogicalApply::new(
             left,

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use paste::paste;
-mod max_one_row_visitor;
-pub use max_one_row_visitor::*;
+mod apply_visitor;
+pub use apply_visitor::*;
 mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
