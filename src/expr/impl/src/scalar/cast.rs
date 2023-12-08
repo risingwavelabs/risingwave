@@ -28,6 +28,7 @@ use risingwave_expr::expr::{
 };
 use risingwave_expr::{function, ExprError, Result};
 use risingwave_pb::expr::expr_node::PbType;
+use thiserror_ext::AsReport;
 
 #[function("cast(varchar) -> *int")]
 #[function("cast(varchar) -> decimal")]
@@ -52,7 +53,7 @@ where
 #[function("pgwire_recv(bytea) -> int8")]
 pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
     let fixed_length =
-        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_string().into()))?;
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
     Ok(i64::from_be_bytes(fixed_length))
 }
 

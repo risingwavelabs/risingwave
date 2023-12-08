@@ -17,11 +17,11 @@ use auto_impl::auto_impl;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use thiserror_ext::AsReport;
 
 use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
 use crate::ExprError;
-use thiserror_ext::AsReport;
 
 /// Report an error during evaluation.
 #[auto_impl(&, Arc)]

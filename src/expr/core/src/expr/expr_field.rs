@@ -89,7 +89,8 @@ impl Build for FieldExpression {
         let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
-        let index = Datum::from_protobuf(value, &DataType::Int32).context("Failed to deserialize i32")?
+        let index = Datum::from_protobuf(value, &DataType::Int32)
+            .context("Failed to deserialize i32")?
             .unwrap()
             .as_int32()
             .to_owned();

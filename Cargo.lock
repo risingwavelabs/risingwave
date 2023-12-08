@@ -7964,6 +7964,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-stream",
  "tracing",
  "tracing-futures",

@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::call_method;
@@ -50,7 +51,7 @@ impl JavaVmWrapper {
         } else {
             tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
             let path = std::env::current_exe()
-                .map_err(|e| format!("unable to get path of current_exe: {:?}", e))?
+                .map_err(|e| format!("unable to get path of current_exe: {:?}", e.as_report()))?
                 .parent()
                 .expect("not root")
                 .join("./libs");
@@ -114,12 +115,12 @@ impl JavaVmWrapper {
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder
             .build()
-            .map_err(|e| format!("invalid jvm args: {:?}", e))?;
+            .map_err(|e| format!("invalid jvm args: {:?}", e.as_report()))?;
 
         // Create a new VM
         let jvm = match JavaVM::new(jvm_args) {
             Err(err) => {
-                tracing::error!("fail to new JVM {:?}", err);
+                tracing::error!("fail to new JVM {:?}", err.as_report());
                 return Err("fail to new JVM".to_string());
             }
             Ok(jvm) => jvm,
@@ -128,7 +129,7 @@ impl JavaVmWrapper {
         tracing::info!("initialize JVM successfully");
 
         register_native_method_for_jvm(&jvm)
-            .map_err(|e| format!("failed to register native method: {:?}", e))?;
+            .map_err(|e| format!("failed to register native method: {:?}", e.as_report()))?;
 
         Ok(jvm)
     }
@@ -137,11 +138,11 @@ impl JavaVmWrapper {
 pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
     let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))?;
+        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e.as_report()))?;
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
-        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))?;
+        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e.as_report()))?;
     use crate::*;
     macro_rules! gen_native_method_array {
         () => {{
@@ -164,7 +165,9 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         }
     }
     env.register_native_methods(binding_class, &gen_native_method_array!())
-        .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))?;
+        .inspect_err(|e| {
+            tracing::error!("jvm register native methods error: {:?}", e.as_report())
+        })?;
 
     tracing::info!("register native methods for jvm successfully");
     Ok(())
@@ -194,7 +197,7 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
             match result {
                 Ok(ret) => ret,
                 Err(e) => {
-                    error!("failed to collect jvm stats: {:?}", e);
+                    error!("failed to collect jvm stats: {:?}", e.as_report());
                     (0, 0)
                 }
             }

@@ -39,6 +39,7 @@ pub enum ErrorInner {
     Arrow(#[from] arrow_schema::ArrowError),
 
     #[error("UDF unsupported: {0}")]
+    // TODO: error-handling
     Unsupported(String),
 
     #[error("UDF service returned no data")]

@@ -15,8 +15,8 @@
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use tokio::sync::OnceCell;
 use thiserror_ext::AsReport;
+use tokio::sync::OnceCell;
 
 use crate::common::hummock_service::{HummockServiceOpts, Metrics};
 use crate::common::meta_service::MetaServiceOpts;
