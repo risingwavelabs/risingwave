@@ -483,7 +483,7 @@ enum StreamScanType {
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 
-  // ARRANGEMENT_BACKFILL corresponds to the `ArrangementBackfillExecutor`.
+  // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
 }
 
