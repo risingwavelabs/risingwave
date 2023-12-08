@@ -22,7 +22,6 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::stream_scan_node::UpstreamTable;
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
@@ -304,14 +303,11 @@ impl StreamTableScan {
             .collect_vec();
 
         // This refers to the output indices of the originating stream.
-        let upstream_table = match self.stream_scan_type {
-            StreamScanType::ArrangementBackfill => {
-                let upstream_table_catalog = self.get_upstream_state_table().clone();
-                Some(UpstreamTable::ArrangementTable(
-                    upstream_table_catalog.to_internal_table_prost(),
-                ))
-            }
-            _ => Some(UpstreamTable::TableDesc(self.core.table_desc.to_protobuf())),
+        let upstream_table_catalog = self.get_upstream_state_table().clone();
+        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+            Some(upstream_table_catalog.to_internal_table_prost())
+        } else {
+            None
         };
 
         let node_body = PbNodeBody::StreamScan(StreamScanNode {
@@ -320,8 +316,10 @@ impl StreamTableScan {
             // The column indices need to be forwarded to the downstream
             output_indices,
             upstream_column_ids,
+            // The table desc used by backfill executor
+            table_desc: Some(self.core.table_desc.to_protobuf()),
             state_table: Some(catalog),
-            upstream_table,
+            arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             ..Default::default()
         });
