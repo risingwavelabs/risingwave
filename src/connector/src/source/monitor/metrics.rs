@@ -112,7 +112,7 @@ impl SourceMetrics {
             exponential_buckets(1.0, 2.0, 20).unwrap(), // max 1048s
         );
         let direct_cdc_event_lag_latency =
-            register_histogram_vec_with_registry!(opts, &["split_id"], registry).unwrap();
+            register_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
 
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {

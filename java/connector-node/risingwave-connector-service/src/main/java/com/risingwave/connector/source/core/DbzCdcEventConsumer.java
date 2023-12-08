@@ -115,11 +115,15 @@ public class DbzCdcEventConsumer
                     committer.markProcessed(event);
                     continue;
                 }
-                long sourceTsMs = ((Struct) record.value()).getStruct("source").getInt64("ts_ms");
+                // get upstream event time from the "source" field
+                var sourceStruct = ((Struct) record.value()).getStruct("source");
+                long sourceTsMs =
+                        sourceStruct == null
+                                ? System.currentTimeMillis()
+                                : sourceStruct.getInt64("ts_ms");
                 byte[] payload =
                         converter.fromConnectData(
                                 record.topic(), record.valueSchema(), record.value());
-
                 msgBuilder
                         .setFullTableName(fullTableName)
                         .setPayload(new String(payload, StandardCharsets.UTF_8))

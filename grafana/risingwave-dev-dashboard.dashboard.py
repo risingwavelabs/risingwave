@@ -977,8 +977,8 @@ def section_streaming_cdc(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('source_cdc_event_lag_duration_miliseconds_bucket')}[$__rate_interval])) by (le, split_id))",
-                                f"lag latency p{legend}" + " - {{split_id}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('source_cdc_event_lag_duration_miliseconds_bucket')}[$__rate_interval])) by (le, table_name))",
+                                f"lag p{legend}" + " - {{table_name}}",
                                 ),
                             [50, 99, "max"],
                         ),
