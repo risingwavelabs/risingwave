@@ -52,6 +52,7 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::alter_parallelism_request::PbParallelism;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -496,6 +497,19 @@ impl MetaClient {
             object: Some(object),
         };
         let resp = self.inner.alter_set_schema(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn alter_parallelism(
+        &self,
+        object: alter_parallelism_request::Object,
+        target_parallelism: PbParallelism,
+    ) -> Result<CatalogVersion> {
+        let request = AlterParallelismRequest {
+            object: Some(object),
+            parallelism: Some(target_parallelism),
+        };
+        let resp = self.inner.alter_parallelism(request).await?;
         Ok(resp.version)
     }
 
@@ -1864,7 +1878,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
-             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
+            ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1874,6 +1888,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
+            ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

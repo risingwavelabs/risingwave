@@ -36,6 +36,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
+mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
@@ -494,6 +495,18 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
+                StatementType::ALTER_TABLE,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
                 StatementType::ALTER_TABLE,
             )
             .await

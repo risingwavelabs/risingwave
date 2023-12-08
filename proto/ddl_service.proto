@@ -216,6 +216,31 @@ message AlterSetSchemaResponse {
   uint64 version = 2;
 }
 
+message AlterParallelismRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 sink_id = 2;
+  }
+
+  message FixedParallelism {
+    uint32 parallelism = 20;
+  }
+
+  message AutoParallelism {
+    // reserved
+  }
+
+  oneof parallelism {
+    AutoParallelism auto = 10;
+    FixedParallelism fixed = 11;
+  }
+}
+
+message AlterParallelismResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
@@ -401,6 +426,7 @@ service DdlService {
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
+  rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

@@ -20,7 +20,10 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName};
+use crate::ast::{
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName,
+    SetVariableValue, SetVariableValueSingle,
+};
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,6 +85,8 @@ pub enum AlterTableOperation {
     ChangeOwner { new_owner_name: Ident },
     /// `SET SCHEMA <schema_name>`
     SetSchema { new_schema_name: ObjectName },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism { parallelism: SetVariableValue },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -213,6 +218,11 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterTableOperation::SetParallelism {
+                parallelism: target_parallelism,
+            } => {
+                write!(f, "SET PARALLELISM TO {}", target_parallelism)
             }
         }
     }
