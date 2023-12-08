@@ -436,12 +436,7 @@ impl LogicalOptimizer {
         }
         // Simple Unnesting.
         plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
+        debug_assert!(!HasMaxOneRowApply().visit(plan.clone()));
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);

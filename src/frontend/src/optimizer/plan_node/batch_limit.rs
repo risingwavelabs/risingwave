@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
 use super::batch::prelude::*;
 use super::generic::PhysicalPlanRef;
-use super::utils::impl_distill_by_unit;
+use super::utils::Distill;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -31,23 +32,31 @@ use crate::optimizer::property::{Order, RequiredDist};
 pub struct BatchLimit {
     pub base: PlanBase<Batch>,
     core: generic::Limit<PlanRef>,
+
+    /// Whether to report an error when the number of rows from the input
+    /// exceeds the limit.
+    pub check_exceeding: bool,
 }
 
 impl BatchLimit {
-    pub fn new(core: generic::Limit<PlanRef>) -> Self {
+    pub fn new(core: generic::Limit<PlanRef>, check_exceeding: bool) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             core.input.distribution().clone(),
             core.input.order().clone(),
         );
-        BatchLimit { base, core }
+        BatchLimit {
+            base,
+            core,
+            check_exceeding,
+        }
     }
 
     fn two_phase_limit(&self, new_input: PlanRef) -> Result<PlanRef> {
         let new_limit = self.core.limit + self.core.offset;
         let new_offset = 0;
         let logical_partial_limit = generic::Limit::new(new_input.clone(), new_limit, new_offset);
-        let batch_partial_limit = Self::new(logical_partial_limit);
+        let batch_partial_limit = Self::new(logical_partial_limit, self.check_exceeding);
         let any_order = Order::any();
 
         let single_dist = RequiredDist::single();
@@ -79,11 +88,16 @@ impl PlanTreeNodeUnary for BatchLimit {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core, self.check_exceeding)
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
-impl_distill_by_unit!(BatchLimit, core, "BatchLimit");
+
+impl Distill for BatchLimit {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        self.core.distill_inner("BatchLimit", self.check_exceeding)
+    }
+}
 
 impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -96,6 +110,7 @@ impl ToBatchPb for BatchLimit {
         NodeBody::Limit(LimitNode {
             limit: self.core.limit,
             offset: self.core.offset,
+            check_exceeding: self.check_exceeding,
         })
     }
 }

@@ -1338,6 +1338,10 @@ impl ToStream for LogicalJoin {
         {
             Ok(dynamic_filter)
         } else {
+            // Attempt to convert the inputs first to provide more accurate error reporting.
+            let _ = self.left().to_stream(ctx)?;
+            let _ = self.right().to_stream(ctx)?;
+
             Err(RwError::from(ErrorCode::NotSupported(
                 "streaming nested-loop join".to_string(),
                 // TODO: replace the link with user doc

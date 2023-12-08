@@ -34,7 +34,13 @@ impl Rule for BatchPushLimitToScanRule {
         if scan.limit().is_some() {
             return None;
         }
-        let pushed_limit = limit.limit() + limit.offset();
+        let pushed_limit = if limit.check_exceeding {
+            // If to check exceeding, we have to fetch at least one more row
+            // to avoid false negative.
+            limit.limit() + limit.offset() + 1
+        } else {
+            limit.limit() + limit.offset()
+        };
         let mut scan_core = scan.core().clone();
         scan_core.chunk_size = Some((u32::MAX as u64).min(pushed_limit) as u32);
         let new_scan = BatchSeqScan::new_with_dist(

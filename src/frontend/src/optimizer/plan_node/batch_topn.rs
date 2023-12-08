@@ -54,7 +54,7 @@ impl BatchTopN {
         let new_offset = 0;
         let partial_input: PlanRef = if input.order().satisfies(&self.core.order) {
             let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
-            let batch_partial_limit = BatchLimit::new(logical_partial_limit);
+            let batch_partial_limit = BatchLimit::new(logical_partial_limit, false);
             batch_partial_limit.into()
         } else {
             let logical_partial_topn =
