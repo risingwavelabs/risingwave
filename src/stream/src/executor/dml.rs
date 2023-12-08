@@ -324,7 +324,8 @@ mod tests {
 
         // The first barrier
         tx.push_barrier(1, false);
-        dml_executor.next().await.unwrap().unwrap();
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
 
         // Messages from upstream streaming executor
         tx.push_chunk(stream_chunk1);
@@ -343,6 +344,8 @@ mod tests {
         // we need to spawn a task here to avoid dead lock.
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
+            // a barrier to trigger batch group flush
+            tx.push_barrier(2, false);
         });
 
         // Consume the 1st message from upstream executor
@@ -397,5 +400,8 @@ mod tests {
                 U+ 2 22",
             )
         );
+
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
     }
 }
