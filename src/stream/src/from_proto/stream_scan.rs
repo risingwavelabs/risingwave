@@ -80,7 +80,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
 
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+            StreamScanType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
@@ -138,7 +138,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .collect_vec();
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
-                // TODO: refactor it with from_table_catalog in the future.
 
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
@@ -149,66 +148,82 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     None
                 };
 
-                if node.stream_scan_type() == StreamScanType::Backfill {
-                    let upstream_table = StorageTable::new_partial(
-                        state_store.clone(),
-                        table_id,
-                        column_descs,
-                        column_ids,
-                        table_pk_order_types,
-                        table_pk_indices,
-                        distribution,
-                        table_option,
-                        value_indices,
-                        prefix_hint_len,
-                        versioned,
-                    );
+                // TODO: refactor it with from_table_catalog in the future.
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
+                    table_id,
+                    column_descs,
+                    column_ids,
+                    table_pk_order_types,
+                    table_pk_indices,
+                    distribution,
+                    table_option,
+                    value_indices,
+                    prefix_hint_len,
+                    versioned,
+                );
 
-                    BackfillExecutor::new(
-                        params.info,
-                        upstream_table,
-                        upstream,
-                        state_table,
-                        output_indices,
-                        progress,
-                        stream.streaming_metrics.clone(),
-                        params.env.config().developer.chunk_size,
-                        node.rate_limit.map(|x| x as _),
-                    )
-                    .boxed()
-                } else {
-                    let upstream_table = node.get_arrangement_table().unwrap();
-                    let versioned = upstream_table.get_version().is_ok();
+                BackfillExecutor::new(
+                    params.info,
+                    upstream_table,
+                    upstream,
+                    state_table,
+                    output_indices,
+                    progress,
+                    stream.streaming_metrics.clone(),
+                    params.env.config().developer.chunk_size,
+                    node.rate_limit.map(|x| x as _),
+                )
+                .boxed()
+            }
+            StreamScanType::ArrangementBackfill => {
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
 
-                    macro_rules! new_executor {
-                        ($SD:ident) => {{
-                            let upstream_table =
-                                ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
-                                    upstream_table,
-                                    state_store.clone(),
-                                    vnodes,
-                                    column_ids,
-                                )
-                                .await;
-                            ArrangementBackfillExecutor::<_, $SD>::new(
-                                params.info,
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+
+                let state_table = node.get_state_table().unwrap();
+                let state_table = StateTable::from_table_catalog(
+                    state_table,
+                    state_store.clone(),
+                    vnodes.clone(),
+                )
+                .await;
+
+                let upstream_table = node.get_arrangement_table().unwrap();
+                let versioned = upstream_table.get_version().is_ok();
+
+                macro_rules! new_executor {
+                    ($SD:ident) => {{
+                        let upstream_table =
+                            ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
                                 upstream_table,
-                                upstream,
-                                state_table.unwrap(),
-                                output_indices,
-                                progress,
-                                schema,
-                                stream.streaming_metrics.clone(),
-                                params.env.config().developer.chunk_size,
+                                state_store.clone(),
+                                vnodes,
+                                column_ids,
                             )
-                            .boxed()
-                        }};
-                    }
-                    if versioned {
-                        new_executor!(ColumnAwareSerde)
-                    } else {
-                        new_executor!(BasicSerde)
-                    }
+                            .await;
+                        ArrangementBackfillExecutor::<_, $SD>::new(
+                            params.info,
+                            upstream_table,
+                            upstream,
+                            state_table,
+                            output_indices,
+                            progress,
+                            schema,
+                            stream.streaming_metrics.clone(),
+                            params.env.config().developer.chunk_size,
+                        )
+                        .boxed()
+                    }};
+                }
+                if versioned {
+                    new_executor!(ColumnAwareSerde)
+                } else {
+                    new_executor!(BasicSerde)
                 }
             }
             StreamScanType::Unspecified => unreachable!(),
