@@ -256,6 +256,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         self.state_table.commit(epoch).await?;
         Ok(())
     }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_table.try_flush().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
