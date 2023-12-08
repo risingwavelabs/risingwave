@@ -14,6 +14,8 @@
 use super::DataType;
 
 /// A struct can implements `Fields` when if can be represented as a relational Row.
+///
+/// Can be automatically derived with [`#[derive(Fields)]`](super::Fields!).
 pub trait Fields {
     /// When the struct being converted to an [`Row`](crate::row::Row) or a [`DataChunk`](crate::array::DataChunk), it schema must be consistent with the `fields` call.
     fn fields() -> Vec<(&'static str, DataType)>;
