@@ -316,8 +316,9 @@ impl StageRunner {
         if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
                 error = %e.as_report(),
-                "Stage {:?}-{:?} failed to schedule tasks",
-                self.stage.query_id, self.stage.id
+                query_id = ?self.stage.query_id,
+                stage_id = ?self.stage.id,
+                "Failed to schedule tasks"
             );
             self.send_event(QueryMessage::Stage(Failed {
                 id: self.stage.id,

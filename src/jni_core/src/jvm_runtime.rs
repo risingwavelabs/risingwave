@@ -120,7 +120,7 @@ impl JavaVmWrapper {
         // Create a new VM
         let jvm = match JavaVM::new(jvm_args) {
             Err(err) => {
-                tracing::error!("fail to new JVM {:?}", err.as_report());
+                tracing::error!(error = ?err.as_report(), "fail to new JVM");
                 return Err("fail to new JVM".to_string());
             }
             Ok(jvm) => jvm,
@@ -138,11 +138,11 @@ impl JavaVmWrapper {
 pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
     let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e.as_report()))?;
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))?;
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
-        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e.as_report()))?;
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm find class error"))?;
     use crate::*;
     macro_rules! gen_native_method_array {
         () => {{
@@ -165,9 +165,9 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         }
     }
     env.register_native_methods(binding_class, &gen_native_method_array!())
-        .inspect_err(|e| {
-            tracing::error!("jvm register native methods error: {:?}", e.as_report())
-        })?;
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "jvm register native methods error"),
+        )?;
 
     tracing::info!("register native methods for jvm successfully");
     Ok(())
@@ -197,7 +197,7 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
             match result {
                 Ok(ret) => ret,
                 Err(e) => {
-                    error!("failed to collect jvm stats: {:?}", e.as_report());
+                    error!(error = ?e.as_report(), "failed to collect jvm stats");
                     (0, 0)
                 }
             }

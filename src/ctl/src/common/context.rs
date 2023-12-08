@@ -69,9 +69,9 @@ impl CtlContext {
                 .await
             {
                 tracing::warn!(
-                    "failed to unregister ctl worker {}: {}",
-                    meta_client.worker_id(),
-                    e.as_report()
+                    error = %e.as_report(),
+                    worker_id = %meta_client.worker_id(),
+                    "failed to unregister ctl worker",
                 );
             }
         }

@@ -324,8 +324,8 @@ impl QueryRunner {
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
                         error = %reason.as_report(),
-                        "Query stage {:?}-{:?} failed:.",
-                        self.query.query_id, id
+                        query_id = ?self.query.query_id,
+                        stage_id = ?id,
                     );
 
                     self.clean_all_stages(Some(reason)).await;

@@ -65,9 +65,9 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
                 }
                 Err(err) => {
                     tracing::error!(
-                        "Failed to get profiling result from {} with error {}",
-                        node_name,
-                        err.as_report()
+                        error = %err.as_report(),
+                        %node_name,
+                        "Failed to get profiling result",
                     );
                 }
             }
@@ -114,9 +114,9 @@ pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::
 
             if let Err(err) = response {
                 tracing::error!(
-                    "Failed to dump profile on {} with error {}",
-                    node_name,
-                    err.as_report()
+                    error = %err.as_report(),
+                    %node_name,
+                    "Failed to dump profile",
                 );
             }
             Ok::<_, anyhow::Error>(())
