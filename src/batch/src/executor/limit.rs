@@ -35,6 +35,8 @@ pub struct LimitExecutor {
     limit: usize,
     /// offset parameter
     offset: usize,
+    /// Whether to report an error when the number of rows from the input
+    /// exceeds the limit.
     check_exceeding: bool,
     /// Identity string of the executor
     identity: String,
