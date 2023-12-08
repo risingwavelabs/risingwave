@@ -24,7 +24,7 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -82,13 +82,16 @@ pub fn gen_sink_plan(
 
     // Used for debezium's table name
     let sink_from_table_name;
+    let sink_form_is_from;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
+            sink_form_is_from = true;
             Box::new(gen_sink_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
+            sink_form_is_from = false;
             query
         }
     };
@@ -150,6 +153,20 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
+    let without_backfill = match with_options.get(SINK_WITHOUT_BACKFILL) {
+        Some(flag) if flag.eq("true") => {
+            if sink_form_is_from {
+                true
+            } else {
+                return Err(ErrorCode::BindError(
+                    "`without_backfill` only support `create sink from mv or table`".to_string(),
+                )
+                .into());
+            }
+        }
+        _ => false,
+    };
+
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -158,6 +175,7 @@ pub fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
+        without_backfill,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();

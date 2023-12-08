@@ -46,6 +46,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
@@ -312,10 +313,18 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, StreamScanType::Backfill)
+    }
+
+    fn gen_optimized_stream_plan_inner(
+        &mut self,
+        emit_on_window_close: bool,
+        stream_scan_type: StreamScanType,
+    ) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let mut plan = self.gen_stream_plan(emit_on_window_close)?;
+        let mut plan = self.gen_stream_plan(emit_on_window_close, stream_scan_type)?;
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
@@ -363,7 +372,11 @@ impl PlanRoot {
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    fn gen_stream_plan(
+        &mut self,
+        emit_on_window_close: bool,
+        stream_scan_type: StreamScanType,
+    ) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -414,7 +427,10 @@ impl PlanRoot {
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 let plan = plan.to_stream_with_dist_required(
                     &self.required_dist,
-                    &mut ToStreamContext::new(emit_on_window_close),
+                    &mut ToStreamContext::new_with_stream_scan_type(
+                        emit_on_window_close,
+                        stream_scan_type,
+                    ),
                 )?;
                 stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)
             }
@@ -705,8 +721,15 @@ impl PlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
+        without_backfail: bool,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
+        let stream_scan_type = if without_backfail {
+            StreamScanType::UpstreamOnly
+        } else {
+            StreamScanType::Backfill
+        };
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
 
         StreamSink::create(
             stream_plan,
