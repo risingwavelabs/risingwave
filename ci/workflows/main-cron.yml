@@ -469,7 +469,12 @@ steps:
     retry: *auto-retry
 
   - label: "GCS source check on AWS (json parser)"
+    key: "gcs-source-tests"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'gcs_source.py json'"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-gcs-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)gcs-source-tests?(,|$$)/
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:

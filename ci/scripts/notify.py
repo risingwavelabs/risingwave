@@ -20,6 +20,7 @@ MAIN_CRON_TEST_MAP = {
     "e2e-clickhouse-sink-tests": ["bohan"],
     "e2e-pulsar-sink-tests": ["renjie"],
     "s3-source-test-for-opendal-fs-engine": ["congyi"],
+    "gcs-source-test": ["congyi"],
     "pulsar-source-tests": ["renjie"],
     "connector-node-integration-test": ["siyuan"],
 }
