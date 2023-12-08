@@ -208,8 +208,8 @@ It only indicates the physical clustering of the data, which may improve the per
                     parallelism: parallelism.get(),
                 });
         // Set the timezone for the stream environment
-        let env = graph.env.as_mut().unwrap();
-        env.timezone = context.get_session_timezone();
+        let ctx = graph.ctx.as_mut().unwrap();
+        ctx.timezone = context.get_session_timezone();
 
         (table, graph, can_run_in_background)
     };

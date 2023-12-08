@@ -840,8 +840,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
 }
 
-// The environment associated with a stream plan
-message StreamEnvironment {
+// The streaming context associated with a stream plan
+message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
 }
@@ -889,7 +889,7 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
-  StreamEnvironment env = 5;
+  StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
 }
