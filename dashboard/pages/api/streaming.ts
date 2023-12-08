@@ -108,16 +108,18 @@ type SourceWrap = Source & {
 }
 
 export async function getSources() {
-  let sourceList: SourceWrap[] = (await api.get("/api/sources")).map(
-    Source.fromJSON
-  ).map((src) => Object.defineProperty(src, 'properties', {
-    get: function() {
-      return this.with_properties
-    },
-    set: function(value) {
-      this.with_properties = value
-    }
-  }))
+  let sourceList: SourceWrap[] = (await api.get("/api/sources"))
+    .map(Source.fromJSON)
+    .map((src) =>
+      Object.defineProperty(src, "properties", {
+        get: function () {
+          return this.with_properties
+        },
+        set: function (value) {
+          this.with_properties = value
+        },
+      })
+    )
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
