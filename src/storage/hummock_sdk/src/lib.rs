@@ -288,7 +288,7 @@ impl EpochWithGap {
                 EpochWithGap::new_max_epoch()
             } else {
                 debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
-                EpochWithGap(epoch + spill_offset)
+                EpochWithGap(epoch + spill_offset as u64)
             }
         }
         #[cfg(feature = "enable_test_epoch")]
