@@ -89,11 +89,11 @@ impl HummockJavaBindingIterator {
 
         for vnode in read_plan.vnode_ids {
             let vnode = VirtualNode::from_index(vnode as usize);
-            let key_range = table_key_range_from_prost(vnode, key_range.clone());
+            let mut key_range = table_key_range_from_prost(vnode, key_range.clone());
             let read_version_tuple = get_committed_read_version_tuple(
                 pin_version.clone(),
                 table_id,
-                &key_range,
+                &mut key_range,
                 read_plan.epoch,
             );
             let stream = reader

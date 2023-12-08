@@ -1218,7 +1218,7 @@ async fn test_hummock_version_reader() {
                 let read_snapshot = read_filter_for_local(
                     epoch1,
                     TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
+                    &mut (Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
                 .unwrap();
@@ -1246,7 +1246,7 @@ async fn test_hummock_version_reader() {
                 let read_snapshot = read_filter_for_local(
                     epoch2,
                     TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
+                    &mut (Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
                 .unwrap();
@@ -1274,7 +1274,7 @@ async fn test_hummock_version_reader() {
                 let read_snapshot = read_filter_for_local(
                     epoch2,
                     TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
+                    &mut (Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
                 .unwrap();
@@ -1337,7 +1337,7 @@ async fn test_hummock_version_reader() {
                     let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch1,
                         TEST_TABLE_ID,
-                        &(Unbounded, Unbounded),
+                        &mut (Unbounded, Unbounded),
                         vec![
                             basic_read_version.clone(),
                             read_version_2.clone(),
@@ -1373,7 +1373,7 @@ async fn test_hummock_version_reader() {
                     let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch2,
                         TEST_TABLE_ID,
-                        &(Unbounded, Unbounded),
+                        &mut (Unbounded, Unbounded),
                         vec![
                             basic_read_version.clone(),
                             read_version_2.clone(),
@@ -1414,7 +1414,7 @@ async fn test_hummock_version_reader() {
                     let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch2,
                         TEST_TABLE_ID,
-                        &(Unbounded, Unbounded),
+                        &mut (Unbounded, Unbounded),
                         vec![
                             basic_read_version.clone(),
                             read_version_2.clone(),
@@ -1451,7 +1451,7 @@ async fn test_hummock_version_reader() {
                     let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch3,
                         TEST_TABLE_ID,
-                        &(Unbounded, Unbounded),
+                        &mut (Unbounded, Unbounded),
                         vec![
                             basic_read_version.clone(),
                             read_version_2.clone(),
@@ -1493,7 +1493,7 @@ async fn test_hummock_version_reader() {
                         let (imms, ssts, watermark) = read_filter_for_batch(
                             epoch2,
                             TEST_TABLE_ID,
-                            &(Unbounded, Unbounded),
+                            &mut (Unbounded, Unbounded),
                             vec![
                                 basic_read_version.clone(),
                                 read_version_2.clone(),
@@ -1529,7 +1529,7 @@ async fn test_hummock_version_reader() {
                         let (imms, ssts, watermark) = read_filter_for_batch(
                             epoch3,
                             TEST_TABLE_ID,
-                            &(Unbounded, Unbounded),
+                            &mut (Unbounded, Unbounded),
                             vec![
                                 basic_read_version.clone(),
                                 read_version_2.clone(),

@@ -466,7 +466,7 @@ impl HummockReadVersion {
 pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
-    key_range: &TableKeyRange,
+    key_range: &mut TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
 ) -> StorageResult<(
     Vec<ImmutableMemtable>,
@@ -540,10 +540,18 @@ pub fn read_filter_for_batch(
 pub fn read_filter_for_local(
     epoch: HummockEpoch,
     table_id: TableId,
-    table_key_range: &TableKeyRange,
+    table_key_range: &mut TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
 ) -> StorageResult<ReadVersionTuple> {
     let read_version_guard = read_version.read();
+
+    let committed_version = read_version_guard.committed().clone();
+
+    let table_watermark = read_version_guard
+        .table_watermarks
+        .as_ref()
+        .and_then(|watermark| watermark.range_watermarks(epoch, table_key_range));
+
     let (imm_iter, sst_iter) =
         read_version_guard
             .staging()
@@ -552,11 +560,8 @@ pub fn read_filter_for_local(
     Ok((
         imm_iter.cloned().collect_vec(),
         sst_iter.cloned().collect_vec(),
-        read_version_guard.committed().clone(),
-        read_version_guard
-            .table_watermarks
-            .as_ref()
-            .and_then(|watermark| watermark.range_watermarks(epoch, table_key_range)),
+        committed_version,
+        table_watermark,
     ))
 }
 
@@ -1064,12 +1069,7 @@ impl HummockVersionReader {
         &self,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<ReadTableWatermark>,
-        ),
+        read_version_tuple: ReadVersionTuple,
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
         let (imms, uncommitted_ssts, committed_version, _) = read_version_tuple;

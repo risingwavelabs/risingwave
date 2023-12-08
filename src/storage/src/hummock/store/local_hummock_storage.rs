@@ -106,7 +106,7 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let table_key_range = (
+        let mut table_key_range = (
             Bound::Included(table_key.clone()),
             Bound::Included(table_key.clone()),
         );
@@ -114,7 +114,7 @@ impl LocalHummockStorage {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
+            &mut table_key_range,
             self.read_version.clone(),
         )?;
 
@@ -129,16 +129,18 @@ impl LocalHummockStorage {
 
     pub async fn iter_flushed(
         &self,
-        table_key_range: TableKeyRange,
+        mut table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
+            &mut table_key_range,
             self.read_version.clone(),
         )?;
+
+        let table_key_range = table_key_range;
 
         self.hummock_version_reader
             .iter(table_key_range, epoch, read_options, read_snapshot)
@@ -155,16 +157,18 @@ impl LocalHummockStorage {
 
     pub async fn iter_all(
         &self,
-        table_key_range: TableKeyRange,
+        mut table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
+            &mut table_key_range,
             self.read_version.clone(),
         )?;
+
+        let table_key_range = table_key_range;
 
         self.hummock_version_reader
             .iter_with_memtable(
@@ -179,7 +183,7 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        key_range: TableKeyRange,
+        mut key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         if self.mem_table.iter(key_range.clone()).next().is_some() {
@@ -189,9 +193,11 @@ impl LocalHummockStorage {
         let read_snapshot = read_filter_for_local(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
-            &key_range,
+            &mut key_range,
             self.read_version.clone(),
         )?;
+
+        let key_range = key_range;
 
         self.hummock_version_reader
             .may_exist(key_range, read_options, read_snapshot)

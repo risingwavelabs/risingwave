@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
-use std::ops::Bound::Included;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,7 +25,7 @@ use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 use tracing::debug;
 
-use crate::key::{vnode_range, TableKeyRange};
+use crate::key::{prefix_slice_with_vnode, vnode_range, TableKey, TableKeyRange};
 use crate::HummockEpoch;
 
 #[derive(Clone)]
@@ -91,23 +91,76 @@ impl TableWatermarksIndex {
     pub fn range_watermarks(
         &self,
         epoch: HummockEpoch,
-        table_key_range: &TableKeyRange,
+        key_range: &mut TableKeyRange,
     ) -> Option<ReadTableWatermark> {
         let mut ret = BTreeMap::new();
-        let (left, right) = vnode_range(table_key_range);
-        for i in left..right {
-            let vnode = VirtualNode::from_index(i);
+        let (left, right) = vnode_range(key_range);
+        if right - left == 1 {
+            // the table key range falls in a single vnode. No table watermark will be returned, and instead the key range
+            // will be modified.
+            let vnode = VirtualNode::from_index(left);
             if let Some(watermark) = self.table_watermark(vnode, epoch) {
-                assert!(ret.insert(vnode, watermark).is_none());
+                match self.watermark_direction {
+                    WatermarkDirection::Ascending => {
+                        let overwrite_start_key = match &key_range.0 {
+                            Included(start_key) | Excluded(start_key) => {
+                                start_key.key_part() < watermark
+                            }
+                            Unbounded => true,
+                        };
+                        if overwrite_start_key {
+                            let watermark_key =
+                                TableKey(prefix_slice_with_vnode(vnode, &watermark));
+                            let fully_filtered = match &key_range.1 {
+                                Included(end_key) => end_key < &watermark_key,
+                                Excluded(end_key) => end_key <= &watermark_key,
+                                Unbounded => false,
+                            };
+                            if fully_filtered {
+                                key_range.1 = Excluded(watermark_key.clone());
+                            }
+                            key_range.0 = Included(watermark_key);
+                        }
+                    }
+                    WatermarkDirection::Descending => {
+                        let overwrite_end_key = match &key_range.1 {
+                            Included(end_key) | Excluded(end_key) => end_key.key_part() > watermark,
+                            Unbounded => true,
+                        };
+                        if overwrite_end_key {
+                            let watermark_key =
+                                TableKey(prefix_slice_with_vnode(vnode, &watermark));
+                            let fully_filtered = match &key_range.0 {
+                                Included(start_key) => start_key > &watermark_key,
+                                Excluded(start_key) => start_key >= &watermark_key,
+                                Unbounded => false,
+                            };
+                            if fully_filtered {
+                                *key_range =
+                                    (Included(watermark_key.clone()), Excluded(watermark_key));
+                            } else {
+                                key_range.1 = Included(watermark_key);
+                            }
+                        }
+                    }
+                }
             }
-        }
-        if ret.is_empty() {
             None
         } else {
-            Some(ReadTableWatermark {
-                direction: self.direction(),
-                vnode_watermarks: ret,
-            })
+            for i in left..right {
+                let vnode = VirtualNode::from_index(i);
+                if let Some(watermark) = self.table_watermark(vnode, epoch) {
+                    assert!(ret.insert(vnode, watermark).is_none());
+                }
+            }
+            if ret.is_empty() {
+                None
+            } else {
+                Some(ReadTableWatermark {
+                    direction: self.direction(),
+                    vnode_watermarks: ret,
+                })
+            }
         }
     }
 
