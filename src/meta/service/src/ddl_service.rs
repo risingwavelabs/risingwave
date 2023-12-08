@@ -186,6 +186,7 @@ impl DdlService for DdlServiceImpl {
 
         match req.fragment_graph {
             None => {
+                // Deprecate this branch
                 let version = self
                     .ddl_controller
                     .run_command(DdlCommand::CreateSource(source))
