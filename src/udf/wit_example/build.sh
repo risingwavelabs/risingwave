@@ -28,8 +28,8 @@ if [ -z "$lang" ]; then
     exit 1
 fi
 
-if [ "$(wasm-tools -V)" != "wasm-tools 1.0.35" ]; then
-    echo "wasm-tools 1.0.35 is required"
+if [ "$(wasm-tools -V)" != "wasm-tools 1.0.54" ]; then
+    echo "wasm-tools 1.0.54 is required"
     exit 1
 fi
 
@@ -86,7 +86,7 @@ fi
 
 # (WASI adaptor) if file not found, download from
 if [ ! -f wasi_snapshot_preview1.reactor.wasm ]; then
-    wget https://github.com/bytecodealliance/wasmtime/releases/download/v10.0.1/wasi_snapshot_preview1.reactor.wasm
+    wget https://github.com/bytecodealliance/wasmtime/releases/download/v15.0.1/wasi_snapshot_preview1.reactor.wasm
 fi
 
 echo wasm-tools component new "my_udf.$lang.wasm" -o my_udf.component.wasm

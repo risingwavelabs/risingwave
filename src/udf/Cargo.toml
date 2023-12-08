@@ -20,7 +20,7 @@ base64 = "0.21"
 bytes = "1.4"
 cfg-or-panic = "0.2"
 futures-util = "0.3.28"
-itertools = "0.11"
+itertools = "0.12"
 risingwave_object_store = { workspace = true }
 static_assertions = "1"
 thiserror = "1"
@@ -31,8 +31,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tonic = { workspace = true }
 tracing = "0.1"
-wasmtime = { version = "10", features = ["component-model"] }
-wasmtime-wasi = { version = "10" }
+wasmtime = { version = "15", features = ["component-model"] }
+wasmtime-wasi = { version = "15" }
 
 [lints]
 workspace = true

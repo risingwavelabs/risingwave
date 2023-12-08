@@ -22,7 +22,10 @@ wit_bindgen::generate!({
     // optional, since there's only one world. We make it explicit here.
     world: "udf",
     // path is relative to Cargo.toml
-    path:"../../wit"
+    path: "../../wit",
+    exports: {
+        world: CountChar,
+    },
 });
 
 // Define a custom type and implement the generated `Udf` trait for it which
@@ -31,8 +34,6 @@ wit_bindgen::generate!({
 /// User defined function tou count number of specified characters.
 /// Ref <https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java>
 struct CountChar;
-
-export_udf!(CountChar);
 
 fn count_char(s: &str, char: &str) -> i64 {
     let mut count = 0;
@@ -46,7 +47,7 @@ fn count_char(s: &str, char: &str) -> i64 {
     count
 }
 
-impl Udf for CountChar {
+impl Guest for CountChar {
     fn eval(batch: RecordBatch) -> Result<RecordBatch, EvalErrno> {
         // Read data from IPC buffer
         let batch = arrow_ipc::reader::StreamReader::try_new(batch.as_slice(), None).unwrap();
@@ -105,14 +106,14 @@ impl Udf for CountChar {
     fn input_schema() -> Schema {
         vec![Field {
             name: "input".to_string(),
-            data_type: DataType::DtString,
+            data_type: DataType::Utf8,
         }]
     }
 
     fn output_schema() -> Schema {
         vec![Field {
             name: "result".to_string(),
-            data_type: DataType::DtI64,
+            data_type: DataType::Int64,
         }]
     }
 }

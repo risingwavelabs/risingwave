@@ -48,14 +48,14 @@ struct WasmState {
 
 impl WasmState {
     pub fn try_new() -> WasmUdfResult<Self> {
-        let mut table = wasmtime_wasi::preview2::Table::new();
+        let table = wasmtime_wasi::preview2::Table::new();
 
         let wasi_ctx = wasmtime_wasi::preview2::WasiCtxBuilder::new()
             // Note: panic message is printed, and only available in WASI.
             // TODO: redirect to tracing to make it clear it's from WASM.
             .inherit_stdout()
             .inherit_stderr()
-            .build(&mut table)?;
+            .build();
         Ok(Self { wasi_ctx, table })
     }
 }
@@ -211,7 +211,7 @@ impl WasmEngine {
         // So creating a Store is cheap?
 
         let mut store = Store::new(&self.engine, WasmState::try_new()?);
-        wasmtime_wasi::preview2::wasi::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
         let (_bindings, _instance) =
             component::Udf::instantiate_async(&mut store, &component, &linker).await?;
 
@@ -244,7 +244,7 @@ impl WasmEngine {
 
         let mut linker = Linker::new(&self.engine);
         let mut store = Store::new(&self.engine, WasmState::try_new()?);
-        wasmtime_wasi::preview2::wasi::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
         let (bindings, instance) =
             component::Udf::instantiate_async(&mut store, &component, &linker).await?;
 

@@ -10,8 +10,7 @@ TODO:
 - [wit-bindgen](https://github.com/bytecodealliance/wit-bindgen) CLI: to generate guest code from WIT file. (Not required for Rust guest)
 
 ```
-cargo install wasm-tools@1.0.35
-cargo install wit-bindgen-cli@0.8.0
+cargo install wasm-tools@1.0.54
 ```
 
 > **Note**
