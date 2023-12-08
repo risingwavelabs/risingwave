@@ -571,6 +571,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<K, S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| async { table.try_flush().await }),
+        )
+        .await?;
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let HashAggExecutor {
@@ -656,6 +665,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             yield Message::Chunk(chunk?);
                         }
                     }
+
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     Self::update_metrics(&this, &mut vars);

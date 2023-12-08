@@ -35,7 +35,7 @@ use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SyncedData, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -682,21 +682,22 @@ fn send_sync_result(
     });
 }
 
-fn to_sync_result(
-    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
-) -> HummockResult<SyncResult> {
-    match staging_sstable_infos {
-        Ok(staging_sstable_infos) => {
-            let sync_size = staging_sstable_infos
+fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResult> {
+    match result {
+        Ok(sync_data) => {
+            let sync_size = sync_data
+                .staging_ssts
                 .iter()
                 .map(StagingSstableInfo::imm_size)
                 .sum();
             Ok(SyncResult {
                 sync_size,
-                uncommitted_ssts: staging_sstable_infos
+                uncommitted_ssts: sync_data
+                    .staging_ssts
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

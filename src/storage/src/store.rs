@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
@@ -23,6 +24,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
@@ -159,6 +161,8 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
