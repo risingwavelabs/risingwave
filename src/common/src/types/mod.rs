@@ -68,6 +68,7 @@ mod to_binary;
 mod to_text;
 mod with_data_type;
 
+pub use fields::Fields;
 pub use risingwave_fields_derive::Fields;
 
 pub use self::datetime::{Date, Time, Timestamp};
@@ -87,7 +88,6 @@ pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
 pub use self::with_data_type::WithDataType;
-pub use fields::Fields;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;

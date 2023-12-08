@@ -14,10 +14,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::Data;
-use syn::DeriveInput;
-use syn::Field;
-use syn::Result;
+use syn::{Data, DeriveInput, Field, Result};
 
 #[proc_macro_derive(Fields)]
 pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
