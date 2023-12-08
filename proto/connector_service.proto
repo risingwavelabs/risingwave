@@ -159,6 +159,7 @@ message CdcMessage {
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
+  int64 source_ts_ms = 5;
 }
 
 enum SourceType {

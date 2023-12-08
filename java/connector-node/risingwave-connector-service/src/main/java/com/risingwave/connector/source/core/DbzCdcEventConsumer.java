@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -114,6 +115,7 @@ public class DbzCdcEventConsumer
                     committer.markProcessed(event);
                     continue;
                 }
+                long sourceTsMs = ((Struct) record.value()).getStruct("source").getInt64("ts_ms");
                 byte[] payload =
                         converter.fromConnectData(
                                 record.topic(), record.valueSchema(), record.value());
@@ -121,6 +123,7 @@ public class DbzCdcEventConsumer
                 msgBuilder
                         .setFullTableName(fullTableName)
                         .setPayload(new String(payload, StandardCharsets.UTF_8))
+                        .setSourceTsMs(sourceTsMs)
                         .build();
                 var message = msgBuilder.build();
                 LOG.debug("record => {}", message.getPayload());
