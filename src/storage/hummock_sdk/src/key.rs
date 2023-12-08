@@ -54,7 +54,17 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
         Unbounded => 0,
     };
     let right = match right {
-        Included(key) | Excluded(key) => key.vnode_part().to_index() + 1,
+        Included(key) => key.vnode_part().to_index() + 1,
+        Excluded(key) => {
+            let (vnode, inner_key) = key.split_vnode();
+            if inner_key.is_empty() {
+                // When the exclusive end key range contains only a vnode,
+                // the whole vnode is excluded.
+                vnode.to_index()
+            } else {
+                vnode.to_index() + 1
+            }
+        }
         Unbounded => VirtualNode::COUNT,
     };
     (left, right)
@@ -1095,5 +1105,32 @@ mod tests {
                 Excluded(concat(max_vnode, b""))
             )
         );
+    }
+
+    #[test]
+    fn test_single_vnode_range() {
+        let left_bound = vec![
+            Included(b"0".as_slice()),
+            Excluded(b"0".as_slice()),
+            Unbounded,
+        ];
+        let right_bound = vec![
+            Included(b"1".as_slice()),
+            Excluded(b"1".as_slice()),
+            Unbounded,
+        ];
+        for vnode in 0..VirtualNode::COUNT {
+            for left in &left_bound {
+                for right in &right_bound {
+                    assert_eq!(
+                        (vnode, vnode + 1),
+                        vnode_range(&map_table_key_range(prefixed_range_with_vnode::<&[u8]>(
+                            (*left, *right),
+                            VirtualNode::from_index(vnode)
+                        )))
+                    )
+                }
+            }
+        }
     }
 }
