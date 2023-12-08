@@ -14,7 +14,7 @@
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use risingwave_common::types::{FloatExt, Timestamp, Timestamptz, F64};
-use risingwave_expr::captured_execution_context::TIME_ZONE;
+use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 
 use crate::scalar::timestamptz::timestamp_at_time_zone;

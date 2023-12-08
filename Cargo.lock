@@ -4347,9 +4347,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2dc222074a1d88750778b7b0ed81925cb9f36443df447ab11c51d5686609b2"
+checksum = "8e2edfc17ad42a5ece82df036301d5ef0c3dc3d071e28aa8a62e461711c55d19"
 dependencies = [
  "bytes",
  "serde",
@@ -4860,9 +4860,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.4.0+0.10.0"
+version = "0.4.1+0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b4d847e67d6f8319d7c5393121556e2a987f5b744967a0f9b84e502020239d3"
+checksum = "813977c7870103e113a0332d97731f961bc48aaa8860edd318ef7d7754214436"
 dependencies = [
  "async-stream",
  "chrono",
@@ -5582,9 +5582,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.57"
+version = "0.10.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac25ee399abb46215765b1cb35bc0212377e58a061560d8b29b024fd0430e7c"
+checksum = "79a4c6c3a2b158f7f8f2a2fc5a969fa3a068df6fc9dbb4a43845436e3af7c800"
 dependencies = [
  "bitflags 2.4.0",
  "cfg-if",
@@ -5614,18 +5614,18 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.25.3+1.1.1t"
+version = "300.1.6+3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924757a6a226bf60da5f7dd0311a34d2b52283dd82ddeb103208ddc66362f80c"
+checksum = "439fac53e092cd7442a3660c85dde4643ab3b5bd39040912388dcdabf6b88085"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.92"
+version = "0.9.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7e971c2c2bba161b2d2fdf37080177eff520b3bc044787c7f1f5f9e78d869b"
+checksum = "3812c071ba60da8b5677cc12bcb1d42989a65553772897a7e0355545a819838f"
 dependencies = [
  "cc",
  "libc",
@@ -6960,9 +6960,9 @@ checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
 
 [[package]]
 name = "redis"
-version = "0.23.3"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f49cdc0bb3f412bf8e7d1bd90fe1d9eb10bc5c399ba90973c14662a27b3f8ba"
+checksum = "c580d9cbbe1d1b479e8d67cf9daf6a62c957e6846048408b80b43ac3f6af84cd"
 dependencies = [
  "async-std",
  "async-trait",
@@ -7323,6 +7323,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio-metrics",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "workspace-hack",
 ]
@@ -7644,6 +7645,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tokio-stream",
  "tower",
@@ -7848,6 +7850,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "thiserror",
+ "thiserror-ext",
  "tracing",
  "workspace-hack",
 ]
@@ -7882,6 +7885,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "sql-json-path",
  "thiserror",
  "tracing",
  "workspace-hack",
@@ -8055,6 +8059,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cfg-or-panic",
+ "chrono",
  "expect-test",
  "futures",
  "itertools 0.12.0",
@@ -8277,6 +8282,7 @@ dependencies = [
  "pbjson-build",
  "prost 0.12.1",
  "prost-helpers",
+ "risingwave_error",
  "serde",
  "strum",
  "thiserror",
@@ -8369,6 +8375,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_variables",
  "rlimit",
+ "thiserror-ext",
  "time",
  "tracing",
  "tracing-opentelemetry",
@@ -9739,6 +9746,19 @@ checksum = "9d1e996ef02c474957d681f1b05213dfb0abab947b446a62d37770b23500184a"
 dependencies = [
  "base64ct",
  "der 0.7.8",
+]
+
+[[package]]
+name = "sql-json-path"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06d900e5c1db024a5bd4535916f1779f104562a7357ff4280e8136eb50b04f35"
+dependencies = [
+ "jsonbb",
+ "nom",
+ "regex",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

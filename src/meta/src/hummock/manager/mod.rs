@@ -57,7 +57,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableWatermarks,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -75,9 +75,9 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
-    trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
+    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
@@ -268,16 +268,19 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
+    pub new_table_watermarks: HashMap<u64, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
+        new_table_watermarks: HashMap<u64, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {
             sstables,
+            new_table_watermarks,
             sst_to_context,
         }
     }
@@ -289,6 +292,7 @@ impl CommitEpochInfo {
     ) -> Self {
         Self::new(
             sstables.into_iter().map(Into::into).collect(),
+            HashMap::new(),
             sst_to_context,
         )
     }
@@ -1008,10 +1012,9 @@ impl HummockManager {
 
             let compact_task_statistics = statistics_compact_task(&compact_task);
 
-            let level_type_label = format!(
-                "L{}->L{}",
-                compact_task.input_ssts[0].level_idx,
-                compact_task.input_ssts.last().unwrap().level_idx,
+            let level_type_label = build_compact_task_level_type_metrics_label(
+                compact_task.input_ssts[0].level_idx as usize,
+                compact_task.input_ssts.last().unwrap().level_idx as usize,
             );
 
             let level_count = compact_task.input_ssts.len();
@@ -1414,6 +1417,7 @@ impl HummockManager {
     ) -> Result<Option<HummockSnapshot>> {
         let CommitEpochInfo {
             mut sstables,
+            new_table_watermarks,
             sst_to_context,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1445,6 +1449,7 @@ impl HummockManager {
             build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.new_table_watermarks = new_table_watermarks;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
         let mut incorrect_ssts = vec![];
@@ -2931,7 +2936,7 @@ impl HummockManager {
             .await;
         match ret {
             Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
+                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
                 return TableAlignRule::SplitToDedicatedCg((
                     new_group_id,
                     table_vnode_partition_count,

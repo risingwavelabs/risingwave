@@ -7,7 +7,7 @@ RUN apt-get update \
 
 FROM base AS dashboard-builder
 
-RUN apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
+RUN apt-get update && apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
   && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
   && apt-get update && apt-get install -y nodejs
@@ -19,7 +19,7 @@ RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_mod
 
 FROM base AS rust-base
 
-RUN apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -90,7 +90,7 @@ RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/
 # We use rust-maven-plugin to build java-binding. So it's FROM rust-base
 FROM rust-base AS java-builder
 
-RUN apt-get -y install maven
+RUN apt-get update && apt-get -y install maven
 
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java

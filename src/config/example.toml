@@ -6,6 +6,7 @@ heartbeat_interval_ms = 1000
 connection_pool_size = 16
 metrics_level = "Info"
 telemetry_enabled = true
+grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true
@@ -110,6 +111,8 @@ compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
 max_preload_io_retry_times = 3
+compactor_fast_max_compact_delete_ratio = 40
+compactor_fast_max_compact_task_size = 2147483648
 mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
@@ -129,9 +129,7 @@ impl LogReader for BoundedInMemLogStoreReader {
             .init_epoch_rx
             .take()
             .expect("should not init for twice");
-        let epoch = init_epoch_rx
-            .await
-            .map_err(|e| anyhow!("unable to get init epoch: {:?}", e))?;
+        let epoch = init_epoch_rx.await.context("unable to get init epoch")?;
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
         self.latest_offset = TruncateOffset::Barrier { epoch: epoch - 1 };

@@ -636,6 +636,8 @@ impl CatalogManager {
         Ok(version)
     }
 
+    /// Marks current relation as "creating" and add reference count to dependent relations.
+    /// And persists internal tables for background DDL progress tracking.
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
@@ -885,7 +887,6 @@ impl CatalogManager {
             self.env.event_log_manager_ref().add_event_logs(event_logs);
         }
 
-        database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
             // If table type is internal, no need to update the ref count OR

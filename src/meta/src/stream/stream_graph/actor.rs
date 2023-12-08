@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -258,7 +259,7 @@ impl ActorBuilder {
     }
 
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
         let rewritten_nodes = self.rewrite()?;
 
         // TODO: store each upstream separately
@@ -281,6 +282,7 @@ impl ActorBuilder {
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition,
+            expr_context: Some(expr_context),
         })
     }
 }
@@ -703,6 +705,7 @@ impl ActorGraphBuilder {
         self,
         id_gen_manager: IdGeneratorManagerRef,
         job: &StreamingJob,
+        expr_context: ExprContext,
     ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
@@ -741,7 +744,7 @@ impl ActorGraphBuilder {
             // and `Chain` are rewritten.
             for builder in actor_builders.into_values() {
                 let fragment_id = builder.fragment_id();
-                let actor = builder.build(job)?;
+                let actor = builder.build(job, expr_context.clone())?;
                 actors.entry(fragment_id).or_default().push(actor);
             }
 

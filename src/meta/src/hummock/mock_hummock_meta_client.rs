@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -32,7 +33,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTa
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     compact_task, CompactTask, HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse, VacuumTask,
+    SubscribeCompactionEventResponse, TableWatermarks, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
@@ -87,6 +88,30 @@ impl MockHummockMetaClient {
             )
             .await
             .unwrap_or(None)
+    }
+
+    pub async fn commit_epoch_with_watermark(
+        &self,
+        epoch: HummockEpoch,
+        sstables: Vec<LocalSstableInfo>,
+        new_table_watermarks: HashMap<u64, TableWatermarks>,
+    ) -> Result<()> {
+        let sst_to_worker = sstables
+            .iter()
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
+            .collect();
+        self.hummock_manager
+            .commit_epoch(
+                epoch,
+                CommitEpochInfo::new(
+                    sstables.into_iter().map(Into::into).collect(),
+                    new_table_watermarks,
+                    sst_to_worker,
+                ),
+            )
+            .await
+            .map_err(mock_err)?;
+        Ok(())
     }
 }
 

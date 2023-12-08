@@ -27,13 +27,14 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_expr::captured_execution_context_scope;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::CapturedExecutionContext;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
+use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
@@ -427,7 +428,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
-        captured_execution_context: CapturedExecutionContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -436,8 +437,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = captured_execution_context_scope!(
-            captured_execution_context.clone(),
+        let exec = expr_context_scope(
+            expr_context.clone(),
             ExecutorBuilder::new(
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
@@ -445,7 +446,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 self.epoch.clone(),
                 self.shutdown_rx.clone(),
             )
-            .build()
+            .build(),
         )
         .await?;
 
@@ -478,9 +479,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                captured_execution_context_scope!(
-                    captured_execution_context,
-                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span)
+                expr_context_scope(
+                    expr_context,
+                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span),
                 )
                 .await;
             };
@@ -644,7 +645,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                             ShutdownMsg::Init => {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
-                                error!("Batch task failed: {:?}", e);
+                                error!(error = %e.as_report(), "Batch task failed");
                                 error = Some(e);
                                 state = TaskStatus::Failed;
                                 break;
@@ -671,7 +672,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         let error = error.map(Arc::new);
         *self.failure.lock() = error.clone();
-        let err_str = error.as_ref().map(|e| e.to_string());
+        let err_str = error.as_ref().map(|e| e.to_report_string());
         if let Err(e) = sender.close(error).await {
             match e {
                 SenderError => {
@@ -689,8 +690,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
-                "The status receiver in FE has closed so the status push is failed {:}",
-                e
+                error = %e.as_report(),
+                "The status receiver in FE has closed so the status push is failed",
             );
         }
 

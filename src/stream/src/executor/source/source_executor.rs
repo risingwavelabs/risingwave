@@ -28,6 +28,7 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -238,7 +239,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
         GLOBAL_ERROR_METRICS.user_source_reader_error.report([
             "SourceReaderError".to_owned(),
-            e.to_string(),
+            e.to_report_string(),
             "SourceExecutor".to_owned(),
             self.actor_ctx.id.to_string(),
             core.source_id.to_string(),
@@ -334,6 +335,13 @@ impl<S: StateStore> SourceExecutor<S> {
         core.split_state_store.state_store.commit(epoch).await?;
 
         core.state_cache.clear();
+
+        Ok(())
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        core.split_state_store.state_store.try_flush().await?;
 
         Ok(())
     }
@@ -597,6 +605,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .inc_by(chunk.cardinality() as u64);
                             yield Message::Chunk(chunk);
+                            self.try_flush_data().await?;
                         }
                     }
                 }

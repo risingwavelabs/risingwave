@@ -361,6 +361,7 @@ impl GlobalStreamManager {
         res
     }
 
+    /// First broadcasts the actor info to `WorkerNodes`, and then let them build actors and channels.
     async fn build_actors(
         &self,
         table_fragments: &TableFragments,
@@ -460,9 +461,9 @@ impl GlobalStreamManager {
         );
         revert_funcs.push(Box::pin(async move {
             if create_type == CreateType::Foreground {
-                if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
-                }
+                hummock_manager_ref
+                    .unregister_table_ids_fail_fast(&registered_table_ids)
+                    .await;
             }
         }));
 
@@ -577,17 +578,9 @@ impl GlobalStreamManager {
             .await?;
 
         // Unregister from compaction group afterwards.
-        if let Err(e) = self
-            .hummock_manager
+        self.hummock_manager
             .unregister_table_fragments_vec(&table_fragments_vec)
-            .await
-        {
-            tracing::warn!(
-                    "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
-                    table_fragments_vec,
-                    e
-                );
-        }
+            .await;
 
         Ok(())
     }

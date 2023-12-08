@@ -19,10 +19,11 @@ use std::sync::OnceLock;
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use thiserror_ext::AsReport;
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub struct MetricsManager {}
 
@@ -46,7 +47,7 @@ impl MetricsManager {
                 let serve_future =
                     hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
                 if let Err(err) = serve_future.await {
-                    eprintln!("server error: {}", err);
+                    error!(error = %err.as_report(), "metrics service exited with error");
                 }
             });
             listen_addr_clone

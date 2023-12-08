@@ -19,6 +19,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
+use thiserror_ext::AsReport;
 
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
@@ -134,7 +135,7 @@ async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
         .body(report_body)
         .send()
         .await
-        .map_err(|err| format!("failed to send telemetry report, err: {}", err))?;
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err.as_report()))?;
     if res.status().is_success() {
         Ok(())
     } else {

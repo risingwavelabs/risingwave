@@ -72,6 +72,7 @@ macro_rules! def_remote_sink {
                 desc.sink_type.is_append_only()
             } }
             { DeltaLake, DeltaLakeSink, "deltalake" }
+            { HttpJava, HttpJavaSink, "http" }
         }
     };
     () => {};
@@ -381,14 +382,6 @@ impl LogSinker for RemoteLogSinker {
                     futures::future::Either::Right(result) => {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
 
-                        match &prev_offset {
-                            Some(TruncateOffset::Barrier { .. }) | None => {
-                                // TODO: this start epoch is actually unnecessary
-                                request_tx.start_epoch(epoch).await?;
-                            }
-                            _ => {}
-                        }
-
                         match item {
                             LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                                 let offset = TruncateOffset::Chunk { epoch, chunk_id };
@@ -577,7 +570,6 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.stream_handle.start_epoch(epoch).await?;
         self.epoch = Some(epoch);
         Ok(())
     }
@@ -834,11 +826,6 @@ mod test {
         sink.begin_epoch(2022).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
 
-        request_receiver
-            .recv()
-            .await
-            .expect("test failed: failed to construct start_epoch request");
-
         sink.write_batch(chunk_a.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
@@ -882,8 +869,6 @@ mod test {
 
         // begin another epoch
         sink.begin_epoch(2023).await.unwrap();
-        // simply keep the channel empty since we've tested begin_epoch
-        let _ = request_receiver.recv().await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
 
         // test another write
