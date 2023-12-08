@@ -505,4 +505,16 @@ impl TableFragments {
             .values()
             .flat_map(|f| f.state_table_ids.clone())
     }
+
+    /// Fill the `expr_context` in `StreamActor`. Used for compatibility.
+    pub fn fill_expr_context(mut self) -> Self {
+        self.fragments.values_mut().for_each(|fragment| {
+            fragment.actors.iter_mut().for_each(|actor| {
+                if actor.expr_context.is_none() {
+                    actor.expr_context = Some(self.env.to_expr_context());
+                }
+            });
+        });
+        self
+    }
 }
