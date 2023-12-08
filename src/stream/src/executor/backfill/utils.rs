@@ -114,11 +114,8 @@ impl BackfillState {
         *current_state = BackfillProgressPerVnode::Completed(new_pos);
     }
 
-    /// If can commit, return state to be committed.
+    /// Return state to be committed.
     fn get_commit_state(&self, vnode: &VirtualNode) -> Option<(Option<Vec<Datum>>, Vec<Datum>)> {
-        if !self.can_commit(vnode) {
-            return None;
-        }
         let new_state = self.inner.get(vnode).unwrap().current_state().clone();
         let new_encoded_state = match new_state {
             BackfillProgressPerVnode::NotStarted => unreachable!(),
@@ -165,9 +162,11 @@ impl BackfillState {
     }
 
     // TODO: We can add a committed flag to speed up this check.
-    fn can_commit(&self, vnode: &VirtualNode) -> bool {
+    /// Checks if the state needs to be committed.
+    fn need_commit(&self, vnode: &VirtualNode) -> bool {
         let state = self.inner.get(vnode).unwrap();
         match state.current_state() {
+            // If current state and committed state are the same, we don't need to commit.
             s @ BackfillProgressPerVnode::InProgress(_current_pos)
             | s @ BackfillProgressPerVnode::Completed(_current_pos) => s != state.committed_state(),
             BackfillProgressPerVnode::NotStarted => false,
@@ -636,11 +635,14 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;
     for vnode in vnodes {
-        let Some((encoded_prev_state, encoded_current_state)) =
-            backfill_state.get_commit_state(&vnode)
-        else {
+        if !backfill_state.need_commit(&vnode) {
             continue;
-        };
+        }
+        let (encoded_prev_state, encoded_current_state) =
+            match backfill_state.get_commit_state(&vnode) {
+                Some((old_state, new_state)) => (old_state, new_state),
+                None => continue,
+            };
         if let Some(encoded_prev_state) = encoded_prev_state {
             // There's some progress, update the state.
             #[cfg(debug_assertions)]
