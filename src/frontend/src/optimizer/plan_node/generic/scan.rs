@@ -172,17 +172,6 @@ impl Scan {
         ids
     }
 
-    pub fn output_and_pk_column_indices(&self) -> Vec<usize> {
-        let mut indices = self.output_col_idx.clone();
-        for column_order in self.primary_key() {
-            let idx = column_order.column_index;
-            if !indices.contains(&idx) {
-                indices.push(idx);
-            }
-        }
-        indices
-    }
-
     /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
     /// scan.
     pub fn to_index_scan(
