@@ -29,7 +29,7 @@ use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -456,6 +456,9 @@ async fn test_graph_builder() -> MetaResult<()> {
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
+    let expr_context = ExprContext {
+        time_zone: graph.env.as_ref().unwrap().timezone.clone(),
+    };
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
@@ -465,7 +468,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job)
+        .generate_graph(env.id_gen_manager_ref(), &job, expr_context)
         .await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);

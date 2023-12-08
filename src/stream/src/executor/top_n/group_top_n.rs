@@ -234,6 +234,10 @@ where
         self.managed_state.flush(epoch).await
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
+    }
+
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
