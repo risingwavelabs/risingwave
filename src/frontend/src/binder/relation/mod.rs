@@ -16,8 +16,9 @@ use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
@@ -193,11 +194,13 @@ impl Binder {
         let schema_name = identifiers.pop().map(|ident| ident.real_value());
         let database_name = identifiers.pop().map(|ident| ident.real_value());
 
-        if let Some(database_name) = database_name && database_name != db_name {
+        if let Some(database_name) = database_name
+            && database_name != db_name
+        {
             return Err(ResolveQualifiedNameError::new(
                 formatted_name,
-                ResolveQualifiedNameErrorKind::NotCurrentDatabase)
-            );
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase,
+            ));
         }
 
         Ok((schema_name, name))
@@ -206,10 +209,7 @@ impl Binder {
     /// return first name in identifiers, must have only one name.
     fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
         if identifiers.len() > 1 {
-            return Err(internal_error(format!(
-                "{} must contain 1 argument",
-                ident_desc
-            )));
+            bail!("{} must contain 1 argument", ident_desc);
         }
         let name = identifiers.pop().unwrap().real_value();
 
@@ -330,7 +330,9 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
+        if schema_name.is_none()
+            && let Some(item) = self.context.cte_to_relation.get(&table_name)
+        {
             // Handles CTE
 
             let (share_id, query, mut original_alias) = item.deref().clone();
@@ -341,9 +343,7 @@ impl Binder {
                 original_alias.columns = original_alias
                     .columns
                     .into_iter()
-                    .zip_longest(
-                        from_alias.columns
-                    )
+                    .zip_longest(from_alias.columns)
                     .map(EitherOrBoth::into_right)
                     .collect();
             }
@@ -360,7 +360,10 @@ impl Binder {
             )?;
 
             // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query, lateral: false }));
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery {
+                query,
+                lateral: false,
+            }));
             let share_relation = Relation::Share(Box::new(BoundShare {
                 share_id,
                 input: input_relation,

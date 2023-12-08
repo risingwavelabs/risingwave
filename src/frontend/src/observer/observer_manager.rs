@@ -215,11 +215,13 @@ impl FrontendObserverNode {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => catalog_guard.drop_database(database.id),
+                Operation::Update => catalog_guard.update_database(database),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
+                Operation::Update => catalog_guard.update_schema(schema),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::RelationGroup(relation_group) => {
@@ -296,6 +298,7 @@ impl FrontendObserverNode {
                     function.schema_id,
                     function.id.into(),
                 ),
+                Operation::Update => catalog_guard.update_function(function),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Connection(connection) => match resp.operation() {
@@ -305,6 +308,7 @@ impl FrontendObserverNode {
                     connection.schema_id,
                     connection.id,
                 ),
+                Operation::Update => catalog_guard.update_connection(connection),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),

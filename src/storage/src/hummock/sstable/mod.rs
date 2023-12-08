@@ -17,8 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::collections::BTreeSet;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
@@ -45,8 +44,6 @@ use risingwave_hummock_sdk::key::{
     FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
 };
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
-#[cfg(test)]
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
 mod filter;
@@ -54,7 +51,7 @@ mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
-    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, CompactionDeleteRangesBuilder,
+    get_min_delete_range_epoch_from_sstable, CompactionDeleteRangeIterator,
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
@@ -63,7 +60,6 @@ pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -199,32 +195,14 @@ impl MonotonicDeleteEvent {
     }
 }
 
-pub(crate) fn create_monotonic_events_from_compaction_delete_events(
-    compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
-) -> Vec<MonotonicDeleteEvent> {
-    let mut epochs = BTreeSet::new();
-    let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
-    for event in compaction_delete_range_events {
-        apply_event(&mut epochs, &event);
-        monotonic_tombstone_events.push(MonotonicDeleteEvent {
-            event_key: event.0,
-            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
-        });
+impl Display for MonotonicDeleteEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event key {:?} epoch {:?}",
+            self.event_key, self.new_epoch
+        )
     }
-    monotonic_tombstone_events.dedup_by(|a, b| {
-        a.event_key.left_user_key.table_id == b.event_key.left_user_key.table_id
-            && a.new_epoch == b.new_epoch
-    });
-    monotonic_tombstone_events
-}
-
-#[cfg(any(test, feature = "test"))]
-pub(crate) fn create_monotonic_events(
-    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
-) -> Vec<MonotonicDeleteEvent> {
-    delete_range_tombstones.sort();
-    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
-    create_monotonic_events_from_compaction_delete_events(events)
 }
 
 /// [`Sstable`] is a handle for accessing SST.
@@ -294,24 +272,6 @@ impl Sstable {
     #[inline]
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
-    }
-
-    #[cfg(test)]
-    pub fn get_sstable_info(&self) -> SstableInfo {
-        SstableInfo {
-            object_id: self.id,
-            sst_id: self.id,
-            key_range: Some(KeyRange {
-                left: self.meta.smallest_key.clone(),
-                right: self.meta.largest_key.clone(),
-                right_exclusive: false,
-            }),
-            file_size: self.meta.estimated_size as u64,
-            meta_offset: self.meta.meta_offset,
-            total_key_count: self.meta.key_count as u64,
-            uncompressed_file_size: self.meta.estimated_size as u64,
-            ..Default::default()
-        }
     }
 }
 
@@ -435,7 +395,16 @@ impl SstableMeta {
 
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let start_offset = buf.len();
-        buf.put_u32_le(utils::checked_into_u32(self.block_metas.len()));
+        buf.put_u32_le(
+            utils::checked_into_u32(self.block_metas.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert block_metas_len {} into u32 table {}",
+                    self.block_metas.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
@@ -444,9 +413,16 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(utils::checked_into_u32(
-            self.monotonic_tombstone_events.len(),
-        ));
+        buf.put_u32_le(
+            utils::checked_into_u32(self.monotonic_tombstone_events.len()).unwrap_or_else(|_| {
+                let tmp_full_key = FullKey::decode(&self.smallest_key);
+                panic!(
+                    "WARN overflow can't convert monotonic_tombstone_events_len {} into u32 table {}",
+                    self.monotonic_tombstone_events.len(),
+                    tmp_full_key.user_key.table_id,
+                )
+            }),
+        );
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
             monotonic_tombstone_event.encode(buf);
         }
@@ -548,6 +524,7 @@ impl SstableMeta {
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+    pub max_preload_retry_times: usize,
 }
 
 impl SstableIteratorReadOptions {
@@ -555,6 +532,7 @@ impl SstableIteratorReadOptions {
         Self {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
+            max_preload_retry_times: 0,
         }
     }
 }

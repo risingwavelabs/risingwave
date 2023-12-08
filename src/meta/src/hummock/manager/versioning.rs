@@ -254,7 +254,7 @@ impl HummockManager {
         if new_write_limits == guard.write_limit {
             return false;
         }
-        tracing::info!("Hummock stopped write is updated: {:#?}", new_write_limits);
+        tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
         guard.write_limit = new_write_limits;
         self.env
@@ -339,6 +339,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         levels: Default::default(),
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
+        table_watermarks: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -560,6 +561,7 @@ mod tests {
             levels: Default::default(),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         for cg in 1..3 {
             version.levels.insert(

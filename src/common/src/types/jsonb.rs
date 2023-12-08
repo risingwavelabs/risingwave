@@ -19,7 +19,7 @@ use bytes::Buf;
 use jsonbb::{Value, ValueRef};
 
 use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef, F32, F64};
+use crate::types::{Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -128,7 +128,7 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> crate::error::Result<Option<bytes::Bytes>> {
+    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
         Ok(Some(self.value_serialize().into()))
     }
 }
@@ -187,62 +187,9 @@ impl From<serde_json::Value> for JsonbVal {
     }
 }
 
-impl From<bool> for JsonbVal {
-    fn from(v: bool) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i16> for JsonbVal {
-    fn from(v: i16) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i32> for JsonbVal {
-    fn from(v: i32) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i64> for JsonbVal {
-    fn from(v: i64) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<F32> for JsonbVal {
-    fn from(v: F32) -> Self {
-        if v.0 == f32::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f32::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
-impl From<F64> for JsonbVal {
-    fn from(v: F64) -> Self {
-        if v.0 == f64::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f64::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-impl From<&str> for JsonbVal {
-    fn from(v: &str) -> Self {
-        Self(v.into())
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v)
     }
 }
 
@@ -252,9 +199,9 @@ impl From<JsonbRef<'_>> for JsonbVal {
     }
 }
 
-impl From<Value> for JsonbVal {
-    fn from(v: Value) -> Self {
-        Self(v)
+impl From<f64> for JsonbVal {
+    fn from(v: f64) -> Self {
+        Self(v.into())
     }
 }
 
@@ -288,9 +235,14 @@ impl<'a> JsonbRef<'a> {
         buf
     }
 
+    /// Returns a jsonb `null` value.
+    pub fn null() -> Self {
+        Self(ValueRef::Null)
+    }
+
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
-        self.0.as_null().is_some()
+        self.0.is_null()
     }
 
     /// Returns true if this is a jsonb null, boolean, number or string.
@@ -303,12 +255,12 @@ impl<'a> JsonbRef<'a> {
 
     /// Returns true if this is a jsonb array.
     pub fn is_array(&self) -> bool {
-        matches!(self.0, ValueRef::Array(_))
+        self.0.is_array()
     }
 
     /// Returns true if this is a jsonb object.
     pub fn is_object(&self) -> bool {
-        matches!(self.0, ValueRef::Object(_))
+        self.0.is_object()
     }
 
     /// Returns the type name of this jsonb.
@@ -426,6 +378,11 @@ impl<'a> JsonbRef<'a> {
         let mut ser =
             Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
         self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
+    }
+
+    /// Returns the capacity of the underlying buffer.
+    pub fn capacity(self) -> usize {
+        self.0.capacity()
     }
 }
 

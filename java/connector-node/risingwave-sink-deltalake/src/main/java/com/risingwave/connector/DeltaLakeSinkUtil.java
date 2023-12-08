@@ -61,8 +61,7 @@ class DeltaLakeSinkUtil {
                             .asRuntimeException();
                 }
             } else {
-                DataType tableColumnDataType = convertType(tableColumnType);
-                if (!tableColumnDataType.equals(column.getValue().getDataType())) {
+                if (!checkType(tableColumnType, column.getValue().getDataType())) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     String.format(
@@ -73,28 +72,28 @@ class DeltaLakeSinkUtil {
         }
     }
 
-    private static DataType convertType(Data.DataType.TypeName typeName) {
+    public static boolean checkType(Data.DataType.TypeName typeName, DataType dataType) {
         switch (typeName) {
             case INT16:
-                return new ShortType();
+                return dataType.equals(new ShortType());
             case INT32:
-                return new IntegerType();
+                return dataType.equals(new IntegerType());
             case INT64:
-                return new LongType();
+                return dataType.equals(new LongType());
             case FLOAT:
-                return new FloatType();
+                return dataType.equals(new FloatType());
             case DOUBLE:
-                return new DoubleType();
+                return dataType.equals(new DoubleType());
             case BOOLEAN:
-                return new BooleanType();
+                return dataType.equals(new BooleanType());
             case VARCHAR:
-                return new StringType();
+                return dataType.equals(new StringType());
             case DECIMAL:
-                return DecimalType.USER_DEFAULT;
+                return dataType.getTypeName().contains("decimal");
             case TIMESTAMP:
-                return new TimestampType();
+                return dataType.equals(new TimestampType());
             case DATE:
-                return new DateType();
+                return dataType.equals(new DateType());
             case STRUCT:
             case LIST:
                 throw UNIMPLEMENTED
@@ -115,7 +114,9 @@ class DeltaLakeSinkUtil {
 
     public static Schema convertSchema(DeltaLog log, TableSchema tableSchema) {
         StructType schema = log.snapshot().getMetadata().getSchema();
-        MessageType parquetSchema = ParquetSchemaConverter.deltaToParquet(schema);
+        MessageType parquetSchema =
+                ParquetSchemaConverter.deltaToParquet(
+                        schema, ParquetSchemaConverter.ParquetOutputTimestampType.TIMESTAMP_MILLIS);
         return new AvroSchemaConverter().convert(parquetSchema);
     }
 }

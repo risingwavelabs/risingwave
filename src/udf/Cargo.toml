@@ -24,7 +24,11 @@ itertools = "0.11"
 risingwave_object_store = { workspace = true }
 static_assertions = "1"
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+thiserror-ext = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "macros",
+] }
 tonic = { workspace = true }
 tracing = "0.1"
 wasmtime = { version = "10", features = ["component-model"] }

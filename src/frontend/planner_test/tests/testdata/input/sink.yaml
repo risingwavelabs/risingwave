@@ -31,3 +31,31 @@
       force_append_only='true');
   expected_outputs:
     - explain_output
+- id: create_upsert_kafka_sink_with_downstream_pk1
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='kafka',
+      topic='abc',
+      type='upsert',
+      primary_key='v1,v2'
+    );
+  expected_outputs:
+    - explain_output
+- id: downstream_pk_same_with_upstream
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v2, v1, count(*) from t1 group by v1, v2 WITH (
+      connector='kafka',
+      topic='abc',
+      type='upsert',
+      primary_key='v2,v1'
+    );
+  expected_outputs:
+    - explain_output
+- id: create_emit_on_close_sink
+  sql: |
+    create table t2 (a int, b int, watermark for b as b - 4) append only;
+    explain create sink sk1 from t2 emit on window close with (connector='blackhole');
+  expected_outputs:
+    - explain_output

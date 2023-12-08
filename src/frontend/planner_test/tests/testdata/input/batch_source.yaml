@@ -14,3 +14,19 @@
   expected_outputs:
   - batch_plan
   - logical_plan
+- sql: |
+    insert into s values (1,2);
+  create_table_with_connector:
+    format: plain
+    encode: protobuf
+    name: s
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        int32 value = 2;
+      }
+  expected_outputs:
+  - batch_plan
+  - logical_plan

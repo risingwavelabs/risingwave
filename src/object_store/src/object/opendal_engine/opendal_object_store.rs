@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
-use tokio::io::AsyncRead;
 
 use crate::object::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, StreamingUploader,
+    BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
+    ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -36,6 +37,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    Obs,
     Oss,
     Webhdfs,
     Azblob,
@@ -86,7 +88,9 @@ impl ObjectStore for OpendalObjectStore {
                 .await?
         };
 
-        if let Some(len) = range.len() && len != data.len() {
+        if let Some(len) = range.len()
+            && len != data.len()
+        {
             return Err(ObjectError::internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 len,
@@ -105,22 +109,18 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        range: Range<usize>,
+    ) -> ObjectResult<ObjectDataStream> {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-        let reader = match start_pos {
-            Some(start_position) => {
-                self.op
-                    .reader_with(path)
-                    .range(start_position as u64..)
-                    .await?
-            }
-            None => self.op.reader(path).await?,
-        };
+        let range: Range<u64> = (range.start as u64)..(range.end as u64);
+        let reader = self.op.reader_with(path).range(range).await?;
+        let stream = reader
+            .into_stream()
+            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpenDalError: {:?}", e))));
 
-        Ok(Box::new(reader))
+        Ok(Box::pin(stream))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -190,6 +190,7 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
             EngineType::Gcs => "Gcs",
+            EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
             EngineType::Azblob => "Azblob",

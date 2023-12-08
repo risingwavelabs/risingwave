@@ -20,6 +20,7 @@
 #![feature(coroutines)]
 #![feature(arc_unwrap_or_clone)]
 #![feature(never_type)]
+#![feature(error_generic_member_access)]
 
 extern crate self as risingwave_expr;
 
@@ -28,6 +29,7 @@ pub mod aggregate;
 pub mod codegen;
 mod error;
 pub mod expr;
+pub mod expr_context;
 pub mod scalar;
 pub mod sig;
 pub mod table_function;

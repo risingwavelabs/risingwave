@@ -79,8 +79,10 @@ impl Parse for FunctionAttr {
                 parsed.generic = Some(get_value()?);
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
-            } else if meta.path().is_ident("deprecated") {
+            } else if meta.path().is_ident("deprecated") || meta.path().is_ident("internal") {
                 parsed.deprecated = true;
+            } else if meta.path().is_ident("rewritten") {
+                parsed.rewritten = true;
             } else if meta.path().is_ident("append_only") {
                 parsed.append_only = true;
             } else {
@@ -314,7 +316,9 @@ fn strip_iterator(ty: &syn::Type) -> Option<&syn::Type> {
         return None;
     };
     for arg in &angle_bracketed.args {
-        if let syn::GenericArgument::AssocType(b) = arg && b.ident == "Item" {
+        if let syn::GenericArgument::AssocType(b) = arg
+            && b.ident == "Item"
+        {
             return Some(&b.ty);
         }
     }

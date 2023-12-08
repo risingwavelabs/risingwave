@@ -24,6 +24,7 @@ use nexmark::event::EventType;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
+use with_options::WithOptions;
 
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::SourceProperties;
@@ -45,7 +46,7 @@ const fn none<T>() -> Option<T> {
 pub type NexmarkProperties = Box<NexmarkPropertiesInner>;
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NexmarkPropertiesInner {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]

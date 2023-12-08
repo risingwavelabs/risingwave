@@ -19,7 +19,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
+use risingwave_object_store::object::{
+    build_remote_object_store, ObjectStoreConfig, ObjectStoreImpl,
+};
 use tokio::sync::Mutex;
 use tracing::debug;
 use wasmtime::component::{Component, Linker};
@@ -291,10 +293,11 @@ async fn get_wasm_storage(wasm_storage_url: &str) -> WasmUdfResult<ObjectStoreIm
         ));
     }
     // Note: it will panic if the url is invalid. We did a validation on meta startup.
-    let object_store = parse_remote_object_store(
+    let object_store = build_remote_object_store(
         wasm_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Wasm Engine",
+        ObjectStoreConfig::default(),
     )
     .await;
     Ok(object_store)

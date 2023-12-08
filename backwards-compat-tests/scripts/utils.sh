@@ -118,6 +118,15 @@ seed_json_kafka() {
   insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
 }
 
+# https://stackoverflow.com/a/4024263
+version_le() {
+    printf '%s\n' "$1" "$2" | sort -C -V
+}
+
+version_lt() {
+    ! version_le "$2" "$1"
+}
+
 ################################### Entry Points
 
 # Get $OLD_VERSION and $NEW_VERSION for Risingwave
@@ -132,13 +141,14 @@ get_rw_versions() {
   echo "--- git branch origin output"
   git branch -r | grep origin
 
+  # Extract X.Y.Z tags
   echo "--- VERSION BRANCHES"
-  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
-  echo "$branches"
+  local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
+  echo "$tags"
 
   # Then we sort them in descending order.
   echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
+  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
   echo "$sorted_versions"
 
   # Then we take the Nth latest version.
@@ -149,14 +159,13 @@ get_rw_versions() {
   NEW_VERSION=$(cat Cargo.toml | grep "\[workspace\.package\]" -A 5 | sed -n 's/version = \"\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' | tr -d ' ')
 
   # Then we assert that `$OLD_VERSION` < `$NEW_VERSION`.
-  local TOP=$(echo -e "$OLD_VERSION\n$NEW_VERSION" | sort -t '.' -n | tail -1)
-  if [[ "$TOP" != "$NEW_VERSION" ]]
+  if version_lt "$OLD_VERSION" "$NEW_VERSION"
   then
-    echo "ERROR: $OLD_VERSION > $NEW_VERSION"
-    exit 1
-  else
     echo "OLD_VERSION: $OLD_VERSION"
     echo "NEW_VERSION: $NEW_VERSION"
+  else
+    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
+    exit 1
   fi
 }
 
@@ -210,6 +219,18 @@ seed_old_cluster() {
   echo "--- KAFKA TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
 
+  # Test invalid WITH options, if OLD_VERSION <= 1.5.0
+  if version_le "$OLD_VERSION" "1.5.0" ; then
+    echo "--- KAFKA TEST (invalid options): Seeding old cluster with data"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/seed.slt"
+
+    echo "--- KAFKA TEST (invalid options): wait 5s for kafka to process data"
+    sleep 5
+
+    echo "--- KAFKA TEST (invalid options): Validating old cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
+  fi
+
   echo "--- Killing cluster"
   kill_cluster
   echo "--- Killed cluster"
@@ -238,6 +259,12 @@ validate_new_cluster() {
 
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
+
+  # Test invalid WITH options, if OLD_VERSION <= 1.5.0
+  if version_le "$OLD_VERSION" "1.5.0" ; then
+    echo "--- KAFKA TEST (invalid options): Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_restart.slt"
+  fi
 
   kill_cluster
 }

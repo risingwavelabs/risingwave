@@ -18,15 +18,15 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndicesRef,
-    StreamExecutorError,
+    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndices, PkIndicesRef, StreamExecutorError,
 };
 
 /// The executor only for receiving barrier from the meta service. It always resides in the leaves
 /// of the streaming graph.
 pub struct BarrierRecvExecutor {
     _ctx: ActorContextRef,
-    identity: String,
+    info: ExecutorInfo,
 
     /// The barrier receiver registered in the local barrier manager.
     barrier_receiver: UnboundedReceiver<Barrier>,
@@ -35,18 +35,26 @@ pub struct BarrierRecvExecutor {
 impl BarrierRecvExecutor {
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
     ) -> Self {
         Self {
             _ctx: ctx,
-            identity: format!("BarrierRecvExecutor {:X}", executor_id),
+            info,
             barrier_receiver,
         }
     }
 
     pub fn for_test(barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
-        Self::new(ActorContext::create(0), barrier_receiver, 0)
+        Self::new(
+            ActorContext::create(0),
+            ExecutorInfo {
+                schema: Schema::empty().clone(),
+                pk_indices: PkIndices::new(),
+                identity: "BarrierRecvExecutor".to_string(),
+            },
+            barrier_receiver,
+        )
     }
 }
 
@@ -63,15 +71,15 @@ impl Executor for BarrierRecvExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        Schema::empty()
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &[]
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 

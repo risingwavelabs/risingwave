@@ -119,6 +119,9 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
         if let Some(compactor_opts) = compactor_opts.as_mut() {
             compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         }
+        if let Some(meta_opts) = meta_opts.as_mut() {
+            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+        }
     }
     ParsedStandaloneOpts {
         meta_opts,
@@ -224,7 +227,9 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: None,
+                            prometheus_host: Some(
+                                "127.0.0.1:1234",
+                            ),
                             etcd_endpoints: "",
                             etcd_auth: false,
                             etcd_username: "",
@@ -232,6 +237,7 @@ mod test {
                             sql_endpoint: None,
                             dashboard_ui_path: None,
                             prometheus_endpoint: None,
+                            prometheus_selector: None,
                             connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
                             config_path: "src/config/test.toml",
@@ -247,10 +253,6 @@ mod test {
                             do_not_config_object_storage_lifecycle: None,
                             backup_storage_url: None,
                             backup_storage_directory: None,
-                            object_store_streaming_read_timeout_ms: None,
-                            object_store_streaming_upload_timeout_ms: None,
-                            object_store_upload_timeout_ms: None,
-                            object_store_read_timeout_ms: None,
                             heap_profiling_dir: None,
                         },
                     ),
@@ -264,6 +266,7 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
+                            mem_table_spill_threshold: 4194304,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,
@@ -271,10 +274,6 @@ mod test {
                             meta_file_cache_dir: None,
                             async_stack_trace: None,
                             heap_profiling_dir: None,
-                            object_store_streaming_read_timeout_ms: None,
-                            object_store_streaming_upload_timeout_ms: None,
-                            object_store_upload_timeout_ms: None,
-                            object_store_read_timeout_ms: None,
                         },
                     ),
                     frontend_opts: Some(

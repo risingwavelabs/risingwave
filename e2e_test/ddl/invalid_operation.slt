@@ -190,7 +190,7 @@ CREATE SINK sink FROM mv WITH (connector='blackhole');
 statement error not found
 drop table sink;
 
-statement error sink properties not provided
+statement error sql parser error
 CREATE SINK sink FROM mv;
 
 # FIXME: improve the error message
@@ -253,7 +253,6 @@ SELECT * from msrc limit 0;
 # FIXME: improve the error message
 query error not found
 SELECT * from sink limit 0;
-----
 
 query I
 SELECT * from v limit 0;
@@ -264,7 +263,7 @@ SELECT * from v limit 0;
 statement ok
 insert into t values (1);
 
-statement error QueryError: Bind error: update modifying the PK column is unsupported
+statement error update modifying the PK column is unsupported
 update t set v = 2;
 
 statement ok

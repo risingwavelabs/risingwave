@@ -23,6 +23,7 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::PbTableFragments;
+use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
@@ -71,6 +72,13 @@ impl StreamEnvironment {
     pub fn to_protobuf(&self) -> PbStreamEnvironment {
         PbStreamEnvironment {
             timezone: self.timezone.clone().unwrap_or("".into()),
+        }
+    }
+
+    pub fn to_expr_context(&self) -> PbExprContext {
+        PbExprContext {
+            // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
+            time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
         }
     }
 
@@ -304,10 +312,19 @@ impl TableFragments {
             .cloned()
     }
 
-    /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
+    pub fn source_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            })
+            .cloned()
+    }
+
+    /// Returns actors that contains backfill executors.
+    pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0
+            (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
         .into_iter()
         .collect()
@@ -355,11 +372,13 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
-        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
-            table_ids
-                .entry(TableId::new(chain.table_id))
-                .or_default()
-                .add_assign(1);
+        let table_id = match stream_node.node_body.as_ref() {
+            Some(NodeBody::StreamScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            _ => None,
+        };
+        if let Some(table_id) = table_id {
+            table_ids.entry(table_id).or_default().add_assign(1);
         }
 
         for child in &stream_node.input {

@@ -49,30 +49,18 @@ services:
   presto:
     build: ./presto-with-iceberg
     container_name: presto
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -96,10 +84,6 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   prepare_mysql:
     image: mysql:8.0
     depends_on:
@@ -175,7 +159,7 @@ services:
       _AIRFLOW_WWW_USER_PASSWORD: 'airflow'
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

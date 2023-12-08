@@ -28,9 +28,11 @@ use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
+use tokio::sync::watch;
 use tokio_stream::StreamExt;
 
 use crate::common::log_store_impl::kv_log_store::buffer::{
@@ -69,6 +71,10 @@ pub struct KvLogStoreReader<S: StateStore> {
     truncate_offset: TruncateOffset,
 
     metrics: KvLogStoreMetrics,
+
+    is_paused: watch::Receiver<bool>,
+
+    identity: String,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -78,6 +84,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
         serde: LogStoreRowSerde,
         rx: LogStoreBufferReceiver,
         metrics: KvLogStoreMetrics,
+        is_paused: watch::Receiver<bool>,
+        identity: String,
     ) -> Self {
         Self {
             table_id,
@@ -90,6 +98,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
             metrics,
+            is_paused,
+            identity,
         }
     }
 
@@ -120,9 +130,9 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 state_store
                     .iter(
                         (Included(range_start), Excluded(range_end)),
-                        u64::MAX,
+                        HummockEpoch::MAX,
                         ReadOptions {
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
                             table_id,
                             ..Default::default()
@@ -148,6 +158,13 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        while *self.is_paused.borrow_and_update() {
+            info!("next_item of {} get blocked by is_pause", self.identity);
+            self.is_paused
+                .changed()
+                .await
+                .map_err(|_| anyhow!("unable to subscribe resume"))?;
+        }
         if let Some(state_store_stream) = &mut self.state_store_stream {
             match state_store_stream.try_next().await? {
                 Some((epoch, item)) => {
@@ -224,17 +241,16 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));
                             let state_store = &state_store;
 
-                            // Use u64::MAX here because the epoch to consume may be below the safe
+                            // Use MAX EPOCH here because the epoch to consume may be below the safe
                             // epoch
                             async move {
                                 Ok::<_, anyhow::Error>(Box::pin(
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
-                                            u64::MAX,
+                                            HummockEpoch::MAX,
                                             ReadOptions {
-                                                prefetch_options:
-                                                    PrefetchOptions::new_for_exhaust_iter(),
+                                                prefetch_options: PrefetchOptions::default(),
                                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
                                                 table_id,
                                                 ..Default::default()

@@ -14,6 +14,7 @@
 
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
+#![feature(error_generic_member_access)]
 
 mod error;
 mod external;

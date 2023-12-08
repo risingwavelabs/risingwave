@@ -15,6 +15,7 @@
 use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -23,7 +24,8 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_storage::store::{InitOptions, LocalStateStore};
+use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
+use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
@@ -43,6 +45,10 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     tx: LogStoreBufferSender,
 
     metrics: KvLogStoreMetrics,
+
+    is_paused: watch::Sender<bool>,
+
+    identity: String,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -52,6 +58,8 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         serde: LogStoreRowSerde,
         tx: LogStoreBufferSender,
         metrics: KvLogStoreMetrics,
+        is_paused: watch::Sender<bool>,
+        identity: String,
     ) -> Self {
         Self {
             _table_id: table_id,
@@ -60,15 +68,25 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             serde,
             tx,
             metrics,
+            is_paused,
+            identity,
         }
     }
 }
 
 impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
-    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+    async fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> LogStoreResult<()> {
         self.state_store
             .init(InitOptions::new_with_epoch(epoch))
             .await?;
+        if pause_read_on_bootstrap {
+            self.pause()?;
+            info!("KvLogStore of {} paused on bootstrap", self.identity);
+        }
         self.seq_id = FIRST_SEQ_ID;
         self.tx.init(epoch.curr);
         Ok(())
@@ -143,7 +161,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             }
         }
         self.state_store.flush(delete_range).await?;
-        self.state_store.seal_current_epoch(next_epoch);
+        self.state_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
@@ -153,5 +172,19 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         self.tx.update_vnode(self.state_store.epoch(), new_vnodes);
         Ok(())
+    }
+
+    fn pause(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is paused", self.identity);
+        self.is_paused
+            .send(true)
+            .map_err(|_| anyhow!("unable to set pause"))
+    }
+
+    fn resume(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is resumed", self.identity);
+        self.is_paused
+            .send(false)
+            .map_err(|_| anyhow!("unable to set resume"))
     }
 }

@@ -21,8 +21,12 @@ use futures::future::join_all;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
+use risingwave_pb::plan_common::ExprContext;
+use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
 
@@ -80,10 +84,10 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!(identity, %err, "failed to evaluate expression");
+        tracing::error!(identity, error = %err.as_report(), "failed to evaluate expression");
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_string();
+        let mut err_str = err.to_report_string();
 
         if self.error_suppressor.lock().suppress_error(&err_str) {
             err_str = format!(
@@ -91,15 +95,12 @@ impl ActorContext {
                 self.error_suppressor.lock().max()
             );
         }
-        self.streaming_metrics
-            .user_compute_error_count
-            .with_label_values(&[
-                "ExprError",
-                &err_str,
-                executor_name,
-                &self.fragment_id.to_string(),
-            ])
-            .inc();
+        GLOBAL_ERROR_METRICS.user_compute_error.report([
+            "ExprError".to_owned(),
+            err_str,
+            executor_name.to_owned(),
+            self.fragment_id.to_string(),
+        ]);
     }
 
     pub fn store_mem_usage(&self, val: usize) {
@@ -130,6 +131,7 @@ pub struct Actor<C> {
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     actor_context: ActorContextRef,
+    expr_context: ExprContext,
 }
 
 impl<C> Actor<C>
@@ -142,6 +144,7 @@ where
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
+        expr_context: ExprContext,
     ) -> Self {
         Self {
             consumer,
@@ -149,20 +152,29 @@ where
             context,
             _metrics: metrics,
             actor_context,
+            expr_context,
         }
     }
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        tokio::join!(
-            // Drive the subtasks concurrently.
-            join_all(std::mem::take(&mut self.subtasks)),
-            self.run_consumer(),
-        )
-        .1
+        expr_context_scope(self.expr_context.clone(), async move {
+            tokio::join!(
+                // Drive the subtasks concurrently.
+                join_all(std::mem::take(&mut self.subtasks)),
+                self.run_consumer(),
+            )
+            .1
+        })
+        .await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
+        fail::fail_point!("start_actors_err", |_| Err(anyhow::anyhow!(
+            "intentional start_actors_err"
+        )
+        .into()));
+
         let id = self.actor_context.id;
 
         let span_name = format!("Actor {id}");
@@ -196,6 +208,11 @@ where
                 Ok(None) => break Err(anyhow!("actor exited unexpectedly").into()),
                 Err(err) => break Err(err),
             };
+
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
 
             // Collect barriers to local barrier manager
             self.context.lock_barrier_manager().collect(id, &barrier);

@@ -75,18 +75,31 @@ message StorageTableDesc {
   repeated uint32 stream_key = 9;
 }
 
+// Represents a table in external database for CDC scenario
+message ExternalTableDesc {
+  uint32 table_id = 1;
+  repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
+  repeated common.ColumnOrder pk = 3;
+  string table_name = 4;
+  repeated uint32 stream_key = 5;
+  map<string, string> connect_properties = 6;
+  // upstream cdc source job id
+  uint32 source_id = 7;
+}
+
 enum JoinType {
   // Note that it comes from Calcite's JoinRelType.
   // DO NOT HAVE direction for SEMI and ANTI now.
-  UNSPECIFIED = 0;
-  INNER = 1;
-  LEFT_OUTER = 2;
-  RIGHT_OUTER = 3;
-  FULL_OUTER = 4;
-  LEFT_SEMI = 5;
-  LEFT_ANTI = 6;
-  RIGHT_SEMI = 7;
-  RIGHT_ANTI = 8;
+  JOIN_TYPE_UNSPECIFIED = 0;
+  JOIN_TYPE_INNER = 1;
+  JOIN_TYPE_LEFT_OUTER = 2;
+  JOIN_TYPE_RIGHT_OUTER = 3;
+  JOIN_TYPE_FULL_OUTER = 4;
+  JOIN_TYPE_LEFT_SEMI = 5;
+  JOIN_TYPE_LEFT_ANTI = 6;
+  JOIN_TYPE_RIGHT_SEMI = 7;
+  JOIN_TYPE_RIGHT_ANTI = 8;
 }
 
 // https://github.com/tokio-rs/prost/issues/80
@@ -143,4 +156,9 @@ message Cardinality {
   uint64 lo = 1;
   // Unbounded if not set.
   optional uint64 hi = 2;
+}
+
+// Provide statement-local context, e.g. session info like time zone, for execution.
+message ExprContext {
+  string time_zone = 1;
 }

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_meta::stream::{ScaleController, ScaleControllerRef};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -35,6 +38,7 @@ pub struct ScaleServiceImpl {
     catalog_manager: CatalogManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
+    scale_controller: ScaleControllerRef,
 }
 
 impl ScaleServiceImpl {
@@ -46,6 +50,12 @@ impl ScaleServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
     ) -> Self {
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            stream_manager.env.clone(),
+        ));
         Self {
             fragment_manager,
             cluster_manager,
@@ -53,6 +63,7 @@ impl ScaleServiceImpl {
             catalog_manager,
             stream_manager,
             barrier_manager,
+            scale_controller,
         }
     }
 }
@@ -77,7 +88,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let worker_nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await;
 
         let actor_splits = self
@@ -115,11 +126,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        self.barrier_manager.check_status_running().await?;
 
         let RescheduleRequest {
             reschedules,
@@ -179,13 +186,9 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        let req = request.into_inner();
+        self.barrier_manager.check_status_running().await?;
 
-        if !self.barrier_manager.is_running().await {
-            return Err(Status::unavailable(
-                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
-            ));
-        }
+        let req = request.into_inner();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
@@ -203,7 +206,7 @@ impl ScaleService for ScaleServiceImpl {
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let plan = self.stream_manager.get_reschedule_plan(policy).await?;
+        let plan = self.scale_controller.get_reschedule_plan(policy).await?;
 
         let next_revision = self.fragment_manager.get_revision().await;
 

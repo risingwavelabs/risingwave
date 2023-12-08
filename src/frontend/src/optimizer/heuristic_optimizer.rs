@@ -62,12 +62,17 @@ impl<'a> HeuristicOptimizer<'a> {
     }
 
     fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
+        let pre_applied = self.stats.total_applied();
         let inputs = plan
             .inputs()
             .into_iter()
             .map(|sub_tree| self.optimize(sub_tree))
             .collect_vec();
-        plan.clone_with_inputs(&inputs)
+        if pre_applied != self.stats.total_applied() {
+            plan.clone_with_inputs(&inputs)
+        } else {
+            plan
+        }
     }
 
     pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {
@@ -102,6 +107,7 @@ impl<'a> HeuristicOptimizer<'a> {
 }
 
 pub struct Stats {
+    total_applied: usize,
     rule_counter: HashMap<String, u32>,
 }
 
@@ -109,10 +115,12 @@ impl Stats {
     pub fn new() -> Self {
         Self {
             rule_counter: HashMap::new(),
+            total_applied: 0,
         }
     }
 
     pub fn count_rule(&mut self, rule: &BoxedRule) {
+        self.total_applied += 1;
         match self.rule_counter.entry(rule.description().to_string()) {
             Entry::Occupied(mut entry) => {
                 *entry.get_mut() += 1;
@@ -124,7 +132,11 @@ impl Stats {
     }
 
     pub fn has_applied_rule(&self) -> bool {
-        !self.rule_counter.is_empty()
+        self.total_applied != 0
+    }
+
+    pub fn total_applied(&self) -> usize {
+        self.total_applied
     }
 }
 

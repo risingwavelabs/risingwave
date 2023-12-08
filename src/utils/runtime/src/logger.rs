@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
+use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -130,7 +131,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
-        println!("failed to get local time offset: {e}, falling back to UTC");
+        println!(
+            "failed to get local time offset, falling back to UTC: {}",
+            e.as_report()
+        );
         OffsetTime::new(
             time::UtcOffset::UTC,
             time::format_description::well_known::Rfc3339,
@@ -189,7 +193,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         }
 
         // Overrides from env var.
-        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
+        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV)
+            && !rust_log.is_empty()
+        {
             let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
             if let Some(default_level) = rust_log_targets.default_level() {
                 filter = filter.with_default(default_level);
@@ -237,8 +243,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let query_log_path = PathBuf::from(query_log_path);
         std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
-                "failed to create directory '{}' for query log: {e}",
-                query_log_path.display()
+                "failed to create directory '{}' for query log: {}",
+                query_log_path.display(),
+                e.as_report(),
             )
         });
         let file = std::fs::OpenOptions::new()
@@ -248,8 +255,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .open(query_log_path.join("query.log"))
             .unwrap_or_else(|e| {
                 panic!(
-                    "failed to create '{}/query.log': {e}",
-                    query_log_path.display()
+                    "failed to create '{}/query.log': {}",
+                    query_log_path.display(),
+                    e.as_report(),
                 )
             });
         let layer = tracing_subscriber::fmt::layer()
@@ -271,8 +279,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .open(query_log_path.join("slow_query.log"))
             .unwrap_or_else(|e| {
                 panic!(
-                    "failed to create '{}/slow_query.log': {e}",
-                    query_log_path.display()
+                    "failed to create '{}/slow_query.log': {}",
+                    query_log_path.display(),
+                    e.as_report(),
                 )
             });
         let layer = tracing_subscriber::fmt::layer()

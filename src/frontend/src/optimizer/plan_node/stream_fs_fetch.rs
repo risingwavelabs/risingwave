@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -90,6 +91,8 @@ impl Distill for StreamFsFetch {
 
 impl ExprRewritable for StreamFsFetch {}
 
+impl ExprVisitable for StreamFsFetch {}
+
 impl StreamNode for StreamFsFetch {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         // `StreamFsFetch` is same as source in proto def, so the following code is the same as `StreamSource`
@@ -111,12 +114,7 @@ impl StreamNode for StreamFsFetch {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

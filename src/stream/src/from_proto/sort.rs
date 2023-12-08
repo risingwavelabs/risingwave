@@ -22,7 +22,6 @@ use crate::executor::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SortExecutorBuilder {
     type Node = SortNode;
 
@@ -37,10 +36,9 @@ impl ExecutorBuilder for SortExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
         Ok(Box::new(SortExecutor::new(SortExecutorArgs {
-            input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
+            input,
             buffer_table: state_table,
             chunk_size: params.env.config().developer.chunk_size,
             sort_column_index: node.sort_column_index as _,

@@ -15,6 +15,7 @@
 mod catalog;
 mod cluster;
 mod env;
+pub mod event_log;
 mod id;
 mod idle;
 mod notification;

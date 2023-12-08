@@ -45,6 +45,7 @@ message MetaSnapshotMetadata {
   uint64 hummock_version_id = 2;
   uint64 max_committed_epoch = 3;
   uint64 safe_epoch = 4;
+  optional uint32 format_version = 5;
 }
 
 service BackupService {

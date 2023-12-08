@@ -42,8 +42,6 @@ pub struct StreamingMetrics {
 
     // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -71,6 +69,10 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Backpressure
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec<5>,
@@ -120,6 +122,10 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // CDC Backfill
+    pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub cdc_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
     // Over Window
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
@@ -147,30 +153,28 @@ pub struct StreamingMetrics {
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
+    // Sink iceberg metrics
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounterVec<2>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogramVec<2>,
+
     // Memory management
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
-    pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
+    pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
-
-    /// User compute error reporting
-    pub user_compute_error_count: GenericCounterVec<AtomicU64>,
-
-    /// User source reader error
-    pub user_source_reader_error_count: GenericCounterVec<AtomicU64>,
 
     // Materialize
     pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
     pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
 
     // Memory
-    pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
+    pub stream_memory_usage: LabelGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -684,10 +688,26 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the cdc_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let cdc_backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_upstream_output_row_count",
+            "Total number of rows that have been output from the cdc_backfill upstream",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -695,7 +715,7 @@ impl StreamingMetrics {
         let over_window_cache_lookup_count = register_int_counter_vec_with_registry!(
             "stream_over_window_cache_lookup_count",
             "Over window executor cache lookup count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -703,7 +723,7 @@ impl StreamingMetrics {
         let over_window_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_over_window_cache_miss_count",
             "Over window executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -845,7 +865,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_evicted_watermark_time_ms = register_int_gauge_vec_with_registry!(
+        let lru_evicted_watermark_time_ms = register_guarded_int_gauge_vec_with_registry!(
             "lru_evicted_watermark_time_ms",
             "The latest evicted watermark time by actors",
             &["table_id", "actor_id", "desc"],
@@ -881,28 +901,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let user_compute_error_count = register_int_counter_vec_with_registry!(
-            "user_compute_error_count",
-            "Compute errors in the system, queryable by tags",
-            &["error_type", "error_msg", "executor_name", "fragment_id"],
-            registry,
-        )
-        .unwrap();
-
-        let user_source_reader_error_count = register_int_counter_vec_with_registry!(
-            "user_source_reader_error_count",
-            "Source reader error count",
-            &[
-                "error_type",
-                "error_msg",
-                "executor_name",
-                "actor_id",
-                "source_id"
-            ],
-            registry,
-        )
-        .unwrap();
-
         let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
             "Materialize executor cache hit count",
@@ -919,10 +917,26 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let stream_memory_usage = register_int_gauge_vec_with_registry!(
+        let stream_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "stream_memory_usage",
             "Memory usage for stream executors",
             &["table_id", "actor_id", "desc"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_file_appender_write_qps = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_file_appender_write_qps",
+            "The qps of iceberg file appender write",
+            &["executor_id", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_file_appender_write_latency = register_guarded_histogram_vec_with_registry!(
+            "iceberg_file_appender_write_latency",
+            "The latency of iceberg file appender write",
+            &["executor_id", "sink_id"],
             registry
         )
         .unwrap();
@@ -931,8 +945,6 @@ impl StreamingMetrics {
             level,
             executor_row_count,
             actor_execution_time,
-            actor_output_buffer_blocking_duration_ns,
-            actor_input_buffer_blocking_duration_ns,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -952,6 +964,8 @@ impl StreamingMetrics {
             sink_input_row_count,
             mview_input_row_count,
             exchange_frag_recv_size,
+            actor_output_buffer_blocking_duration_ns,
+            actor_input_buffer_blocking_duration_ns,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
@@ -986,6 +1000,8 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            cdc_backfill_snapshot_read_row_count,
+            cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
@@ -1003,6 +1019,8 @@ impl StreamingMetrics {
             kv_log_store_storage_write_size,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
+            iceberg_file_appender_write_qps,
+            iceberg_file_appender_write_latency,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
@@ -1012,8 +1030,6 @@ impl StreamingMetrics {
             jemalloc_active_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
-            user_compute_error_count,
-            user_source_reader_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
@@ -1052,6 +1068,14 @@ impl StreamingMetrics {
         let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
         let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
 
+        let label_list = [identity, sink_id_str];
+        let iceberg_file_appender_write_qps = self
+            .iceberg_file_appender_write_qps
+            .with_label_values(&label_list);
+        let iceberg_file_appender_write_latency = self
+            .iceberg_file_appender_write_latency
+            .with_label_values(&label_list);
+
         SinkMetrics {
             sink_commit_duration_metrics,
             connector_sink_rows_received,
@@ -1060,6 +1084,8 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            iceberg_file_appender_write_qps,
+            iceberg_file_appender_write_latency,
         }
     }
 }

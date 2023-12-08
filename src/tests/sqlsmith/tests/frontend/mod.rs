@@ -44,7 +44,7 @@ pub struct SqlsmithEnv {
 /// Returns `Ok(true)` if query result was ignored.
 /// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
 /// Then, we can infer the correct state of the database.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<bool> {
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<str>) -> Result<bool> {
     let result = handler::handle(session.clone(), stmt, sql, vec![])
         .await
         .map(|_| ())
@@ -97,18 +97,19 @@ async fn create_tables(
     let (mut tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
-        let create_sql = s.to_string();
-        handle(session.clone(), s, &create_sql).await?;
+        let create_sql: Arc<str> = Arc::from(s.to_string());
+        handle(session.clone(), s, create_sql).await?;
     }
 
     // Generate some mviews
     for i in 0..20 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let sql: Arc<str> = Arc::from(sql);
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        let skipped = handle(session.clone(), stmt, &sql).await?;
+        let skipped = handle(session.clone(), stmt, sql).await?;
         if !skipped {
             tables.push(table);
         }
@@ -149,22 +150,25 @@ async fn test_stream_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
 
     let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+    let sql: Arc<str> = Arc::from(sql);
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
-    let skipped = handle(session.clone(), stmt, &sql).await?;
+    let skipped = handle(session.clone(), stmt, sql).await?;
     if !skipped {
-        let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+        let drop_sql: Arc<str> = Arc::from(format!("DROP MATERIALIZED VIEW {}", table.name));
         let drop_stmts = parse_sql(&drop_sql);
         let drop_stmt = drop_stmts[0].clone();
-        handle(session.clone(), drop_stmt, &drop_sql).await?;
+        handle(session.clone(), drop_stmt, drop_sql).await?;
     }
     Ok(())
 }
@@ -205,19 +209,21 @@ fn test_batch_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let sql = sql_gen(&mut rng, tables);
+    let sql: Arc<str> = Arc::from(sql_gen(&mut rng, tables));
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
     let context: OptimizerContextRef =
-        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, &sql)?).into();
+        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?).into();
 
     match stmt {
         Statement::Query(_) => {
@@ -248,7 +254,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     let session = frontend.session_ref();
 
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
@@ -266,7 +274,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
 /// Otherwise no error: skip status: false.
 fn validate_result<T>(result: Result<T>) -> Result<bool> {
     if let Err(e) = result {
-        if let Some(s) = e.message() && is_permissible_error(s) {
+        if let Some(s) = e.message()
+            && is_permissible_error(s)
+        {
             return Ok(true);
         } else {
             return Err(e);

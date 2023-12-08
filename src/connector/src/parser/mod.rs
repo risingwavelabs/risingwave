@@ -25,7 +25,7 @@ use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Scalar};
@@ -43,7 +43,7 @@ use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
@@ -169,12 +169,27 @@ impl MessageMeta<'_> {
             SourceColumnType::Offset => Datum::Some(self.offset.into()).into(),
             // Extract custom meta data per connector.
             SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
-                assert_eq!(desc.name.as_str(), KAFKA_TIMESTAMP_COLUMN_NAME, "unexpected meta column name");
-                kafka_meta.timestamp.map(|ts| {
-                    risingwave_common::cast::i64_to_timestamptz(ts)
-                        .unwrap()
-                        .to_scalar_value()
-                }).into()
+                assert_eq!(
+                    desc.name.as_str(),
+                    KAFKA_TIMESTAMP_COLUMN_NAME,
+                    "unexpected kafka meta column name"
+                );
+                kafka_meta
+                    .timestamp
+                    .map(|ts| {
+                        risingwave_common::cast::i64_to_timestamptz(ts)
+                            .unwrap()
+                            .to_scalar_value()
+                    })
+                    .into()
+            }
+            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
+                assert_eq!(
+                    desc.name.as_str(),
+                    TABLE_NAME_COLUMN_NAME,
+                    "unexpected cdc meta column name"
+                );
+                Datum::Some(cdc_meta.full_table_name.as_str().into()).into()
             }
 
             // For other cases, return `None`.
@@ -532,14 +547,12 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
-                if parser.parser_format() == ParserFormat::Debezium {
-                    tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
-                    // empty payload means a heartbeat in cdc source
-                    // heartbeat message offset should not overwrite data messages offset
-                    split_offset_mapping
-                        .entry(msg.split_id)
-                        .or_insert(msg.offset.clone());
-                }
+                tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
+                // assumes an empty message as a heartbeat
+                // heartbeat message offset should not overwrite data messages offset
+                split_offset_mapping
+                    .entry(msg.split_id)
+                    .or_insert(msg.offset.clone());
 
                 continue;
             }
@@ -903,9 +916,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
                 } else {
-                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
-                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-                    ));
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(props).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Avro(config)
             }
@@ -932,9 +948,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
                 } else {
-                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
-                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-                    ));
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(props).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Protobuf(config)
             }
