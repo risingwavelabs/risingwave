@@ -87,7 +87,6 @@ where
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        _schema: Schema, // Output schema of this executor
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {

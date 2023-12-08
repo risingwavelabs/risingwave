@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -52,24 +52,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             .iter()
             .map(|&i| i as usize)
             .collect_vec();
-
-        let schema = if matches!(
-            node.stream_scan_type(),
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill
-        ) {
-            Schema::new(
-                output_indices
-                    .iter()
-                    .map(|i| snapshot.schema().fields()[*i].clone())
-                    .collect_vec(),
-            )
-        } else {
-            // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
-            // directly output the columns received from the upstream or snapshot.
-            let all_indices = (0..snapshot.schema().len()).collect_vec();
-            assert_eq!(output_indices, all_indices);
-            snapshot.schema().clone()
-        };
 
         let executor = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
@@ -213,7 +195,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             state_table,
                             output_indices,
                             progress,
-                            schema,
                             stream.streaming_metrics.clone(),
                             params.env.config().developer.chunk_size,
                         )
