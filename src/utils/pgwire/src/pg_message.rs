@@ -295,14 +295,30 @@ impl FeMessage {
 impl FeStartupMessage {
     /// Read startup message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let mut len_buffer = [0; 4];
-        let n = crate::utils::read_exact_or_eof(stream, &mut len_buffer).await?;
-        match n {
-            4 => (),
-            0 => return Ok(FeMessage::HealthCheck),
-            _ => return Err(ErrorKind::UnexpectedEof.into()),
+        let mut buffer1 = vec![0; 1];
+        let result = stream.read_exact(&mut buffer1).await;
+        let filled1 = match result {
+            Ok(n) => n,
+            Err(err) => {
+                // Detect whether it is a health check.
+                if err.kind() == ErrorKind::UnexpectedEof {
+                    return Ok(FeMessage::HealthCheck);
+                } else {
+                    return Err(err);
+                }
+            }
         };
-        let len = NetworkEndian::read_i32(&len_buffer);
+        assert_eq!(filled1, 1);
+
+        let mut buffer2 = vec![0; 3];
+        let filled2 = stream.read_exact(&mut buffer2).await?;
+        assert_eq!(filled2, 3);
+
+        let mut buffer3 = BytesMut::with_capacity(4);
+        buffer3.put_slice(&buffer1);
+        buffer3.put_slice(&buffer2);
+
+        let len = NetworkEndian::read_i32(&buffer3);
 
         let protocol_num = stream.read_i32().await?;
         let payload_len = (len - 8) as usize;

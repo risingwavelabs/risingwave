@@ -31,4 +31,3 @@ pub mod pg_protocol;
 pub mod pg_response;
 pub mod pg_server;
 pub mod types;
-pub mod utils;

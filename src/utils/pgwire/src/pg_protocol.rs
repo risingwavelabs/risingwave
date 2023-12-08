@@ -586,7 +586,7 @@ where
     }
 
     fn process_health_check(&mut self) {
-        tracing::info!("health check");
+        tracing::debug!("health check");
         self.is_terminate = true;
     }
 
