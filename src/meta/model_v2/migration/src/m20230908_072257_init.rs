@@ -498,8 +498,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Source::RowIdIndex).integer())
                     .col(ColumnDef::new(Source::Columns).json().not_null())
                     .col(ColumnDef::new(Source::PkColumnIds).json().not_null())
-                    .col(ColumnDef::new(Source::Properties).json().not_null())
-                    .col(ColumnDef::new(Source::Options).json().not_null())
+                    .col(ColumnDef::new(Source::WithProperties).json().not_null())
+                    .col(ColumnDef::new(Source::FormatEncodeOptions).json().not_null())
                     .col(ColumnDef::new(Source::Definition).string().not_null())
                     .col(ColumnDef::new(Source::SourceInfo).json())
                     .col(ColumnDef::new(Source::WatermarkDescs).json().not_null())
@@ -1036,8 +1036,8 @@ enum Source {
     RowIdIndex,
     Columns,
     PkColumnIds,
-    Properties,
-    Options,
+    WithProperties,
+    FormatEncodeOptions,
     Definition,
     SourceInfo,
     WatermarkDescs,
