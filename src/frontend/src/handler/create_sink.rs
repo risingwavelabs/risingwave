@@ -86,12 +86,19 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     })
 }
 
-#[allow(clippy::type_complexity)]
+// used to store result of `gen_sink_plan`
+pub struct SinkPlanContext {
+    pub query: Box<Query>,
+    pub sink_plan: PlanRef,
+    pub sink_catalog: SinkCatalog,
+    pub target_table_catalog: Option<Arc<TableCatalog>>,
+}
+
 pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(Box<Query>, PlanRef, SinkCatalog, Option<Arc<TableCatalog>>)> {
+) -> Result<SinkPlanContext> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -256,7 +263,12 @@ pub fn gen_sink_plan(
         }
     };
 
-    Ok((query, sink_plan, sink_catalog, target_table_catalog))
+    Ok(SinkPlanContext {
+        query,
+        sink_plan,
+        sink_catalog,
+        target_table_catalog,
+    })
 }
 
 pub async fn handle_create_sink(
@@ -276,8 +288,12 @@ pub async fn handle_create_sink(
     let (sink, graph, target_table_catalog) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
 
-        let (query, plan, sink, target_table_catalog) =
-            gen_sink_plan(&session, context.clone(), stmt)?;
+        let SinkPlanContext {
+            query,
+            sink_plan: plan,
+            sink_catalog: sink,
+            target_table_catalog,
+        } = gen_sink_plan(&session, context.clone(), stmt)?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
