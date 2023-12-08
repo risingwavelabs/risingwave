@@ -576,7 +576,7 @@ impl DdlController {
         Ok(())
     }
 
-    /// Let the stream manager to create the stream job, and do some cleanup work after it fails or finishes.
+    /// Let the stream manager to create the actors, and do some cleanup work after it fails or finishes.
     async fn create_streaming_job_inner(
         &self,
         stream_job: StreamingJob,
@@ -661,7 +661,9 @@ impl DdlController {
         Ok(version)
     }
 
-    /// Creates [`StreamFragmentGraph`] from the protobuf message, and does some preparation work.
+    /// Creates [`StreamFragmentGraph`] from the protobuf message
+    /// (allocate and fill ID for fragments, internal tables, and the table in the local graph),
+    /// and does some preparation work.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
@@ -726,7 +728,9 @@ impl DdlController {
         Ok(parallelism)
     }
 
-    /// Builds the actor graph for stream manager to create the stream job
+    /// Builds the actor graph:
+    /// - Schedule the fragments based on their distribution
+    /// - Expand each fragment into one or several actors
     async fn build_stream_job(
         &self,
         env: StreamEnvironment,
