@@ -282,6 +282,12 @@ impl<S: StateStore> ManagedTopNState<S> {
             }
         }
 
+        if topn_cache.len() == 0 {
+            // after trying to initially fill in the cache, the length is still 0,
+            // meaning the table is empty
+            topn_cache.update_table_row_count(0);
+        }
+
         Ok(())
     }
 
