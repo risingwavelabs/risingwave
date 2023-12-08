@@ -109,6 +109,27 @@ message UncommittedEpoch {
   repeated SstableInfo tables = 2;
 }
 
+message VnodeWatermark {
+  // The watermark shared by multiple vnodes
+  bytes watermark = 1;
+  // The set of vnodes that share the same watermark
+  common.Buffer vnode_bitmap = 2;
+}
+
+message TableWatermarks {
+  message EpochNewWatermarks {
+    repeated VnodeWatermark watermarks = 1;
+    uint64 epoch = 2;
+  }
+
+  // Table watermarks of a state table from all vnodes written in multiple epochs.
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated EpochNewWatermarks epoch_watermarks = 1;
+
+  // The direction of the table watermark.
+  bool is_ascending = 2;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -124,6 +145,7 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
+  map<uint64, TableWatermarks> table_watermarks = 5;
 }
 
 message HummockVersionDelta {
@@ -140,6 +162,7 @@ message HummockVersionDelta {
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
+  map<uint64, TableWatermarks> new_table_watermarks = 8;
 }
 
 message HummockVersionDeltas {

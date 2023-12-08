@@ -15,7 +15,7 @@
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
 
-use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, FragmentId, VnodeBitmap};
+use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -56,6 +56,7 @@ pub struct Model {
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

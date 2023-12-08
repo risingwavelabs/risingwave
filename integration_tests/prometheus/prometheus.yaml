@@ -10,11 +10,11 @@ scrape_configs:
 
   - job_name: compute
     static_configs:
-      - targets: ["compute-node-0:1222"]
+      - targets: ["risingwave-standalone:1222"]
 
   - job_name: meta
     static_configs:
-      - targets: ["meta-node-0:1250"]
+      - targets: ["risingwave-standalone:1250"]
 
   - job_name: minio
     metrics_path: /minio/v2/metrics/cluster
@@ -23,7 +23,7 @@ scrape_configs:
 
   - job_name: compactor
     static_configs:
-      - targets: ["compactor-0:1260"]
+      - targets: ["risingwave-standalone:1260"]
 
   - job_name: etcd
     static_configs:

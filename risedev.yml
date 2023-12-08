@@ -191,6 +191,19 @@ profile:
       - use: compactor
       # - use: prometheus
       # - use: grafana
+  obs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use obs as storage backend, configure bucket name:
+      - use: opendal
+        engine: obs
+        bucket: bucket-name
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
 
   oss:
     steps:

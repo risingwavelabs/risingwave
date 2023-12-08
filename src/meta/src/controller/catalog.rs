@@ -46,10 +46,10 @@ use tokio::sync::RwLock;
 
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    check_connection_name_duplicate, check_function_signature_duplicate,
-    check_relation_name_duplicate, check_schema_name_duplicate, ensure_object_id,
-    ensure_object_not_refer, ensure_schema_empty, ensure_user_id, get_referring_objects,
-    get_referring_objects_cascade, list_user_info_by_ids, PartialObject,
+    check_connection_name_duplicate, check_database_name_duplicate,
+    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    get_referring_objects, get_referring_objects_cascade, list_user_info_by_ids, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
@@ -142,6 +142,7 @@ impl CatalogController {
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
+        check_database_name_duplicate(&db.name, &txn).await?;
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
@@ -303,8 +304,13 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+        // TODO: support drop schema cascade.
         if drop_mode == DropMode::Restrict {
             ensure_schema_empty(schema_id, &txn).await?;
+        } else {
+            return Err(MetaError::permission_denied(
+                "drop schema cascade is not supported yet".to_string(),
+            ));
         }
 
         // Find affect users with privileges on the schema and the objects in the schema.
@@ -1073,12 +1079,80 @@ impl CatalogController {
         ))
     }
 
+    async fn alter_database_name(
+        &self,
+        database_id: DatabaseId,
+        name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        check_database_name_duplicate(name, &txn).await?;
+
+        let active_model = database::ActiveModel {
+            database_id: Set(database_id),
+            name: Set(name.to_string()),
+        };
+        let database = active_model.update(&txn).await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database, obj).into()),
+            )
+            .await;
+        Ok(version)
+    }
+
+    async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let obj = Object::find_by_id(schema_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+        check_schema_name_duplicate(name, obj.database_id.unwrap(), &txn).await?;
+
+        let active_model = schema::ActiveModel {
+            schema_id: Set(schema_id),
+            name: Set(name.to_string()),
+        };
+        let schema = active_model.update(&txn).await?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Schema(ObjectModel(schema, obj).into()),
+            )
+            .await;
+        Ok(version)
+    }
+
     pub async fn alter_name(
         &self,
         object_type: ObjectType,
         object_id: ObjectId,
         object_name: &str,
     ) -> MetaResult<NotificationVersion> {
+        if object_type == ObjectType::Database {
+            return self.alter_database_name(object_id as _, object_name).await;
+        } else if object_type == ObjectType::Schema {
+            return self.alter_schema_name(object_id as _, object_name).await;
+        }
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
@@ -1256,21 +1330,67 @@ mod tests {
     const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
-    async fn test_create_database() -> MetaResult<()> {
+    async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-        let db = PbDatabase {
-            name: "test".to_string(),
+        let pb_database = PbDatabase {
+            name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
-        mgr.create_database(db).await?;
+        mgr.create_database(pb_database).await?;
 
-        let db = Database::find()
-            .filter(database::Column::Name.eq("test"))
+        let database_id: DatabaseId = Database::find()
+            .select_only()
+            .column(database::Column::DatabaseId)
+            .filter(database::Column::Name.eq("db1"))
+            .into_tuple()
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        mgr.drop_database(db.database_id).await?;
+
+        mgr.alter_name(ObjectType::Database, database_id, "db2")
+            .await?;
+        let database = Database::find_by_id(database_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(database.name, "db2");
+
+        mgr.drop_database(database_id).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_schema_func() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let pb_schema = PbSchema {
+            database_id: TEST_DATABASE_ID as _,
+            name: "schema1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        };
+        mgr.create_schema(pb_schema.clone()).await?;
+        assert!(mgr.create_schema(pb_schema).await.is_err());
+
+        let schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("schema1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        mgr.alter_name(ObjectType::Schema, schema_id, "schema2")
+            .await?;
+        let schema = Schema::find_by_id(schema_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(schema.name, "schema2");
+        mgr.drop_schema(schema_id, DropMode::Restrict).await?;
+
         Ok(())
     }
 
@@ -1346,7 +1466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_alter_rename() -> MetaResult<()> {
+    async fn test_alter_relation_rename() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,

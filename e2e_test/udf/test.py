@@ -84,6 +84,11 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     return dec
 
 
+@udf(input_types=["FLOAT8"], result_type="DECIMAL")
+def float_to_decimal(f: float) -> Decimal:
+    return Decimal(f)
+
+
 @udf(input_types=["DECIMAL", "DECIMAL"], result_type="DECIMAL")
 def decimal_add(a: Decimal, b: Decimal) -> Decimal:
     return a + b
@@ -217,6 +222,7 @@ if __name__ == "__main__":
     server.add_function(split)
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
+    server.add_function(float_to_decimal)
     server.add_function(decimal_add)
     server.add_function(array_access)
     server.add_function(jsonb_access)
