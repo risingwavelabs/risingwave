@@ -339,6 +339,13 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        core.split_state_store.state_store.try_flush().await?;
+
+        Ok(())
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -598,6 +605,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .inc_by(chunk.cardinality() as u64);
                             yield Message::Chunk(chunk);
+                            self.try_flush_data().await?;
                         }
                     }
                 }

@@ -244,6 +244,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(chunk)
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
+            .await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let Self {
@@ -296,6 +303,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     if let Some(chunk) =
