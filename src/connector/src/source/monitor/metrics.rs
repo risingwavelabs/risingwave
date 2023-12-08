@@ -107,7 +107,7 @@ impl SourceMetrics {
         .unwrap();
 
         let opts = histogram_opts!(
-            "source_cdc_event_lag_duration_miliseconds",
+            "source_cdc_event_lag_duration_milliseconds",
             "source_cdc_lag_latency",
             exponential_buckets(1.0, 2.0, 20).unwrap(), // max 1048s
         );
