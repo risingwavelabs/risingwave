@@ -416,8 +416,15 @@ impl SinkWriter for DeltaLakeSinkWriter {
 pub struct DeltaLakeSinkCommitter {
     table: DeltaTable,
 }
-impl DeltaLakeSinkCommitter {
-    pub async fn commit_inner(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+
+#[async_trait::async_trait]
+impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("DeltaLake commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
 
         let deltalake_write_result = metadata
@@ -460,18 +467,6 @@ impl DeltaLakeSinkCommitter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
-        tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
-    }
-
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        self.commit_inner(epoch, metadata).await
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct DeltaLakeWriteResult {
     adds: Vec<Add>,
@@ -504,9 +499,8 @@ impl DeltaLakeWriteResult {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod test {
-    use std::fs;
     use std::sync::Arc;
 
     use datafusion::prelude::*;
@@ -519,17 +513,13 @@ mod test {
     use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
     use crate::sink::deltalake::DeltaLakeSinkCommitter;
     use crate::sink::writer::SinkWriter;
+    use crate::sink::SinkCommitCoordinator;
     use crate::source::DataType;
 
-    fn remove_dir(path: &str) {
-        if fs::metadata(path).is_ok() && fs::metadata(path).unwrap().is_dir() {
-            fs::remove_dir_all(path).unwrap();
-        }
-    }
     #[tokio::test]
     async fn test_deltalake() {
-        let path = "./deltalake-test";
-        remove_dir(path);
+        let dir = tempdir::TempDir::new("./deltalake").unwrap();
+        let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
             .with_column("id", SchemaDataType::integer(), false, Default::default())
@@ -581,7 +571,7 @@ mod test {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit_inner(1, vec![metadata]).await.unwrap();
+        committer.commit(1, vec![metadata]).await.unwrap();
 
         let ctx = SessionContext::new();
         let table = deltalake::open_table(path).await.unwrap();
@@ -596,6 +586,5 @@ mod test {
             .unwrap();
         assert_eq!(3, batches.get(0).unwrap().column(0).len());
         assert_eq!(3, batches.get(0).unwrap().column(1).len());
-        remove_dir(path);
     }
 }
