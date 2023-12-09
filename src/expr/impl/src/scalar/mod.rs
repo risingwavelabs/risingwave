@@ -30,6 +30,7 @@ mod array_to_string;
 mod ascii;
 mod bitwise_op;
 mod cardinality;
+mod case;
 mod cast;
 mod cmp;
 mod concat_op;
