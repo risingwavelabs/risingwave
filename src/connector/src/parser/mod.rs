@@ -37,6 +37,7 @@ use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
+use self::cockroach::CockroachJsonParser;
 pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
@@ -55,6 +56,7 @@ use crate::source::{
 mod avro;
 mod bytes_parser;
 mod canal;
+mod cockroach;
 mod common;
 mod csv_parser;
 mod debezium;
@@ -420,6 +422,7 @@ pub enum ParseResult {
 pub enum ParserFormat {
     CanalJson,
     Csv,
+    Cockroach,
     Json,
     Maxwell,
     Debezium,
@@ -702,6 +705,7 @@ pub enum ByteStreamSourceParserImpl {
     DebeziumMongoJson(DebeziumMongoJsonParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
+    Cockroach(CockroachJsonParser),
 }
 
 pub type ParsedStreamImpl = impl SourceWithStateStream + Unpin;
@@ -719,6 +723,7 @@ impl ByteStreamSourceParserImpl {
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
             Self::Plain(parser) => parser.into_stream(msg_stream),
             Self::Upsert(parser) => parser.into_stream(msg_stream),
+            Self::Cockroach(parser) => parser.into_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -762,6 +767,10 @@ impl ByteStreamSourceParserImpl {
                 let parser =
                     MaxwellParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Maxwell(parser))
+            }
+            (ProtocolProperties::Cockroach, EncodingProperties::Json(_)) => {
+                let parser = CockroachJsonParser::new(rw_columns, source_ctx);
+                Ok(Self::Cockroach(parser))
             }
             _ => unreachable!(),
         }
@@ -866,6 +875,7 @@ pub enum ProtocolProperties {
     Plain,
     Upsert,
     Native,
+    Cockroach,
     #[default]
     Unspecified,
 }
@@ -886,6 +896,7 @@ impl SpecificParserConfig {
             SourceFormat::Canal => ProtocolProperties::Canal,
             SourceFormat::Upsert => ProtocolProperties::Upsert,
             SourceFormat::Plain => ProtocolProperties::Plain,
+            SourceFormat::Cockroach => ProtocolProperties::Cockroach,
             _ => unreachable!(),
         };
 
@@ -992,6 +1003,11 @@ impl SpecificParserConfig {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }
             (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
+            (SourceFormat::Cockroach, SourceEncode::Json) => {
+                EncodingProperties::Json(JsonProperties {
+                    use_schema_registry: false,
+                })
+            }
             (format, encode) => {
                 return Err(RwError::from(ProtocolError(format!(
                     "Unsupported format {:?} encode {:?}",

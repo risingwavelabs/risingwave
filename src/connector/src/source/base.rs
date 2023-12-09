@@ -229,6 +229,7 @@ pub enum SourceFormat {
     Canal,
     Upsert,
     Plain,
+    Cockroach,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -305,6 +306,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Cockroach, PbEncodeType::Json) => {
+            (SourceFormat::Cockroach, SourceEncode::Json)
+        }
         (format, encode) => {
             return Err(anyhow!(
                 "Unsupported combination of format {:?} and encode {:?}",
