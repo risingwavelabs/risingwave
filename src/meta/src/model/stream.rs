@@ -321,6 +321,15 @@ impl TableFragments {
             .cloned()
     }
 
+    pub fn sink_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Sink as u32) != 0
+            })
+            .cloned()
+    }
+
     /// Returns actors that contains backfill executors.
     pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {

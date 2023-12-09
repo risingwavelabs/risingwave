@@ -44,7 +44,7 @@ use risingwave_stream::executor::external::ExternalStorageTable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, Barrier, BoxedExecutor as StreamBoxedExecutor,
+    expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedExecutor as StreamBoxedExecutor,
     BoxedMessageStream, CdcBackfillExecutor, Executor, ExecutorInfo, MaterializeExecutor, Message,
     Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
 };
@@ -306,12 +306,13 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             _phantom: PhantomData,
         })],
     );
-    let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
-        adds: HashMap::new(),
-        added_actors: HashSet::new(),
-        splits,
-        pause: false,
-    });
+    let init_barrier =
+        Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+            adds: HashMap::new(),
+            added_actors: HashSet::new(),
+            splits,
+            pause: false,
+        }));
 
     tx.send_barrier(init_barrier);
 
