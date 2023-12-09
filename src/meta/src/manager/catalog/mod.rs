@@ -1453,6 +1453,7 @@ impl CatalogManager {
                 })
                 .collect_vec();
 
+            // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
             if !table_sinks.is_empty() {
                 bail!(
                     "Found {} sink(s) into table in dependency, please drop them manually",
