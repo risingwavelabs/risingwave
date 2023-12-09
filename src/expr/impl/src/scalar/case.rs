@@ -122,8 +122,7 @@ fn build_case_expr(
         }
         when_clauses.push(WhenClause { when, then });
     }
-    let else_clause = if let Some(iter) = iter.into_remainder() {
-        let else_clause = iter.into_iter().next().unwrap();
+    let else_clause = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
         if else_clause.return_type() != return_type {
             bail!("Type mismatched between else and case.");
         }
@@ -175,16 +174,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_without_else() {
-        // when x then 1
-        let case = build_from_pretty("(case:int4 $0:boolean 1:int4)");
+        // when x then 1 when y then 2
+        let case = build_from_pretty("(case:int4 $0:boolean 1:int4 $1:boolean 2:int4)");
         let (input, expected) = DataChunk::from_pretty(
-            "B i
-             t 1
-             f .
-             t 1
-             f .",
+            "B B i
+             f f .
+             f t 2
+             t f 1
+             t t 1",
         )
-        .split_column_at(1);
+        .split_column_at(2);
 
         // test eval
         let output = case.eval(&input).await.unwrap();
