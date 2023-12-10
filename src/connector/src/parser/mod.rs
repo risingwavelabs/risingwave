@@ -323,8 +323,8 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (&SourceColumnType::Meta, _)
                     if matches!(
-                        &self.row_meta,
-                        &Some(SourceMeta::Kafka | SourceMeta::DebeziumCdc)
+                        &self.row_meta.map(|ele| ele.meta),
+                        &Some(SourceMeta::Kafka(_) | SourceMeta::DebeziumCdc(_))
                     ) =>
                 {
                     // SourceColumnType is for CDC source only.
