@@ -98,7 +98,7 @@ pub(super) fn at_least_one_ok(mut results: Vec<Result<()>>) -> Result<()> {
 // For parser that doesn't support key currently
 #[macro_export]
 macro_rules! only_parse_payload {
-    ($self:ident, $payload:expr, $writer:ident) => {
+    ($self:ident, $payload:ident, $writer:ident) => {
         if let Some(payload) = $payload {
             $self.parse_inner(payload, $writer).await
         } else {

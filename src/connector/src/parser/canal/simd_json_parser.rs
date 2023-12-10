@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
-
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -28,7 +26,7 @@ use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{
     ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
 };
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
 const OP: &str = "type";
@@ -130,12 +128,13 @@ impl ByteStreamSourceParser for CanalJsonParser {
         ParserFormat::CanalJson
     }
 
-    fn parse_one<'a>(
+    async fn parse_one<'a>(
         &'a mut self,
-        message: SourceMessage,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<()>> + Send + 'a {
-        only_parse_payload!(self, message.payload, writer)
+    ) -> Result<()> {
+        only_parse_payload!(self, payload, writer)
     }
 }
 

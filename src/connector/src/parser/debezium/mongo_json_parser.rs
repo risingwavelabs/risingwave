@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::future::Future;
 
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -26,7 +25,7 @@ use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMessage};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct DebeziumMongoJsonParser {
@@ -118,11 +117,12 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         ParserFormat::DebeziumMongo
     }
 
-    fn parse_one<'a>(
+    async fn parse_one<'a>(
         &'a mut self,
-        message: SourceMessage,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<()>> + Send + 'a {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }
