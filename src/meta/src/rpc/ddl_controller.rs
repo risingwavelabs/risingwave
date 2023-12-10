@@ -55,7 +55,7 @@ use crate::manager::{
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentId, StreamEnvironment, TableFragments};
+use crate::model::{FragmentId, StreamContext, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -490,7 +490,7 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
@@ -505,7 +505,7 @@ impl DdlController {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(
-                    env.clone(),
+                    stream_ctx,
                     &stream_job,
                     fragment_graph,
                     affected_table_replace_info,
@@ -626,7 +626,7 @@ impl DdlController {
     // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
     async fn inject_replace_table_job(
         &self,
-        env: StreamEnvironment,
+        stream_ctx: StreamContext,
         sink_table_fragments: &TableFragments,
         ReplaceTableInfo {
             mut streaming_job,
@@ -639,7 +639,7 @@ impl DdlController {
             .await?;
 
         let (mut replace_table_ctx, mut table_fragments) = self
-            .build_replace_table(env.clone(), &streaming_job, fragment_graph, None)
+            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None)
             .await?;
 
         let mut union_fragment_id = None;
@@ -936,7 +936,7 @@ impl DdlController {
     /// - Expand each fragment into one or several actors
     async fn build_stream_job(
         &self,
-        env: StreamEnvironment,
+        stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<ReplaceTableInfo>,
@@ -944,7 +944,7 @@ impl DdlController {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
-        let expr_context = env.to_expr_context();
+        let expr_context = stream_ctx.to_expr_context();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -999,12 +999,12 @@ impl DdlController {
             id.into(),
             graph,
             &building_locations.actor_locations,
-            env.clone(),
+            stream_ctx.clone(),
         );
 
         let replace_table_job_info = match affected_table_replace_info {
             Some(replace_table_info) => Some(
-                self.inject_replace_table_job(env, &table_fragments, replace_table_info)
+                self.inject_replace_table_job(stream_ctx, &table_fragments, replace_table_info)
                     .await?,
             ),
             None => None,
@@ -1226,7 +1226,7 @@ impl DdlController {
         table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         let fragment_graph = self
             .prepare_replace_table(&mut stream_job, fragment_graph)
@@ -1235,7 +1235,7 @@ impl DdlController {
         let result = try {
             let (ctx, table_fragments) = self
                 .build_replace_table(
-                    env,
+                    stream_ctx,
                     &stream_job,
                     fragment_graph,
                     table_col_index_mapping.clone(),
@@ -1289,14 +1289,14 @@ impl DdlController {
     /// fragments.
     async fn build_replace_table(
         &self,
-        env: StreamEnvironment,
+        stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
-        let expr_context = env.to_expr_context();
+        let expr_context = stream_ctx.to_expr_context();
 
         let old_table_fragments = self
             .fragment_manager
@@ -1376,7 +1376,7 @@ impl DdlController {
             dummy_id.into(),
             graph,
             &building_locations.actor_locations,
-            env,
+            stream_ctx,
         );
 
         let ctx = ReplaceTableContext {
