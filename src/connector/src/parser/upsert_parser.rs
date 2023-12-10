@@ -15,6 +15,7 @@
 use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::plan_common::AdditionalColumnType;
 
 use super::bytes_parser::BytesAccessBuilder;
 use super::unified::upsert::UpsertChangeEvent;
@@ -52,13 +53,14 @@ async fn build_accessor_builder(
     }
 }
 
-fn check_rw_default_key(columns: &Vec<SourceColumnDesc>) -> bool {
-    for col in columns {
-        if col.name.starts_with(DEFAULT_KEY_COLUMN_NAME) {
-            return true;
+fn get_key_column_name(columns: &Vec<SourceColumnDesc>) -> Option<String> {
+    columns.iter().find_map(|column| {
+        if column.additional_column_type == AdditionalColumnType::Key {
+            Some(column.name.clone())
+        } else {
+            None
         }
-    }
-    false
+    })
 }
 
 impl UpsertParser {
@@ -67,12 +69,12 @@ impl UpsertParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        // check whether columns has `DEFAULT_KEY_COLUMN_NAME`, if so, the key accessor should be
+        // check whether columns has Key as AdditionalColumnType, if so, the key accessor should be
         // bytes
-        let key_builder = if check_rw_default_key(&rw_columns) {
+        let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
             AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
                 BytesProperties {
-                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+                    column_name: Some(key_column_name),
                 },
             ))?)
         } else {
