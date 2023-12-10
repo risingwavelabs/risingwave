@@ -33,6 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
+use risingwave_pb::plan_common::AdditionalColumnType;
 use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
@@ -310,32 +311,64 @@ impl SourceStreamChunkRowWriter<'_> {
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
         let mut wrapped_f = |desc: &SourceColumnDesc| {
-            if let Some(meta_value) =
-                (self.row_meta.as_ref()).and_then(|row_meta| row_meta.value_for_column(desc))
-            {
-                // For meta columns, fill in the meta data.
-                Ok(A::output_for(meta_value))
-            } else {
-                // For normal columns, call the user provided closure.
-                match f(desc) {
-                    Ok(output) => Ok(output),
+            match (&desc.column_type, &desc.additional_column_type) {
+                (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
+                    // SourceColumnType is for CDC source only.
+                    Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|row_meta| row_meta.value_for_column(desc))
+                            .unwrap(), // handled all match cases in internal match, unwrap is safe
+                    ))
+                }
+                (&SourceColumnType::Meta, _)
+                    if matches!(
+                        &self.row_meta,
+                        &Some(SourceMeta::Kafka | SourceMeta::DebeziumCdc)
+                    ) =>
+                {
+                    // SourceColumnType is for CDC source only.
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|row_meta| row_meta.value_for_column(desc))
+                            .unwrap(), // handled all match cases in internal match, unwrap is safe
+                    ));
+                }
+                (
+                    _,
+                    &AdditionalColumnType::Timestamp
+                    | &AdditionalColumnType::Partition
+                    | &AdditionalColumnType::Filename
+                    | &AdditionalColumnType::Offset
+                    | &AdditionalColumnType::Header,
+                    // AdditionalColumnType::Unspecified is means it comes from message payload
+                    // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
+                ) => {
+                    todo!()
+                }
+                (_, _) => {
+                    // For normal columns, call the user provided closure.
+                    match f(desc) {
+                        Ok(output) => Ok(output),
 
-                    // Throw error for failed access to primary key columns.
-                    Err(e) if desc.is_pk => Err(e),
-                    // Ignore error for other columns and fill in `NULL` instead.
-                    Err(error) => {
-                        // TODO: figure out a way to fill in not-null default value if user specifies one
-                        // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                        //       see #13105
-                        tracing::warn!(
-                            %error,
-                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                            offset = self.row_meta.as_ref().map(|m| m.offset),
-                            column = desc.name,
-                            "failed to parse non-pk column, padding with `NULL`"
-                        );
-                        Ok(A::output_for(Datum::None))
+                        // Throw error for failed access to primary key columns.
+                        Err(e) if desc.is_pk => Err(e),
+                        // Ignore error for other columns and fill in `NULL` instead.
+                        Err(error) => {
+                            // TODO: figure out a way to fill in not-null default value if user specifies one
+                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                            //       see #13105
+                            tracing::warn!(
+                                %error,
+                                split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                                offset = self.row_meta.as_ref().map(|m| m.offset),
+                                column = desc.name,
+                                "failed to parse non-pk column, padding with `NULL`"
+                            );
+                            Ok(A::output_for(Datum::None))
+                        }
                     }
                 }
             }
@@ -559,17 +592,12 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             split_offset_mapping.insert(msg.split_id.clone(), msg.offset.clone());
 
             let old_op_num = builder.op_num();
-            match parser
-                .parse_one_with_txn(
-                    msg.key,
-                    builder.row_writer().with_meta(MessageMeta {
-                        meta: &msg.meta,
-                        split_id: &msg.split_id,
-                        offset: &msg.offset,
-                    }),
-                )
-                .await
-            {
+            let row_builder = builder.row_writer().with_meta(MessageMeta {
+                meta: &msg.meta,
+                split_id: &msg.split_id,
+                offset: &msg.offset,
+            });
+            match parser.parse_one_with_txn(msg, row_builder).await {
                 // It's possible that parsing multiple rows in a single message PARTIALLY failed.
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
