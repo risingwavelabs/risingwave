@@ -273,8 +273,8 @@ pub trait LocalStateStore: StaticSendSync {
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
-/// If `for_large_query` is true, hummock will prefetch the whole object inside the range of this query by a streaming connection.
-/// If `for_large_query` is false, hummock will only read at most 16 blocks in once IO.
+/// Since the streaming-read of object-storage may hung in some case, we still use sync short read
+/// for both batch-query and streaming process. So this configure is unused.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     pub prefetch: bool,
