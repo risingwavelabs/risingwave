@@ -33,9 +33,7 @@ use uuid::Uuid;
 use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{
-    ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, MetadataFucker, WorkerId,
-};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataFucker, WorkerId};
 use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -204,15 +202,12 @@ impl GlobalStreamManager {
     pub fn new(
         env: MetaSrvEnv,
         metadata_fucker: MetadataFucker,
-        fragment_manager: FragmentManagerRef,
         barrier_scheduler: BarrierScheduler,
-        cluster_manager: ClusterManagerRef,
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
         let scale_controller = Arc::new(ScaleController::new(
-            fragment_manager,
-            cluster_manager,
+            &metadata_fucker,
             source_manager.clone(),
             env.clone(),
         ));
@@ -691,8 +686,8 @@ mod tests {
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
-        CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        MetadataFuckerV1, RelationIdEnum, StreamingClusterInfo,
+        CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
+        MetaSrvEnv, MetadataFuckerV1, RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
@@ -896,30 +891,26 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
-            let barrier_manager = Arc::new(GlobalBarrierManager::new(
-                scheduled_barriers,
-                env.clone(),
-                cluster_manager.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-                hummock_manager.clone(),
-                source_manager.clone(),
-                sink_manager,
-                meta_metrics.clone(),
-            ));
-
             let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
                 cluster_manager: cluster_manager.clone(),
                 catalog_manager: catalog_manager.clone(),
                 fragment_manager: fragment_manager.clone(),
             });
 
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
+                scheduled_barriers,
+                env.clone(),
+                metadata_fucker.clone(),
+                hummock_manager.clone(),
+                source_manager.clone(),
+                sink_manager,
+                meta_metrics.clone(),
+            ));
+
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 metadata_fucker,
-                fragment_manager.clone(),
                 barrier_scheduler.clone(),
-                cluster_manager.clone(),
                 source_manager.clone(),
                 hummock_manager,
             )?;

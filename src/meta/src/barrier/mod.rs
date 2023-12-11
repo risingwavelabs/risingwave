@@ -57,10 +57,7 @@ use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
-    MetadataFucker, WorkerId,
-};
+use crate::manager::{LocalNotification, MetaSrvEnv, MetadataFucker, WorkerId};
 use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
@@ -518,9 +515,7 @@ impl GlobalBarrierManager {
     pub fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_fucker: MetadataFucker,
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
@@ -531,16 +526,8 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        // TODO: init it with v2 if sql backend enabled.
-        let metadata_fucker = MetadataFucker::new_v1(
-            cluster_manager.clone(),
-            catalog_manager,
-            fragment_manager.clone(),
-        );
-        // TODO: use metadata fucker in scale controller instead.
         let scale_controller = Arc::new(ScaleController::new(
-            fragment_manager,
-            cluster_manager,
+            &metadata_fucker,
             source_manager.clone(),
             env.clone(),
         ));

@@ -378,16 +378,19 @@ pub struct ScaleController {
 
 impl ScaleController {
     pub fn new(
-        fragment_manager: FragmentManagerRef,
-        cluster_manager: ClusterManagerRef,
+        metadata_fucker: &MetadataFucker,
         source_manager: SourceManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
-        Self {
-            fragment_manager,
-            cluster_manager,
-            source_manager,
-            env,
+        // TODO: use metadata fucker in scale controller instead.
+        match metadata_fucker {
+            MetadataFucker::V1(fucker) => Self {
+                fragment_manager: fucker.fragment_manager.clone(),
+                cluster_manager: fucker.cluster_manager.clone(),
+                source_manager,
+                env,
+            },
+            MetadataFucker::V2(_) => unimplemented!("support v2 in scale controller"),
         }
     }
 

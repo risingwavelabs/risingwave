@@ -508,9 +508,7 @@ pub async fn start_service_as_election_leader(
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
+        metadata_fucker.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
@@ -528,9 +526,7 @@ pub async fn start_service_as_election_leader(
         GlobalStreamManager::new(
             env.clone(),
             metadata_fucker.clone(),
-            fragment_manager.clone(),
             barrier_scheduler.clone(),
-            cluster_manager.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
         )
@@ -588,10 +584,8 @@ pub async fn start_service_as_election_leader(
     let user_srv = UserServiceImpl::new(env.clone(), catalog_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
-        fragment_manager.clone(),
-        cluster_manager.clone(),
+        metadata_fucker.clone(),
         source_manager,
-        catalog_manager.clone(),
         stream_manager.clone(),
         barrier_manager.clone(),
     );
@@ -628,7 +622,7 @@ pub async fn start_service_as_election_leader(
     );
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_fucker.clone());
-    let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
+    let cloud_srv = CloudServiceImpl::new(metadata_fucker.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -708,7 +702,7 @@ pub async fn start_service_as_election_leader(
     let telemetry_manager = TelemetryManager::new(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
-            cluster_manager,
+            metadata_fucker.clone(),
             meta_store.meta_store_type(),
         )),
     );

@@ -637,6 +637,18 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+        let inner = self.inner.read().await;
+        let sources = Source::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(sources
+            .into_iter()
+            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
+            .collect())
+    }
+
     pub async fn create_function(
         &self,
         mut pb_function: PbFunction,
