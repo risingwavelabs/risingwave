@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
+
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_plan::DmlNode;
@@ -20,7 +22,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
 use crate::executor::dml::DmlExecutor;
-use crate::executor::BoxedExecutor;
+use crate::executor::{BoxedExecutor, Executor, FlowControlExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct DmlExecutorBuilder;
@@ -38,7 +40,11 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let table_id = TableId::new(node.table_id);
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
 
-        Ok(Box::new(DmlExecutor::new(
+        let rate_limit = node
+            .rate_limit
+            .as_ref()
+            .map(|v| NonZeroU64::new(*v).unwrap());
+        let executor = Box::new(DmlExecutor::new(
             params.info,
             upstream,
             params.env.dml_manager_ref(),
@@ -46,6 +52,13 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
-        )))
+            rate_limit,
+        ));
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
+        )
+        .boxed())
     }
 }
