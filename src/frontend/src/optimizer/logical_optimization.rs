@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 
 use super::plan_node::RewriteExprsRecursive;
 use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
