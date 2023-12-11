@@ -19,17 +19,15 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, ensure, Result};
+use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
 struct VnodeExpression {
     dist_key_indices: Vec<usize>,
 }
 
-#[build_function("vnode(...) -> any", type_infer = "panic")]
-fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    ensure!(return_type == DataType::Int16);
-
+#[build_function("vnode(...) -> int2")]
+fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let dist_key_indices = children
         .into_iter()
         .map(|child| child.input_ref_index().unwrap())
