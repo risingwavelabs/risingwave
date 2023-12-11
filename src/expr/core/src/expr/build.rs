@@ -299,7 +299,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
     fn parse_type(&mut self) -> DataType {
         match self.tokens.next().expect("Unexpected end of input") {
             Token::Literal(name) => name
-                .replace("_", " ")
+                .replace('_', " ")
                 .parse::<DataType>()
                 .expect_str("type", &name),
             t => panic!("Expected a Literal, got {t:?}"),

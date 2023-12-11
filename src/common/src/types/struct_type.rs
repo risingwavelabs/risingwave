@@ -154,7 +154,7 @@ impl FromStr for StructType {
         if s == "record" {
             return Ok(StructType::unnamed(Vec::new()));
         }
-        if !(s.starts_with("struct<") && s.ends_with(">")) {
+        if !(s.starts_with("struct<") && s.ends_with('>')) {
             return Err(anyhow!("expect struct<...>"));
         };
         let mut field_types = Vec::new();
