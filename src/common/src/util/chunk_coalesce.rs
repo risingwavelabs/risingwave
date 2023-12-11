@@ -126,7 +126,8 @@ impl DataChunkBuilder {
     pub fn append_chunk(&mut self, data_chunk: DataChunk) -> AppendDataChunk<'_> {
         AppendDataChunk {
             builder: self,
-            remaining: Some(SlicedDataChunk::new_checked(data_chunk)),
+            remaining: (data_chunk.capacity() > 0) // defensive check for empty chunk
+                .then_some(SlicedDataChunk::new_checked(data_chunk)),
         }
     }
 
