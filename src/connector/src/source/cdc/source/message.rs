@@ -20,7 +20,7 @@ use crate::source::SourceMeta;
 #[derive(Debug, Clone)]
 pub struct DebeziumCdcMeta {
     pub full_table_name: String,
-    // payload.source.ts_ms the time that the change event was made in the database
+    // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
     pub source_ts_ms: i64,
 }
 
