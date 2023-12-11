@@ -807,14 +807,22 @@ impl S3ObjectStore {
         err: &Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>,
     ) -> bool {
         match err {
-            Either::Left(err) => {
-                if let SdkError::DispatchFailure(e) = err {
+            Either::Left(err) => match err {
+                SdkError::DispatchFailure(e) => {
                     if e.is_timeout() {
                         tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
                         return true;
                     }
                 }
-            }
+                SdkError::ServiceError(e) => {
+                    let e = e.err();
+                    if matches!(e, GetObjectError::Unhandled(_)) {
+                        tracing::warn!("{e:?} occurs, trying to retry S3 get_object request.");
+                        return true;
+                    }
+                }
+                _ => {}
+            },
             Either::Right(_) => {
                 // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
                 // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
