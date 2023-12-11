@@ -33,9 +33,9 @@ use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, iter_chunks, mapping_chunk,
+    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -71,6 +71,8 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    rate_limit: Option<usize>,
 }
 
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
@@ -89,6 +91,7 @@ where
         progress: CreateMviewProgress,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        rate_limit: Option<usize>,
     ) -> Self {
         Self {
             info,
@@ -100,6 +103,7 @@ where
             progress,
             metrics,
             chunk_size,
+            rate_limit,
         }
     }
 
@@ -128,7 +132,13 @@ where
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
-            .map(|_| DataChunkBuilder::new(snapshot_data_types.clone(), self.chunk_size))
+            .map(|_| {
+                create_builder(
+                    self.rate_limit,
+                    self.chunk_size,
+                    snapshot_data_types.clone(),
+                )
+            })
             .collect_vec();
 
         let mut upstream = self.upstream.execute();

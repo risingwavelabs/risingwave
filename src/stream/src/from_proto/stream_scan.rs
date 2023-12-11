@@ -197,6 +197,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             progress,
                             stream.streaming_metrics.clone(),
                             params.env.config().developer.chunk_size,
+                            node.rate_limit.map(|x| x as _),
                         )
                         .boxed()
                     }};

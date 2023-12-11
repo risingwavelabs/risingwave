@@ -23,7 +23,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
@@ -35,8 +35,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
+    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, iter_chunks,
+    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -167,7 +167,7 @@ where
             .await?;
         tracing::trace!(is_finished, row_count, "backfill state recovered");
 
-        let mut builder = Self::create_builder(
+        let mut builder = create_builder(
             rate_limit,
             self.chunk_size,
             self.upstream_table.schema().data_types(),
@@ -454,7 +454,7 @@ where
                                 "actor rate limit changed",
                             );
                             assert!(builder.is_empty());
-                            builder = Self::create_builder(
+                            builder = create_builder(
                                 rate_limit,
                                 self.chunk_size,
                                 self.upstream_table.schema().data_types(),
@@ -673,29 +673,6 @@ where
             current_state,
         )
         .await
-    }
-
-    /// Creates a data chunk builder for snapshot read.
-    /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
-    /// This is so we can partition snapshot read into smaller chunks than chunk size.
-    fn create_builder(
-        rate_limit: Option<usize>,
-        chunk_size: usize,
-        data_types: Vec<DataType>,
-    ) -> DataChunkBuilder {
-        if let Some(rate_limit) = rate_limit
-            && rate_limit < chunk_size
-        {
-            DataChunkBuilder::new(
-                data_types,
-                rate_limit,
-            )
-        } else {
-            DataChunkBuilder::new(
-                data_types,
-                chunk_size,
-            )
-        }
     }
 }
 

@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -716,4 +716,27 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         table.commit_no_data_expected(epoch);
     }
     Ok(())
+}
+
+/// Creates a data chunk builder for snapshot read.
+/// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
+/// This is so we can partition snapshot read into smaller chunks than chunk size.
+pub fn create_builder(
+    rate_limit: Option<usize>,
+    chunk_size: usize,
+    data_types: Vec<DataType>,
+) -> DataChunkBuilder {
+    if let Some(rate_limit) = rate_limit
+        && rate_limit < chunk_size
+    {
+        DataChunkBuilder::new(
+            data_types,
+            rate_limit,
+        )
+    } else {
+        DataChunkBuilder::new(
+            data_types,
+            chunk_size,
+        )
+    }
 }
