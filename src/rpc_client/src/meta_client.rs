@@ -271,12 +271,12 @@ impl MetaClient {
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
-        let worker_node = add_worker_resp
-            .node
-            .expect("AddWorkerNodeResponse::node is empty");
+        let worker_id = add_worker_resp
+            .node_id
+            .expect("AddWorkerNodeResponse::node_id is empty");
 
         let meta_client = Self {
-            worker_id: worker_node.id,
+            worker_id,
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
@@ -300,6 +300,7 @@ impl MetaClient {
     pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
+            node_id: self.worker_id,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
             Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),

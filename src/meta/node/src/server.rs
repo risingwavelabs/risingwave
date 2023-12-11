@@ -527,7 +527,7 @@ pub async fn start_service_as_election_leader(
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
-            metadata_fucker,
+            metadata_fucker.clone(),
             fragment_manager.clone(),
             barrier_scheduler.clone(),
             cluster_manager.clone(),
@@ -596,7 +596,7 @@ pub async fn start_service_as_election_leader(
         barrier_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_fucker.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
