@@ -326,6 +326,7 @@ impl QueryRunner {
                         error = %reason.as_report(),
                         query_id = ?self.query.query_id,
                         stage_id = ?id,
+                        "query stage failed"
                     );
 
                     self.clean_all_stages(Some(reason)).await;
@@ -402,6 +403,7 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
+        // TODO(error-handling): should prefer use error types than strings.
         let error_msg = error.as_ref().map(|e| e.to_report_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.

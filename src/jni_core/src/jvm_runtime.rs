@@ -18,7 +18,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Context};
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -31,27 +31,27 @@ use crate::call_method;
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
 pub static JVM: JavaVmWrapper = JavaVmWrapper;
-static JVM_RESULT: OnceLock<Result<JavaVM, String>> = OnceLock::new();
+static JVM_RESULT: OnceLock<anyhow::Result<JavaVM>> = OnceLock::new();
 
 pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
         match JVM_RESULT.get_or_init(|| {
-            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e))
+            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e.as_report()))
         }) {
             Ok(jvm) => Ok(jvm),
             Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
         }
     }
 
-    fn inner_new() -> Result<JavaVM, String> {
+    fn inner_new() -> anyhow::Result<JavaVM> {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
             libs_path
         } else {
             tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
             let path = std::env::current_exe()
-                .map_err(|e| format!("unable to get path of current_exe: {:?}", e.as_report()))?
+                .context("unable to get path of current_exe")?
                 .parent()
                 .expect("not root")
                 .join("./libs");
@@ -63,10 +63,7 @@ impl JavaVmWrapper {
         let dir = Path::new(&libs_path);
 
         if !dir.is_dir() {
-            return Err(format!(
-                "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
-                libs_path
-            ));
+            bail!("CONNECTOR_LIBS_PATH \"{}\" is not a directory", libs_path);
         }
 
         let mut class_vec = vec![];
@@ -81,10 +78,7 @@ impl JavaVmWrapper {
                 }
             }
         } else {
-            return Err(format!(
-                "failed to read CONNECTOR_LIBS_PATH \"{}\"",
-                libs_path
-            ));
+            bail!("failed to read CONNECTOR_LIBS_PATH \"{}\"", libs_path);
         }
 
         let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
@@ -113,23 +107,20 @@ impl JavaVmWrapper {
             .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
 
         tracing::info!("JVM args: {:?}", args_builder);
-        let jvm_args = args_builder
-            .build()
-            .map_err(|e| format!("invalid jvm args: {:?}", e.as_report()))?;
+        let jvm_args = args_builder.build().context("invalid jvm args")?;
 
         // Create a new VM
         let jvm = match JavaVM::new(jvm_args) {
             Err(err) => {
                 tracing::error!(error = ?err.as_report(), "fail to new JVM");
-                return Err("fail to new JVM".to_string());
+                bail!("fail to new JVM");
             }
             Ok(jvm) => jvm,
         };
 
         tracing::info!("initialize JVM successfully");
 
-        register_native_method_for_jvm(&jvm)
-            .map_err(|e| format!("failed to register native method: {:?}", e.as_report()))?;
+        register_native_method_for_jvm(&jvm).context("failed to register native method")?;
 
         Ok(jvm)
     }

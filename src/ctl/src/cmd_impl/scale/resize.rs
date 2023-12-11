@@ -301,7 +301,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
     } = match response {
         Ok(response) => response,
         Err(e) => {
-            fail!("Failed to generate plan: {:?}", e.as_report());
+            fail!("Failed to generate plan: {}", e.as_report());
         }
     };
 
@@ -365,7 +365,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
             match meta_client.reschedule(reschedules, revision, false).await {
                 Ok(response) => response,
                 Err(e) => {
-                    fail!("Failed to execute plan: {:?}", e.as_report());
+                    fail!("Failed to execute plan: {}", e.as_report());
                 }
             };
 
@@ -392,7 +392,7 @@ pub async fn update_schedulability(
     let GetClusterInfoResponse { worker_nodes, .. } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            fail!("Failed to get cluster info: {:?}", e.as_report());
+            fail!("Failed to get cluster info: {}", e.as_report());
         }
     };
 
