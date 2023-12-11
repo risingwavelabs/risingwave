@@ -16,6 +16,7 @@ use risingwave_common::types::DataType;
 
 use super::{Access, ChangeEvent, ChangeEventOperation};
 use crate::parser::unified::AccessError;
+use crate::source::SourceColumnDesc;
 
 /// `UpsertAccess` wraps a key-value message format into an upsert source.
 /// A key accessor and a value accessor are required.
@@ -102,22 +103,23 @@ where
         }
     }
 
-    fn access_field(&self, name: &str, type_expected: &DataType) -> super::AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         // access value firstly
-        match self.access(&["value", name], Some(type_expected)) {
+        match self.access(&["value", &desc.name], Some(&desc.data_type)) {
             Err(AccessError::Undefined { .. }) => (), // fallthrough
             other => return other,
         };
 
-        match self.access(&["key", name], Some(type_expected)) {
+        match self.access(&["key", &desc.name], Some(&desc.data_type)) {
             Err(AccessError::Undefined { .. }) => (), // fallthrough
             other => return other,
         };
 
         if let Some(key_as_column_name) = &self.key_as_column_name
-            && name == key_as_column_name
+            && &desc.name == key_as_column_name
         {
-            return self.access(&["key"], Some(type_expected));
+            // todo: check logic later
+            return self.access(&["key"], Some(&desc.data_type));
         }
 
         Ok(None)

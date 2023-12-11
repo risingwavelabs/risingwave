@@ -743,8 +743,6 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    // todo: handle pk carefully, revisit logic later
-
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
@@ -770,6 +768,9 @@ pub(crate) async fn bind_source_pk(
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+
+        // For all Upsert formats, we only accept one and only key column as primary key.
+        // Additional KEY columns must be set in this case and must be primary key.
         (Format::Upsert, Encode::Json) => {
             if let Some(ref key_column_name) = key_column_name && sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
@@ -799,25 +800,26 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::Upsert, Encode::Avro) => {
-            // todo: check logic here:
-            // * if defined pk, it must be the same as key column
-            // * if not defined pk, extract pk from schema but put a mark on the columns
-            // * if no pk in schema, use the key column as primary key
-            if sql_defined_pk {
-                if sql_defined_pk_names.len() != 1 {
-                    return Err(RwError::from(ProtocolError(
-                        "upsert avro supports only one primary key column.".to_string(),
-                    )));
+            // prev deprecated logic:
+            // if key schema can be inferred from schema registry, then use it
+            if sql_defined_pk && sql_defined_pk_names.len() != 1 {
+                return Err(RwError::from(ProtocolError(
+                    "upsert avro supports only one primary key column.".to_string(),
+                )));
+            }
+            if let Some(ref key_column_name) = key_column_name {
+                if key_column_name.eq(sql_defined_pk_names[0].as_str()) {
+                    sql_defined_pk_names
+                } else {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "upsert avro's key column {} not match with sql defined primary key {}",
+                        key_column_name, sql_defined_pk_names[0]
+                    ))));
                 }
-                sql_defined_pk_names
-            } else if let Some(extracted_pk_names) =
-                extract_upsert_avro_table_pk_columns(source_info, with_properties).await?
-            {
-                extracted_pk_names
             } else {
-                // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_default_key_column(columns);
-                vec![DEFAULT_KEY_COLUMN_NAME.into()]
+                return Err(RwError::from(ProtocolError(
+                    "INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE AVRO".to_string(),
+                )));
             }
         }
 

@@ -72,14 +72,15 @@ impl UpsertParser {
         // check whether columns has Key as AdditionalColumnType, if so, the key accessor should be
         // bytes
         let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
+            // later: if key column has other type other than bytes, build other accessor.
+            // For now, all key columns are bytes
             AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
                 BytesProperties {
                     column_name: Some(key_column_name),
                 },
             ))?)
         } else {
-            let (key_config, key_type) = extract_key_config!(props);
-            build_accessor_builder(key_config, key_type).await?
+            unreachable!("format upsert must have key column")
         };
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
