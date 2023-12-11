@@ -172,23 +172,16 @@ impl ConnectorSource {
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
-    let prefix = lister
-        .get_prefix()
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("");
-
     let matcher = lister.get_matcher();
     let mut object_metadata_iter = lister.list().await?;
 
     while let Some(list_res) = object_metadata_iter.next().await {
         match list_res {
             Ok(res) => {
-                if res.name.starts_with(prefix)
-                    && matcher
-                        .as_ref()
-                        .map(|m| m.matches(&res.name))
-                        .unwrap_or(true)
+                if matcher
+                    .as_ref()
+                    .map(|m| m.matches(&res.name))
+                    .unwrap_or(true)
                 {
                     yield res
                 } else {

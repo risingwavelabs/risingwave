@@ -55,20 +55,15 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> anyhow::Result<ObjectMetadataIter> {
-        // Currently, we need to do full list and then filter the prefix and matcher,
-        // After OpenDAL implementing the list prefix, we can use the user-specified prefix.
-        // https://github.com/apache/incubator-opendal/issues/3247
-        // todo(wcy-fdu): manual filtering prefix
-
-        // let _prefix = match &self.prefix {
-        //     Some(prefix) => prefix,
-        //     None => "",
-        // };
+        let prefix = match &self.prefix {
+            Some(prefix) => prefix,
+            None => "",
+        };
 
         let object_lister = self
             .op
-            .lister_with("/")
-            .delimiter("")
+            .lister_with(prefix)
+            .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
@@ -99,10 +94,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         });
 
         Ok(stream.boxed())
-    }
-
-    pub fn get_prefix(&self) -> &Option<String> {
-        &self.prefix
     }
 
     pub fn get_matcher(&self) -> &Option<glob::Pattern> {

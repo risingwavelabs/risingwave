@@ -5596,6 +5596,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "opendal"
+version = "0.43.0"
+source = "git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69#9a222e4d72b328a24d5775b1565292f4636bbe69"
+dependencies = [
+ "anyhow",
+ "async-compat",
+ "async-trait",
+ "backon",
+ "base64 0.21.4",
+ "bytes",
+ "chrono",
+ "flagset",
+ "futures",
+ "http 0.2.9",
+ "log",
+ "md-5",
+ "once_cell",
+ "parking_lot 0.12.1",
+ "percent-encoding",
+ "pin-project",
+ "quick-xml 0.30.0",
+ "reqsign",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "openidconnect"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7752,7 +7783,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.41.0",
+ "opendal 0.43.0 (git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69)",
  "parking_lot 0.12.1",
  "paste",
  "pretty_assertions",
@@ -8307,7 +8338,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.43.0",
+ "opendal 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "prometheus",
  "risingwave_common",
  "rustls",
