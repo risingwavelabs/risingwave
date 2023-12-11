@@ -23,8 +23,8 @@ pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 fn inner(tokens: TokenStream) -> TokenStream {
     match gen(tokens) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
+        Ok(tokens) => tokens,
+        Err(err) => err.to_compile_error(),
     }
 }
 
