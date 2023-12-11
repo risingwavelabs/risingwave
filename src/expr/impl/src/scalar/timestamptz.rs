@@ -17,6 +17,7 @@ use std::fmt::Write;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
@@ -87,7 +88,7 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
     elem.parse().or_else(|_| {
         timestamp_at_time_zone(
             elem.parse::<Timestamp>()
-                .map_err(|err| ExprError::Parse(err.to_string().into()))?,
+                .map_err(|err| ExprError::Parse(err.to_report_string().into()))?,
             time_zone,
         )
     })

@@ -7840,6 +7840,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "size",
+ "thiserror-ext",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -7944,6 +7945,7 @@ dependencies = [
  "sha2",
  "sql-json-path",
  "thiserror",
+ "thiserror-ext",
  "tracing",
  "workspace-hack",
 ]
@@ -8019,6 +8021,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-stream",
  "tracing",
  "tracing-futures",
@@ -8133,6 +8136,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "thiserror-ext",
  "tracing",
 ]
 
