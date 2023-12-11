@@ -16,18 +16,12 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use futures_util::future::FutureExt;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::{bail, ensure};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::ExprNode;
-
-use super::Build;
-use crate::expr::{BoxedExpression, Expression};
-use crate::Result;
+use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
 pub struct InExpression {
@@ -42,13 +36,9 @@ impl InExpression {
         data: impl Iterator<Item = Datum>,
         return_type: DataType,
     ) -> Self {
-        let mut sarg = HashSet::new();
-        for datum in data {
-            sarg.insert(datum);
-        }
         Self {
             left,
-            set: sarg,
+            set: data.collect(),
             return_type,
         }
     }
@@ -95,185 +85,73 @@ impl Expression for InExpression {
     }
 }
 
-impl Build for InExpression {
-    fn build(
-        prost: &ExprNode,
-        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
-    ) -> Result<Self> {
-        ensure!(prost.get_function_type().unwrap() == Type::In);
-
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
-        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
-            bail!("Expected RexNode::FuncCall");
-        };
-        let children = &func_call_node.children;
-
-        let left_expr = build_child(&children[0])?;
-        let mut data = Vec::new();
-        // Used for const expression below to generate datum.
-        // Frontend has made sure these can all be folded to constants.
-        let data_chunk = DataChunk::new_dummy(1);
-        for child in &children[1..] {
-            let const_expr = build_child(child)?;
-            let array = const_expr
-                .eval(&data_chunk)
-                .now_or_never()
-                .expect("constant expression should not be async")?;
-            let datum = array.value_at(0).to_owned_datum();
-            data.push(datum);
-        }
-        Ok(InExpression::new(left_expr, data.into_iter(), ret_type))
+#[build_function("in(any, ...) -> boolean")]
+fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let left_expr = iter.next().unwrap();
+    let mut data = Vec::with_capacity(iter.size_hint().0);
+    for child in iter {
+        data.push(child.eval_const()?);
     }
+    Ok(Box::new(InExpression::new(
+        left_expr,
+        data.into_iter(),
+        return_type,
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::row::OwnedRow;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, Datum, ScalarImpl};
-    use risingwave_common::util::value_encoding::DatumToProtoExt;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::PbDataType;
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall};
-
-    use crate::expr::expr_in::InExpression;
-    use crate::expr::{Build, Expression, InputRefExpression};
-
-    #[test]
-    fn test_in_expr() {
-        let input_ref_expr_node = ExprNode {
-            function_type: Type::Unspecified as i32,
-            return_type: Some(PbDataType {
-                type_name: TypeName::Varchar as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(0)),
-        };
-        let constant_values = vec![
-            ExprNode {
-                function_type: Type::Unspecified as i32,
-                return_type: Some(PbDataType {
-                    type_name: TypeName::Varchar as i32,
-                    ..Default::default()
-                }),
-                rex_node: Some(RexNode::Constant(Datum::Some("ABC".into()).to_protobuf())),
-            },
-            ExprNode {
-                function_type: Type::Unspecified as i32,
-                return_type: Some(PbDataType {
-                    type_name: TypeName::Varchar as i32,
-                    ..Default::default()
-                }),
-                rex_node: Some(RexNode::Constant(Datum::Some("def".into()).to_protobuf())),
-            },
-        ];
-        let mut in_children = vec![input_ref_expr_node];
-        in_children.extend(constant_values);
-        let call = FunctionCall {
-            children: in_children,
-        };
-        let p = ExprNode {
-            function_type: Type::In as i32,
-            return_type: Some(PbDataType {
-                type_name: TypeName::Boolean as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(call)),
-        };
-        assert!(InExpression::build_for_test(&p).is_ok());
-    }
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::{build_from_pretty, Expression};
 
     #[tokio::test]
-    async fn test_eval_search_expr() {
-        let input_refs = [
-            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
-            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
-        ];
-        let data = [
-            vec![
-                Some(ScalarImpl::Utf8("abc".into())),
-                Some(ScalarImpl::Utf8("def".into())),
-            ],
-            vec![None, Some(ScalarImpl::Utf8("abc".into()))],
-        ];
+    async fn test_in_expr() {
+        let expr = build_from_pretty("(in:boolean $0:varchar abc:varchar def:varchar)");
+        let (input, expected) = DataChunk::from_pretty(
+            "T   B
+             abc t
+             a   f
+             def t
+             abc t
+             .   .",
+        )
+        .split_column_at(1);
 
-        let data_chunks = [
-            DataChunk::from_pretty(
-                "T
-                 abc
-                 a
-                 def
-                 abc
-                 .",
-            )
-            .with_invisible_holes(),
-            DataChunk::from_pretty(
-                "T
-                abc
-                a
-                .",
-            )
-            .with_invisible_holes(),
-        ];
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
 
-        let expected = vec![
-            vec![Some(true), Some(false), Some(true), Some(true), None],
-            vec![Some(true), None, None],
-        ];
-
-        for (i, input_ref) in input_refs.into_iter().enumerate() {
-            let search_expr =
-                InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
-            let vis = data_chunks[i].visibility();
-            let res = search_expr
-                .eval(&data_chunks[i])
-                .await
-                .unwrap()
-                .compact(vis, expected[i].len());
-
-            for (i, expect) in expected[i].iter().enumerate() {
-                assert_eq!(res.datum_at(i), expect.map(ScalarImpl::Bool));
-            }
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
         }
     }
 
     #[tokio::test]
-    async fn test_eval_row_search_expr() {
-        let input_refs = [
-            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
-            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
-        ];
+    async fn test_in_expr_null() {
+        let expr = build_from_pretty("(in:boolean $0:varchar abc:varchar NULL:varchar)");
+        let (input, expected) = DataChunk::from_pretty(
+            "T   B
+             abc t
+             a   .
+             .   .",
+        )
+        .split_column_at(1);
 
-        let data = [
-            vec![
-                Some(ScalarImpl::Utf8("abc".into())),
-                Some(ScalarImpl::Utf8("def".into())),
-            ],
-            vec![None, Some(ScalarImpl::Utf8("abc".into()))],
-        ];
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
 
-        let row_inputs = vec![
-            vec![Some("abc"), Some("a"), Some("def"), None],
-            vec![Some("abc"), Some("a"), None],
-        ];
-
-        let expected = [
-            vec![Some(true), Some(false), Some(true), None],
-            vec![Some(true), None, None],
-        ];
-
-        for (i, input_ref) in input_refs.into_iter().enumerate() {
-            let search_expr =
-                InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
-
-            for (j, row_input) in row_inputs[i].iter().enumerate() {
-                let row_input = vec![row_input.map(|s| s.into())];
-                let row = OwnedRow::new(row_input);
-                let result = search_expr.eval_row(&row).await.unwrap();
-                assert_eq!(result, expected[i][j].map(ScalarImpl::Bool));
-            }
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
         }
     }
 }

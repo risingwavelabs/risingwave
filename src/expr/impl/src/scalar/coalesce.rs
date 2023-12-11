@@ -18,12 +18,8 @@ use std::sync::Arc;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::ExprNode;
-
-use super::Build;
-use crate::expr::{BoxedExpression, Expression};
-use crate::{bail, ensure, Result};
+use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
 pub struct CoalesceExpression {
@@ -78,125 +74,43 @@ impl Expression for CoalesceExpression {
     }
 }
 
-impl CoalesceExpression {
-    pub fn new(return_type: DataType, children: Vec<BoxedExpression>) -> Self {
-        CoalesceExpression {
-            return_type,
-            children,
-        }
-    }
-}
-
-impl Build for CoalesceExpression {
-    fn build(
-        prost: &ExprNode,
-        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
-    ) -> Result<Self> {
-        ensure!(prost.get_function_type().unwrap() == Type::Coalesce);
-
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
-        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
-            bail!("Expected RexNode::FuncCall");
-        };
-
-        let children = func_call_node
-            .children
-            .to_vec()
-            .iter()
-            .map(build_child)
-            .collect::<Result<Vec<_>>>()?;
-        Ok(CoalesceExpression::new(ret_type, children))
-    }
+#[build_function("coalesce(...) -> any", type_infer = "panic")]
+fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    Ok(Box::new(CoalesceExpression {
+        return_type,
+        children,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::row::OwnedRow;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{Scalar, ScalarImpl};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::PbDataType;
-    use risingwave_pb::expr::expr_node::RexNode;
-    use risingwave_pb::expr::expr_node::Type::Coalesce;
-    use risingwave_pb::expr::{ExprNode, FunctionCall};
-
-    use crate::expr::expr_coalesce::CoalesceExpression;
-    use crate::expr::test_utils::make_input_ref;
-    use crate::expr::{Build, Expression};
-
-    pub fn make_coalesce_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
-        ExprNode {
-            function_type: Coalesce as i32,
-            return_type: Some(PbDataType {
-                type_name: ret as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
-        }
-    }
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
 
     #[tokio::test]
     async fn test_coalesce_expr() {
-        let input_node1 = make_input_ref(0, TypeName::Int32);
-        let input_node2 = make_input_ref(1, TypeName::Int32);
-        let input_node3 = make_input_ref(2, TypeName::Int32);
+        let expr = build_from_pretty("(coalesce:int4 $0:int4 $1:int4 $2:int4)");
+        let (input, expected) = DataChunk::from_pretty(
+            "i i i i
+             1 . . 1
+             . 2 . 2
+             . . 3 3
+             . . . .",
+        )
+        .split_column_at(3);
 
-        let data_chunk = DataChunk::from_pretty(
-            "i i i
-             1 . .
-             . 2 .
-             . . 3
-             . . .",
-        );
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
 
-        let nullif_expr = CoalesceExpression::build_for_test(&make_coalesce_function(
-            vec![input_node1, input_node2, input_node3],
-            TypeName::Int32,
-        ))
-        .unwrap();
-        let res = nullif_expr.eval(&data_chunk).await.unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
-        assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
-        assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
-        assert_eq!(res.datum_at(3), None);
-    }
-
-    #[tokio::test]
-    async fn test_eval_row_coalesce_expr() {
-        let input_node1 = make_input_ref(0, TypeName::Int32);
-        let input_node2 = make_input_ref(1, TypeName::Int32);
-        let input_node3 = make_input_ref(2, TypeName::Int32);
-
-        let nullif_expr = CoalesceExpression::build_for_test(&make_coalesce_function(
-            vec![input_node1, input_node2, input_node3],
-            TypeName::Int32,
-        ))
-        .unwrap();
-
-        let row_inputs = vec![
-            vec![Some(1), None, None, None],
-            vec![None, Some(2), None, None],
-            vec![None, None, Some(3), None],
-            vec![None, None, None, None],
-        ];
-
-        let expected = vec![
-            Some(ScalarImpl::Int32(1)),
-            Some(ScalarImpl::Int32(2)),
-            Some(ScalarImpl::Int32(3)),
-            None,
-        ];
-
-        for (i, row_input) in row_inputs.iter().enumerate() {
-            let datum_vec = row_input
-                .iter()
-                .map(|o| o.map(|int| int.to_scalar_value()))
-                .collect();
-            let row = OwnedRow::new(datum_vec);
-
-            let result = nullif_expr.eval_row(&row).await.unwrap();
-            assert_eq!(result, expected[i]);
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
         }
     }
 }

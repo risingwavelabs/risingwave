@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::ExprNode;
-
-use super::Build;
-use crate::expr::{BoxedExpression, Expression};
-use crate::{bail, ensure, Result};
+use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::{build_function, Result};
 
 /// `FieldExpression` access a field from a struct.
 #[derive(Debug)]
@@ -59,119 +54,46 @@ impl Expression for FieldExpression {
     }
 }
 
-impl FieldExpression {
-    pub fn new(return_type: DataType, input: BoxedExpression, index: usize) -> Self {
-        FieldExpression {
-            return_type,
-            input,
-            index,
-        }
-    }
-}
-
-impl Build for FieldExpression {
-    fn build(
-        prost: &ExprNode,
-        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
-    ) -> Result<Self> {
-        ensure!(prost.get_function_type().unwrap() == Type::Field);
-
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
-        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
-            bail!("Expected RexNode::FuncCall");
-        };
-
-        let children = func_call_node.children.to_vec();
-        // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
-        // `InputRef`, the second is i32 `Literal`.
-        let [first, second]: [_; 2] = children.try_into().unwrap();
-        let input = build_child(&first)?;
-        let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
-            bail!("Expected Constant as 1st argument");
-        };
-        let index = Datum::from_protobuf(value, &DataType::Int32)
-            .context("Failed to deserialize i32")?
-            .unwrap()
-            .as_int32()
-            .to_owned();
-
-        Ok(FieldExpression::new(ret_type, input, index as usize))
-    }
+#[build_function("field(struct, int4) -> any", type_infer = "panic")]
+fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
+    // `InputRef`, the second is i32 `Literal`.
+    let [input, index]: [_; 2] = children.try_into().unwrap();
+    let index = index.eval_const()?.unwrap().into_int32() as usize;
+    Ok(Box::new(FieldExpression {
+        return_type,
+        input,
+        index,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-
-    use risingwave_common::array::{Array, DataChunk, F32Array, I32Array, StructArray};
-    use risingwave_common::types::{DataType, ScalarImpl, StructType};
-    use risingwave_pb::data::data_type::TypeName;
-
-    use crate::expr::expr_field::FieldExpression;
-    use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
-    use crate::expr::{Build, Expression};
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::row::Row;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
 
     #[tokio::test]
     async fn test_field_expr() {
-        let input_node = make_input_ref(0, TypeName::Struct);
-        let literal_node = make_i32_literal(0);
-        let field_expr = FieldExpression::build_for_test(&make_field_function(
-            vec![input_node, literal_node],
-            TypeName::Int32,
-        ))
-        .unwrap();
-        let array = StructArray::new(
-            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
-            vec![
-                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
-                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
-            ],
-            [true].into_iter().collect(),
-        );
+        let expr = build_from_pretty("(field:int4 $0:struct 0:int4)");
+        let (input, expected) = DataChunk::from_pretty(
+            "{i,f}   i
+             (1,2.0) 1
+             (2,2.0) 2
+             (3,2.0) 3",
+        )
+        .split_column_at(1);
 
-        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
-        let res = field_expr.eval(&data_chunk).await.unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
-        assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
-        assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
-        assert_eq!(res.datum_at(3), Some(ScalarImpl::Int32(4)));
-        assert_eq!(res.datum_at(4), Some(ScalarImpl::Int32(5)));
-    }
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
 
-    #[tokio::test]
-    async fn test_nested_field_expr() {
-        let field_node = make_field_function(
-            vec![make_input_ref(0, TypeName::Struct), make_i32_literal(0)],
-            TypeName::Int32,
-        );
-        let field_expr = FieldExpression::build_for_test(&make_field_function(
-            vec![field_node, make_i32_literal(1)],
-            TypeName::Int32,
-        ))
-        .unwrap();
-
-        let struct_array = StructArray::new(
-            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
-            vec![
-                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
-                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into_ref(),
-            ],
-            [true].into_iter().collect(),
-        );
-        let array = StructArray::new(
-            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
-            vec![
-                struct_array.into_ref(),
-                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
-            ],
-            [true].into_iter().collect(),
-        );
-
-        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
-        let res = field_expr.eval(&data_chunk).await.unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
-        assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));
-        assert_eq!(res.datum_at(2), Some(ScalarImpl::Float32(3.0.into())));
-        assert_eq!(res.datum_at(3), Some(ScalarImpl::Float32(4.0.into())));
-        assert_eq!(res.datum_at(4), Some(ScalarImpl::Float32(5.0.into())));
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
     }
 }

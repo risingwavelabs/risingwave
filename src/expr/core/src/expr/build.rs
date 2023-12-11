@@ -19,13 +19,8 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
-use super::expr_array_transform::ArrayTransformExpression;
-use super::expr_coalesce::CoalesceExpression;
-use super::expr_field::FieldExpression;
-use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
-use super::expr_vnode::VnodeExpression;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
 use super::wrapper::EvalErrorReport;
@@ -112,10 +107,6 @@ where
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
                 E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
-                E::In => InExpression::build_boxed(prost, build_child),
-                E::Coalesce => CoalesceExpression::build_boxed(prost, build_child),
-                E::Field => FieldExpression::build_boxed(prost, build_child),
-                E::Vnode => VnodeExpression::build_boxed(prost, build_child),
 
                 // General types, lookup in the function signature map
                 _ => FuncCallBuilder::build_boxed(prost, build_child),
@@ -193,12 +184,6 @@ pub fn build_func(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
-    if func == PbType::ArrayTransform {
-        // TODO: The function framework can't handle the lambda arg now.
-        let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
-        return Ok(ArrayTransformExpression { array, lambda }.boxed());
-    }
-
     let args = children.iter().map(|c| c.return_type()).collect_vec();
     let desc = FUNCTION_REGISTRY
         .get(func, &args, &ret_type)

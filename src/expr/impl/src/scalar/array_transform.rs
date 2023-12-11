@@ -18,14 +18,13 @@ use async_trait::async_trait;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ListValue, ScalarImpl};
-
-use super::{BoxedExpression, Expression};
-use crate::Result;
+use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::{build_function, Result};
 
 #[derive(Debug)]
-pub struct ArrayTransformExpression {
-    pub(super) array: BoxedExpression,
-    pub(super) lambda: BoxedExpression,
+struct ArrayTransformExpression {
+    array: BoxedExpression,
+    lambda: BoxedExpression,
 }
 
 #[async_trait]
@@ -60,4 +59,10 @@ impl Expression for ArrayTransformExpression {
             Ok(None)
         }
     }
+}
+
+#[build_function("array_transform(any, anyarray) -> anyarray", type_infer = "panic")]
+fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
+    Ok(Box::new(ArrayTransformExpression { array, lambda }))
 }
