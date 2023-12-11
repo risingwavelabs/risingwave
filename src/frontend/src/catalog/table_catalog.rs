@@ -28,7 +28,7 @@ use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
@@ -154,6 +154,9 @@ pub struct TableCatalog {
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
+
+    /// Incoming sinks, used for sink into table
+    pub incoming_sinks: Vec<SinkId>,
 }
 
 // How the stream job was created will determine
@@ -441,6 +444,7 @@ impl TableCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
+            incoming_sinks: self.incoming_sinks.clone(),
         }
     }
 
@@ -555,6 +559,7 @@ impl From<PbTable> for TableCatalog {
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
+            incoming_sinks: tb.incoming_sinks.clone(),
         }
     }
 }
@@ -648,6 +653,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
+            incoming_sinks: vec![],
         }
         .into();
 
@@ -705,6 +711,7 @@ mod tests {
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
+                incoming_sinks: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
