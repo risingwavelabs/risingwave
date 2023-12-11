@@ -42,3 +42,15 @@ pub use mock_external_table::MockExternalTableReader;
 pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+
+pub fn is_key_belong_to_format_encode_options(key: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "schema.registry",
+        "schema.location",
+        "message",
+        "key.message",
+        "without_header",
+        "delimiter",
+    ];
+    PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+}
