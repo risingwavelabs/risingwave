@@ -116,8 +116,11 @@ impl Epoch {
 
 pub const EPOCH_AVAILABLE_BITS: u64 = 16;
 pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
-pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
-pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
+// Low EPOCH_AVAILABLE_BITS bits set to 1
+pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
+// High (64-EPOCH_AVAILABLE_BITS) bits set to 1
+const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
+pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
 
 pub fn is_max_epoch(epoch: u64) -> bool {
     // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,

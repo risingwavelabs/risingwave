@@ -110,7 +110,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
 
                     Statement::CreateIndex {

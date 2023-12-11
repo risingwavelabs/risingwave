@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, TableId};
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
@@ -47,6 +47,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
+        let target_table = sink_desc.get_target_table().cloned().ok().map(TableId::new);
         let properties = sink_desc.get_properties().clone();
         let downstream_pk = sink_desc
             .downstream_pk
@@ -101,6 +102,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             format_desc,
             db_name,
             sink_from_name,
+            target_table,
         };
 
         let sink_id_str = format!("{}", sink_id.sink_id);

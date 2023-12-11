@@ -25,13 +25,8 @@ message RowSeqScanNode {
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
 
-  message ChunkSize {
-    uint32 chunk_size = 1;
-  }
-  // If along with `batch_limit`, `chunk_size` will be set.
-  ChunkSize chunk_size = 6;
   // The pushed down `batch_limit`. Max rows needed to return.
-  optional uint64 limit = 7;
+  optional uint64 limit = 6;
 }
 
 message SysRowSeqScanNode {
