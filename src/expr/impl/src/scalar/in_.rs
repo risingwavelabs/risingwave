@@ -69,6 +69,7 @@ impl Expression for InExpression {
         let mut output_array = BoolArrayBuilder::new(input_array.len());
         for (data, vis) in input_array.iter().zip_eq_fast(input.visibility().iter()) {
             if vis {
+                // TODO: avoid `to_owned_datum()`
                 let ret = self.exists(&data.to_owned_datum());
                 output_array.append(ret);
             } else {
@@ -135,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_expr_null() {
-        let expr = build_from_pretty("(in:boolean $0:varchar abc:varchar NULL:varchar)");
+        let expr = build_from_pretty("(in:boolean $0:varchar abc:varchar null:varchar)");
         let (input, expected) = DataChunk::from_pretty(
             "T   B
              abc t

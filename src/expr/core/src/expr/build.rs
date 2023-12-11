@@ -285,7 +285,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
                 let ty = self.parse_type();
                 let value = match value.as_str() {
-                    "null" => None,
+                    "null" | "NULL" => None,
                     _ => Some(
                         ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
                     ),
