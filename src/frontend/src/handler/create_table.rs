@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
@@ -29,16 +30,14 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
-use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
-use risingwave_connector::source::external::{
-    CdcTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
-};
+use risingwave_connector::source::external::{DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
     ObjectName, SourceWatermark, TableConstraint,
@@ -472,7 +471,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, mut source_info) =
+    let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
@@ -526,43 +525,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let cdc_table_type = CdcTableType::from_properties(&properties);
-    if cdc_table_type.can_backfill() && context.session_ctx().config().cdc_backfill() {
-        // debezium connector will only consume changelogs from latest offset on this mode
-        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
-
-        let pk_column_indices = {
-            let mut id_to_idx = HashMap::new();
-            columns.iter().enumerate().for_each(|(idx, c)| {
-                id_to_idx.insert(c.column_id(), idx);
-            });
-            // pk column id must exist in table columns.
-            pk_column_ids
-                .iter()
-                .map(|c| id_to_idx.get(c).copied().unwrap())
-                .collect_vec()
-        };
-        let table_pk = pk_column_indices
-            .iter()
-            .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
-            .collect();
-
-        let cdc_table_desc = CdcTableDesc {
-            table_id: TableId::placeholder(),
-            source_id: TableId::placeholder(),
-            external_table_name: "".to_string(),
-            pk: table_pk,
-            columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-            stream_key: pk_column_indices,
-            value_indices: (0..columns.len()).collect_vec(),
-            connect_properties: Default::default(),
-        };
-
-        tracing::debug!(?cdc_table_desc, "create table with source w/ backfill");
-        // save external table info to `source_info`
-        source_info.external_table = Some(cdc_table_desc.to_protobuf());
-    }
-
     gen_table_plan_inner(
         context.into(),
         table_name,
@@ -573,7 +535,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
         Some(source_info),
         definition,
         watermark_descs,
-        Some(cdc_table_type),
         append_only,
         Some(col_id_gen.into_version()),
     )
@@ -652,7 +613,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
         None,
         definition,
         watermark_descs,
-        None,
         append_only,
         version,
     )
@@ -669,7 +629,6 @@ fn gen_table_plan_inner(
     source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
-    cdc_table_type: Option<CdcTableType>,
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
@@ -693,20 +652,10 @@ fn gen_table_plan_inner(
         database_id,
         name: name.clone(),
         row_id_index: row_id_index.map(|i| i as _),
-        columns: {
-            let mut source_columns = columns.clone();
-            if let Some(t) = cdc_table_type
-                && t.can_backfill()
-            {
-                // Append the offset column to be used in the cdc backfill
-                let offset_column = ColumnCatalog::offset_column();
-                source_columns.push(offset_column);
-            }
-            source_columns
-                .iter()
-                .map(|column| column.to_protobuf())
-                .collect_vec()
-        },
+        columns: columns
+            .iter()
+            .map(|column| column.to_protobuf())
+            .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
@@ -724,7 +673,7 @@ fn gen_table_plan_inner(
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
     let source_node: PlanRef = LogicalSource::new(
-        source_catalog,
+        source_catalog.clone(),
         columns.clone(),
         row_id_index,
         false,
@@ -1071,6 +1020,76 @@ pub fn check_create_table_with_source(
         })?;
     }
     Ok(source_schema)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_stream_graph_for_table(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    original_catalog: &Arc<TableCatalog>,
+    source_schema: Option<ConnectorSchema>,
+    handler_args: HandlerArgs,
+    col_id_gen: ColumnIdGenerator,
+    columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
+    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let (plan, source, table) = match source_schema {
+        Some(source_schema) => {
+            gen_create_table_plan_with_source(
+                context,
+                table_name,
+                columns,
+                constraints,
+                source_schema,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+            )
+            .await?
+        }
+        None => gen_create_table_plan(
+            context,
+            table_name,
+            columns,
+            constraints,
+            col_id_gen,
+            source_watermarks,
+            append_only,
+        )?,
+    };
+
+    // TODO: avoid this backward conversion.
+    if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
+        Err(ErrorCode::InvalidInputSyntax(
+            "alter primary key of table is not supported".to_owned(),
+        ))?
+    }
+
+    let graph = StreamFragmentGraph {
+        parallelism: session
+            .config()
+            .streaming_parallelism()
+            .map(|parallelism| Parallelism {
+                parallelism: parallelism.get(),
+            }),
+        ..build_graph(plan)
+    };
+
+    // Fill the original table ID.
+    let table = Table {
+        id: original_catalog.id().table_id(),
+        optional_associated_source_id: original_catalog
+            .associated_source_id()
+            .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+        ..table
+    };
+
+    Ok((graph, table, source))
 }
 
 #[cfg(test)]

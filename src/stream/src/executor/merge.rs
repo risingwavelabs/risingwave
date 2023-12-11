@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -142,7 +142,8 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
+                        barrier.mutation.as_deref()
                     {
                         if select_all
                             .upstream_actor_ids()
@@ -192,7 +193,7 @@ impl MergeExecutor {
                                     )
                                 })
                                 .try_collect()
-                                .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
+                                .context("failed to create upstream receivers")?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
@@ -639,14 +640,14 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 

@@ -33,7 +33,7 @@ use tokio::time::Instant;
 use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
-use super::Watermark;
+use super::{AddMutation, UpdateMutation, Watermark};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -205,16 +205,38 @@ impl DispatchExecutorInner {
         };
 
         match mutation {
-            Mutation::Add { adds, .. } => {
+            Mutation::Add(AddMutation { adds, .. }) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 actor_new_dispatchers: actor_dispatchers,
                 ..
-            } => {
+            }) => {
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
+                if let Some(updates) = dispatchers.get(&self.actor_id) {
+                    for update in updates {
+                        self.pre_update_dispatcher(update)?;
+                    }
+                }
+            }
+            Mutation::AddAndUpdate(
+                AddMutation { adds, .. },
+                UpdateMutation {
+                    dispatchers,
+                    actor_new_dispatchers: actor_dispatchers,
+                    ..
+                },
+            ) => {
+                if let Some(new_dispatchers) = adds.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
@@ -226,7 +248,7 @@ impl DispatchExecutorInner {
                 }
             }
             _ => {}
-        };
+        }
 
         Ok(())
     }
@@ -246,11 +268,19 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update {
+            Mutation::Update(UpdateMutation {
                 dispatchers,
                 dropped_actors,
                 ..
-            } => {
+            })
+            | Mutation::AddAndUpdate(
+                _,
+                UpdateMutation {
+                    dispatchers,
+                    dropped_actors,
+                    ..
+                },
+            ) => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
@@ -263,7 +293,6 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-
             _ => {}
         };
 
@@ -1124,14 +1153,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1176,14 +1205,14 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
+        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 

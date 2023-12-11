@@ -164,8 +164,10 @@ impl LocalQueryExecution {
             }
         };
 
+        use risingwave_expr::expr_context::TIME_ZONE;
+
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, TIME_ZONE,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH,
         };
 
         let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await };

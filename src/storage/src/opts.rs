@@ -80,7 +80,6 @@ pub struct StorageOpts {
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub data_file_cache_insert_rate_limit_mb: usize,
-    pub data_file_cache_reclaim_rate_limit_mb: usize,
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub data_file_cache_catalog_bits: usize,
     pub data_file_cache_compression: String,
@@ -104,7 +103,6 @@ pub struct StorageOpts {
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
     pub meta_file_cache_insert_rate_limit_mb: usize,
-    pub meta_file_cache_reclaim_rate_limit_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_catalog_bits: usize,
     pub meta_file_cache_compression: String,
@@ -130,6 +128,8 @@ pub struct StorageOpts {
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
     pub max_preload_io_retry_times: usize,
+    pub compactor_fast_max_compact_delete_ratio: u32,
+    pub compactor_fast_max_compact_task_size: u64,
 
     pub mem_table_spill_threshold: usize,
 
@@ -190,7 +190,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
-            data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
             data_file_cache_ring_buffer_capacity_mb: c
                 .storage
                 .data_file_cache
@@ -214,7 +213,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
-            meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
             meta_file_cache_ring_buffer_capacity_mb: c
                 .storage
                 .meta_file_cache
@@ -252,6 +250,10 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
             object_store_config: c.storage.object_store.clone(),
+            compactor_fast_max_compact_delete_ratio: c
+                .storage
+                .compactor_fast_max_compact_delete_ratio,
+            compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
         }
     }
 }

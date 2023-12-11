@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use std::{fmt, thread};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -275,16 +275,25 @@ impl MetaClient {
             .node
             .expect("AddWorkerNodeResponse::node is empty");
 
-        Ok((
-            Self {
-                worker_id: worker_node.id,
-                worker_type,
-                host_addr: addr.clone(),
-                inner: grpc_meta_client,
-                meta_config: meta_config.to_owned(),
-            },
-            system_params_resp.params.unwrap().into(),
-        ))
+        let meta_client = Self {
+            worker_id: worker_node.id,
+            worker_type,
+            host_addr: addr.clone(),
+            inner: grpc_meta_client,
+            meta_config: meta_config.to_owned(),
+        };
+
+        static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
+        REPORT_PANIC.call_once(|| {
+            let meta_client_clone = meta_client.clone();
+            std::panic::update_hook(move |default_hook, info| {
+                // Try to report panic event to meta node.
+                meta_client_clone.try_add_panic_event_blocking(info, None);
+                default_hook(info);
+            });
+        });
+
+        Ok((meta_client, system_params_resp.params.unwrap().into()))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -396,10 +405,12 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
+        affected_table_change: Option<ReplaceTablePlan>,
     ) -> Result<(u32, CatalogVersion)> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
+            affected_table_change,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -495,10 +506,12 @@ impl MetaClient {
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
-            source,
-            table: Some(table),
-            fragment_graph: Some(graph),
-            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+            plan: Some(ReplaceTablePlan {
+                source,
+                table: Some(table),
+                fragment_graph: Some(graph),
+                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+            }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here
@@ -556,8 +569,17 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id, cascade };
+    pub async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<CatalogVersion> {
+        let request = DropSinkRequest {
+            sink_id,
+            cascade,
+            affected_table_change,
+        };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
@@ -1205,6 +1227,47 @@ impl MetaClient {
         let req = ListCompactTaskProgressRequest {};
         let resp = self.inner.list_compact_task_progress(req).await?;
         Ok(resp.task_progress)
+    }
+
+    #[cfg(madsim)]
+    pub fn try_add_panic_event_blocking(
+        &self,
+        panic_info: impl Display,
+        timeout_millis: Option<u64>,
+    ) {
+    }
+
+    /// If `timeout_millis` is None, default is used.
+    #[cfg(not(madsim))]
+    pub fn try_add_panic_event_blocking(
+        &self,
+        panic_info: impl Display,
+        timeout_millis: Option<u64>,
+    ) {
+        let event = event_log::EventWorkerNodePanic {
+            worker_id: self.worker_id,
+            worker_type: self.worker_type.into(),
+            host_addr: Some(self.host_addr.to_protobuf()),
+            panic_info: format!("{panic_info}"),
+        };
+        let grpc_meta_client = self.inner.clone();
+        let _ = thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let req = AddEventLogRequest {
+                event: Some(add_event_log_request::Event::WorkerNodePanic(event)),
+            };
+            rt.block_on(async {
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(timeout_millis.unwrap_or(1000)),
+                    grpc_meta_client.add_event_log(req),
+                )
+                .await;
+            });
+        })
+        .join();
     }
 }
 
@@ -1880,6 +1943,7 @@ macro_rules! for_all_meta_rpc {
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
+            ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
         }
     };
 }

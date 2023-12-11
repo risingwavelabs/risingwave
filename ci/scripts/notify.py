@@ -56,6 +56,7 @@ INTEGRATION_TEST_MAP = {
     "elasticsearch-sink-json": ["xinhao"],
     "redis-sink-json": ["xinhao"],
     "big-query-sink-json": ["xinhao"],
+    "vector-json": ["tao"],
 }
 
 def get_failed_tests(get_test_status, test_map):

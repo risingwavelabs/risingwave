@@ -15,12 +15,12 @@
 #![feature(lint_reasons)]
 #![feature(let_chains)]
 
-use context::DefineContextAttr;
+use std::vec;
+
+use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
-
-use crate::context::{generate_captured_function, CaptureContextAttr};
 
 mod context;
 mod gen;

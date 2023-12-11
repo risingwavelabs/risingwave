@@ -31,6 +31,7 @@ use risingwave_connector::sink::log_store::{
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
@@ -341,7 +342,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .monitored(metrics);
 
         if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
-            let mut err_str = e.to_string();
+            let mut err_str = e.to_report_string();
             if actor_context
                 .error_suppressor
                 .lock()
@@ -462,6 +463,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -589,6 +591,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -713,6 +716,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {

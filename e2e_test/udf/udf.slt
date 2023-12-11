@@ -40,7 +40,13 @@ statement ok
 create function split(varchar) returns table (word varchar, length int) as split using link 'http://localhost:8815';
 
 statement ok
+create function float_to_decimal(float8) returns decimal as float_to_decimal using link 'http://localhost:8815';
+
+statement ok
 create function hex_to_dec(varchar) returns decimal as hex_to_dec using link 'http://localhost:8815';
+
+statement ok
+create function decimal_add(decimal, decimal) returns decimal as decimal_add using link 'http://localhost:8815';
 
 statement ok
 create function array_access(varchar[], int) returns varchar as array_access using link 'http://localhost:8815';
@@ -72,7 +78,9 @@ query TTTTT rowsort
 show functions
 ----
 array_access character varying[], integer character varying (empty) http://localhost:8815
+decimal_add numeric, numeric numeric (empty) http://localhost:8815
 extract_tcp_info bytea struct<src_ip character varying, dst_ip character varying, src_port smallint, dst_port smallint> (empty) http://localhost:8815
+float_to_decimal double precision numeric (empty) http://localhost:8815
 gcd integer, integer integer (empty) http://localhost:8815
 gcd integer, integer, integer integer (empty) http://localhost:8815
 hex_to_dec character varying numeric (empty) http://localhost:8815
@@ -105,6 +113,16 @@ query I
 select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
 ----
 233276425899864771438119478
+
+query I
+select float_to_decimal('-1e-10'::float8);
+----
+-0.0000000001000000000000000036
+
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
 
 query T
 select array_access(ARRAY['a', 'b', 'c'], 2);
@@ -142,7 +160,7 @@ select (return_all(
     1 ::bigint,
     1 ::float4,
     1 ::float8,
-    1234567890123456789012345678 ::decimal,
+    12345678901234567890.12345678 ::decimal,
     date '2023-06-01',
     time '01:02:03.456789',
     timestamp '2023-06-01 01:02:03.456789',
@@ -153,7 +171,7 @@ select (return_all(
     row(1, 2)::struct<f1 int, f2 int>
 )).*;
 ----
-t 1 1 1 1 1 1234567890123456789012345678 2023-06-01 01:02:03.456789 2023-06-01 01:02:03.456789 1 mon 2 days 00:00:03 string \x6279746573 {"key": 1} (1,2)
+t 1 1 1 1 1 12345678901234567890.12345678 2023-06-01 01:02:03.456789 2023-06-01 01:02:03.456789 1 mon 2 days 00:00:03 string \x6279746573 {"key": 1} (1,2)
 
 query T
 select (return_all_arrays(
@@ -163,7 +181,7 @@ select (return_all_arrays(
     array[null, 1 ::bigint],
     array[null, 1 ::float4],
     array[null, 1 ::float8],
-    array[null, 1234567890123456789012345678 ::decimal],
+    array[null, 12345678901234567890.12345678 ::decimal],
     array[null, date '2023-06-01'],
     array[null, time '01:02:03.456789'],
     array[null, timestamp '2023-06-01 01:02:03.456789'],
@@ -174,7 +192,29 @@ select (return_all_arrays(
     array[null, row(1, 2)::struct<f1 int, f2 int>]
 )).*;
 ----
-{NULL,t} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,1234567890123456789012345678} {NULL,2023-06-01} {NULL,01:02:03.456789} {NULL,"2023-06-01 01:02:03.456789"} {NULL,"1 mon 2 days 00:00:03"} {NULL,string} {NULL,"\\x6279746573"} {NULL,"{\"key\": 1}"} {NULL,"(1,2)"}
+{NULL,t} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,12345678901234567890.12345678} {NULL,2023-06-01} {NULL,01:02:03.456789} {NULL,"2023-06-01 01:02:03.456789"} {NULL,"1 mon 2 days 00:00:03"} {NULL,string} {NULL,"\\x6279746573"} {NULL,"{\"key\": 1}"} {NULL,"(1,2)"}
+
+# test large string output
+query I
+select length((return_all(
+    null::boolean,
+    null::smallint,
+    null::int,
+    null::bigint,
+    null::float4,
+    null::float8,
+    null::decimal,
+    null::date,
+    null::time,
+    null::timestamp,
+    null::interval,
+    repeat('a', 100000)::varchar,
+    repeat('a', 100000)::bytea,
+    null::jsonb,
+    null::struct<f1 int, f2 int>
+)).varchar);
+----
+100000
 
 query I
 select series(5);
@@ -313,7 +353,13 @@ statement ok
 drop function split;
 
 statement ok
+drop function float_to_decimal;
+
+statement ok
 drop function hex_to_dec;
+
+statement ok
+drop function decimal_add;
 
 statement ok
 drop function array_access;

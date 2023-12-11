@@ -97,7 +97,7 @@ message TableFragments {
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
-  stream_plan.StreamEnvironment env = 6;
+  stream_plan.StreamContext ctx = 6;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.
@@ -196,7 +196,7 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
-    stream_plan.StreamEnvironment env = 2;
+    stream_plan.StreamContext ctx = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
@@ -601,6 +601,12 @@ message EventLog {
     uint64 cur_epoch = 2;
     string error = 3;
   }
+  message EventWorkerNodePanic {
+    uint32 worker_id = 1;
+    common.WorkerType worker_type = 2;
+    common.HostAddress host_addr = 3;
+    string panic_info = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -612,6 +618,7 @@ message EventLog {
     EventBarrierComplete barrier_complete = 6;
     EventInjectBarrierFail inject_barrier_fail = 7;
     EventCollectBarrierFail collect_barrier_fail = 8;
+    EventLog.EventWorkerNodePanic worker_node_panic = 9;
   }
 }
 
@@ -621,6 +628,16 @@ message ListEventLogResponse {
   repeated EventLog event_logs = 1;
 }
 
+message AddEventLogRequest {
+  // A subset of EventLog.event that can be added by non meta node.
+  oneof event {
+    EventLog.EventWorkerNodePanic worker_node_panic = 1;
+  }
+}
+
+message AddEventLogResponse {}
+
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+  rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
 }

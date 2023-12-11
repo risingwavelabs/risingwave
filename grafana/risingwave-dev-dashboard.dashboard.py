@@ -943,6 +943,50 @@ def section_streaming(outer_panels):
         )
     ]
 
+def section_streaming_cdc(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming CDC",
+            [
+                panels.timeseries_rowsps(
+                    "CDC Backfill Snapshot Read Throughput(rows)",
+                    "Total number of rows that have been read from the cdc backfill snapshot",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "CDC Backfill Upstream Throughput(rows)",
+                    "Total number of rows that have been output from the cdc backfill upstream",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_cdc_backfill_upstream_output_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                            ),
+                    ],
+                ),
+                panels.timeseries_latency_ms(
+                    "CDC Consume Lag Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('source_cdc_event_lag_duration_milliseconds_bucket')}[$__rate_interval])) by (le, table_name))",
+                                f"lag p{legend}" + " - {{table_name}}",
+                                ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
 
 def section_streaming_actors(outer_panels):
     panels = outer_panels.sub_panel()
@@ -3914,6 +3958,7 @@ dashboard = Dashboard(
         *section_cluster_node(panels),
         *section_recovery_node(panels),
         *section_streaming(panels),
+        *section_streaming_cdc(panels),
         *section_streaming_actors(panels),
         *section_streaming_actors_tokio(panels),
         *section_streaming_exchange(panels),

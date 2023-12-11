@@ -31,6 +31,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::{error, warn, Instrument};
@@ -226,12 +227,7 @@ where
                     panic_message::panic_message(&payload).to_owned(),
                 ))
             })
-            .inspect_err(|error| {
-                error!(
-                    error = error as &dyn std::error::Error,
-                    "error when process message"
-                )
-            });
+            .inspect_err(|error| error!(error = %error.as_report(), "error when process message"));
 
         match result {
             Ok(()) => Some(()),
@@ -347,6 +343,7 @@ where
                     return Err(err.into());
                 }
             }
+            FeMessage::HealthCheck => self.process_health_check(),
         }
         self.stream.flush().await?;
         Ok(())
@@ -585,6 +582,11 @@ where
     }
 
     fn process_terminate(&mut self) {
+        self.is_terminate = true;
+    }
+
+    fn process_health_check(&mut self) {
+        tracing::debug!("health check");
         self.is_terminate = true;
     }
 

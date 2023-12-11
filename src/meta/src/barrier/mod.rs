@@ -28,6 +28,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_hummock_sdk::table_watermark::merge_multiple_new_table_watermarks;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -35,7 +36,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_plan::Barrier;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -73,7 +74,7 @@ mod recovery;
 mod schedule;
 mod trace;
 
-pub use self::command::{Command, Reschedule};
+pub use self::command::{Command, ReplaceTablePlan, Reschedule};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -106,12 +107,20 @@ pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
 pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
+/// The reason why the cluster is recovering.
+enum RecoveryReason {
+    /// After bootstrap.
+    Bootstrap,
+    /// After failure.
+    Failover(MetaError),
+}
+
 /// Status of barrier manager.
 enum BarrierManagerStatus {
     /// Barrier manager is starting.
     Starting,
     /// Barrier manager is under recovery.
-    Recovering,
+    Recovering(RecoveryReason),
     /// Barrier manager is running.
     Running,
 }
@@ -141,6 +150,12 @@ pub enum CommandChanges {
     CreateTable(TableId),
     /// Some actors will be added or removed.
     Actor {
+        to_add: HashSet<ActorId>,
+        to_remove: HashSet<ActorId>,
+    },
+    /// This is used for sinking into the table, featuring both `CreateTable` and `Actor` changes.
+    CreateSinkIntoTable {
+        sink_id: TableId,
         to_add: HashSet<ActorId>,
         to_remove: HashSet<ActorId>,
     },
@@ -270,7 +285,11 @@ impl CheckpointControl {
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
     fn pre_resolve(&mut self, command: &Command) {
-        match command.changes() {
+        self.pre_resolve_helper(command.changes());
+    }
+
+    fn pre_resolve_helper(&mut self, changes: CommandChanges) {
+        match changes {
             CommandChanges::CreateTable(table) => {
                 assert!(
                     !self.dropping_tables.contains(&table),
@@ -290,6 +309,15 @@ impl CheckpointControl {
                 self.adding_actors.extend(to_add);
             }
 
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.pre_resolve_helper(CommandChanges::CreateTable(sink_id));
+                self.pre_resolve_helper(CommandChanges::Actor { to_add, to_remove });
+            }
+
             _ => {}
         }
     }
@@ -298,7 +326,11 @@ impl CheckpointControl {
     /// removed actors from checkpoint control, so that `can_actor_send_or_collect` will return
     /// `false`.
     fn post_resolve(&mut self, command: &Command) {
-        match command.changes() {
+        self.post_resolve_helper(command.changes());
+    }
+
+    fn post_resolve_helper(&mut self, change: CommandChanges) {
+        match change {
             CommandChanges::DropTables(tables) => {
                 assert!(
                     self.dropping_tables.is_disjoint(&tables),
@@ -307,14 +339,14 @@ impl CheckpointControl {
                 self.dropping_tables.extend(tables);
             }
 
-            CommandChanges::Actor { to_remove, .. } => {
+            CommandChanges::Actor { to_remove, .. }
+            | CommandChanges::CreateSinkIntoTable { to_remove, .. } => {
                 assert!(
                     self.removing_actors.is_disjoint(&to_remove),
                     "duplicated actor in concurrent checkpoint"
                 );
                 self.removing_actors.extend(to_remove);
             }
-
             _ => {}
         }
     }
@@ -459,6 +491,14 @@ impl CheckpointControl {
                 self.removing_actors.retain(|a| !to_remove.contains(a));
             }
             CommandChanges::None => {}
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.remove_changes(CommandChanges::CreateTable(sink_id));
+                self.remove_changes(CommandChanges::Actor { to_add, to_remove });
+            }
         }
     }
 
@@ -566,10 +606,19 @@ impl GlobalBarrierManager {
         (join_handle, shutdown_tx)
     }
 
-    /// Return whether the barrier manager is running.
-    pub async fn is_running(&self) -> bool {
+    /// Check the status of barrier manager, return error if it is not `Running`.
+    pub async fn check_status_running(&self) -> MetaResult<()> {
         let status = self.status.lock().await;
-        matches!(*status, BarrierManagerStatus::Running)
+        match &*status {
+            BarrierManagerStatus::Starting
+            | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
+                bail!("The cluster is bootstrapping")
+            }
+            BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
+                Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
+            }
+            BarrierManagerStatus::Running => Ok(()),
+        }
     }
 
     /// Set barrier manager status.
@@ -631,7 +680,8 @@ impl GlobalBarrierManager {
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap))
+                .await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
@@ -826,7 +876,7 @@ impl GlobalBarrierManager {
                         curr: command_context.curr_epoch.value().0,
                         prev: command_context.prev_epoch.value().0,
                     }),
-                    mutation,
+                    mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
                     tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
                         .to_protobuf(),
                     kind: command_context.kind as i32,
@@ -925,7 +975,7 @@ impl GlobalBarrierManager {
             .map_err(Into::into);
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
-            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
+            .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
@@ -1010,7 +1060,10 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            self.set_status(BarrierManagerStatus::Recovering).await;
+            self.set_status(BarrierManagerStatus::Recovering(RecoveryReason::Failover(
+                err.clone(),
+            )))
+            .await;
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
@@ -1234,5 +1287,9 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
             .collect_vec();
         synced_ssts.append(&mut t);
     }
-    CommitEpochInfo::new(synced_ssts, sst_to_worker)
+    CommitEpochInfo::new(
+        synced_ssts,
+        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
+        sst_to_worker,
+    )
 }

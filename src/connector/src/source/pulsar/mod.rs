@@ -43,7 +43,11 @@ pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis", alias = "pulsar.time.offset")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "pulsar.time.offset",
+        alias = "scan.startup.timestamp_millis"
+    )]
     pub time_offset: Option<String>,
 
     #[serde(flatten)]

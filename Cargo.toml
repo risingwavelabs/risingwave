@@ -57,6 +57,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
+exclude = ["lints"]
 resolver = "2"
 
 [workspace.package]
@@ -113,7 +114,7 @@ hashbrown = { version = "0.14.0", features = [
   "nightly",
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
@@ -128,7 +129,7 @@ arrow-flight = "49"
 arrow-select = "49"
 arrow-ord = "49"
 arrow-row = "49"
-thiserror-ext = "0.0.8"
+thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
@@ -172,6 +173,7 @@ risingwave_udf = { path = "./src/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+tokio-util = "0.7"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
@@ -255,3 +257,6 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+[workspace.metadata.dylint]
+libraries = [{ path = "./lints" }]
