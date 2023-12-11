@@ -274,20 +274,6 @@ impl Sstable {
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
-
-    // #[inline(always)]
-    // pub fn block_smallest_key(&self, block_index: usize) -> &Vec<u8> {
-    //     &self.meta.block_metas[block_index].smallest_key
-    // }
-
-    // #[inline(always)]
-    // pub fn block_largest_key(&self, block_index: usize) -> &Vec<u8> {
-    //     if block_index + 1 != self.block_count() {
-    //         &self.meta.block_metas[block_index].smallest_key
-    //     } else {
-    //         &self.meta.largest_key
-    //     }
-    // }
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
