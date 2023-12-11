@@ -53,7 +53,7 @@ async fn build_accessor_builder(
     }
 }
 
-fn get_key_column_name(columns: &Vec<SourceColumnDesc>) -> Option<String> {
+pub fn get_key_column_name(columns: &Vec<SourceColumnDesc>) -> Option<String> {
     columns.iter().find_map(|column| {
         if column.additional_column_type == AdditionalColumnType::Key {
             Some(column.name.clone())

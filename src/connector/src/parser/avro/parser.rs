@@ -305,6 +305,7 @@ mod test {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
+            key_builder: None,
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,

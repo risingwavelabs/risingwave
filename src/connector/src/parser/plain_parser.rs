@@ -21,11 +21,17 @@ use super::{
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::only_parse_payload;
-use crate::parser::ParserFormat;
+use crate::parser::bytes_parser::BytesAccessBuilder;
+use crate::parser::unified::upsert::UpsertChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
+use crate::parser::unified::{AccessImpl, ChangeEventOperation};
+use crate::parser::upsert_parser::get_key_column_name;
+use crate::parser::{BytesProperties, ParserFormat};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct PlainParser {
+    pub key_builder: Option<AccessBuilderImpl>,
     pub payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     pub source_ctx: SourceContextRef,
@@ -37,6 +43,16 @@ impl PlainParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
+        let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
+            Some(AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
+                    column_name: Some(key_column_name),
+                }),
+            )?))
+        } else {
+            None
+        };
+
         let payload_builder = match props.encoding_config {
             EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
@@ -50,6 +66,7 @@ impl PlainParser {
             }
         };
         Ok(Self {
+            key_builder,
             payload_builder,
             rw_columns,
             source_ctx,
@@ -58,12 +75,29 @@ impl PlainParser {
 
     pub async fn parse_inner(
         &mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<()> {
-        let accessor = self.payload_builder.generate_accessor(payload).await?;
+        // reuse upsert component but always insert
+        let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
+            UpsertChangeEvent::default();
+        let change_event_op = ChangeEventOperation::Upsert;
+        if let Some(data) = key {
+            // key is optional in format plain
+            row_op = row_op.with_key(self.key_builder.generate_accessor(data).await?);
+        }
+        if let Some(data) = payload {
+            row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+        } else {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "payload is required in format plain, but got empty".to_string(),
+            )));
+        }
 
-        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
+        apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
+            .map_err(Into::into)
+        // apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
     }
 }
 
@@ -82,10 +116,10 @@ impl ByteStreamSourceParser for PlainParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
+        key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<()> {
-        only_parse_payload!(self, payload, writer)
+        self.parse_inner(key, payload, writer).await
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
+use risingwave_pb::plan_common::AdditionalColumnType;
 
 use super::{Access, ChangeEvent, ChangeEventOperation};
 use crate::parser::unified::AccessError;
@@ -105,21 +106,26 @@ where
 
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         // access value firstly
-        match self.access(&["value", &desc.name], Some(&desc.data_type)) {
-            Err(AccessError::Undefined { .. }) => (), // fallthrough
-            other => return other,
-        };
-
-        match self.access(&["key", &desc.name], Some(&desc.data_type)) {
-            Err(AccessError::Undefined { .. }) => (), // fallthrough
-            other => return other,
-        };
-
-        if let Some(key_as_column_name) = &self.key_as_column_name
-            && &desc.name == key_as_column_name
-        {
-            // todo: check logic later
-            return self.access(&["key"], Some(&desc.data_type));
+        match desc.additional_column_type {
+            AdditionalColumnType::Key => {
+                match self.access(&["key", &desc.name], Some(&desc.data_type)) {
+                    Err(AccessError::Undefined { .. }) => (), // fallthrough
+                    other => return other,
+                };
+                if let Some(key_as_column_name) = &self.key_as_column_name
+                    && &desc.name == key_as_column_name
+                {
+                    // todo: check logic later
+                    return self.access(&["key"], Some(&desc.data_type));
+                }
+            }
+            AdditionalColumnType::Unspecified => {
+                match self.access(&["value", &desc.name], Some(&desc.data_type)) {
+                    Err(AccessError::Undefined { .. }) => (),
+                    other => return other,
+                };
+            }
+            _ => unreachable!(),
         }
 
         Ok(None)
