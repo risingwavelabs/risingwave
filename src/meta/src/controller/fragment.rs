@@ -34,7 +34,7 @@ use risingwave_pb::meta::{FragmentParallelUnitMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamEnvironment,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -249,7 +249,7 @@ impl CatalogController {
     pub fn compose_table_fragments(
         table_id: u32,
         state: PbState,
-        env: Option<PbStreamEnvironment>,
+        ctx: Option<PbStreamContext>,
         fragments: Vec<(
             fragment::Model,
             Vec<actor::Model>,
@@ -277,7 +277,7 @@ impl CatalogController {
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            env,
+            ctx,
         };
 
         Ok(table_fragments)
@@ -554,9 +554,7 @@ impl CatalogController {
         Self::compose_table_fragments(
             job_id as _,
             job_info.job_status.into(),
-            job_info
-                .timezone
-                .map(|tz| PbStreamEnvironment { timezone: tz }),
+            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             parallel_units_map,
         )

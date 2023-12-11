@@ -265,11 +265,12 @@ impl Sstable {
         self.filter_reader.may_match(user_key_range, hash)
     }
 
+    #[inline(always)]
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
@@ -525,6 +526,7 @@ pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     pub max_preload_retry_times: usize,
+    pub prefetch_for_large_query: bool,
 }
 
 impl SstableIteratorReadOptions {
@@ -533,6 +535,7 @@ impl SstableIteratorReadOptions {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
             max_preload_retry_times: 0,
+            prefetch_for_large_query: read_options.prefetch_options.for_large_query,
         }
     }
 }

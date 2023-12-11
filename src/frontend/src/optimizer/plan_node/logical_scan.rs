@@ -193,16 +193,6 @@ impl LogicalScan {
         }
     }
 
-    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
-    /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: u32) {
-        self.core.chunk_size = Some(chunk_size);
-    }
-
-    pub fn chunk_size(&self) -> Option<u32> {
-        self.core.chunk_size
-    }
-
     pub fn primary_key(&self) -> &[ColumnOrder] {
         self.core.primary_key()
     }

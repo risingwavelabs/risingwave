@@ -642,7 +642,8 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                PrefetchOptions::new_for_large_range_scan(),
+                // Here we only use small range prefetch because every barrier change, the executor will recreate a new iterator. So we do not need prefetch too much data.
+                PrefetchOptions::prefetch_for_small_range_scan(),
             )
             .await?;
 

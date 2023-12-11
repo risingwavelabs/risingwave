@@ -86,7 +86,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("MATERIALIZED VIEW".into())),
                         Some(ScalarImpl::Int32(t.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
@@ -107,7 +107,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("TABLE".into())),
                         Some(ScalarImpl::Int32(t.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
@@ -128,7 +128,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("SINK".into())),
                         Some(ScalarImpl::Int32(t.id.sink_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
@@ -149,7 +149,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("INDEX".into())),
                         Some(ScalarImpl::Int32(t.index_table.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
