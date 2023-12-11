@@ -18,7 +18,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
-use risingwave_connector::source::is_key_belong_to_format_encode_options;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
@@ -102,31 +101,10 @@ impl DatabaseManager {
                 .map(|database| (database.id, database)),
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-        let sources = BTreeMap::from_iter(sources.into_iter().map(|mut source| {
+        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| {
             // TODO(weili): wait for yezizp to refactor ref cnt
             if let Some(connection_id) = source.connection_id {
                 *relation_ref_count.entry(connection_id).or_default() += 1;
-            }
-
-            // This block here is for maintaining backward compatibility with older source formats when `format_encode_options` is
-            // merged into `with_properties`.
-            // Context: https://github.com/risingwavelabs/risingwave/pull/13762.
-            //
-            // We identify a 'legacy' source based on two conditions:
-            // 1. The `format_encode_options` in `source_info` is empty.
-            // 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
-            // And if the source is identified as 'legacy', we move the misplaced keys from `with_properties` to `format_encode_options`.
-            if let Some(ref mut source_info) = source.info && source_info.format_encode_options.is_empty() {
-                source.with_properties.retain(|k, v| {
-                    if is_key_belong_to_format_encode_options(k) {
-                        source_info
-                            .format_encode_options
-                            .insert(k.to_string(), v.to_string());
-                        false
-                    } else {
-                        true
-                    }
-                })
             }
             (source.id, source)
         }));

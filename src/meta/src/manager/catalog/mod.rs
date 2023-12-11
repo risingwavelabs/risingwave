@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
+use risingwave_connector::source::is_key_belong_to_format_encode_options;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
@@ -166,11 +167,55 @@ impl CatalogManager {
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        self.source_backward_compat_check().await?;
         Ok(())
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
+    }
+
+    /// This function is for maintaining backward compatibility with older source formats when `format_encode_options` is
+    /// merged into `with_properties`.
+    /// Context: <https://github.com/risingwavelabs/risingwave/pull/13762>.
+    ///
+    /// We identify a 'legacy' source based on two conditions:
+    /// 1. The `format_encode_options` in `source_info` is empty.
+    /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    /// And if the source is identified as 'legacy', we move the misplaced keys from `with_properties` to `format_encode_options`.
+    async fn source_backward_compat_check(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let legacy_sources = sources
+            .tree_ref()
+            .iter()
+            .filter(|(_, source)| {
+                if let Some(source_info) = &source.info && source_info.format_encode_options.is_empty() {
+                    true
+                } else {
+                    false
+                }
+        })
+        .map(|t| t.1.clone())
+        .collect_vec();
+        for mut source in legacy_sources {
+            source.with_properties.retain(|k, v| {
+                if is_key_belong_to_format_encode_options(k) {
+                    source
+                        .info
+                        .as_mut()
+                        .unwrap()
+                        .format_encode_options
+                        .insert(k.to_string(), v.to_string());
+                    false
+                } else {
+                    true
+                }
+            });
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, sources)?;
+        Ok(())
     }
 }
 
