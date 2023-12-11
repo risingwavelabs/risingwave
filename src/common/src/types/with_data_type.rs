@@ -22,7 +22,15 @@ use super::{
     Timestamp, Timestamptz, F32, F64,
 };
 
+/// A trait for all physical types that can be associated with a [`DataType`].
+///
+/// This is also a helper for [`Fields`](derive@crate::types::Fields) derive macro.
 pub trait WithDataType {
+    /// Returns the most obvious [`DataType`] for the rust type.
+    ///
+    /// There may be more than one [`DataType`] corresponding to the same rust type,
+    /// for example, [`Int64`](DataType::Int64) and [`Serial`](DataType::Serial) are
+    /// both expressed as i64. This method will return [`Int64`](DataType::Int64).
     fn default_data_type() -> DataType;
 }
 
