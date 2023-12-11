@@ -184,9 +184,7 @@ impl DmlExecutor {
                                 <= self.chunk_size
                             {
                                 // txn buffer is small and batch group has space.
-                                for chunk in txn_buffer.vec.drain(..) {
-                                    batch_group.push(chunk);
-                                }
+                                batch_group.extend(txn_buffer.vec);
                             } else {
                                 // txn buffer is small and batch group has no space, so yield the large one.
                                 if txn_buffer_cardinality < batch_group_cardinality {
