@@ -156,7 +156,7 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = self
             .op
             .lister_with(prefix)
-            .delimiter("")
+            .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::ContentType)
             .await?;
 
