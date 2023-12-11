@@ -260,7 +260,7 @@ impl ConcatSstableIterator {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let block_stream = self
                 .sstable_store
-                .get_stream_by_position(sstable.value().id, &sstable.value().meta.block_metas)
+                .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 

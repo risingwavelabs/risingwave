@@ -14,7 +14,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -39,7 +39,9 @@ use super::{
     Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, FileCache, RecentFilter, Sstable,
     SstableBlockIndex, SstableMeta, SstableWriter,
 };
-use crate::hummock::block_stream::{BlockDataStream, BlockStream, PrefetchBlockStream};
+use crate::hummock::block_stream::{
+    BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
+};
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::utils::LockTable;
@@ -141,6 +143,7 @@ pub struct SstableStore {
 
     recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
     prefetch_lock_table: LockTable,
+    prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
 }
 
@@ -187,6 +190,7 @@ impl SstableStore {
 
             recent_filter,
             prefetch_lock_table: LockTable::default(),
+            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity,
         }
     }
@@ -208,6 +212,7 @@ impl SstableStore {
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
             prefetch_lock_table: LockTable::default(),
+            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             recent_filter: None,
         }
@@ -268,8 +273,16 @@ impl SstableStore {
             .map_err(Into::into)
     }
 
-    pub fn support_prefetch(&self) -> bool {
-        self.prefetch_buffer_capacity > 0
+    pub async fn get_stream(
+        &self,
+        sst: &Sstable,
+        start_index: usize,
+        end_index: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Box<dyn BlockStream>> {
+        self.prefetch_blocks(sst, start_index, end_index, policy, stats)
+            .await
     }
 
     pub async fn prefetch_blocks(
@@ -282,11 +295,20 @@ impl SstableStore {
     ) -> HummockResult<Box<dyn BlockStream>> {
         const MAX_PREFETCH_BLOCK: usize = 16;
         let object_id = sst.id;
+        if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
+            let block = self.get(sst, block_index, policy, stats).await?;
+            return Ok(Box::new(PrefetchBlockStream::new(
+                VecDeque::from([block]),
+                block_index,
+                None,
+            )));
+        }
         stats.cache_data_block_total += 1;
         if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
                 block_index,
+                None,
             )));
         }
         let _guard = self.prefetch_lock_table.lock_for(object_id).await;
@@ -294,6 +316,7 @@ impl SstableStore {
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
                 block_index,
+                None,
             )));
         }
         let end_index = std::cmp::min(end_index, block_index + MAX_PREFETCH_BLOCK);
@@ -322,6 +345,8 @@ impl SstableStore {
                 .map(|meta| meta.len as usize)
                 .sum::<usize>();
         let data_path = self.get_sst_data_path(object_id);
+        let memory_usage = end_offset - start_offset;
+        let tracker = MemoryUsageTracker::new(self.prefetch_buffer_usage.clone(), memory_usage);
         let span: await_tree::Span = format!("Prefetch SST-{}", object_id).into();
         let store = self.store.clone();
         let join_handle = tokio::spawn(async move {
@@ -374,7 +399,11 @@ impl SstableStore {
             blocks.push_back(holder);
             offset = end;
         }
-        Ok(Box::new(PrefetchBlockStream::new(blocks, block_index)))
+        Ok(Box::new(PrefetchBlockStream::new(
+            blocks,
+            block_index,
+            Some(tracker),
+        )))
     }
 
     pub async fn get_block_response(
@@ -635,7 +664,7 @@ impl SstableStore {
         self.meta_cache.get_memory_usage() as u64
     }
 
-    pub async fn get_stream_by_position(
+    pub async fn get_stream_for_blocks(
         &self,
         object_id: HummockSstableObjectId,
         metas: &[BlockMeta],

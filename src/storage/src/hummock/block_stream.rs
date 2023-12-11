@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use fail::fail_point;
@@ -26,6 +28,24 @@ pub trait BlockStream: Send + Sync + 'static {
     /// left to read.
     async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>>;
     fn next_block_index(&self) -> usize;
+}
+
+pub struct MemoryUsageTracker {
+    total_usage: Arc<AtomicUsize>,
+    usage: usize,
+}
+
+impl MemoryUsageTracker {
+    pub fn new(total_usage: Arc<AtomicUsize>, usage: usize) -> Self {
+        total_usage.fetch_add(usage, Ordering::SeqCst);
+        Self { total_usage, usage }
+    }
+}
+
+impl Drop for MemoryUsageTracker {
+    fn drop(&mut self) {
+        self.total_usage.fetch_sub(self.usage, Ordering::SeqCst);
+    }
 }
 
 /// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
@@ -143,13 +163,19 @@ impl BlockDataStream {
 pub struct PrefetchBlockStream {
     blocks: VecDeque<BlockHolder>,
     block_index: usize,
+    _tracker: Option<MemoryUsageTracker>,
 }
 
 impl PrefetchBlockStream {
-    pub fn new(blocks: VecDeque<BlockHolder>, block_index: usize) -> Self {
+    pub fn new(
+        blocks: VecDeque<BlockHolder>,
+        block_index: usize,
+        _tracker: Option<MemoryUsageTracker>,
+    ) -> Self {
         Self {
             blocks,
             block_index,
+            _tracker,
         }
     }
 }

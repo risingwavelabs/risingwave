@@ -88,7 +88,7 @@ pub fn storage_memory_config(
 
     let prefetch_buffer_capacity_mb = storage_config
         .prefetch_buffer_capacity_mb
-        .unwrap_or(meta_cache_capacity_mb + block_cache_capacity_mb);
+        .unwrap_or(block_cache_capacity_mb);
 
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;

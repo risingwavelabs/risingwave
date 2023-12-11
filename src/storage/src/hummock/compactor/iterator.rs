@@ -100,7 +100,7 @@ impl SstableStreamIterator {
     async fn create_stream(&mut self) -> HummockResult<()> {
         let block_stream = self
             .sstable_store
-            .get_stream_by_position(
+            .get_stream_for_blocks(
                 self.sstable_info.object_id,
                 &self.block_metas[self.seek_block_idx..],
             )

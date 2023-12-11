@@ -273,7 +273,8 @@ fn try_update_failure_metric<T>(
     result: &ObjectResult<T>,
     operation_type: &'static str,
 ) {
-    if result.is_err() {
+    if let Err(e) = &result {
+        tracing::error!("read failed because of: {:?}", e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -621,9 +622,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
-        if let Err(e) = &res {
-            tracing::error!("read failed because of: {:?}", e);
-        }
 
         let data = res?;
         self.object_store_metrics

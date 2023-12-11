@@ -94,8 +94,8 @@ impl MonitoredStorageMetrics {
 
         // 1ms - 100s
         let mut state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
-        state_store_read_time_buckets.push(20.0);
-        state_store_read_time_buckets.push(80.0);
+        state_store_read_time_buckets.push(40.0);
+        state_store_read_time_buckets.push(100.0);
 
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
