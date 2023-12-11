@@ -35,10 +35,8 @@ impl Rule for BatchPushLimitToScanRule {
             return None;
         }
         let pushed_limit = limit.limit() + limit.offset();
-        let mut scan_core = scan.core().clone();
-        scan_core.chunk_size = Some((u32::MAX as u64).min(pushed_limit) as u32);
         let new_scan = BatchSeqScan::new_with_dist(
-            scan_core,
+            scan.core().clone(),
             scan.base.distribution().clone(),
             scan.scan_ranges().iter().cloned().collect_vec(),
             Some(pushed_limit),

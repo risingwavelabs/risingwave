@@ -23,7 +23,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
@@ -41,7 +41,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Message, Mutation, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -101,6 +101,11 @@ pub struct BackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    /// Rate limit, just used to initialize the chunk size for
+    /// snapshot read side.
+    /// If smaller than chunk_size, it will take precedence.
+    rate_limit: Option<usize>,
 }
 
 impl<S> BackfillExecutor<S>
@@ -117,6 +122,7 @@ where
         progress: CreateMviewProgress,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        rate_limit: Option<usize>,
     ) -> Self {
         let actor_id = progress.actor_id();
         Self {
@@ -129,6 +135,7 @@ where
             actor_id,
             metrics,
             chunk_size,
+            rate_limit,
         }
     }
 
@@ -136,6 +143,8 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+
+        let mut rate_limit = self.rate_limit;
 
         let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
 
@@ -161,8 +170,11 @@ where
             .await?;
         tracing::trace!(is_finished, row_count, "backfill state recovered");
 
-        let mut builder =
-            DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
+        let mut builder = Self::create_builder(
+            rate_limit,
+            self.chunk_size,
+            self.upstream_table.schema().data_types(),
+        );
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -433,6 +445,27 @@ where
                     "Backfill state persisted"
                 );
 
+                // Update snapshot read chunk builder.
+                if let Some(mutation) = barrier.mutation.as_ref() {
+                    if let Mutation::Throttle(actor_to_apply) = mutation.as_ref() {
+                        let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                        if let Some(new_rate_limit) = new_rate_limit_entry {
+                            rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
+                            tracing::info!(
+                                id = self.actor_id,
+                                new_rate_limit = ?self.rate_limit,
+                                "actor rate limit changed",
+                            );
+                            assert!(builder.is_empty());
+                            builder = Self::create_builder(
+                                rate_limit,
+                                self.chunk_size,
+                                self.upstream_table.schema().data_types(),
+                            );
+                        }
+                    }
+                }
+
                 yield Message::Barrier(barrier);
 
                 if snapshot_read_complete {
@@ -643,6 +676,29 @@ where
             current_state,
         )
         .await
+    }
+
+    /// Creates a data chunk builder for snapshot read.
+    /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
+    /// This is so we can partition snapshot read into smaller chunks than chunk size.
+    fn create_builder(
+        rate_limit: Option<usize>,
+        chunk_size: usize,
+        data_types: Vec<DataType>,
+    ) -> DataChunkBuilder {
+        if let Some(rate_limit) = rate_limit
+            && rate_limit < chunk_size
+        {
+            DataChunkBuilder::new(
+                data_types,
+                rate_limit,
+            )
+        } else {
+            DataChunkBuilder::new(
+                data_types,
+                chunk_size,
+            )
+        }
     }
 }
 
