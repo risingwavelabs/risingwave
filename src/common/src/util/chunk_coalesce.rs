@@ -39,6 +39,8 @@ pub struct DataChunkBuilder {
 
 impl DataChunkBuilder {
     pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
+        assert!(batch_size > 0);
+
         Self {
             data_types,
             batch_size,
