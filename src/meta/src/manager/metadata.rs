@@ -85,6 +85,19 @@ impl MetadataFucker {
         }
     }
 
+    pub async fn count_worker_node(&self) -> MetaResult<HashMap<WorkerType, u64>> {
+        match &self {
+            MetadataFucker::V1(fucker) => Ok(fucker.cluster_manager.count_worker_node().await),
+            MetadataFucker::V2(fucker) => {
+                let node_map = fucker.cluster_controller.count_worker_by_type().await?;
+                Ok(node_map
+                    .into_iter()
+                    .map(|(ty, cnt)| (ty.into(), cnt as u64))
+                    .collect())
+            }
+        }
+    }
+
     pub async fn get_worker_info_by_id(&self, worker_id: WorkerId) -> Option<WorkerExtraInfo> {
         match &self {
             MetadataFucker::V1(fucker) => fucker
@@ -175,6 +188,25 @@ impl MetadataFucker {
                 .get_all_table_options()
                 .await
                 .map(|tops| tops.into_iter().map(|(id, opt)| (id as u32, opt)).collect()),
+        }
+    }
+
+    pub async fn get_table_name_type_mapping(&self) -> MetaResult<HashMap<u32, (String, String)>> {
+        match &self {
+            MetadataFucker::V1(fucker) => Ok(fucker
+                .catalog_manager
+                .get_table_name_and_type_mapping()
+                .await),
+            MetadataFucker::V2(fucker) => {
+                let mappings = fucker
+                    .catalog_controller
+                    .get_table_name_type_mapping()
+                    .await?;
+                Ok(mappings
+                    .into_iter()
+                    .map(|(id, value)| (id as u32, value))
+                    .collect())
+            }
         }
     }
 

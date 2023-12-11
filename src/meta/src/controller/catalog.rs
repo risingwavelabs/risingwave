@@ -29,6 +29,7 @@ use risingwave_meta_model_v2::{
     DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
     SourceId, TableId, UserId,
 };
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
     PbView,
@@ -1580,6 +1581,34 @@ impl CatalogController {
         Ok(table_options
             .into_iter()
             .map(|(id, property)| (id, TableOption::build_table_option(&property.into_inner())))
+            .collect())
+    }
+
+    pub async fn get_table_name_type_mapping(
+        &self,
+    ) -> MetaResult<HashMap<TableId, (String, String)>> {
+        let inner = self.inner.read().await;
+        let table_name_types: Vec<(TableId, String, TableType)> = Table::find()
+            .select_only()
+            .columns([
+                table::Column::TableId,
+                table::Column::Name,
+                table::Column::TableType,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(table_name_types
+            .into_iter()
+            .map(|(id, name, table_type)| {
+                (
+                    id,
+                    (
+                        name,
+                        PbTableType::from(table_type).as_str_name().to_string(),
+                    ),
+                )
+            })
             .collect())
     }
 

@@ -34,11 +34,12 @@ use risingwave_object_store::object::object_metrics::{
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
+use crate::manager::MetadataFucker;
 use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
@@ -693,7 +694,7 @@ impl Default for MetaMetrics {
 }
 
 pub fn start_worker_info_monitor(
-    cluster_manager: ClusterManagerRef,
+    metadata_fucker: MetadataFucker,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
@@ -713,7 +714,15 @@ pub fn start_worker_info_monitor(
                 }
             }
 
-            for (worker_type, worker_num) in cluster_manager.count_worker_node().await {
+            let node_map = match metadata_fucker.count_worker_node().await {
+                Ok(node_map) => node_map,
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "fail to count worker node");
+                    continue;
+                }
+            };
+
+            for (worker_type, worker_num) in node_map {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[(worker_type.as_str_name())])
@@ -741,9 +750,7 @@ pub fn start_worker_info_monitor(
 }
 
 pub fn start_fragment_info_monitor(
-    cluster_manager: ClusterManagerRef,
-    catalog_manager: CatalogManagerRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_fucker: MetadataFucker,
     hummock_manager: HummockManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -765,24 +772,44 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
+            let worker_nodes = match metadata_fucker
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
+                .await
+            {
+                Ok(worker_nodes) => worker_nodes,
+                Err(err) => {
+                    tracing::warn!(error=%err.as_report(), "fail to list worker node");
+                    continue;
+                }
+            };
+            let table_name_and_type_mapping =
+                match metadata_fucker.get_table_name_type_mapping().await {
+                    Ok(mapping) => mapping,
+                    Err(err) => {
+                        tracing::warn!(error=%err.as_report(), "fail to get table name mapping");
+                        continue;
+                    }
+                };
+
             // Start fresh with a reset to clear all outdated labels. This is safe since we always
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(Some(WorkerType::ComputeNode), None)
-                .await
+            let workers: HashMap<u32, String> = worker_nodes
                 .into_iter()
                 .map(|worker_node| match worker_node.host {
                     Some(host) => (worker_node.id, format!("{}:{}", host.host, host.port)),
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
-            let table_name_and_type_mapping =
-                catalog_manager.get_table_name_and_type_mapping().await;
             let table_compaction_group_id_mapping = hummock_manager
                 .get_table_compaction_group_id_mapping()
                 .await;
+
+            let fragment_manager = match &metadata_fucker {
+                MetadataFucker::V1(fucker) => &fucker.fragment_manager,
+                MetadataFucker::V2(_) => unimplemented!("support fetching metric in v2"),
+            };
 
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {

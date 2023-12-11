@@ -85,20 +85,11 @@ impl TelemetryReportCreator for MetaReportCreator {
         session_id: String,
         up_time: u64,
     ) -> TelemetryResult<MetaTelemetryReport> {
-        let node_map = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.cluster_manager.count_worker_node().await,
-            MetadataFucker::V2(fucker) => {
-                let node_map = fucker
-                    .cluster_controller
-                    .count_worker_by_type()
-                    .await
-                    .map_err(|err| err.as_report().to_string())?;
-                node_map
-                    .into_iter()
-                    .map(|(ty, cnt)| (ty.into(), cnt as u64))
-                    .collect()
-            }
-        };
+        let node_map = self
+            .metadata_fucker
+            .count_worker_node()
+            .await
+            .map_err(|err| err.as_report().to_string())?;
 
         Ok(MetaTelemetryReport {
             base: TelemetryReportBase {

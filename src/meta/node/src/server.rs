@@ -637,15 +637,13 @@ pub async fn start_service_as_election_leader(
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(
-        cluster_manager.clone(),
+        metadata_fucker.clone(),
         election_client.clone(),
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
     sub_tasks.push(start_fragment_info_monitor(
-        cluster_manager.clone(),
-        catalog_manager,
-        fragment_manager.clone(),
+        metadata_fucker.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
