@@ -950,12 +950,13 @@ impl HummockManager {
             .await?;
 
             tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {} cost time: {:?} input {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
                 compact_task.target_level,
-                start_time.elapsed()
+                start_time.elapsed(),
+                compact_task.input_ssts
             );
         } else {
             compact_task.table_options = table_id_to_option
@@ -3264,14 +3265,14 @@ impl CompactionState {
 
     pub fn auto_pick_type(&self, group: CompactionGroupId) -> Option<TaskType> {
         let guard = self.scheduled.lock();
-        if guard.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
+        if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
+            Some(compact_task::TaskType::Dynamic)
+        } else if guard.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
-        } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
-            Some(compact_task::TaskType::Dynamic)
         } else {
             None
         }
