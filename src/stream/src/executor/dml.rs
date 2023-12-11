@@ -18,7 +18,7 @@ use std::mem;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
@@ -29,6 +29,7 @@ use super::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
     Mutation, PkIndicesRef,
 };
+use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
@@ -128,6 +129,14 @@ impl DmlExecutor {
         // A batch group of small chunks.
         let mut batch_group: Vec<StreamChunk> = vec![];
 
+        let mut builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            self.column_descs
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect(),
+        );
+
         while let Some(input_msg) = stream.next().await {
             match input_msg? {
                 Either::Left(msg) => {
@@ -146,9 +155,16 @@ impl DmlExecutor {
                         // Flush the remaining batch group
                         if !batch_group.is_empty() {
                             let vec = mem::take(&mut batch_group);
-                            let concat_chunk = StreamChunk::concat(vec);
-                            debug_assert!(concat_chunk.cardinality() <= self.chunk_size);
-                            yield Message::Chunk(concat_chunk);
+                            for chunk in vec {
+                                for (op, row) in chunk.rows() {
+                                    if let Some(chunk) = builder.append_row(op, row) {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+                            }
+                            if let Some(chunk) = builder.take() {
+                                yield Message::Chunk(chunk);
+                            }
                         }
                     }
                     yield msg;
@@ -190,9 +206,17 @@ impl DmlExecutor {
                                 if txn_buffer_cardinality < batch_group_cardinality {
                                     mem::swap(&mut txn_buffer.vec, &mut batch_group);
                                 }
-                                let concat_chunk = StreamChunk::concat(txn_buffer.vec);
-                                debug_assert!(concat_chunk.cardinality() <= self.chunk_size);
-                                yield Message::Chunk(concat_chunk);
+
+                                for chunk in txn_buffer.vec {
+                                    for (op, row) in chunk.rows() {
+                                        if let Some(chunk) = builder.append_row(op, row) {
+                                            yield Message::Chunk(chunk);
+                                        }
+                                    }
+                                }
+                                if let Some(chunk) = builder.take() {
+                                    yield Message::Chunk(chunk);
+                                }
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
