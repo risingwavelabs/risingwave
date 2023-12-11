@@ -82,8 +82,8 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv,
-    MetadataFucker, TableId, META_NODE_ID,
+    ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, MetadataFucker, TableId,
+    META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
@@ -296,11 +296,9 @@ impl CommitEpochInfo {
 impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_fucker: MetadataFucker,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
@@ -309,12 +307,10 @@ impl HummockManager {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
-            cluster_manager,
-            fragment_manager,
+            metadata_fucker,
             metrics,
             compactor_manager,
             compaction_group_manager,
-            catalog_manager,
             compactor_streams_change_tx,
         )
         .await
@@ -339,14 +335,14 @@ impl HummockManager {
                 .await
                 .unwrap();
         let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+        let metadata_fucker =
+            MetadataFucker::new_v1(cluster_manager, catalog_manager, fragment_manager);
         Self::new_impl(
             env,
-            cluster_manager,
-            fragment_manager,
+            metadata_fucker,
             metrics,
             compactor_manager,
             compaction_group_manager,
-            catalog_manager,
             compactor_streams_change_tx,
         )
         .await
@@ -355,12 +351,10 @@ impl HummockManager {
 
     async fn new_impl(
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_fucker: MetadataFucker,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
@@ -407,8 +401,6 @@ impl HummockManager {
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let metadata_fucker =
-            MetadataFucker::new_v1(cluster_manager, catalog_manager, fragment_manager);
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(

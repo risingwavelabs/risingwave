@@ -418,15 +418,22 @@ pub async fn start_service_as_election_leader(
             .await
             .unwrap(),
     );
+    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+
+    // TODO: init metadata fucker in V2 if sql-backend enabled.
+    let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
+        cluster_manager: cluster_manager.clone(),
+        catalog_manager: catalog_manager.clone(),
+        fragment_manager: fragment_manager.clone(),
+    });
+
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
     serving::on_meta_start(
         env.notification_manager_ref(),
-        cluster_manager.clone(),
-        fragment_manager.clone(),
+        &metadata_fucker,
         serving_vnode_mapping.clone(),
     )
     .await;
-    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
         hummock::CompactorManager::with_meta(env.clone())
@@ -434,7 +441,8 @@ pub async fn start_service_as_election_leader(
             .unwrap(),
     );
 
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+    let heartbeat_srv = HeartbeatServiceImpl::new(metadata_fucker.clone());
+
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
 
@@ -442,11 +450,9 @@ pub async fn start_service_as_election_leader(
 
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
-        cluster_manager.clone(),
-        fragment_manager.clone(),
+        metadata_fucker.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
-        catalog_manager.clone(),
         compactor_streams_change_tx,
     )
     .await
@@ -517,12 +523,6 @@ pub async fn start_service_as_election_leader(
             source_manager.run().await.unwrap();
         });
     }
-
-    let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
-        cluster_manager: cluster_manager.clone(),
-        catalog_manager: catalog_manager.clone(),
-        fragment_manager: fragment_manager.clone(),
-    });
 
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
@@ -608,7 +608,7 @@ pub async fn start_service_as_election_leader(
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
-        fragment_manager.clone(),
+        metadata_fucker.clone(),
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
@@ -627,7 +627,7 @@ pub async fn start_service_as_election_leader(
         system_params_controller.clone(),
     );
     let serving_srv =
-        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_fucker.clone());
     let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
@@ -672,8 +672,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
-            cluster_manager.clone(),
-            fragment_manager.clone(),
+            metadata_fucker.clone(),
             serving_vnode_mapping,
         )
         .await,

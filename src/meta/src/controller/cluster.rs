@@ -209,7 +209,7 @@ impl ClusterController {
         &self,
         worker_id: WorkerId,
         info: Vec<heartbeat_request::extra_info::Info>,
-    ) {
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         self.inner
             .write()
@@ -745,10 +745,16 @@ impl ClusterControllerInner {
         worker_id: WorkerId,
         ttl: Duration,
         info: Vec<heartbeat_request::extra_info::Info>,
-    ) {
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
             worker_info.update_hummock_info(info);
+            Ok(())
+        } else {
+            Err(MetaError::invalid_worker(
+                worker_id as u32,
+                "worker not found",
+            ))
         }
     }
 

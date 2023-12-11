@@ -18,6 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_meta::manager::MetadataFucker;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
@@ -27,24 +28,24 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
-use crate::manager::FragmentManagerRef;
 use crate::RwReceiverStream;
+
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
     vacuum_manager: VacuumManagerRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_fucker: MetadataFucker,
 }
 
 impl HummockServiceImpl {
     pub fn new(
         hummock_manager: HummockManagerRef,
         vacuum_trigger: VacuumManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_fucker: MetadataFucker,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             vacuum_manager: vacuum_trigger,
-            fragment_manager,
+            metadata_fucker,
         }
     }
 }
@@ -234,13 +235,13 @@ impl HummockManagerService for HummockServiceImpl {
             }
         }
 
-        // get internal_table_id by fragment_manager
+        // get internal_table_id by metadata_manger
         if request.table_id >= NON_RESERVED_SYS_CATALOG_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
-                .fragment_manager
-                .select_table_fragments_by_table_id(&table_id)
+                .metadata_fucker
+                .get_job_fragments_by_id(&table_id)
                 .await
             {
                 option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());

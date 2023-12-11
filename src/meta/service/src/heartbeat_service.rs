@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_meta::manager::MetadataFucker;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::ClusterManagerRef;
-
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
-    cluster_manager: ClusterManagerRef,
+    metadata_fucker: MetadataFucker,
 }
 
 impl HeartbeatServiceImpl {
-    pub fn new(cluster_manager: ClusterManagerRef) -> Self {
-        HeartbeatServiceImpl { cluster_manager }
+    pub fn new(metadata_fucker: MetadataFucker) -> Self {
+        HeartbeatServiceImpl { metadata_fucker }
     }
 }
 
@@ -38,16 +37,21 @@ impl HeartbeatService for HeartbeatServiceImpl {
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .cluster_manager
-            .heartbeat(
-                req.node_id,
-                req.info
-                    .into_iter()
-                    .filter_map(|node_info| node_info.info)
-                    .collect_vec(),
-            )
-            .await;
+        let info = req
+            .info
+            .into_iter()
+            .filter_map(|node_info| node_info.info)
+            .collect_vec();
+        let result = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.cluster_manager.heartbeat(req.node_id, info).await,
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .cluster_controller
+                    .heartbeat(req.node_id as _, info)
+                    .await
+            }
+        };
+
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
             Err(e) => {

@@ -13,28 +13,28 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_meta::manager::MetadataFucker;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::FragmentManagerRef;
 use crate::serving::ServingVnodeMappingRef;
 
 pub struct ServingServiceImpl {
     serving_vnode_mapping: ServingVnodeMappingRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_fucker: MetadataFucker,
 }
 
 impl ServingServiceImpl {
     pub fn new(
         serving_vnode_mapping: ServingVnodeMappingRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_fucker: MetadataFucker,
     ) -> Self {
         Self {
             serving_vnode_mapping,
-            fragment_manager,
+            metadata_fucker,
         }
     }
 }
@@ -55,16 +55,27 @@ impl ServingService for ServingServiceImpl {
             })
             .collect();
         let fragment_to_table = {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
-            guard
-                .table_fragments()
-                .iter()
-                .flat_map(|(table_id, tf)| {
-                    tf.fragment_ids()
-                        .map(|fragment_id| (fragment_id, table_id.table_id))
-                        .collect_vec()
-                })
-                .collect()
+            match &self.metadata_fucker {
+                MetadataFucker::V1(fucker) => {
+                    let guard = fucker.fragment_manager.get_fragment_read_guard().await;
+                    guard
+                        .table_fragments()
+                        .iter()
+                        .flat_map(|(table_id, tf)| {
+                            tf.fragment_ids()
+                                .map(|fragment_id| (fragment_id, table_id.table_id))
+                                .collect_vec()
+                        })
+                        .collect()
+                }
+                MetadataFucker::V2(fucker) => fucker
+                    .catalog_controller
+                    .fragment_job_mapping()
+                    .await?
+                    .into_iter()
+                    .map(|(fragment_id, job_id)| (fragment_id as u32, job_id as u32))
+                    .collect(),
+            }
         };
         Ok(Response::new(GetServingVnodeMappingsResponse {
             mappings,

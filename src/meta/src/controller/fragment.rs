@@ -96,7 +96,6 @@ impl CatalogController {
         }
 
         // update serving vnode mappings.
-        // TODO: fix serving vnode mapping using metadata fucker.
         match operation {
             Operation::Add | Operation::Update => {
                 self.env

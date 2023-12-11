@@ -862,13 +862,17 @@ mod tests {
 
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
+            let metadata_fucker = MetadataFucker::new_v1(
+                cluster_manager.clone(),
+                catalog_manager.clone(),
+                fragment_manager.clone(),
+            );
+
             let hummock_manager = HummockManager::new(
                 env.clone(),
-                cluster_manager.clone(),
-                fragment_manager.clone(),
+                metadata_fucker,
                 meta_metrics.clone(),
                 compactor_manager.clone(),
-                catalog_manager.clone(),
                 tx,
             )
             .await?;
