@@ -132,6 +132,8 @@ async fn extract_avro_table_schema(
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
@@ -192,6 +194,8 @@ async fn extract_debezium_avro_table_schema(
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
@@ -222,6 +226,8 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = SpecificParserConfig::new(&info, with_properties)?;
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
