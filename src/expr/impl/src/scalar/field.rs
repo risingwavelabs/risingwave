@@ -77,9 +77,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_field_expr() {
-        let expr = build_from_pretty("(field:int4 $0:struct 0:int4)");
+        let expr = build_from_pretty("(field:int4 $0:struct<a_int4,b_float4> 0:int4)");
         let (input, expected) = DataChunk::from_pretty(
-            "{i,f}   i
+            "<i,f>   i
              (1,2.0) 1
              (2,2.0) 2
              (3,2.0) 3",
