@@ -265,11 +265,12 @@ impl Sstable {
         self.filter_reader.may_match(user_key_range, hash)
     }
 
+    #[inline(always)]
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
