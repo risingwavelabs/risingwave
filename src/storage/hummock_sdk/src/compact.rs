@@ -78,33 +78,20 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         hex::encode(key_range.right.as_slice())
     };
 
-    if sstable_info.stale_key_count > 0 {
-        let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-            ratio,
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-        )
-        .unwrap();
-    }
+    let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
+    writeln!(
+        s,
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, delete_ratio={}%, range_tombstone_count={}",
+        sstable_info.get_object_id(),
+        sstable_info.get_sst_id(),
+        left_str,
+        right_str,
+        sstable_info.table_ids,
+        sstable_info.file_size / 1024,
+        ratio,
+        sstable_info.range_tombstone_count,
+    )
+    .unwrap();
 }
 
 pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
