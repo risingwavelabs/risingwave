@@ -127,14 +127,16 @@ impl SstableIterator {
             return Ok(());
         }
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx && let Ok(preload_stream) = self
-            .sstable_store
-            .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
-                        self.options.cache_policy,
-                        &mut self.stats,
-            ).await
-        {
-            self.preload_stream = Some(preload_stream);
+        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+            match self
+                .sstable_store
+                .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
+                                 self.options.cache_policy,
+                                 &mut self.stats,
+                ).await {
+                Ok(preload_stream) => self.preload_stream = Some(preload_stream),
+                Err(e) => tracing::warn!("failed to create stream for prefetch data because of {:?}, fall back to block get.", e),
+            }
         }
 
         if self
@@ -194,7 +196,7 @@ impl SstableIterator {
                             self.preload_stream = Some(stream);
                         }
                         Err(e) => {
-                            tracing::error!("failed to recreate stream meet IO error: {:?}", e);
+                            tracing::warn!("failed to recreate stream meet IO error: {:?}", e);
                             break;
                         }
                     }

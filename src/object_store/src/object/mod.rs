@@ -274,7 +274,7 @@ fn try_update_failure_metric<T>(
     operation_type: &'static str,
 ) {
     if let Err(e) = &result {
-        tracing::error!("read failed because of: {:?}", e);
+        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])

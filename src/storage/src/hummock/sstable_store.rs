@@ -273,18 +273,6 @@ impl SstableStore {
             .map_err(Into::into)
     }
 
-    pub async fn get_stream(
-        &self,
-        sst: &Sstable,
-        start_index: usize,
-        end_index: usize,
-        policy: CachePolicy,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Box<dyn BlockStream>> {
-        self.prefetch_blocks(sst, start_index, end_index, policy, stats)
-            .await
-    }
-
     pub async fn prefetch_blocks(
         &self,
         sst: &Sstable,
