@@ -3,7 +3,7 @@ CREATE TABLE personnel (
     name varchar,
 );
 
-CREATE SINK s_nats FROM personnel WITH (
+CREATE SINK nats_sink FROM personnel WITH (
     connector='nats',
     server_url='nats-server:4222',
     subject='subject1',

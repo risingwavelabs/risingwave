@@ -1,4 +1,4 @@
-CREATE TABLE test
+CREATE TABLE nats_source_table
 (
   id integer,
   name varchar,

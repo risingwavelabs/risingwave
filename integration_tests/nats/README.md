@@ -45,7 +45,7 @@ psql -h localhost -p 4566 -d dev -U root
 nats pub subject2 --server=localhost:4222 --count=20 "{\"id\":{{Count}},\"name\":\"Alice{{Count}}\"}"
 
 // check result
-dev=> select * from test order by id;
+dev=> select * from nats_source_table order by id;
  id |  name   
 ----+---------
   1 | Alice1
