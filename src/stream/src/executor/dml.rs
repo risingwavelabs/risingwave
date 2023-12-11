@@ -177,7 +177,7 @@ impl DmlExecutor {
 
                             if txn_buffer_cardinality >= self.chunk_size {
                                 // txn buffer isn't small, so yield.
-                                for chunk in txn_buffer.vec.drain(..) {
+                                for chunk in txn_buffer.vec {
                                     yield Message::Chunk(chunk);
                                 }
                             } else if txn_buffer_cardinality + batch_group_cardinality
