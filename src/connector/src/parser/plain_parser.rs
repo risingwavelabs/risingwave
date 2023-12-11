@@ -83,9 +83,9 @@ impl PlainParser {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let change_event_op = ChangeEventOperation::Upsert;
-        if let Some(data) = key {
+        if let Some(data) = key && let Some(key_builder) = self.key_builder.as_mut() {
             // key is optional in format plain
-            row_op = row_op.with_key(self.key_builder.generate_accessor(data).await?);
+            row_op = row_op.with_key(key_builder.generate_accessor(data).await?);
         }
         if let Some(data) = payload {
             row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
