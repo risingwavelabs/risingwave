@@ -168,8 +168,8 @@ get_rw_versions() {
   get_old_version
   get_new_version
 
-  # Then we assert that `$OLD_VERSION` < `$NEW_VERSION`.
-  if version_lt "$OLD_VERSION" "$NEW_VERSION"
+  # Then we assert that `$OLD_VERSION` <= `$NEW_VERSION`.
+  if version_le "$OLD_VERSION" "$NEW_VERSION"
   then
     echo "OLD_VERSION: $OLD_VERSION"
     echo "NEW_VERSION: $NEW_VERSION"
