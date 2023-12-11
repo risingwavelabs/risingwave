@@ -12,23 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
+mod prometheus;
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use anyhow::anyhow;
-use arrow_array::RecordBatch;
 use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema, SchemaRef};
 use async_trait::async_trait;
 use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
-use icelake::io::file_writer::DeltaWriterResult;
-use icelake::io::prometheus::{FileAppenderMetrics, WriterPrometheusLayer};
-use icelake::io::{ChainedFileAppenderLayer, EmptyLayer, RollingWriter};
+use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
+use icelake::io_v2::prometheus::{PrometheusWriterBuilder, WriterMetrics};
+use icelake::io_v2::{
+    DataFileWriterBuilder, EqualityDeltaWriterBuilder, IcebergWriterBuilder, DELETE_OP, INSERT_OP,
+};
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
+use itertools::Itertools;
 use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -41,6 +43,9 @@ use serde_derive::Deserialize;
 use url::Url;
 use with_options::WithOptions;
 
+use self::prometheus::base_file_metrics_writer::BaseFileWriterWithMetricsBuilder;
+use self::prometheus::partition_metrics_writer::FanoutPartitionedWriterWithMetricsBuilder;
+use self::prometheus::position_delete_metrics_writer::PositionDeleteWriterWithMetricsBuilder;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -375,35 +380,52 @@ impl Sink for IcebergSink {
     }
 }
 
-pub struct IcebergWriter(IcebergWriterEnum);
+pub struct IcebergWriter {
+    inner_writer: IcebergWriterEnum,
+    schema: SchemaRef,
+}
 
 enum IcebergWriterEnum {
-    AppendOnly(AppendOnlyWriter),
-    Upsert(UpsertWriter),
+    AppendOnly(RecordBatchWriter),
+    Upsert(DeltaWriter),
 }
 
 impl IcebergWriter {
-    fn metrics_layer(write_param: &SinkWriterParam) -> WriterPrometheusLayer {
-        let iceberg_metrics = FileAppenderMetrics::new(
-            write_param
-                .sink_metrics
-                .iceberg_file_appender_write_qps
-                .deref()
-                .clone(),
-            write_param
-                .sink_metrics
-                .iceberg_file_appender_write_latency
-                .deref()
-                .clone(),
-        );
-        WriterPrometheusLayer::new(iceberg_metrics)
-    }
-
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
-        let metrics_layer = Self::metrics_layer(writer_param);
-        Ok(Self(IcebergWriterEnum::AppendOnly(
-            AppendOnlyWriter::new(table, metrics_layer).await?,
-        )))
+        let builder_helper = table.builder_helper()?;
+
+        let data_file_builder = DataFileWriterBuilder::new(BaseFileWriterWithMetricsBuilder::new(
+            builder_helper
+                .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
+            writer_param
+                .sink_metrics
+                .iceberg_rolling_unflushed_data_file
+                .clone(),
+        ));
+        let partition_data_file_builder = FanoutPartitionedWriterWithMetricsBuilder::new(
+            builder_helper.fanout_partition_writer_builder(data_file_builder.clone())?,
+            writer_param.sink_metrics.iceberg_partition_num.clone(),
+        );
+        let dispatch_builder = builder_helper
+            .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
+        // wrap a layer with collect write metrics
+        let prometheus_builder = PrometheusWriterBuilder::new(
+            dispatch_builder,
+            WriterMetrics::new(
+                writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                writer_param
+                    .sink_metrics
+                    .iceberg_write_latency
+                    .deref()
+                    .clone(),
+            ),
+        );
+        let schema = table.current_arrow_schema()?;
+        let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
+        Ok(Self {
+            inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
+            schema,
+        })
     }
 
     pub async fn new_upsert(
@@ -411,10 +433,54 @@ impl IcebergWriter {
         unique_column_ids: Vec<usize>,
         writer_param: &SinkWriterParam,
     ) -> Result<Self> {
-        let metrics_layer = Self::metrics_layer(writer_param);
-        Ok(Self(IcebergWriterEnum::Upsert(
-            UpsertWriter::new(table, unique_column_ids, metrics_layer).await?,
-        )))
+        let builder_helper = table.builder_helper()?;
+        let data_file_builder = DataFileWriterBuilder::new(BaseFileWriterWithMetricsBuilder::new(
+            builder_helper
+                .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
+            writer_param
+                .sink_metrics
+                .iceberg_rolling_unflushed_data_file
+                .clone(),
+        ));
+        let position_delete_builder = PositionDeleteWriterWithMetricsBuilder::new(
+            builder_helper.position_delete_writer_builder(0, 1024)?,
+            writer_param
+                .sink_metrics
+                .iceberg_position_delete_cache_num
+                .clone(),
+        );
+        let euality_delete_builder =
+            builder_helper.equality_delete_writer_builder(unique_column_ids.clone(), 0)?;
+        let delta_builder = EqualityDeltaWriterBuilder::new(
+            data_file_builder,
+            position_delete_builder,
+            euality_delete_builder,
+            unique_column_ids,
+        );
+        let partition_delta_builder = FanoutPartitionedWriterWithMetricsBuilder::new(
+            builder_helper.fanout_partition_writer_builder(delta_builder.clone())?,
+            writer_param.sink_metrics.iceberg_partition_num.clone(),
+        );
+        let dispatch_builder =
+            builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
+        // wrap a layer with collect write metrics
+        let prometheus_builder = PrometheusWriterBuilder::new(
+            dispatch_builder,
+            WriterMetrics::new(
+                writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                writer_param
+                    .sink_metrics
+                    .iceberg_write_latency
+                    .deref()
+                    .clone(),
+            ),
+        );
+        let schema = table.current_arrow_schema()?;
+        let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
+        Ok(Self {
+            inner_writer: IcebergWriterEnum::Upsert(inner_writer),
+            schema,
+        })
     }
 }
 
@@ -430,9 +496,38 @@ impl SinkWriter for IcebergWriter {
 
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        match &mut self.0 {
-            IcebergWriterEnum::AppendOnly(writer) => writer.write(chunk).await?,
-            IcebergWriterEnum::Upsert(writer) => writer.write(chunk).await?,
+        let (mut chunk, ops) = chunk.compact().into_parts();
+        if ops.len() == 0 {
+            return Ok(());
+        }
+
+        match &mut self.inner_writer {
+            IcebergWriterEnum::AppendOnly(writer) => {
+                // filter chunk
+                let filters =
+                    chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
+                chunk.set_visibility(filters);
+                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+                writer.write(chunk).await?;
+            }
+            IcebergWriterEnum::Upsert(writer) => {
+                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk)
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+                writer
+                    .write(
+                        ops.iter()
+                            .map(|op| match op {
+                                Op::UpdateInsert | Op::Insert => INSERT_OP,
+                                Op::UpdateDelete | Op::Delete => DELETE_OP,
+                            })
+                            .collect_vec(),
+                        chunk,
+                    )
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -445,9 +540,26 @@ impl SinkWriter for IcebergWriter {
             return Ok(None);
         }
 
-        let res = match &mut self.0 {
-            IcebergWriterEnum::AppendOnly(writer) => writer.flush().await?,
-            IcebergWriterEnum::Upsert(writer) => writer.flush().await?,
+        let res = match &mut self.inner_writer {
+            IcebergWriterEnum::AppendOnly(writer) => {
+                let data_files = writer.flush().await?;
+                WriteResult {
+                    data_files,
+                    delete_files: vec![],
+                }
+            }
+            IcebergWriterEnum::Upsert(writer) => {
+                let mut res = WriteResult {
+                    data_files: vec![],
+                    delete_files: vec![],
+                };
+                for delta in writer.flush().await? {
+                    res.data_files.extend(delta.data);
+                    res.delete_files.extend(delta.pos_delete);
+                    res.delete_files.extend(delta.eq_delete);
+                }
+                res
+            }
         };
 
         Ok(Some(SinkMetadata::try_from(&res)?))
@@ -457,331 +569,6 @@ impl SinkWriter for IcebergWriter {
     async fn abort(&mut self) -> Result<()> {
         // TODO: abort should clean up all the data written in this epoch.
         Ok(())
-    }
-}
-
-struct AppendOnlyWriter {
-    table: Table,
-    writer: icelake::io::task_writer::TaskWriter<
-        ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
-    >,
-    schema: SchemaRef,
-    metrics_layer: WriterPrometheusLayer,
-}
-
-impl AppendOnlyWriter {
-    pub async fn new(table: Table, metrics_layer: WriterPrometheusLayer) -> Result<Self> {
-        let schema = Arc::new(
-            table
-                .current_table_metadata()
-                .current_schema()
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-                .clone()
-                .try_into()
-                .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?,
-        );
-
-        Ok(Self {
-            writer: table
-                .writer_builder()
-                .await?
-                .with_file_appender_layer(metrics_layer.clone())
-                .build_task_writer()
-                .await
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            table,
-            schema,
-            metrics_layer,
-        })
-    }
-
-    pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let (mut chunk, ops) = chunk.into_parts();
-
-        let filters =
-            chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
-
-        chunk.set_visibility(filters);
-        let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-        self.writer.write(&chunk).await.map_err(|err| {
-            SinkError::Iceberg(anyhow!("Write chunk fail: {}, chunk: {:?}", err, chunk))
-        })?;
-
-        Ok(())
-    }
-
-    pub async fn flush(&mut self) -> Result<WriteResult> {
-        let old_writer = std::mem::replace(
-            &mut self.writer,
-            self.table
-                .writer_builder()
-                .await?
-                .with_file_appender_layer(self.metrics_layer.clone())
-                .build_task_writer()
-                .await
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-        );
-
-        let data_files = old_writer
-            .close()
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!("Close writer fail: {}", err)))?;
-
-        Ok(WriteResult {
-            data_files,
-            delete_files: vec![],
-        })
-    }
-}
-
-struct UpsertWriter {
-    writer: UpsertWriterInner,
-    schema: SchemaRef,
-}
-enum UpsertWriterInner {
-    Partition(PartitionDeltaWriter),
-    Unpartition(UnpartitionDeltaWriter),
-}
-
-impl UpsertWriter {
-    pub async fn new(
-        table: Table,
-        unique_column_ids: Vec<usize>,
-        metrics_layer: WriterPrometheusLayer,
-    ) -> Result<Self> {
-        let schema = Arc::new(
-            table
-                .current_table_metadata()
-                .current_schema()
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-                .clone()
-                .try_into()
-                .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?,
-        );
-        let inner = if let Some(partition_splitter) = table.partition_splitter()? {
-            UpsertWriterInner::Partition(PartitionDeltaWriter::new(
-                table,
-                partition_splitter,
-                unique_column_ids,
-                metrics_layer,
-            ))
-        } else {
-            UpsertWriterInner::Unpartition(
-                UnpartitionDeltaWriter::new(table, unique_column_ids, metrics_layer).await?,
-            )
-        };
-        Ok(Self {
-            writer: inner,
-            schema,
-        })
-    }
-
-    fn partition_ops(ops: &[Op]) -> Vec<(usize, usize)> {
-        assert!(!ops.is_empty());
-        let mut res = vec![];
-        let mut start = 0;
-        let mut prev_op = ops[0];
-        for (i, op) in ops.iter().enumerate().skip(1) {
-            if *op != prev_op {
-                res.push((start, i));
-                start = i;
-                prev_op = *op;
-            }
-        }
-        res.push((start, ops.len()));
-        res
-    }
-
-    pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let (chunk, ops) = chunk.compact().into_parts();
-        if ops.len() == 0 {
-            return Ok(());
-        }
-        let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        let ranges = Self::partition_ops(&ops);
-        for (start, end) in ranges {
-            let batch = chunk.slice(start, end - start);
-            match ops[start] {
-                Op::UpdateInsert | Op::Insert => match &mut self.writer {
-                    UpsertWriterInner::Partition(writer) => writer.write(batch).await?,
-                    UpsertWriterInner::Unpartition(writer) => writer.write(batch).await?,
-                },
-
-                Op::UpdateDelete | Op::Delete => match &mut self.writer {
-                    UpsertWriterInner::Partition(writer) => writer.delete(batch).await?,
-                    UpsertWriterInner::Unpartition(writer) => writer.delete(batch).await?,
-                },
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn flush(&mut self) -> Result<WriteResult> {
-        match &mut self.writer {
-            UpsertWriterInner::Partition(writer) => {
-                let mut data_files = vec![];
-                let mut delete_files = vec![];
-                for res in writer.flush().await? {
-                    data_files.extend(res.data);
-                    delete_files.extend(res.pos_delete);
-                    delete_files.extend(res.eq_delete);
-                }
-                Ok(WriteResult {
-                    data_files,
-                    delete_files,
-                })
-            }
-            UpsertWriterInner::Unpartition(writer) => {
-                let res = writer.flush().await?;
-                let delete_files = res.pos_delete.into_iter().chain(res.eq_delete).collect();
-                Ok(WriteResult {
-                    data_files: res.data,
-                    delete_files,
-                })
-            }
-        }
-    }
-}
-
-struct UnpartitionDeltaWriter {
-    table: Table,
-    writer: icelake::io::file_writer::EqualityDeltaWriter<
-        ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
-    >,
-    metrics_layer: WriterPrometheusLayer,
-    unique_column_ids: Vec<usize>,
-}
-
-impl UnpartitionDeltaWriter {
-    pub async fn new(
-        table: Table,
-        unique_column_ids: Vec<usize>,
-        metrics_layer: WriterPrometheusLayer,
-    ) -> Result<Self> {
-        Ok(Self {
-            writer: table
-                .writer_builder()
-                .await?
-                .with_file_appender_layer(metrics_layer.clone())
-                .build_equality_delta_writer(unique_column_ids.clone())
-                .await?,
-            metrics_layer,
-            table,
-            unique_column_ids,
-        })
-    }
-
-    pub async fn write(&mut self, batch: RecordBatch) -> Result<()> {
-        self.writer.write(batch).await?;
-        Ok(())
-    }
-
-    pub async fn delete(&mut self, batch: RecordBatch) -> Result<()> {
-        self.writer.delete(batch).await?;
-        Ok(())
-    }
-
-    pub async fn flush(&mut self) -> Result<DeltaWriterResult> {
-        let writer = std::mem::replace(
-            &mut self.writer,
-            self.table
-                .writer_builder()
-                .await?
-                .with_file_appender_layer(self.metrics_layer.clone())
-                .build_equality_delta_writer(self.unique_column_ids.clone())
-                .await?,
-        );
-        Ok(writer.close(None).await?)
-    }
-}
-
-struct PartitionDeltaWriter {
-    table: Table,
-    writers: HashMap<
-        icelake::types::PartitionKey,
-        icelake::io::file_writer::EqualityDeltaWriter<
-            ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
-        >,
-    >,
-    partition_splitter: icelake::types::PartitionSplitter,
-    unique_column_ids: Vec<usize>,
-    metrics_layer: WriterPrometheusLayer,
-}
-
-impl PartitionDeltaWriter {
-    pub fn new(
-        table: Table,
-        partition_splitter: icelake::types::PartitionSplitter,
-        unique_column_ids: Vec<usize>,
-        metrics_layer: WriterPrometheusLayer,
-    ) -> Self {
-        Self {
-            table,
-            writers: HashMap::new(),
-            metrics_layer,
-            partition_splitter,
-            unique_column_ids,
-        }
-    }
-
-    pub async fn write(&mut self, batch: RecordBatch) -> Result<()> {
-        let partitions = self.partition_splitter.split_by_partition(&batch)?;
-        for (partition_key, batch) in partitions {
-            match self.writers.entry(partition_key) {
-                Entry::Vacant(v) => {
-                    v.insert(
-                        self.table
-                            .writer_builder()
-                            .await?
-                            .with_file_appender_layer(self.metrics_layer.clone())
-                            .build_equality_delta_writer(self.unique_column_ids.clone())
-                            .await?,
-                    )
-                    .write(batch)
-                    .await?
-                }
-                Entry::Occupied(mut v) => v.get_mut().write(batch).await?,
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn delete(&mut self, batch: RecordBatch) -> Result<()> {
-        let partitions = self.partition_splitter.split_by_partition(&batch)?;
-        for (partition_key, batch) in partitions {
-            match self.writers.entry(partition_key) {
-                Entry::Vacant(v) => {
-                    v.insert(
-                        self.table
-                            .writer_builder()
-                            .await?
-                            .with_file_appender_layer(self.metrics_layer.clone())
-                            .build_equality_delta_writer(self.unique_column_ids.clone())
-                            .await?,
-                    )
-                    .delete(batch)
-                    .await
-                    .unwrap();
-                }
-                Entry::Occupied(mut v) => v.get_mut().delete(batch).await.unwrap(),
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn flush(&mut self) -> Result<Vec<DeltaWriterResult>> {
-        let mut res = Vec::with_capacity(self.writers.len());
-        for (partition_key, writer) in self.writers.drain() {
-            let partition_value = self
-                .partition_splitter
-                .convert_key_to_value(partition_key)?;
-            let delta_result = writer.close(Some(partition_value)).await?;
-            res.push(delta_result);
-        }
-        Ok(res)
     }
 }
 
