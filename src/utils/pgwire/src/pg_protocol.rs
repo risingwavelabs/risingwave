@@ -19,22 +19,22 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::{Arc, LazyLock, Weak};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
-use futures::future::Either;
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
+use risingwave_common::util::query_log::*;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::{error, warn, Instrument};
+use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::net::AddressRef;
@@ -102,8 +102,6 @@ where
     // Client Address
     peer_addr: AddressRef,
 }
-
-const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
 /// Configures TLS encryption for connections.
 #[derive(Debug, Clone)]
@@ -199,37 +197,121 @@ where
         self.do_process(msg).await.is_none() || self.is_terminate
     }
 
+    fn span_for_msg(&self, msg: &FeMessage) -> tracing::Span {
+        let Some(session_id) = self.session.as_ref().map(|s| s.id().0) else {
+            return tracing::Span::none();
+        };
+
+        let (mode, sql) = match msg {
+            FeMessage::Query(q) => ("simple query", q.get_sql().unwrap_or("??")),
+            FeMessage::Parse(p) => (
+                "extended query parse",
+                cstr_to_str(&p.sql_bytes).unwrap_or("??"),
+            ),
+            FeMessage::Execute(e) => (
+                "extended query execute",
+                cstr_to_str(&e.portal_name).unwrap_or("??"),
+            ),
+            _ => return tracing::Span::none(),
+        };
+
+        tracing::info_span!(
+            target: PGWIRE_ROOT_SPAN_TARGET,
+            "handle_query",
+            mode,
+            session_id,
+            sql = %truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN),
+        )
+    }
+
     /// Return type `Option<()>` is essentially a bool, but allows `?` for early return.
     /// - `None` means to terminate the current connection
     /// - `Some(())` means to continue processing the next message
     async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
-        let fut = {
-            // Set the current session as the context when processing the message, if exists.
-            let weak_session = self
-                .session
-                .as_ref()
-                .map(|s| Arc::downgrade(s) as Weak<dyn Any + Send + Sync>);
+        let span = self.span_for_msg(&msg);
+        let weak_session = self
+            .session
+            .as_ref()
+            .map(|s| Arc::downgrade(s) as Weak<dyn Any + Send + Sync>);
 
-            let fut = self.do_process_inner(msg);
+        // Processing the message itself.
+        //
+        // Note: pin the future to avoid stack overflow as we'll wrap it multiple times
+        // in the following code.
+        let fut = Box::pin(self.do_process_inner(msg));
 
+        // Set the current session as the context when processing the message, if exists.
+        let fut = async move {
             if let Some(session) = weak_session {
-                Either::Left(CURRENT_SESSION.scope(session, fut))
+                CURRENT_SESSION.scope(session, fut).await
             } else {
-                Either::Right(fut)
+                fut.await
             }
         };
 
-        let result = AssertUnwindSafe(fut)
-            .rw_catch_unwind()
-            .await
-            .unwrap_or_else(|payload| {
-                Err(PsqlError::Panic(
-                    panic_message::panic_message(&payload).to_owned(),
-                ))
-            })
-            .inspect_err(|error| error!(error = %error.as_report(), "error when process message"));
+        // Catch unwind.
+        let fut = async move {
+            AssertUnwindSafe(fut)
+                .rw_catch_unwind()
+                .await
+                .unwrap_or_else(|payload| {
+                    Err(PsqlError::Panic(
+                        panic_message::panic_message(&payload).to_owned(),
+                    ))
+                })
+        };
 
-        match result {
+        // Slow query log.
+        let fut = async move {
+            let period = *SLOW_QUERY_LOG_PERIOD;
+            let mut fut = std::pin::pin!(fut);
+            let mut elapsed = Duration::ZERO;
+
+            // Report the SQL in the log periodically if the query is slow.
+            loop {
+                match tokio::time::timeout(period, &mut fut).await {
+                    Ok(result) => break result,
+                    Err(_) => {
+                        elapsed += period;
+                        tracing::info!(
+                            target: PGWIRE_SLOW_QUERY_LOG,
+                            ?elapsed,
+                            "slow query"
+                        );
+                    }
+                }
+            }
+        };
+
+        // Query log.
+        let fut = async move {
+            let start = Instant::now();
+            let result = fut.await;
+            let elapsed = start.elapsed();
+
+            // Always log if an error occurs.
+            if let Err(error) = &result {
+                tracing::error!(error = %error.as_report(), "error when process message");
+            }
+
+            // Log to optionally-enabled target `PGWIRE_QUERY_LOG`.
+            // Only log if we're currently in a tracing span set in `span_for_msg`.
+            if !tracing::Span::current().is_none() {
+                tracing::info!(
+                    target: PGWIRE_QUERY_LOG,
+                    status = if result.is_ok() { "ok" } else { "err" },
+                    time = ?elapsed,
+                );
+            }
+
+            result
+        };
+
+        // Tracing span.
+        let fut = fut.instrument(span);
+
+        // Execute the future and handle the error.
+        match fut.await {
             Ok(()) => Some(()),
             Err(e) => {
                 match e {
@@ -460,26 +542,12 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        let start = Instant::now();
+
         let session = self.session.clone().unwrap();
-        let session_id = session.id().0;
+
         let _exec_context_guard = session.init_exec_context(sql.clone());
-        let result = self
-            .inner_process_query_msg(sql.clone(), session.clone())
-            .await;
-
-        let mills = start.elapsed().as_millis();
-
-        tracing::info!(
-            target: PGWIRE_QUERY_LOG,
-            mode = %"(simple query)",
-            session = %session_id,
-            status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
-        );
-
-        result
+        self.inner_process_query_msg(sql.clone(), session.clone())
+            .await
     }
 
     async fn inner_process_query_msg(
@@ -497,17 +565,7 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let span = tracing::info_span!(
-                "process_query_msg_one_stmt",
-                session_id = session.id().0,
-                stmt = format_args!(
-                    "{}",
-                    truncated_fmt::TruncatedFmt(&stmt, *RW_QUERY_LOG_TRUNCATE_LEN)
-                ),
-            );
-
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
-                .instrument(span)
                 .await?;
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
@@ -593,23 +651,9 @@ where
     fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         let session = self.session.clone().unwrap();
-        let session_id = session.id().0;
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
-        let start = Instant::now();
 
-        let result = self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids);
-
-        let mills = start.elapsed().as_millis();
-        tracing::info!(
-            target: PGWIRE_QUERY_LOG,
-            mode = %"(extended query parse)",
-            session = %session_id,
-            status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
-        );
-
-        result
+        self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
     }
 
     fn inner_process_parse_msg(
@@ -728,7 +772,6 @@ where
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let row_max = msg.max_rows as usize;
         let session = self.session.clone().unwrap();
-        let session_id = session.id().0;
 
         if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
             assert!(self.portal_store.contains_key(&portal_name));
@@ -739,23 +782,11 @@ where
                 self.result_cache.insert(portal_name, result_cache);
             }
         } else {
-            let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
 
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
-
-            let mills = start.elapsed().as_millis();
-
-            tracing::info!(
-                target: PGWIRE_QUERY_LOG,
-                mode = %"(extended query execute)",
-                session = %session_id,
-                status = %if result.is_ok() { "ok" } else { "err" },
-                time = %format_args!("{}ms", mills),
-                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
-            );
 
             let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
             let mut result_cache = ResultCache::new(pg_response);
@@ -997,7 +1028,7 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            warn!("Unable to set up an ssl connection, reason: {}", e);
+            tracing::warn!("Unable to set up an ssl connection, reason: {}", e);
             let _ = stream.shutdown().await;
             return Err(e.into());
         }
