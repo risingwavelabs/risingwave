@@ -34,7 +34,6 @@
 // These modules define concrete expression structures.
 mod and_or;
 mod expr_array_transform;
-mod expr_case;
 mod expr_coalesce;
 mod expr_field;
 mod expr_in;

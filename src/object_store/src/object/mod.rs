@@ -846,12 +846,14 @@ pub async fn build_remote_object_store(
                     .monitored(metrics),
             )
         }
-        fs if fs.starts_with("fs://") => ObjectStoreImpl::Opendal(
-            // Now fs engine is only used in CI, so we can hardcode root.
-            OpendalObjectStore::new_fs_engine("/tmp/rw_ci".to_string())
-                .unwrap()
-                .monitored(metrics),
-        ),
+        fs if fs.starts_with("fs://") => {
+            let fs = fs.strip_prefix("fs://").unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_fs_engine(fs.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
 
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             tracing::error!("The s3 compatible mode has been unified with s3.");

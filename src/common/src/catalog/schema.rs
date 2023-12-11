@@ -21,6 +21,7 @@ use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
+
 /// The field in the schema of the executor's return data
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {

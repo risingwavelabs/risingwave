@@ -25,6 +25,7 @@ use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse, Reschedule};
 use serde::{Deserialize, Serialize};
 use serde_yaml;
+use thiserror_ext::AsReport;
 
 use crate::CtlContext;
 
@@ -250,7 +251,7 @@ pub async fn unregister_workers(
     } = match meta_client.get_cluster_info().await {
         Ok(info) => info,
         Err(e) => {
-            println!("Failed to get cluster info: {}", e);
+            println!("Failed to get cluster info: {}", e.as_report());
             exit(1);
         }
     };
@@ -359,7 +360,7 @@ pub async fn unregister_workers(
 
         println!("Unregistering worker #{}, address: {:?}", id, host);
         if let Err(e) = meta_client.delete_worker_node(host).await {
-            println!("Failed to delete worker #{}: {}", id, e);
+            println!("Failed to delete worker #{}: {}", id, e.as_report());
         };
     }
 
