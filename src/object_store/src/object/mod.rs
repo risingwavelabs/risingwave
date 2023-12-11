@@ -273,7 +273,8 @@ fn try_update_failure_metric<T>(
     result: &ObjectResult<T>,
     operation_type: &'static str,
 ) {
-    if result.is_err() {
+    if let Err(e) = &result {
+        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -648,12 +649,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_read(path, range)
-                .verbose_instrument_await("object_store_streaming_read")
-                .await
-        };
+        let future = self
+            .inner
+            .streaming_read(path, range)
+            .verbose_instrument_await("object_store_streaming_read");
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)

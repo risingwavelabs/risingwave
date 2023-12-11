@@ -526,6 +526,7 @@ pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     pub max_preload_retry_times: usize,
+    pub prefetch_for_large_query: bool,
 }
 
 impl SstableIteratorReadOptions {
@@ -534,6 +535,7 @@ impl SstableIteratorReadOptions {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
             max_preload_retry_times: 0,
+            prefetch_for_large_query: read_options.prefetch_options.for_large_query,
         }
     }
 }
