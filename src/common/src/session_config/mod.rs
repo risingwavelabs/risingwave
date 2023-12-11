@@ -195,12 +195,12 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     synchronize_seqscans: bool,
 
-    /// Abort any statement that takes more than the specified amount of time. If
+    /// Abort query statement that takes more than the specified amount of time in sec. If
     /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0)]
-    statement_timeout: i32,
+    #[parameter(default = 0u32)]
+    statement_timeout: u32,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
