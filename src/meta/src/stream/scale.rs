@@ -49,7 +49,8 @@ use uuid::Uuid;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv, WorkerId,
+    ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
+    MetadataFucker, WorkerId,
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::serving::{
@@ -2082,7 +2083,11 @@ impl GlobalStreamManager {
             reschedules: reschedule_fragment,
         };
 
-        let fragment_manager_ref = self.fragment_manager.clone();
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unimplemented!("support reschedule in v2");
+        };
+
+        let fragment_manager_ref = fucker.fragment_manager.clone();
 
         revert_funcs.push(Box::pin(async move {
             fragment_manager_ref
@@ -2102,8 +2107,12 @@ impl GlobalStreamManager {
     async fn trigger_scale_out(&self, workers: Vec<WorkerId>) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
+        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+            unimplemented!("support reschedule in v2");
+        };
+
         let fragment_worker_changes = {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let guard = fucker.fragment_manager.get_fragment_read_guard().await;
             let mut fragment_worker_changes = HashMap::new();
             for table_fragments in guard.table_fragments().values() {
                 for fragment_id in table_fragments.fragment_ids() {
@@ -2159,9 +2168,10 @@ impl GlobalStreamManager {
         ticker.reset();
 
         let worker_nodes = self
-            .cluster_manager
+            .metadata_fucker
             .list_active_streaming_compute_nodes()
-            .await;
+            .await
+            .expect("list active streaming compute nodes");
 
         let mut worker_cache: BTreeMap<_, _> = worker_nodes
             .into_iter()

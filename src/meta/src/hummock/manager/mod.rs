@@ -60,6 +60,7 @@ use risingwave_pb::hummock::{
     IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLockWriteGuard;
@@ -81,8 +82,8 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, TableId,
-    META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv,
+    MetadataFucker, TableId, META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
@@ -115,10 +116,8 @@ const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager {
     pub env: MetaSrvEnv,
-    pub cluster_manager: ClusterManagerRef,
-    catalog_manager: CatalogManagerRef,
 
-    fragment_manager: FragmentManagerRef,
+    metadata_fucker: MetadataFucker,
     /// Lock order: compaction, versioning, compaction_group_manager.
     /// - Lock compaction first, then versioning, and finally compaction_group_manager.
     /// - This order should be strictly followed to prevent deadlock.
@@ -407,6 +406,9 @@ impl HummockManager {
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let metadata_fucker =
+            MetadataFucker::new_v1(cluster_manager, catalog_manager, fragment_manager);
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -418,9 +420,7 @@ impl HummockManager {
                 Default::default(),
             ),
             metrics,
-            cluster_manager,
-            catalog_manager,
-            fragment_manager,
+            metadata_fucker,
             compaction_group_manager,
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
@@ -569,7 +569,7 @@ impl HummockManager {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if !self.check_context(context_id).await {
+            } else if !self.check_context(context_id).await? {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
@@ -812,7 +812,11 @@ impl HummockManager {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
-        let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+        let all_table_id_to_option = self
+            .metadata_fucker
+            .get_all_table_options()
+            .await
+            .map_err(|err| Error::MetaStore(err.into()))?;
         let mut table_to_vnode_partition = match self
             .group_to_table_vnode_partition
             .read()
@@ -2024,8 +2028,8 @@ impl HummockManager {
         .await
     }
 
-    pub fn cluster_manager(&self) -> &ClusterManagerRef {
-        &self.cluster_manager
+    pub fn metadata_fucker(&self) -> &MetadataFucker {
+        &self.metadata_fucker
     }
 
     fn notify_last_version_delta(&self, versioning: &Versioning) {
@@ -2237,8 +2241,9 @@ impl HummockManager {
                                     };
 
                                     if let Some(mv_id_to_all_table_ids) = hummock_manager
-                                        .fragment_manager
-                                        .get_mv_id_to_internal_table_ids_mapping()
+                                        .metadata_fucker
+                                        .get_job_id_to_internal_table_ids_mapping()
+                                        .await
                                     {
                                         trigger_mv_stat(
                                             &hummock_manager.metrics,
@@ -2483,7 +2488,13 @@ impl HummockManager {
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
-        let created_tables = self.catalog_manager.get_created_table_ids().await;
+        let created_tables = match self.metadata_fucker.get_created_table_ids().await {
+            Ok(created_tables) => created_tables,
+            Err(err) => {
+                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                return;
+            }
+        };
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;

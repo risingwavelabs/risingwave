@@ -325,7 +325,7 @@ impl HummockManagerService for HummockServiceImpl {
         let workers = self
             .hummock_manager
             .list_workers(&pinned_versions.iter().map(|v| v.context_id).collect_vec())
-            .await;
+            .await?;
         Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
             summary: Some(PinnedVersionsSummary {
                 pinned_versions,
@@ -342,7 +342,7 @@ impl HummockManagerService for HummockServiceImpl {
         let workers = self
             .hummock_manager
             .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
-            .await;
+            .await?;
         Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
             summary: Some(PinnedSnapshotsSummary {
                 pinned_snapshots,
@@ -502,7 +502,7 @@ impl HummockManagerService for HummockServiceImpl {
 
         // check_context and add_compactor as a whole is not atomic, but compactor_manager will
         // remove invalid compactor eventually.
-        if !self.hummock_manager.check_context(context_id).await {
+        if !self.hummock_manager.check_context(context_id).await? {
             return Err(Status::new(
                 tonic::Code::Internal,
                 format!("invalid hummock context {}", context_id),

@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::iter;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
-    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SourceId,
-    TableId, UserId,
+    DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
+    SourceId, TableId, UserId,
 };
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -1553,6 +1554,48 @@ impl CatalogController {
             )
             .await;
         Ok(version)
+    }
+
+    pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
+        let inner = self.inner.read().await;
+        let table_options: Vec<(TableId, Property)> = Table::find()
+            .select_only()
+            .columns([table::Column::TableId, table::Column::Properties])
+            .into_tuple::<(TableId, Property)>()
+            .all(&inner.db)
+            .await?;
+
+        Ok(table_options
+            .into_iter()
+            .map(|(id, property)| (id, TableOption::build_table_option(&property.into_inner())))
+            .collect())
+    }
+
+    pub async fn get_created_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+
+        // created table ids.
+        let mut table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .join(JoinType::LeftJoin, table::Relation::Object1.def())
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        // internal table ids.
+        let internal_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.is_in(table_ids.clone()))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        table_ids.extend(internal_table_ids);
+
+        Ok(table_ids)
     }
 }
 

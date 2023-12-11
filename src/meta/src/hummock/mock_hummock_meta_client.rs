@@ -207,9 +207,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )> {
-        let worker_node = self
+        let context_id = self
             .hummock_manager
-            .cluster_manager()
+            .metadata_fucker()
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {
@@ -221,7 +221,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             )
             .await
             .unwrap();
-        let context_id = worker_node.id;
         let _compactor_rx = self
             .hummock_manager
             .compactor_manager_ref_for_test()

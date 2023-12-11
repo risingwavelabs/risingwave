@@ -497,11 +497,11 @@ impl GlobalBarrierManager {
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         match &self.metadata_fucker {
             MetadataFucker::V1(_) => self.migrate_actors_v1(info).await,
-            MetadataFucker::V2(_) => self.migrate_actors_v2(info).await,
+            MetadataFucker::V2(_) => self.migrate_actors_v2(info),
         }
     }
 
-    async fn migrate_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
+    fn migrate_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
         let MetadataFucker::V2(_fucker) = &self.metadata_fucker else {
             unreachable!()
         };
@@ -542,11 +542,11 @@ impl GlobalBarrierManager {
     async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         match &self.metadata_fucker {
             MetadataFucker::V1(_) => self.scale_actors_v1(info).await,
-            MetadataFucker::V2(_) => self.scale_actors_v2(info).await,
+            MetadataFucker::V2(_) => self.scale_actors_v2(info),
         }
     }
 
-    async fn scale_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
+    fn scale_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
         let MetadataFucker::V2(_fucker) = &self.metadata_fucker else {
             unreachable!()
         };

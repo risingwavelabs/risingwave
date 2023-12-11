@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -47,7 +46,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
+use crate::manager::{
+    LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
+};
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -376,9 +377,9 @@ pub struct WorkerExtraInfo {
     expire_at: Option<u64>,
     started_at: Option<u64>,
     // Monotonic increasing id since meta node bootstrap.
-    info_version_id: u64,
+    pub(crate) info_version_id: u64,
     // GC watermark.
-    hummock_gc_watermark: Option<HummockSstableObjectId>,
+    pub(crate) hummock_gc_watermark: Option<HummockSstableObjectId>,
     resource: Option<PbResource>,
 }
 
@@ -411,6 +412,19 @@ impl WorkerExtraInfo {
     }
 }
 
+// TODO: remove this when we deprecate model v1.
+impl From<crate::model::Worker> for WorkerExtraInfo {
+    fn from(worker: crate::model::Worker) -> Self {
+        Self {
+            expire_at: Some(worker.expire_at),
+            started_at: worker.started_at,
+            info_version_id: worker.info_version_id,
+            hummock_gc_watermark: worker.hummock_gc_watermark,
+            resource: worker.resource,
+        }
+    }
+}
+
 fn timestamp_now_sec() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -437,19 +451,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
         }),
         started_at,
     }
-}
-
-/// The cluster info used for scheduling a streaming job.
-#[derive(Debug, Clone)]
-pub struct StreamingClusterInfo {
-    /// All **active** compute nodes in the cluster.
-    pub worker_nodes: HashMap<u32, PbWorkerNode>,
-
-    /// All parallel units of the **active** compute nodes in the cluster.
-    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
-
-    /// All unschedulable parallel units of compute nodes in the cluster.
-    pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterControllerInner {

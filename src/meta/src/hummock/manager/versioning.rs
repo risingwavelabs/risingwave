@@ -43,6 +43,7 @@ use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::model::{ValTransaction, VarTransaction};
 use crate::storage::Transaction;
+use crate::MetaResult;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
@@ -188,14 +189,14 @@ impl HummockManager {
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
-    ) -> HashMap<HummockContextId, WorkerNode> {
+    ) -> MetaResult<HashMap<HummockContextId, WorkerNode>> {
         let mut workers = HashMap::new();
         for context_id in context_ids {
-            if let Some(worker) = self.cluster_manager.get_worker_by_id(*context_id).await {
-                workers.insert(*context_id, worker.worker_node);
+            if let Some(worker_node) = self.metadata_fucker().get_worker_by_id(*context_id).await? {
+                workers.insert(*context_id, worker_node);
             }
         }
-        workers
+        Ok(workers)
     }
 
     #[named]

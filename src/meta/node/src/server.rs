@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::manager::{MetadataFucker, MetadataFuckerV1};
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
@@ -517,9 +518,16 @@ pub async fn start_service_as_election_leader(
         });
     }
 
+    let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
+        cluster_manager: cluster_manager.clone(),
+        catalog_manager: catalog_manager.clone(),
+        fragment_manager: fragment_manager.clone(),
+    });
+
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
+            metadata_fucker,
             fragment_manager.clone(),
             barrier_scheduler.clone(),
             cluster_manager.clone(),
