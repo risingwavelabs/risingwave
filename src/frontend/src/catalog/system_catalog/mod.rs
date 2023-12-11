@@ -334,8 +334,8 @@ macro_rules! prepare_sys_catalog {
             $(
                 #[ctor::ctor]
                 #[allow(non_snake_case)]
-                unsafe fn [<register_ ${index() + 1}>]() {
-                    _register(${index() + 1} as u32, $builtin_catalog);
+                unsafe fn [<register_${index()}>]() {
+                    _register((${index()} + 1) as u32, $builtin_catalog);
                 }
             )*
         }
