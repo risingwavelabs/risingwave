@@ -61,8 +61,38 @@ impl Expression for ArrayTransformExpression {
     }
 }
 
-#[build_function("array_transform(any, anyarray) -> anyarray", type_infer = "panic")]
+#[build_function("array_transform(anyarray, any) -> anyarray")]
 fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
     Ok(Box::new(ArrayTransformExpression { array, lambda }))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::row::Row;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
+
+    #[tokio::test]
+    async fn test_array_transform() {
+        let expr =
+            build_from_pretty("(array_transform:int4[] $0:int4[] (multiply:int4 $0:int4 2:int4))");
+        let (input, expected) = DataChunk::from_pretty(
+            "i[]     i[]
+             {1,2,3} {2,4,6}",
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
+    }
 }
