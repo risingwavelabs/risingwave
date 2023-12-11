@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use futures_util::FutureExt;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
@@ -91,8 +92,14 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
     let mut iter = children.into_iter();
     let left_expr = iter.next().unwrap();
     let mut data = Vec::with_capacity(iter.size_hint().0);
+    let data_chunk = DataChunk::new_dummy(1);
     for child in iter {
-        data.push(child.eval_const()?);
+        let array = child
+            .eval(&data_chunk)
+            .now_or_never()
+            .expect("constant expression should not be async")?;
+        let datum = array.value_at(0).to_owned_datum();
+        data.push(datum);
     }
     Ok(Box::new(InExpression::new(
         left_expr,
