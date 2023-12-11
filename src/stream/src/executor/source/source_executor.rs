@@ -376,11 +376,11 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
+                Mutation::Add(AddMutation { splits, .. })
+                | Mutation::Update(UpdateMutation {
                     actor_splits: splits,
                     ..
-                } => {
+                }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         tracing::info!(
                             "source exector: actor {:?} boot with splits: {:?}",
@@ -493,7 +493,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                             should_trim_state = true;
                                         }
 
-                                        Mutation::Update { actor_splits, .. } => {
+                                        Mutation::Update(UpdateMutation {
+                                            actor_splits, ..
+                                        }) => {
                                             target_state = self
                                                 .apply_split_change(
                                                     &source_desc,
@@ -760,7 +762,7 @@ mod tests {
         );
         let mut executor = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -773,7 +775,7 @@ mod tests {
                 ],
             },
             pause: false,
-        });
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -854,7 +856,7 @@ mod tests {
         );
         let mut handler = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -867,7 +869,7 @@ mod tests {
                 ],
             },
             pause: false,
-        });
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
