@@ -16,7 +16,8 @@ use std::str::FromStr;
 
 use chrono::{Datelike, NaiveTime, Timelike};
 use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::expr_context::TIME_ZONE;
+use risingwave_expr::{capture_context, function, ExprError, Result};
 
 use self::Unit::*;
 use crate::scalar::timestamptz::time_zone_err;
@@ -105,25 +106,28 @@ fn extract_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Decimal {
     }
 }
 
+// capture context based implementation
 #[function(
     "extract(varchar, timestamptz) -> decimal",
-    prebuild = "Unit::from_str($0)?.ensure_timestamptz()?"
+    prebuild = "Unit::from_str($0)?.ensure_timestamptz_at_timezone()?"
 )]
-fn extract_from_timestamptz(tz: Timestamptz, unit: &Unit) -> Decimal {
-    match unit {
-        Epoch => Decimal::from_i128_with_scale(tz.timestamp_micros() as _, 6),
-        // TODO(#5826): all other units depend on implicit session TimeZone
-        u => unreachable!("invalid unit {u:?} for timestamp with time zone"),
-    }
+fn extract_from_timestamptz(input: Timestamptz, unit: &Unit) -> Result<Decimal> {
+    extract_from_timestamptz_impl_captured(input, unit)
 }
 
+// rewrite based implementation
 #[function(
     "extract(varchar, timestamptz, varchar) -> decimal",
     prebuild = "Unit::from_str($0)?.ensure_timestamptz_at_timezone()?"
 )]
-fn extract_from_timestamptz_at_timezone(
-    input: Timestamptz,
+fn extract_from_timestamptz1(input: Timestamptz, timezone: &str, unit: &Unit) -> Result<Decimal> {
+    extract_from_timestamptz_impl(timezone, input, unit)
+}
+
+#[capture_context(TIME_ZONE)]
+fn extract_from_timestamptz_impl(
     timezone: &str,
+    input: Timestamptz,
     unit: &Unit,
 ) -> Result<Decimal> {
     use chrono::Offset as _;
@@ -194,6 +198,7 @@ fn date_part_from_time(time: Time, unit: &Unit) -> Result<F64> {
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
+// capture context based implementation
 #[function(
     "date_part(varchar, timestamp) -> float8",
     prebuild = "Unit::from_str($0)?.ensure_timestamp()?"
@@ -204,12 +209,13 @@ fn date_part_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Result<F64> {
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
+// rewrite based implementation
 #[function(
     "date_part(varchar, timestamptz) -> float8",
-    prebuild = "Unit::from_str($0)?.ensure_timestamptz()?"
+    prebuild = "Unit::from_str($0)?.ensure_timestamptz_at_timezone()?"
 )]
 fn date_part_from_timestamptz(input: Timestamptz, unit: &Unit) -> Result<F64> {
-    extract_from_timestamptz(input, unit)
+    extract_from_timestamptz(input, unit)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
@@ -223,7 +229,7 @@ fn date_part_from_timestamptz_at_timezone(
     timezone: &str,
     unit: &Unit,
 ) -> Result<F64> {
-    extract_from_timestamptz_at_timezone(input, timezone, unit)?
+    extract_from_timestamptz1(input, timezone, unit)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
@@ -322,7 +328,9 @@ impl Unit {
 
     /// Whether the unit is a valid timestamptz at timezone unit.
     const fn is_timestamptz_at_timezone_unit(self) -> bool {
-        self.is_timestamp_unit() || matches!(self, Timezone | Timezone_Hour | Timezone_Minute)
+        self.is_timestamp_unit()
+            || self.is_timestamptz_unit()
+            || matches!(self, Timezone | Timezone_Hour | Timezone_Minute)
     }
 
     /// Whether the unit is a valid interval unit.
@@ -359,15 +367,6 @@ impl Unit {
             Ok(self)
         } else {
             Err(unsupported_unit(self, "timestamp"))
-        }
-    }
-
-    /// Ensure the unit is a valid timestamptz unit.
-    fn ensure_timestamptz(self) -> Result<Self> {
-        if self.is_timestamptz_unit() {
-            Ok(self)
-        } else {
-            Err(unsupported_unit(self, "timestamp with time zone"))
         }
     }
 

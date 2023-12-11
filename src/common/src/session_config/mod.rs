@@ -163,6 +163,10 @@ pub struct ConfigMap {
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
+    /// Enable timezone rewrite. Defaults to false.
+    #[parameter(default = false, rename = "rw_enable_timezone_rewriting")]
+    enable_timezone_rewriting: bool,
+
     /// Enable split distinct agg
     #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,

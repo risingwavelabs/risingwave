@@ -17,7 +17,7 @@ use risingwave_common::types::{FloatExt, Timestamp, Timestamptz, F64};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 
-use crate::scalar::timestamptz::timestamp_at_time_zone;
+use crate::scalar::timestamptz::timestamp_at_time_zone_impl;
 
 // year int, month int, day int, hour int, min int, sec double precision
 #[function("make_timestamptz(int4, int4, int4, int4, int4, float8) -> timestamptz")]
@@ -78,5 +78,5 @@ fn make_timestamptz_impl(
             })?,
     );
 
-    timestamp_at_time_zone(Timestamp(naive_date_time), time_zone)
+    timestamp_at_time_zone_impl(time_zone, Timestamp(naive_date_time))
 }

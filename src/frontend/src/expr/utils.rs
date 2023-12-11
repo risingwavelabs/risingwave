@@ -531,6 +531,43 @@ impl WatermarkAnalyzer {
                 }
                 _ => WatermarkDerivation::None,
             },
+            // ExprType::AtTimeZone => {
+            //     if func_call.inputs().len() == 1 {
+            //         match self.visit_unary_op(func_call.inputs()) {
+            //             Constant => Constant,
+            //             derivation @ (Watermark(_) | Nondecreasing) => {
+            //                 if !(func_call.return_type() == DataType::Timestamptz
+            //                     && func_call.inputs()[0].return_type() == DataType::Timestamp)
+            //                 {
+            //                     WatermarkDerivation::None
+            //                 } else {
+            //                     derivation
+            //                 }
+            //             }
+            //             _ => WatermarkDerivation::None,
+            //         }
+            //     } else {
+            //         match self.visit_binary_op(func_call.inputs()) {
+            //             (Constant, Constant) => Constant,
+            //             (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+            //                 if !(func_call.return_type() == DataType::Timestamptz
+            //                     && func_call.inputs()[0].return_type() == DataType::Timestamp)
+            //                     && func_call.inputs()[1]
+            //                         .as_literal()
+            //                         .and_then(|literal| literal.get_data().as_ref())
+            //                         .map_or(true, |time_zone| {
+            //                             !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
+            //                         })
+            //                 {
+            //                     WatermarkDerivation::None
+            //                 } else {
+            //                     derivation
+            //                 }
+            //             }
+            //             _ => WatermarkDerivation::None,
+            //         }
+            //     }
+            // }
             ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
                 // Requires time zone and interval to be literal, at least for now.
                 let time_zone = match &func_call.inputs()[2] {

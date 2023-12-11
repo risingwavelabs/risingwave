@@ -70,6 +70,7 @@ impl OptimizerContext {
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
             handler_args.session.config().timezone().to_owned(),
+            handler_args.session.config().enable_timezone_rewriting(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {
