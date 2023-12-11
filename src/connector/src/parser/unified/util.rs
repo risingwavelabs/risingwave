@@ -14,7 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, RwError};
 
-use super::{Access, AccessError, AccessImpl, AccessResult, ChangeEvent};
+use super::{Access, AccessError, AccessResult, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::SourceColumnDesc;
@@ -44,22 +44,6 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
     writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> AccessResult<()> {
     writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
-}
-
-pub fn apply_key_val_accessor_on_stream_chunk_writer(
-    key_column_name: &str,
-    key_accessor: AccessImpl<'_, '_>,
-    val_accessor: AccessImpl<'_, '_>,
-    writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> AccessResult<()> {
-    let f = |column: &SourceColumnDesc| {
-        if column.name == key_column_name {
-            key_accessor.access(&[&column.name], Some(&column.data_type))
-        } else {
-            val_accessor.access(&[&column.name], Some(&column.data_type))
-        }
-    };
-    writer.insert(f)
 }
 
 impl From<AccessError> for RwError {

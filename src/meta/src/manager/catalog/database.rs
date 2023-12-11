@@ -23,6 +23,7 @@ use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
     StreamJobStatus, Table, View,
 };
+use risingwave_pb::data::DataType;
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
@@ -44,6 +45,7 @@ pub type Catalog = (
 type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
+type FunctionKey = (DatabaseId, SchemaId, String, Vec<DataType>);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
@@ -235,14 +237,14 @@ impl DatabaseManager {
         }
     }
 
-    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+    pub fn check_function_duplicated(&self, function_key: &FunctionKey) -> MetaResult<()> {
         if self.functions.values().any(|x| {
-            x.database_id == function.database_id
-                && x.schema_id == function.schema_id
-                && x.name.eq(&function.name)
-                && x.arg_types == function.arg_types
+            x.database_id == function_key.0
+                && x.schema_id == function_key.1
+                && x.name.eq(&function_key.2)
+                && x.arg_types == function_key.3
         }) {
-            Err(MetaError::catalog_duplicated("function", &function.name))
+            Err(MetaError::catalog_duplicated("function", &function_key.2))
         } else {
             Ok(())
         }
@@ -290,6 +292,10 @@ impl DatabaseManager {
 
     pub fn get_table(&self, table_id: TableId) -> Option<&Table> {
         self.tables.get(&table_id)
+    }
+
+    pub fn get_sink(&self, sink_id: SinkId) -> Option<&Sink> {
+        self.sinks.get(&sink_id)
     }
 
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
@@ -415,8 +421,7 @@ impl DatabaseManager {
     }
 
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
-        self.in_progress_creation_tracker
-            .contains(&relation.clone())
+        self.in_progress_creation_tracker.contains(relation)
     }
 
     /// For all types of DDL
@@ -459,11 +464,6 @@ impl DatabaseManager {
 
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
         self.in_progress_creation_streaming_job.keys().cloned()
-    }
-
-    pub fn clear_creating_stream_jobs(&mut self) {
-        self.in_progress_creation_tracker.clear();
-        self.in_progress_creation_streaming_job.clear();
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {
@@ -538,6 +538,14 @@ impl DatabaseManager {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found("connection", connection_id))
+        }
+    }
+
+    pub fn ensure_function_id(&self, function_id: FunctionId) -> MetaResult<()> {
+        if self.functions.contains_key(&function_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("function", function_id))
         }
     }
 

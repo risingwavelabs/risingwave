@@ -44,7 +44,9 @@ use crate::manager::{
     IdCategoryType, MetaSrvEnv, StreamingJob,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
+use crate::rpc::ddl_controller::{
+    DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
+};
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -89,6 +91,36 @@ impl DdlServiceImpl {
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
+        }
+    }
+
+    fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
+        let mut source = change.source;
+        let mut fragment_graph = change.fragment_graph.unwrap();
+        let mut table = change.table.unwrap();
+        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
+            let source = source.as_mut().unwrap();
+            let table_id = table.id;
+            fill_table_stream_graph_info(
+                Some((source, source_id)),
+                (&mut table, table_id),
+                TableJobType::General,
+                &mut fragment_graph,
+            );
+        }
+        let table_col_index_mapping = change
+            .table_col_index_mapping
+            .as_ref()
+            .map(ColIndexMapping::from_protobuf);
+
+        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
+
+        ReplaceTableInfo {
+            streaming_job: stream_job,
+            fragment_graph,
+            col_index_mapping: table_col_index_mapping,
         }
     }
 }
@@ -213,6 +245,7 @@ impl DdlService for DdlServiceImpl {
                         stream_job,
                         fragment_graph,
                         CreateType::Foreground,
+                        None,
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -249,26 +282,37 @@ impl DdlService for DdlServiceImpl {
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
+
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let affected_table_change = req.get_affected_table_change().cloned().ok();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = sink.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let mut stream_job = StreamingJob::Sink(sink);
+        let mut stream_job = match &affected_table_change {
+            None => StreamingJob::Sink(sink, None),
+            Some(change) => {
+                let table = change.table.clone().unwrap();
+                let source = change.source.clone();
+                StreamingJob::Sink(sink, Some((table, source)))
+            }
+        };
+
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+
         stream_job.set_id(id);
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(
-                stream_job,
-                fragment_graph,
-                CreateType::Foreground,
-            ))
-            .await?;
+        let command = DdlCommand::CreateStreamingJob(
+            stream_job,
+            fragment_graph,
+            CreateType::Foreground,
+            affected_table_change.map(Self::extract_replace_table_info),
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
@@ -284,13 +328,16 @@ impl DdlService for DdlServiceImpl {
         let request = request.into_inner();
         let sink_id = request.sink_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Sink(sink_id),
-                drop_mode,
-            ))
-            .await?;
+
+        let command = DdlCommand::DropStreamingJob(
+            StreamingJobId::Sink(sink_id),
+            drop_mode,
+            request
+                .affected_table_change
+                .map(Self::extract_replace_table_info),
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         self.sink_manager
             .stop_sink_coordinator(SinkId::from(sink_id))
@@ -323,6 +370,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 create_type,
+                None,
             ))
             .await?;
 
@@ -348,6 +396,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::MaterializedView(table_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -378,6 +427,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 CreateType::Foreground,
+                None,
             ))
             .await?;
 
@@ -402,6 +452,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::Index(index_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -483,6 +534,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 CreateType::Foreground,
+                None,
             ))
             .await?;
 
@@ -507,6 +559,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -566,34 +619,13 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceTablePlanRequest>,
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
-        let req = request.into_inner();
-
-        let mut source = req.source;
-        let mut fragment_graph = req.fragment_graph.unwrap();
-        let mut table = req.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            let source = source.as_mut().unwrap();
-            let table_id = table.id;
-            fill_table_stream_graph_info(
-                Some((source, source_id)),
-                (&mut table, table_id),
-                TableJobType::General,
-                &mut fragment_graph,
-            );
-        }
-        let table_col_index_mapping =
-            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
+        let req = request.into_inner().get_plan().cloned()?;
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceTable(
-                stream_job,
-                fragment_graph,
-                table_col_index_mapping,
-            ))
+            .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                req,
+            )))
             .await?;
 
         Ok(Response::new(ReplaceTablePlanResponse {
@@ -626,16 +658,16 @@ impl DdlService for DdlServiceImpl {
         }
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        request: Request<AlterRelationNameRequest>,
-    ) -> Result<Response<AlterRelationNameResponse>, Status> {
-        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        request: Request<AlterNameRequest>,
+    ) -> Result<Response<AlterNameResponse>, Status> {
+        let AlterNameRequest { object, new_name } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .run_command(DdlCommand::AlterName(object.unwrap(), new_name))
             .await?;
-        Ok(Response::new(AlterRelationNameResponse {
+        Ok(Response::new(AlterNameResponse {
             status: None,
             version,
         }))
@@ -666,6 +698,24 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_set_schema(
+        &self,
+        request: Request<AlterSetSchemaRequest>,
+    ) -> Result<Response<AlterSetSchemaResponse>, Status> {
+        let AlterSetSchemaRequest {
+            object,
+            new_schema_id,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
+            .await?;
+        Ok(Response::new(AlterSetSchemaResponse {
             status: None,
             version,
         }))
@@ -721,7 +771,7 @@ impl DdlService for DdlServiceImpl {
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured".into(),
+                                "AWS client is not configured",
                             )));
                         }
                     }
@@ -885,7 +935,11 @@ fn fill_table_stream_graph_info(
                     // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
                     // group (that is, different from any other server id being used by any master or slave)
                     if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY)
-                        && matches!(CdcSourceType::from(connector.as_str()),CdcSourceType::Mysql) {
+                        && matches!(
+                            CdcSourceType::from(connector.as_str()),
+                            CdcSourceType::Mysql
+                        )
+                    {
                         let props = &mut source_node.source_inner.as_mut().unwrap().properties;
                         let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
                         props
@@ -912,7 +966,9 @@ fn fill_table_stream_graph_info(
             }
 
             // fill table id for cdc backfill
-            if let NodeBody::StreamScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
+            if let NodeBody::StreamCdcScan(node) = node_body
+                && table_job_type == TableJobType::SharedCdcSource
+            {
                 if let Some(table) = node.cdc_table_desc.as_mut() {
                     table.table_id = table_id;
                 }

@@ -25,6 +25,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
@@ -112,4 +113,7 @@ impl ToBatchPb for BatchSource {
         })
     }
 }
+
 impl ExprRewritable for BatchSource {}
+
+impl ExprVisitable for BatchSource {}

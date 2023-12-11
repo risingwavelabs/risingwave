@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Bound::*;
@@ -279,6 +280,17 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     }
 }
 
+pub fn end_bound_of_vnode(vnode: VirtualNode) -> Bound<Bytes> {
+    if vnode == VirtualNode::MAX {
+        Unbounded
+    } else {
+        let end_bound_index = vnode.to_index() + 1;
+        Excluded(Bytes::copy_from_slice(
+            &VirtualNode::from_index(end_bound_index).to_be_bytes(),
+        ))
+    }
+}
+
 /// Get the end bound of the given `prefix` when transforming it to a key range.
 pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
@@ -315,17 +327,20 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     }
 }
 
+pub fn prefix_slice_with_vnode(vnode: VirtualNode, slice: &[u8]) -> Bytes {
+    let prefix = vnode.to_be_bytes();
+    let mut buf = BytesMut::with_capacity(prefix.len() + slice.len());
+    buf.extend_from_slice(&prefix);
+    buf.extend_from_slice(slice);
+    buf.freeze()
+}
+
 /// Prepend the `prefix` to the given key `range`.
-pub fn prefixed_range<B: AsRef<[u8]>>(
+pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
-    prefix: &[u8],
+    vnode: VirtualNode,
 ) -> (Bound<Bytes>, Bound<Bytes>) {
-    let prefixed = |b: &B| -> Bytes {
-        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
-        buf.extend_from_slice(prefix);
-        buf.extend_from_slice(b.as_ref());
-        buf.freeze()
-    };
+    let prefixed = |b: &B| -> Bytes { prefix_slice_with_vnode(vnode, b.as_ref()) };
 
     let start: Bound<Bytes> = match range.start_bound() {
         Included(b) => Included(prefixed(b)),
@@ -333,7 +348,7 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
             assert!(!b.as_ref().is_empty());
             Excluded(prefixed(b))
         }
-        Unbounded => Included(Bytes::copy_from_slice(prefix)),
+        Unbounded => Included(Bytes::copy_from_slice(&vnode.to_be_bytes())),
     };
 
     let end = match range.end_bound() {
@@ -342,7 +357,7 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
             assert!(!b.as_ref().is_empty());
             Excluded(prefixed(b))
         }
-        Unbounded => end_bound_of_prefix(prefix),
+        Unbounded => end_bound_of_vnode(vnode),
     };
 
     (start, end)
@@ -399,16 +414,28 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn split_vnode(&self) -> (VirtualNode, &[u8]) {
+        debug_assert!(
+            self.0.as_ref().len() >= VirtualNode::SIZE,
+            "too short table key: {:?}",
+            self.0.as_ref()
+        );
+        let (vnode, inner_key) = self.0.as_ref().split_array_ref::<{ VirtualNode::SIZE }>();
+        (VirtualNode::from_be_bytes(*vnode), inner_key)
+    }
+
     pub fn vnode_part(&self) -> VirtualNode {
-        VirtualNode::from_be_bytes(
-            self.0.as_ref()[..VirtualNode::SIZE]
-                .try_into()
-                .expect("slice with incorrect length"),
-        )
+        self.split_vnode().0
     }
 
     pub fn key_part(&self) -> &[u8] {
-        &self.0.as_ref()[VirtualNode::SIZE..]
+        self.split_vnode().1
+    }
+}
+
+impl<T: AsRef<[u8]>> Borrow<[u8]> for TableKey<T> {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -421,6 +448,16 @@ impl EstimateSize for TableKey<Bytes> {
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
+}
+
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
@@ -997,5 +1034,52 @@ mod tests {
         let c = c.encode();
         assert!(a.lt(&b));
         assert!(b.lt(&c));
+    }
+
+    #[test]
+    fn test_prefixed_range_with_vnode() {
+        let concat = |vnode: usize, b: &[u8]| -> Bytes {
+            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b)
+        };
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Included(Bytes::from("1")), Included(Bytes::from("2"))),
+                VirtualNode::from_index(233),
+            ),
+            (Included(concat(233, b"1")), Included(concat(233, b"2")))
+        );
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Excluded(Bytes::from("1")), Excluded(Bytes::from("2"))),
+                VirtualNode::from_index(233),
+            ),
+            (Excluded(concat(233, b"1")), Excluded(concat(233, b"2")))
+        );
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(233),
+            ),
+            (Included(concat(233, b"")), Excluded(concat(234, b"")))
+        );
+        let max_vnode = VirtualNode::COUNT - 1;
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(max_vnode),
+            ),
+            (Included(concat(max_vnode, b"")), Unbounded)
+        );
+        let second_max_vnode = max_vnode - 1;
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(second_max_vnode),
+            ),
+            (
+                Included(concat(second_max_vnode, b"")),
+                Excluded(concat(max_vnode, b""))
+            )
+        );
     }
 }

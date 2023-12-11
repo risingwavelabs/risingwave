@@ -257,7 +257,7 @@ export default function FragmentGraph({
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
-            isSelected(id) ? theme.colors.teal[500] : theme.colors.gray[500]
+            isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
           )
 
         // Actor links
@@ -315,7 +315,7 @@ export default function FragmentGraph({
           }
 
           circle
-            .attr("fill", theme.colors.teal[500])
+            .attr("fill", theme.colors.blue[500])
             .attr("r", nodeRadius)
             .style("cursor", "pointer")
             .on("click", (_d: any, i: any) => openPlanNodeDetail(i))
@@ -388,7 +388,7 @@ export default function FragmentGraph({
           )
           .attr("stroke", (d: any) =>
             isSelected(d.source) || isSelected(d.target)
-              ? theme.colors.teal["500"]
+              ? theme.colors.blue["500"]
               : theme.colors.gray["300"]
           )
       const createEdge = (sel: any) =>

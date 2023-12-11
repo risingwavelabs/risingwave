@@ -59,6 +59,9 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
+    input_pk_indices: Vec<usize>,
+
     /// Schema from input.
     input_schema: Schema,
 
@@ -138,6 +141,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
+                input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
@@ -240,6 +244,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(chunk)
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
+            .await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let Self {
@@ -275,6 +286,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.agg_funcs,
                 &this.storages,
                 &this.intermediate_state_table,
+                &this.input_pk_indices,
                 this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
@@ -291,6 +303,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     if let Some(chunk) =

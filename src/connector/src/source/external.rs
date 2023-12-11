@@ -542,6 +542,10 @@ mod tests {
 
     #[test]
     fn test_mysql_filter_expr() {
+        let cols = vec!["id".to_string()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(id > :id)");
+
         let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
@@ -578,16 +582,17 @@ mod tests {
             sink_id: Default::default(),
             properties: Default::default(),
             columns: vec![
-                ColumnDesc::named("v1".into(), ColumnId::new(1), DataType::Int32),
-                ColumnDesc::named("v2".into(), ColumnId::new(2), DataType::Decimal),
-                ColumnDesc::named("v3".into(), ColumnId::new(3), DataType::Varchar),
-                ColumnDesc::named("v4".into(), ColumnId::new(4), DataType::Date),
+                ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+                ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
+                ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
+                ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
             ],
             downstream_pk: vec![0],
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
+            target_table: None,
         };
 
         let rw_schema = param.schema();

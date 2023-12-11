@@ -21,6 +21,7 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -95,3 +96,5 @@ impl StreamNode for StreamDml {
 }
 
 impl ExprRewritable for StreamDml {}
+
+impl ExprVisitable for StreamDml {}

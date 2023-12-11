@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
@@ -24,7 +25,6 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
@@ -69,7 +69,6 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            ScanTableType::default(),
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
                 .table_indexes
@@ -93,11 +92,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("Subquery in join on condition");
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
@@ -107,11 +102,7 @@ impl Planner {
         let join_type = join.join_type;
         let on_clause = join.cond;
         if on_clause.has_subquery() {
-            return Err(ErrorCode::NotImplemented(
-                "Subquery in join on condition is unsupported".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Subquery in join on condition");
         }
 
         let correlated_id = self.ctx.next_correlated_id();

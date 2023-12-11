@@ -20,7 +20,6 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_transform::ArrayTransformExpression;
-use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
@@ -114,7 +113,6 @@ where
                 // Dedicated types
                 E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
                 E::In => InExpression::build_boxed(prost, build_child),
-                E::Case => CaseExpression::build_boxed(prost, build_child),
                 E::Coalesce => CoalesceExpression::build_boxed(prost, build_child),
                 E::Field => FieldExpression::build_boxed(prost, build_child),
                 E::Vnode => VnodeExpression::build_boxed(prost, build_child),

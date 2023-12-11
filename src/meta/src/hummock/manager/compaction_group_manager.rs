@@ -44,7 +44,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::manager::{IdCategory, MetaSrvEnv, TableId};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,
 };
@@ -135,24 +135,21 @@ impl HummockManager {
     }
 
     /// Unregisters `table_fragments` from compaction groups
-    pub async fn unregister_table_fragments_vec(
-        &self,
-        table_fragments: &[TableFragments],
-    ) -> Result<()> {
-        self.unregister_table_ids(
+    pub async fn unregister_table_fragments_vec(&self, table_fragments: &[TableFragments]) {
+        self.unregister_table_ids_fail_fast(
             &table_fragments
                 .iter()
                 .flat_map(|t| t.all_table_ids())
                 .collect_vec(),
         )
-        .await
+        .await;
     }
 
     /// Unregisters stale members and groups
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
+    pub async fn purge(&self, valid_ids: &[u32]) {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -161,8 +158,7 @@ impl HummockManager {
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(&to_unregister).await?;
-        Ok(())
+        self.unregister_table_ids_fail_fast(&to_unregister).await;
     }
 
     /// Prefer using `register_table_fragments`.
@@ -265,11 +261,8 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Prefer using `unregister_table_fragments_vec`.
-    /// Only use `unregister_table_ids` when [`TableFragments`] is unavailable.
-    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
-    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+    async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
             return Ok(());
         }
@@ -376,10 +369,17 @@ impl HummockManager {
                 HashSet::from_iter(get_compaction_group_ids(&versioning.current_version)),
                 self.env.meta_store(),
             )
-            .await
-            .inspect_err(|e| tracing::warn!("failed to purge stale compaction group config. {}", e))
-            .ok();
+            .await?;
         Ok(())
+    }
+
+    /// Prefer using `unregister_table_fragments_vec`.
+    /// Only use `unregister_table_ids_fail_fast` when [`TableFragments`] is unavailable.
+    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
+    pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
+        self.unregister_table_ids(table_ids)
+            .await
+            .unwrap_or_else(|e| panic!("unregister table ids fail: {table_ids:?} {e}"));
     }
 
     pub async fn update_compaction_config(
@@ -403,6 +403,7 @@ impl HummockManager {
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
+
         Ok(result)
     }
 
@@ -440,23 +441,30 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
-            .await
+        let result = self
+            .move_state_table_to_compaction_group(parent_group_id, table_ids, None, 0)
+            .await?;
+        self.group_to_table_vnode_partition
+            .write()
+            .insert(result.0, result.1);
+
+        Ok(result.0)
     }
 
     /// move some table to another compaction-group. Create a new compaction group if it does not
     /// exist.
+    /// TODO: Move table_to_partition in result to compaction group
     #[named]
     pub async fn move_state_table_to_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
-        allow_split_by_table: bool,
-        weight_split_by_vnode: u32,
-    ) -> Result<CompactionGroupId> {
+        partition_vnode_count: u32,
+    ) -> Result<(CompactionGroupId, BTreeMap<TableId, u32>)> {
+        let mut table_to_partition = BTreeMap::default();
         if table_ids.is_empty() {
-            return Ok(parent_group_id);
+            return Ok((parent_group_id, table_to_partition));
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
         let mut compaction_guard = write_lock!(self, compaction).await;
@@ -561,8 +569,7 @@ impl HummockManager {
                     .read()
                     .await
                     .default_compaction_config();
-                config.split_by_state_table = allow_split_by_table;
-                config.split_weight_by_vnode = weight_split_by_vnode;
+                config.split_weight_by_vnode = partition_vnode_count;
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
@@ -615,6 +622,11 @@ impl HummockManager {
             insert.apply_to_txn(&mut trx).await?;
             self.env.meta_store().txn(trx).await?;
             insert.commit();
+
+            // Currently, only splitting out a single table_id is supported.
+            for table_id in table_ids {
+                table_to_partition.insert(table_id, partition_vnode_count);
+            }
         } else {
             self.env.meta_store().txn(trx).await?;
         }
@@ -688,7 +700,7 @@ impl HummockManager {
             .with_label_values(&[&parent_group_id.to_string()])
             .inc();
 
-        Ok(target_compaction_group_id)
+        Ok((target_compaction_group_id, table_to_partition))
     }
 
     #[named]
@@ -1070,17 +1082,15 @@ mod tests {
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1.clone()])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge(&table_fragment_2.all_table_ids().collect_vec())
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await.unwrap();
+        compaction_group_manager.purge(&[]).await;
         assert_eq!(registered_number().await, 0);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
@@ -1103,8 +1113,7 @@ mod tests {
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 0);
         assert_eq!(group_number().await, 2);
     }

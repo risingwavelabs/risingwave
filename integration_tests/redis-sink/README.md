@@ -20,11 +20,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 3. Execute a simple query:
 
 ```sh
-docker compose exec redis redis-ctl keys *
+docker compose exec redis redis-cli keys '*'
 
 ```
 We also can use 'get' to query value
-
-```sql
-select user_id, count(*) from default.demo_test group by user_id
-```

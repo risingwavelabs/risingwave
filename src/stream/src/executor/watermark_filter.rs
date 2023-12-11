@@ -207,6 +207,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             watermark,
                         ));
                     }
+                    table.try_flush().await?;
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {

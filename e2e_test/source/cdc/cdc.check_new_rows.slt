@@ -52,12 +52,12 @@ select v1, v2, v3 from mytable order by v1;
 query I
 SELECT * from products_test_cnt
 ----
-11
+13
 
 query I
 SELECT * from orders_test_cnt
 ----
-4
+5
 
 query ITT
 SELECT * FROM products_test order by id limit 3

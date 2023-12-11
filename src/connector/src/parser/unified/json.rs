@@ -496,24 +496,17 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, Some(item_type)))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            (Some(DataType::List(item_type)), ValueType::Array) => ListValue::new({
+                let array = value.as_array().unwrap();
+                let mut builder = item_type.create_array_builder(array.len());
+                for v in array {
+                    let value = self.parse(v, Some(item_type))?;
+                    builder.append(value);
+                }
+                builder.finish()
+            })
             .into(),
-            (None, ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, None))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .into(),
+
             // ---- Bytea -----
             (Some(DataType::Bytea), ValueType::String) => match self.bytea_handling {
                 ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())

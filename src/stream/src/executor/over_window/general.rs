@@ -592,6 +592,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     for chunk in Self::apply_chunk(&mut this, &mut vars, chunk) {
                         yield Message::Chunk(chunk?);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;

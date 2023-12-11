@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -89,6 +90,8 @@ impl Distill for StreamFsFetch {
 }
 
 impl ExprRewritable for StreamFsFetch {}
+
+impl ExprVisitable for StreamFsFetch {}
 
 impl StreamNode for StreamFsFetch {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {

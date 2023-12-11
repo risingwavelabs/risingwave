@@ -39,6 +39,7 @@ use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
@@ -65,7 +66,7 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+    get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -99,15 +100,7 @@ async fn extract_json_table_schema(
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
     let columns = vec![
         ColumnCatalog {
-            column_desc: ColumnDesc {
-                data_type: DataType::Jsonb,
-                column_id: ColumnId::placeholder(),
-                name: "payload".to_string(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-                generated_or_default_column: None,
-                description: None,
-            },
+            column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
             is_hidden: false,
         },
         ColumnCatalog::offset_column(),
@@ -590,7 +583,6 @@ pub(crate) async fn bind_columns_from_source(
         );
         session.notice_to_user(err_string);
     }
-
     Ok(res)
 }
 
@@ -621,27 +613,11 @@ pub(crate) fn bind_all_columns(
             (Format::DebeziumMongo, Encode::Json) => {
                 let mut columns = vec![
                     ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Varchar,
-                            column_id: 0.into(),
-                            name: "_id".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                            generated_or_default_column: None,
-                            description: None,
-                        },
+                        column_desc: ColumnDesc::named("_id", 0.into(), DataType::Varchar),
                         is_hidden: false,
                     },
                     ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Jsonb,
-                            column_id: 0.into(),
-                            name: "payload".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                            generated_or_default_column: None,
-                            description: None,
-                        },
+                        column_desc: ColumnDesc::named("payload", 0.into(), DataType::Jsonb),
                         is_hidden: false,
                     },
                 ];
@@ -718,15 +694,7 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
-            sql_defined_pk_names
-        }
-        (Format::Plain, _) => {
-            if is_key_mq_connector(with_properties) {
-                add_default_key_column(columns);
-            }
-            sql_defined_pk_names
-        }
+        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
@@ -828,15 +796,11 @@ fn check_and_add_timestamp_column(
 ) {
     if is_kafka_connector(with_properties) {
         let kafka_timestamp_column = ColumnCatalog {
-            column_desc: ColumnDesc {
-                data_type: DataType::Timestamptz,
-                column_id: ColumnId::placeholder(),
-                name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-                generated_or_default_column: None,
-                description: None,
-            },
+            column_desc: ColumnDesc::named(
+                KAFKA_TIMESTAMP_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Timestamptz,
+            ),
 
             is_hidden: true,
         };
@@ -846,16 +810,12 @@ fn check_and_add_timestamp_column(
 
 fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
-        column_desc: ColumnDesc {
-            data_type: DataType::Bytea,
-            column_id: ColumnId::new(columns.len() as i32),
-            name: DEFAULT_KEY_COLUMN_NAME.to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-            description: None,
-        },
-        is_hidden: true,
+        column_desc: ColumnDesc::named(
+            DEFAULT_KEY_COLUMN_NAME,
+            (columns.len() as i32).into(),
+            DataType::Bytea,
+        ),
+        is_hidden: false,
     };
     columns.push(column);
 }
@@ -1128,10 +1088,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    };
+    let source_schema = stmt.source_schema.into_v2_with_warning();
 
     let mut with_properties = handler_args
         .with_options
@@ -1145,8 +1102,11 @@ pub async fn handle_create_source(
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
     // gated the feature with a session variable
-    let create_cdc_source_job =
-        is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
+    let create_cdc_source_job = if is_cdc_connector(&with_properties) {
+        CdcTableType::from_properties(&with_properties).can_backfill()
+    } else {
+        false
+    };
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
@@ -1260,10 +1220,13 @@ pub async fn handle_create_source(
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
-            graph.parallelism = session
-                .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism });
+            graph.parallelism =
+                session
+                    .config()
+                    .streaming_parallelism()
+                    .map(|parallelism| Parallelism {
+                        parallelism: parallelism.get(),
+                    });
             graph
         };
         catalog_writer
@@ -1282,12 +1245,13 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
-        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
+        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::handler::create_source::debezium_cdc_source_schema;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -1322,10 +1286,8 @@ pub mod tests {
             vec![DataType::Varchar, DataType::Varchar],
             vec!["address".to_string(), "zipcode".to_string()],
         );
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
-            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
+            ROWID_PREFIX => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
@@ -1343,9 +1305,6 @@ pub mod tests {
             "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
-        session
-            .set_config("cdc_backfill", vec!["true".to_string()])
-            .unwrap();
 
         frontend
             .run_sql_with_session(session.clone(), sql)
@@ -1366,15 +1325,19 @@ pub mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = row_id_column_name();
-        let offset_col_name = offset_column_name();
-        let table_name_col_name = cdc_table_name_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "payload" => DataType::Jsonb,
-            offset_col_name.as_str() => DataType::Varchar,
-            table_name_col_name.as_str() => DataType::Varchar,
+            OFFSET_COLUMN_NAME => DataType::Varchar,
+            TABLE_NAME_COLUMN_NAME => DataType::Varchar,
         };
         assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_cdc_source_job_schema() {
+        let columns = debezium_cdc_source_schema();
+        // make sure it doesn't broken by future PRs
+        assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
     }
 }

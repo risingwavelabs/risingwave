@@ -14,11 +14,11 @@
 
 use std::sync::Arc;
 
+use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
-use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;

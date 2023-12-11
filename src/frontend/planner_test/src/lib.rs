@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
+use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
     explain, variable, HandlerArgs,
@@ -264,7 +265,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map() {
             for (key, val) in config_map {
-                session.set_config(key, vec![val.to_owned()]).unwrap();
+                session.set_config(key, val.to_owned()).unwrap();
             }
         }
 
@@ -425,10 +426,7 @@ impl TestCase {
                     cdc_table_info,
                     ..
                 } => {
-                    // TODO(st1page): refacor it
-                    let notice = Default::default();
-                    let source_schema =
-                        source_schema.map(|schema| schema.into_source_schema_v2().0);
+                    let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
 
                     create_table::handle_create_table(
                         handler_args,
@@ -439,7 +437,6 @@ impl TestCase {
                         source_schema,
                         source_watermarks,
                         append_only,
-                        notice,
                         cdc_table_info,
                     )
                     .await?;
@@ -794,6 +791,7 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

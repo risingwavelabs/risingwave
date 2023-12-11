@@ -362,12 +362,10 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
-    pub fn into_source_schema_v2(self) -> (ConnectorSchema, Option<String>) {
+    pub(crate) fn into_v2(self) -> ConnectorSchema {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => (
-                inner.into_source_schema_v2(),
-                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string())),
-            CompatibleSourceSchema::V2(inner) => (inner, None),
+            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
+            CompatibleSourceSchema::V2(inner) => inner,
         }
     }
 }
@@ -457,7 +455,7 @@ impl Parser {
                 ConnectorSchema::debezium_json()
             };
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for CDC connectors should be \
@@ -469,7 +467,7 @@ impl Parser {
         } else if connector.contains("nexmark") {
             let expected = ConnectorSchema::native();
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for nexmark connectors should be \
@@ -822,12 +820,20 @@ pub struct CreateSinkStatement {
     pub columns: Vec<Ident>,
     pub emit_mode: Option<EmitMode>,
     pub sink_schema: Option<ConnectorSchema>,
+    pub into_table_name: Option<ObjectName>,
 }
 
 impl ParseTo for CreateSinkStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
+
+        let into_table_name = if p.parse_keyword(Keyword::INTO) {
+            impl_parse_to!(into_table_name: ObjectName, p);
+            Some(into_table_name)
+        } else {
+            None
+        };
 
         let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
 
@@ -843,8 +849,14 @@ impl ParseTo for CreateSinkStatement {
 
         let emit_mode = p.parse_emit_mode()?;
 
+        // This check cannot be put into the `WithProperties::parse_to`, since other
+        // statements may not need the with properties.
+        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) && into_table_name.is_none() {
+            p.expected("WITH", p.peek_token())?
+        }
         impl_parse_to!(with_properties: WithProperties, p);
-        if with_properties.0.is_empty() {
+
+        if with_properties.0.is_empty() && into_table_name.is_none() {
             return Err(ParserError::ParserError(
                 "sink properties not provided".to_string(),
             ));
@@ -860,6 +872,7 @@ impl ParseTo for CreateSinkStatement {
             columns,
             emit_mode,
             sink_schema,
+            into_table_name,
         })
     }
 }

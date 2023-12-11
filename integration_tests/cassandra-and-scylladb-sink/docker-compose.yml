@@ -1,0 +1,58 @@
+---
+version: "3"
+services:
+  cassandra:
+    image: cassandra:4.0
+    ports:
+      - 9042:9042
+    environment:
+      - CASSANDRA_CLUSTER_NAME=cloudinfra
+    volumes:
+      - "./prepare_cassandra_and_scylladb.sql:/prepare_cassandra_and_scylladb.sql"
+  scylladb:
+    image: scylladb/scylla:5.1
+    # port 9042 is used by cassandra
+    ports:
+      - 9041:9042
+    environment:
+      - CASSANDRA_CLUSTER_NAME=cloudinfra
+    volumes:
+      - "./prepare_cassandra_and_scylladb.sql:/prepare_cassandra_and_scylladb.sql"
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose
