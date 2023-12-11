@@ -14,6 +14,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -22,7 +23,9 @@ use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_common::cache::{
+    CachePriority, LookupResponse, LruCacheEventListener, LruKey, LruValue,
+};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -129,6 +132,30 @@ impl LruCacheEventListener for MetaCacheEventListener {
     }
 }
 
+pub enum CachedOrOwned<K, V>
+where
+    K: LruKey,
+    V: LruValue,
+{
+    Cached(CacheableEntry<K, V>),
+    Owned(V),
+}
+
+impl<K, V> Deref for CachedOrOwned<K, V>
+where
+    K: LruKey,
+    V: LruValue,
+{
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CachedOrOwned::Cached(entry) => entry,
+            CachedOrOwned::Owned(v) => v,
+        }
+    }
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
@@ -138,7 +165,10 @@ pub struct SstableStore {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
-    recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+    /// Recent filter for `(sst_obj_id, blk_idx)`.
+    ///
+    /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
+    recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pending_streaming_loading: Arc<AtomicUsize>,
     large_query_memory_usage: usize,
 }
@@ -153,7 +183,7 @@ impl SstableStore {
         large_query_memory_usage: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
-        recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+        recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -363,7 +393,7 @@ impl SstableStore {
         };
 
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.insert(object_id);
+            filter.extend([(object_id, usize::MAX), (object_id, block_index)]);
         }
 
         match policy {
@@ -451,6 +481,26 @@ impl SstableStore {
         if let Err(e) = self.meta_file_cache.clear() {
             tracing::warn!("meta file cache clear error: {}", e);
         }
+    }
+
+    pub async fn sstable_cached(
+        &self,
+        sst_obj_id: HummockSstableObjectId,
+    ) -> HummockResult<Option<CachedOrOwned<HummockSstableObjectId, Box<Sstable>>>> {
+        if let Some(sst) = self.meta_cache.lookup(sst_obj_id, &sst_obj_id) {
+            return Ok(Some(CachedOrOwned::Cached(sst)));
+        }
+
+        if let Some(sst) = self
+            .meta_file_cache
+            .lookup(&sst_obj_id)
+            .await
+            .map_err(HummockError::file_cache)?
+        {
+            return Ok(Some(CachedOrOwned::Owned(sst)));
+        }
+
+        Ok(None)
     }
 
     /// Returns `table_holder`
@@ -542,7 +592,7 @@ impl SstableStore {
         block: Box<Block>,
     ) {
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.insert(object_id);
+            filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
         }
         self.block_cache
             .insert(object_id, block_index, block, CachePriority::High);
@@ -579,12 +629,18 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_recent_filter(&self) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
+    pub fn data_recent_filter(
+        &self,
+    ) -> Option<&Arc<RecentFilter<(HummockSstableObjectId, usize)>>> {
         self.recent_filter.as_ref()
     }
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, CachedBlock> {
         &self.data_file_cache
+    }
+
+    pub fn data_cache(&self) -> &BlockCache {
+        &self.block_cache
     }
 }
 
@@ -765,8 +821,9 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
+            // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
             if let Some(filter) = self.sstable_store.recent_filter.as_ref() {
-                filter.insert(self.object_id);
+                filter.insert((self.object_id, usize::MAX));
             }
 
             // Add block cache.
