@@ -98,6 +98,9 @@ impl DataChunk {
     /// Build a `DataChunk` with rows.
     ///
     /// Panics if the `rows` is empty.
+    ///
+    /// Should prefer using [`DataChunkBuilder`] instead to avoid unnecessary allocation
+    /// of rows.
     pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
         let mut builder = DataChunkBuilder::new(data_types.to_vec(), rows.len() + 1);
 

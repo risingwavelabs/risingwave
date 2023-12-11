@@ -33,7 +33,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
 use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::ZipEqDebug;
+
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
@@ -126,26 +126,20 @@ impl StreamChunk {
     }
 
     /// Build a `StreamChunk` from rows.
-    // TODO: introducing something like `StreamChunkBuilder` maybe better.
+    ///
+    /// Panics if the `rows` is empty.
+    ///
+    /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
+    /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        let mut array_builders = data_types
-            .iter()
-            .map(|data_type| data_type.create_array_builder(rows.len()))
-            .collect::<Vec<_>>();
-        let mut ops = vec![];
+        let mut builder = StreamChunkBuilder::new(rows.len() + 1, data_types.to_vec());
 
         for (op, row) in rows {
-            ops.push(*op);
-            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
-                builder.append(datum);
-            }
+            let none = builder.append_row(*op, row);
+            debug_assert!(none.is_none());
         }
 
-        let new_columns = array_builders
-            .into_iter()
-            .map(|builder| builder.finish().into())
-            .collect::<Vec<_>>();
-        StreamChunk::new(ops, new_columns)
+        builder.take().expect("empty chunk")
     }
 
     /// Get the reference of the underlying data chunk.
