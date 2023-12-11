@@ -16,7 +16,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::bail;
 use tonic_0_9::Code;
@@ -126,7 +126,8 @@ impl SplitReader for PubsubSplitReader {
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
-        let client = Client::new(Default::default())
+        let config = ClientConfig::default().with_auth().await.unwrap();
+        let client = Client::new(config)
             .await
             .map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
