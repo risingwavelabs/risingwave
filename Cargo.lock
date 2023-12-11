@@ -7975,6 +7975,7 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap",
+ "ctor",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
