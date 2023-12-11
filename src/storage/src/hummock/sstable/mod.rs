@@ -65,7 +65,6 @@ use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
-const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const OLD_VERSION: u32 = 1;
 const VERSION: u32 = 2;
@@ -164,8 +163,10 @@ impl MonotonicDeleteEvent {
         }
     }
 
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        self.event_key.left_user_key.encode_length_prefixed(buf);
+    pub fn encode(&self, mut buf: impl BufMut) {
+        self.event_key
+            .left_user_key
+            .encode_length_prefixed(&mut buf);
         buf.put_u8(if self.event_key.is_exclude_left_key {
             1
         } else {
@@ -292,7 +293,7 @@ impl BlockMeta {
     /// ```plain
     /// | offset (4B) | len (4B) | uncompressed size (4B) | smallest key len (4B) | smallest key |
     /// ```
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, mut buf: impl BufMut) {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
         buf.put_u32_le(self.uncompressed_size);
@@ -388,15 +389,18 @@ impl SstableMeta {
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
+    #[expect(clippy::uninit_vec)]
     pub fn encode_to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
-        self.encode_to(&mut buf);
+        let encoded_size = self.encoded_size();
+        let mut buf = Vec::with_capacity(encoded_size);
+        unsafe { buf.set_len(encoded_size) };
+        self.encode_to(&mut buf[..]);
         buf
     }
 
-    pub fn encode_to(&self, buf: &mut Vec<u8>) {
-        let start_offset = buf.len();
-        buf.put_u32_le(
+    pub fn encode_to(&self, buf: &mut [u8]) {
+        let mut cursor = &mut buf[..];
+        cursor.put_u32_le(
             utils::checked_into_u32(self.block_metas.len()).unwrap_or_else(|_| {
                 let tmp_full_key = FullKey::decode(&self.smallest_key);
                 panic!(
@@ -407,14 +411,14 @@ impl SstableMeta {
             }),
         );
         for block_meta in &self.block_metas {
-            block_meta.encode(buf);
+            block_meta.encode(&mut cursor);
         }
-        put_length_prefixed_slice(buf, &self.bloom_filter);
-        buf.put_u32_le(self.estimated_size);
-        buf.put_u32_le(self.key_count);
-        put_length_prefixed_slice(buf, &self.smallest_key);
-        put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(
+        put_length_prefixed_slice(&mut cursor, &self.bloom_filter);
+        cursor.put_u32_le(self.estimated_size);
+        cursor.put_u32_le(self.key_count);
+        put_length_prefixed_slice(&mut cursor, &self.smallest_key);
+        put_length_prefixed_slice(&mut cursor, &self.largest_key);
+        cursor.put_u32_le(
             utils::checked_into_u32(self.monotonic_tombstone_events.len()).unwrap_or_else(|_| {
                 let tmp_full_key = FullKey::decode(&self.smallest_key);
                 panic!(
@@ -425,13 +429,16 @@ impl SstableMeta {
             }),
         );
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
-            monotonic_tombstone_event.encode(buf);
+            monotonic_tombstone_event.encode(&mut cursor);
         }
-        buf.put_u64_le(self.meta_offset);
-        let checksum = xxhash64_checksum(&buf[start_offset..]);
-        buf.put_u64_le(checksum);
-        buf.put_u32_le(VERSION);
-        buf.put_u32_le(MAGIC);
+        cursor.put_u64_le(self.meta_offset);
+
+        let written = buf.len() - 16; // checksum, version, magic
+        let checksum = xxhash64_checksum(&buf[..written]);
+        let mut cursor = &mut buf[written..];
+        cursor.put_u64_le(checksum);
+        cursor.put_u32_le(VERSION);
+        cursor.put_u32_le(MAGIC);
     }
 
     pub fn decode(buf: &[u8]) -> HummockResult<Self> {
