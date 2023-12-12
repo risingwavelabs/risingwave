@@ -87,7 +87,7 @@ message BarrierCompleteResponse {
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
-  map<uint64, hummock.TableWatermarks> table_watermarks = 6;
+  map<uint32, hummock.TableWatermarks> table_watermarks = 6;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

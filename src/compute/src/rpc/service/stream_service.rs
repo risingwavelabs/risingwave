@@ -247,7 +247,7 @@ impl StreamService for StreamServiceImpl {
             worker_id: self.env.worker_id(),
             table_watermarks: table_watermarks
                 .into_iter()
-                .map(|(key, value)| (key.table_id as u64, value.to_protobuf()))
+                .map(|(key, value)| (key.table_id, value.to_protobuf()))
                 .collect(),
         }))
     }
