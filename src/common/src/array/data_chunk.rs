@@ -102,6 +102,10 @@ impl DataChunk {
     /// Should prefer using [`DataChunkBuilder`] instead to avoid unnecessary allocation
     /// of rows.
     pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
+        // `append_one_row` will cause the builder to finish immediately once capacity is met.
+        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
+        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
+        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
         let mut builder = DataChunkBuilder::new(data_types.to_vec(), rows.len() + 1);
 
         for row in rows {
@@ -109,7 +113,7 @@ impl DataChunk {
             debug_assert!(none.is_none());
         }
 
-        builder.consume_all().expect("empty chunk")
+        builder.consume_all().expect("chunk should not be empty")
     }
 
     /// Return the next visible row index on or after `row_idx`.
