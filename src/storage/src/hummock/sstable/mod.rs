@@ -390,7 +390,6 @@ impl SstableMeta {
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
-    #[expect(clippy::uninit_vec)]
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         let encoded_size = self.encoded_size();
         let mut buf = Vec::with_capacity(encoded_size);
