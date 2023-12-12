@@ -35,25 +35,36 @@ pub struct ReadTableWatermark {
 }
 
 impl ReadTableWatermark {
-    pub fn merge_other(&mut self, other: ReadTableWatermark) {
-        assert_eq!(self.direction, other.direction);
-        for (vnode, watermark) in other.vnode_watermarks {
-            match self.vnode_watermarks.entry(vnode) {
-                btree_map::Entry::Vacant(entry) => {
-                    entry.insert(watermark);
-                }
-                btree_map::Entry::Occupied(mut entry) => {
-                    let prev_watermark = entry.get();
-                    let overwrite = match self.direction {
-                        WatermarkDirection::Ascending => watermark > prev_watermark,
-                        WatermarkDirection::Descending => watermark < prev_watermark,
-                    };
-                    if overwrite {
+    pub fn merge_multiple(mut watermarks: Vec<ReadTableWatermark>) -> Option<ReadTableWatermark> {
+        fn merge_other(this: &mut ReadTableWatermark, other: ReadTableWatermark) {
+            assert_eq!(this.direction, other.direction);
+            for (vnode, watermark) in other.vnode_watermarks {
+                match this.vnode_watermarks.entry(vnode) {
+                    btree_map::Entry::Vacant(entry) => {
                         entry.insert(watermark);
+                    }
+                    btree_map::Entry::Occupied(mut entry) => {
+                        let prev_watermark = entry.get();
+                        let overwrite = match this.direction {
+                            WatermarkDirection::Ascending => watermark > prev_watermark,
+                            WatermarkDirection::Descending => watermark < prev_watermark,
+                        };
+                        if overwrite {
+                            entry.insert(watermark);
+                        }
                     }
                 }
             }
         }
+        let mut ret = if let Some(ret) = watermarks.pop() {
+            ret
+        } else {
+            return None;
+        };
+        while let Some(watermark) = watermarks.pop() {
+            merge_other(&mut ret, watermark);
+        }
+        Some(ret)
     }
 }
 

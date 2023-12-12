@@ -472,7 +472,7 @@ pub fn read_filter_for_batch(
     assert!(!read_version_vec.is_empty());
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());
     let mut max_mce_version: Option<CommittedVersion> = None;
-    let mut table_watermark: Option<ReadTableWatermark> = None;
+    let mut table_watermarks: Vec<ReadTableWatermark> = Vec::new();
     for read_version in &read_version_vec {
         let read_version_guard = read_version.read();
 
@@ -480,6 +480,10 @@ pub fn read_filter_for_batch(
             .table_watermarks
             .as_ref()
             .and_then(|watermarks| watermarks.range_watermarks(epoch, &mut key_range));
+
+        if let Some(read_watermark) = read_watermark {
+            table_watermarks.push(read_watermark);
+        }
 
         let (imms, ssts) = {
             let (imm_iter, sst_iter) = read_version_guard
@@ -500,17 +504,6 @@ pub fn read_filter_for_batch(
             }
         } else {
             max_mce_version = Some(read_version_guard.committed.clone());
-        }
-
-        if let Some(read_watermark) = read_watermark {
-            match &mut table_watermark {
-                Some(prev_watermark) => {
-                    prev_watermark.merge_other(read_watermark);
-                }
-                None => {
-                    table_watermark = Some(read_watermark);
-                }
-            }
         }
     }
 
@@ -539,7 +532,12 @@ pub fn read_filter_for_batch(
 
     Ok((
         key_range,
-        (imm_vec, sst_vec, max_mce_version, table_watermark),
+        (
+            imm_vec,
+            sst_vec,
+            max_mce_version,
+            ReadTableWatermark::merge_multiple(table_watermarks),
+        ),
     ))
 }
 
