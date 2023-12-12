@@ -28,6 +28,9 @@ rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_rt = { workspace = true, optional = true }
 risingwave_storage = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_stream = { workspace = true }
+futures-async-stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -49,9 +52,13 @@ workspace-hack = { path = "../workspace-hack" }
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.27", features = ["fs", "mman"] }
 
+# [[bin]]
+# name = "s3-bench"
+# path = "s3_bench/main.rs"
+
 [[bin]]
-name = "s3-bench"
-path = "s3_bench/main.rs"
+name = "sink-bench"
+path = "sink_bench/main.rs"
 
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]

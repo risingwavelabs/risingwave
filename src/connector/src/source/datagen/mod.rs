@@ -54,7 +54,7 @@ pub struct DatagenProperties {
     /// datagen will create v1 by self-incrementing from 1 to 1000
     /// datagen will create v2 by randomly generating from default_min to default_max
     #[serde(flatten)]
-    fields: HashMap<String, String>,
+    pub fields: HashMap<String, String>,
 }
 
 impl SourceProperties for DatagenProperties {
