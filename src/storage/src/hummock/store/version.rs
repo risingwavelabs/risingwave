@@ -24,7 +24,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
+    bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, TableWatermarksIndex};
@@ -466,9 +466,9 @@ impl HummockReadVersion {
 pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
-    key_range: &mut TableKeyRange,
+    mut key_range: TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-) -> StorageResult<ReadVersionTuple> {
+) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
     assert!(!read_version_vec.is_empty());
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());
     let mut max_mce_version: Option<CommittedVersion> = None;
@@ -476,10 +476,15 @@ pub fn read_filter_for_batch(
     for read_version in &read_version_vec {
         let read_version_guard = read_version.read();
 
+        let read_watermark = read_version_guard
+            .table_watermarks
+            .as_ref()
+            .and_then(|watermarks| watermarks.range_watermarks(epoch, &mut key_range));
+
         let (imms, ssts) = {
             let (imm_iter, sst_iter) = read_version_guard
                 .staging()
-                .prune_overlap(epoch, table_id, key_range);
+                .prune_overlap(epoch, table_id, &key_range);
 
             (
                 imm_iter.cloned().collect_vec(),
@@ -496,11 +501,6 @@ pub fn read_filter_for_batch(
         } else {
             max_mce_version = Some(read_version_guard.committed.clone());
         }
-
-        let read_watermark = read_version_guard
-            .table_watermarks
-            .as_ref()
-            .and_then(|watermarks| watermarks.range_watermarks(epoch, key_range));
 
         if let Some(read_watermark) = read_watermark {
             match &mut table_watermark {
@@ -537,15 +537,18 @@ pub fn read_filter_for_batch(
         }));
     }
 
-    Ok((imm_vec, sst_vec, max_mce_version, table_watermark))
+    Ok((
+        key_range,
+        (imm_vec, sst_vec, max_mce_version, table_watermark),
+    ))
 }
 
 pub fn read_filter_for_local(
     epoch: HummockEpoch,
     table_id: TableId,
-    table_key_range: &mut TableKeyRange,
+    mut table_key_range: TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
-) -> StorageResult<ReadVersionTuple> {
+) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
     let read_version_guard = read_version.read();
 
     let committed_version = read_version_guard.committed().clone();
@@ -553,18 +556,19 @@ pub fn read_filter_for_local(
     let table_watermark = read_version_guard
         .table_watermarks
         .as_ref()
-        .and_then(|watermark| watermark.range_watermarks(epoch, table_key_range));
+        .and_then(|watermark| watermark.range_watermarks(epoch, &mut table_key_range));
 
     let (imm_iter, sst_iter) =
         read_version_guard
             .staging()
-            .prune_overlap(epoch, table_id, table_key_range);
+            .prune_overlap(epoch, table_id, &table_key_range);
+
+    let imms = imm_iter.cloned().collect();
+    let ssts = sst_iter.cloned().collect();
 
     Ok((
-        imm_iter.cloned().collect_vec(),
-        sst_iter.cloned().collect_vec(),
-        committed_version,
-        table_watermark,
+        table_key_range,
+        (imms, ssts, committed_version, table_watermark),
     ))
 }
 
@@ -1074,6 +1078,10 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
     ) -> StorageResult<bool> {
+        if is_empty_key_range(&table_key_range) {
+            return Ok(false);
+        }
+
         let table_id = read_options.table_id;
         let (imms, uncommitted_ssts, committed_version, _) = read_version_tuple;
         let mut stats_guard =

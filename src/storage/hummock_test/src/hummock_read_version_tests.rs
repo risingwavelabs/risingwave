@@ -317,11 +317,11 @@ async fn test_read_filter_basic() {
 
         // build for local
         {
-            let mut key_range = key_range.clone();
-            let hummock_read_snapshot = read_filter_for_local(
+            let key_range = key_range.clone();
+            let (_, hummock_read_snapshot) = read_filter_for_local(
                 epoch,
                 TableId::from(table_id),
-                &mut key_range,
+                key_range,
                 read_version.clone(),
             )
             .unwrap();
@@ -336,16 +336,12 @@ async fn test_read_filter_basic() {
 
         // build for batch
         {
-            let mut key_range = key_range.clone();
+            let key_range = key_range.clone();
             let read_version_vec = vec![read_version];
 
-            let hummock_read_snapshot = read_filter_for_batch(
-                epoch,
-                TableId::from(table_id),
-                &mut key_range,
-                read_version_vec,
-            )
-            .unwrap();
+            let (_, hummock_read_snapshot) =
+                read_filter_for_batch(epoch, TableId::from(table_id), key_range, read_version_vec)
+                    .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());

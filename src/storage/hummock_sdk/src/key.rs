@@ -46,6 +46,13 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
 );
 
+pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
+    match key_range {
+        (Included(start), Excluded(end)) => start == end,
+        _ => false,
+    }
+}
+
 // returning left inclusive and right exclusive
 pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
     let (left, right) = range;
