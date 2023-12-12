@@ -124,6 +124,22 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Fragment")]
+pub struct PartialFragmentStateTables {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub state_table_ids: I32Array,
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "Actor")]
+pub struct PartialActorLocation {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub parallel_unit_id: i32,
+}
+
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,

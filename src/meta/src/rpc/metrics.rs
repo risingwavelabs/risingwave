@@ -38,6 +38,9 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::controller::catalog::CatalogControllerRef;
+use crate::controller::cluster::ClusterControllerRef;
+use crate::controller::utils::PartialFragmentStateTables;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataFucker;
 use crate::rpc::ElectionClientRef;
@@ -749,6 +752,128 @@ pub fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
+pub async fn refresh_fragment_info_metrics_v2(
+    catalog_controller: &CatalogControllerRef,
+    cluster_controller: &ClusterControllerRef,
+    hummock_manager: &HummockManagerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let worker_nodes = match cluster_controller
+        .list_workers(Some(WorkerType::ComputeNode.into()), None)
+        .await
+    {
+        Ok(worker_nodes) => worker_nodes,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to list worker node");
+            return;
+        }
+    };
+    let actor_locations = match catalog_controller.list_actor_locations().await {
+        Ok(actor_locations) => actor_locations,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get actor locations");
+            return;
+        }
+    };
+    let sink_actor_mapping = match catalog_controller.list_sink_actor_mapping().await {
+        Ok(sink_actor_mapping) => sink_actor_mapping,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get sink actor mapping");
+            return;
+        }
+    };
+    let fragment_state_tables = match catalog_controller.list_fragment_state_tables().await {
+        Ok(fragment_state_tables) => fragment_state_tables,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get fragment state tables");
+            return;
+        }
+    };
+    let table_name_and_type_mapping = match catalog_controller.get_table_name_type_mapping().await {
+        Ok(mapping) => mapping,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get table name mapping");
+            return;
+        }
+    };
+
+    let pu_addr_mapping: HashMap<u32, String> = worker_nodes
+        .into_iter()
+        .flat_map(|worker_node| {
+            let addr = match worker_node.host {
+                Some(host) => format!("{}:{}", host.host, host.port),
+                None => "".to_owned(),
+            };
+            worker_node
+                .parallel_units
+                .into_iter()
+                .map(move |pu| (pu.id, addr.clone()))
+        })
+        .collect();
+    let table_compaction_group_id_mapping = hummock_manager
+        .get_table_compaction_group_id_mapping()
+        .await;
+
+    // Start fresh with a reset to clear all outdated labels. This is safe since we always
+    // report full info on each interval.
+    meta_metrics.actor_info.reset();
+    meta_metrics.table_info.reset();
+    meta_metrics.sink_info.reset();
+    for actor_location in actor_locations {
+        let actor_id_str = actor_location.actor_id.to_string();
+        let fragment_id_str = actor_location.fragment_id.to_string();
+        // Report a dummy gauge metrics with (fragment id, actor id, node
+        // address) as its label
+        if let Some(address) = pu_addr_mapping.get(&(actor_location.parallel_unit_id as u32)) {
+            meta_metrics
+                .actor_info
+                .with_label_values(&[&actor_id_str, &fragment_id_str, address])
+                .set(1);
+        }
+    }
+    for (sink_id, (sink_name, actor_ids)) in sink_actor_mapping {
+        let sink_id_str = sink_id.to_string();
+        for actor_id in actor_ids {
+            let actor_id_str = actor_id.to_string();
+            meta_metrics
+                .sink_info
+                .with_label_values(&[&actor_id_str, &sink_id_str, &sink_name])
+                .set(1);
+        }
+    }
+    for PartialFragmentStateTables {
+        fragment_id,
+        job_id,
+        state_table_ids,
+    } in fragment_state_tables
+    {
+        let fragment_id_str = fragment_id.to_string();
+        let job_id_str = job_id.to_string();
+        for table_id in state_table_ids.into_inner() {
+            let table_id_str = table_id.to_string();
+            let (table_name, table_type) = table_name_and_type_mapping
+                .get(&table_id)
+                .cloned()
+                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+            let compaction_group_id = table_compaction_group_id_mapping
+                .get(&(table_id as u32))
+                .map(|cg_id| cg_id.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            meta_metrics
+                .table_info
+                .with_label_values(&[
+                    &job_id_str,
+                    &table_id_str,
+                    &fragment_id_str,
+                    &table_name,
+                    &table_type,
+                    &compaction_group_id,
+                ])
+                .set(1);
+        }
+    }
+}
+
 pub fn start_fragment_info_monitor(
     metadata_fucker: MetadataFucker,
     hummock_manager: HummockManagerRef,
@@ -772,44 +897,43 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
-            let worker_nodes = match metadata_fucker
-                .list_worker_node(Some(WorkerType::ComputeNode), None)
-                .await
-            {
-                Ok(worker_nodes) => worker_nodes,
-                Err(err) => {
-                    tracing::warn!(error=%err.as_report(), "fail to list worker node");
+            let (cluster_manager, catalog_manager, fragment_manager) = match &metadata_fucker {
+                MetadataFucker::V1(fucker) => (
+                    &fucker.cluster_manager,
+                    &fucker.catalog_manager,
+                    &fucker.fragment_manager,
+                ),
+                MetadataFucker::V2(fucker) => {
+                    refresh_fragment_info_metrics_v2(
+                        &fucker.catalog_controller,
+                        &fucker.cluster_controller,
+                        &hummock_manager,
+                        meta_metrics.clone(),
+                    )
+                    .await;
                     continue;
                 }
             };
-            let table_name_and_type_mapping =
-                match metadata_fucker.get_table_name_type_mapping().await {
-                    Ok(mapping) => mapping,
-                    Err(err) => {
-                        tracing::warn!(error=%err.as_report(), "fail to get table name mapping");
-                        continue;
-                    }
-                };
 
             // Start fresh with a reset to clear all outdated labels. This is safe since we always
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let workers: HashMap<u32, String> = worker_nodes
+            meta_metrics.sink_info.reset();
+            let workers: HashMap<u32, String> = cluster_manager
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
+                .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {
                     Some(host) => (worker_node.id, format!("{}:{}", host.host, host.port)),
                     None => (worker_node.id, "".to_owned()),
                 })
                 .collect();
+            let table_name_and_type_mapping =
+                catalog_manager.get_table_name_and_type_mapping().await;
             let table_compaction_group_id_mapping = hummock_manager
                 .get_table_compaction_group_id_mapping()
                 .await;
-
-            let fragment_manager = match &metadata_fucker {
-                MetadataFucker::V1(fucker) => &fucker.fragment_manager,
-                MetadataFucker::V2(_) => unimplemented!("support fetching metric in v2"),
-            };
 
             let core = fragment_manager.get_fragment_read_guard().await;
             for table_fragments in core.table_fragments().values() {

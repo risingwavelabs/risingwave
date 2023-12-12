@@ -20,10 +20,10 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, ActorId, ConnectorSplits, FragmentId, FragmentVnodeMapping,
-    I32Array, ObjectId, StreamNode, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, sink, ActorId, ConnectorSplits, FragmentId,
+    FragmentVnodeMapping, I32Array, ObjectId, SinkId, StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -49,7 +49,10 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-use crate::controller::utils::{get_actor_dispatchers, get_parallel_unit_mapping};
+use crate::controller::utils::{
+    get_actor_dispatchers, get_parallel_unit_mapping, PartialActorLocation,
+    PartialFragmentStateTables,
+};
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
@@ -706,6 +709,65 @@ impl CatalogController {
                 | PbFragmentTypeFlag::Values as u32
                 | PbFragmentTypeFlag::BarrierRecv as u32))
             != 0
+    }
+
+    pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
+        let inner = self.inner.read().await;
+        let actor_locations: Vec<PartialActorLocation> =
+            Actor::find().into_partial_model().all(&inner.db).await?;
+        Ok(actor_locations)
+    }
+
+    pub async fn list_sink_actor_mapping(
+        &self,
+    ) -> MetaResult<HashMap<SinkId, (String, Vec<ActorId>)>> {
+        let inner = self.inner.read().await;
+        let sink_id_names: Vec<(SinkId, String)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::Name])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let (sink_ids, _): (Vec<_>, Vec<_>) = sink_id_names.iter().cloned().unzip();
+        let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
+
+        let actor_with_type: Vec<(ActorId, SinkId, i32)> = Actor::find()
+            .select_only()
+            .column(actor::Column::ActorId)
+            .columns([fragment::Column::JobId, fragment::Column::FragmentTypeMask])
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(fragment::Column::JobId.is_in(sink_ids))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut sink_actor_mapping = HashMap::new();
+        for (actor_id, sink_id, type_mask) in actor_with_type {
+            if type_mask & PbFragmentTypeFlag::Sink as i32 != 0 {
+                sink_actor_mapping
+                    .entry(sink_id)
+                    .or_insert_with(|| (sink_name_mapping.get(&sink_id).unwrap().clone(), vec![]))
+                    .1
+                    .push(actor_id);
+            }
+        }
+
+        Ok(sink_actor_mapping)
+    }
+
+    pub async fn list_fragment_state_tables(&self) -> MetaResult<Vec<PartialFragmentStateTables>> {
+        let inner = self.inner.read().await;
+        let fragment_state_tables: Vec<PartialFragmentStateTables> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::StateTableIds,
+            ])
+            .into_partial_model()
+            .all(&inner.db)
+            .await?;
+        Ok(fragment_state_tables)
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
