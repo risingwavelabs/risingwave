@@ -23,8 +23,7 @@ services:
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
                     --connector-rpc-endpoint 0.0.0.0:50051 \
-                    #--parallelism 4 \
-                    #--total-memory-bytes 8589934592 \
+                    --parallelism 4 \
                     --role both \
                     --meta-address http://0.0.0.0:5690\" \
                  --frontend-opts=\" \
@@ -59,7 +58,6 @@ services:
       - "2222:2222"
     depends_on:
       - etcd-0
-    env_file: multiple_object_storage.env
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
@@ -80,9 +78,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 28G
+          memory: <config-the-allocated-memory>
         reservations:
-          memory: 28G
+          memory: <config-the-allocated-memory>
   etcd-0:
     extends:
       file: docker-compose.yml
@@ -95,16 +93,10 @@ services:
     extends:
       file: docker-compose.yml
       service: prometheus-0
-  message_queue:
-    extends:
-      file: docker-compose.yml
-      service: message_queue
 volumes:
   etcd-0:
     external: false
   grafana-0:
     external: false
   prometheus-0:
-    external: false
-  message_queue:
     external: false
