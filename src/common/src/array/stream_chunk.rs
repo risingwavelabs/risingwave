@@ -604,7 +604,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //    TZ: Timestamptz
     /// //   SRL: Serial
     /// //   x[]: array of x
-    /// // {i,f}: struct
+    /// // <i,f>: struct
     /// ```
     fn from_pretty(s: &str) -> Self {
         let mut chunk_str = String::new();

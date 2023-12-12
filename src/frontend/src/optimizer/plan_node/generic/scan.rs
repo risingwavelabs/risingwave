@@ -52,8 +52,6 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
-    /// Help RowSeqScan executor use a better chunk size
-    pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
     /// The cardinality of the table **without** applying the predicate.
@@ -302,10 +300,9 @@ impl Scan {
             table_catalog,
             indexes,
             predicate,
-            chunk_size: None,
             for_system_time_as_of_proctime,
-            ctx,
             table_cardinality,
+            ctx,
         }
     }
 

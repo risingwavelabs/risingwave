@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
@@ -27,6 +27,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn, Instrument};
@@ -165,7 +166,7 @@ impl QueryExecution {
 
                 let root_stage = root_stage_receiver
                     .await
-                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
+                    .context("Starting query execution failed")??;
 
                 tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -322,8 +323,10 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {:?}.",
-                        self.query.query_id, id, reason
+                        error = %reason.as_report(),
+                        query_id = ?self.query.query_id,
+                        stage_id = ?id,
+                        "query stage failed"
                     );
 
                     self.clean_all_stages(Some(reason)).await;
@@ -400,7 +403,8 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
-        let error_msg = error.as_ref().map(|e| e.to_string());
+        // TODO(error-handling): should prefer use error types than strings.
+        let error_msg = error.as_ref().map(|e| e.to_report_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
             let root_stage_sender = mem::take(&mut self.root_stage_sender);

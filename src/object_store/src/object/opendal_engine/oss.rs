@@ -19,12 +19,6 @@ use opendal::Operator;
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
-/// The minimum number of bytes that is buffered before they are uploaded as a part, , will be used
-/// in streaing upload.
-///
-/// Reference: <https://www.alibabacloud.com/help/en/oss/user-guide/multipart-upload-12>
-const OSS_PART_SIZE: usize = 16 * 1024 * 1024;
-
 impl OpendalObjectStore {
     /// create opendal oss engine.
     pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
@@ -32,8 +26,6 @@ impl OpendalObjectStore {
         let mut builder = Oss::default();
 
         builder.bucket(&bucket);
-
-        builder.write_min_size(OSS_PART_SIZE);
 
         builder.root(&root);
 

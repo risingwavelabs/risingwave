@@ -22,7 +22,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::external::{CdcOffset, ExternalTableReader};
 
-use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
+use super::external::ExternalStorageTable;
 use crate::executor::backfill::utils::iter_chunks;
 use crate::executor::{StreamExecutorError, StreamExecutorResult, INVALID_EPOCH};
 
@@ -46,20 +46,6 @@ pub struct SnapshotReadArgs {
 }
 
 impl SnapshotReadArgs {
-    pub fn new(
-        epoch: u64,
-        current_pos: Option<OwnedRow>,
-        ordered: bool,
-        chunk_size: usize,
-    ) -> Self {
-        Self {
-            epoch,
-            current_pos,
-            ordered,
-            chunk_size,
-        }
-    }
-
     pub fn new_for_cdc(current_pos: Option<OwnedRow>, chunk_size: usize) -> Self {
         Self {
             epoch: INVALID_EPOCH,

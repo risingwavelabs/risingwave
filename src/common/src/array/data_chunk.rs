@@ -733,7 +733,7 @@ pub trait DataChunkTestExt {
     /// //     T: str
     /// //    TS: Timestamp
     /// //   SRL: Serial
-    /// // {i,f}: struct
+    /// // <i,f>: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
 
@@ -783,7 +783,7 @@ impl DataChunkTestExt for DataChunk {
                 "TZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
-                array if array.starts_with('{') && array.ends_with('}') => {
+                array if array.starts_with('<') && array.ends_with('>') => {
                     DataType::Struct(StructType::unnamed(
                         array[1..array.len() - 1]
                             .split(',')
