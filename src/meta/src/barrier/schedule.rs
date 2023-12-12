@@ -181,17 +181,19 @@ impl BarrierScheduler {
     /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
     pub async fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let queue = &mut self.inner.queue.write().await;
-        if let Some(idx) = queue.queue.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob {
-                table_fragments, ..
-            } = &scheduled.command
-                && table_fragments.table_id() == table_id
-            {
-                true
-            } else {
-                false
-            }
-        }) {
+        // Find the position of the create command, with the table_id of the stream job
+        let position = queue
+            .queue
+            .iter()
+            .position(|scheduled| match &scheduled.command {
+                Command::CreateStreamingJob {
+                    table_fragments, ..
+                } => table_fragments.table_id() == table_id,
+                _ => false,
+            });
+
+        // Cancel the queued command if it exists
+        if let Some(idx) = position {
             queue.queue.remove(idx).unwrap();
             true
         } else {
