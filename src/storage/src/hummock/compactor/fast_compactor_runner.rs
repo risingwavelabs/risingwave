@@ -29,12 +29,13 @@ use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, L
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
@@ -46,7 +47,7 @@ use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct BlockStreamIterator {
     /// The downloading stream.
-    block_stream: BlockStream,
+    block_stream: BlockDataStream,
 
     next_block_index: usize,
 
@@ -69,11 +70,11 @@ impl BlockStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable: TableHolder,
-        block_stream: BlockStream,
+        block_stream: BlockDataStream,
         task_progress: Arc<TaskProgress>,
     ) -> Self {
         Self {
@@ -85,16 +86,13 @@ impl BlockStreamIterator {
         }
     }
 
-    pub fn is_first_block(&self) -> bool {
-        self.next_block_index == 0
-    }
-
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let (data, meta) = match self.block_stream.next().await? {
+        let (data, _) = match self.block_stream.next_block_impl().await? {
             None => return Ok(None),
             Some(ret) => ret,
         };
+        let meta = self.sstable.value().meta.block_metas[self.next_block_index].clone();
         let filter_block = self
             .sstable
             .value()
@@ -262,7 +260,7 @@ impl ConcatSstableIterator {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let block_stream = self
                 .sstable_store
-                .get_stream_by_position(sstable.value().id, 0, &sstable.value().meta.block_metas)
+                .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 

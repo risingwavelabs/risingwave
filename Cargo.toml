@@ -7,6 +7,7 @@ members = [
   "src/cmd_all",
   "src/common",
   "src/common/common_service",
+  "src/common/fields-derive",
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
@@ -15,6 +16,7 @@ members = [
   "src/expr/core",
   "src/expr/impl",
   "src/expr/macro",
+  "src/expr/udf",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
@@ -47,7 +49,6 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
-  "src/udf",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
@@ -169,7 +170,7 @@ risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }
 risingwave_stream = { path = "./src/stream" }
 risingwave_test_runner = { path = "./src/test_runner" }
-risingwave_udf = { path = "./src/udf" }
+risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }

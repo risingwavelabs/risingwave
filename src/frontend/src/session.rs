@@ -62,6 +62,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -808,8 +809,9 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
+        let mut stmts = Parser::parse_sql(&sql).inspect_err(
+            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
+        )?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -843,7 +845,7 @@ impl SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        .inspect_err(|e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"))?;
         Ok(rsp)
     }
 
@@ -1041,7 +1043,7 @@ impl Session for SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        .inspect_err(|e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"))?;
         Ok(rsp)
     }
 
@@ -1101,7 +1103,7 @@ impl Session for SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle execute:\n{}", e))?;
+        .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
         Ok(rsp)
     }
 
