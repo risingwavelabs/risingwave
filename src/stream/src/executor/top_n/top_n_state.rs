@@ -143,6 +143,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         start_key: Option<CacheKey>,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
+        tracing::warn!("[rc] this should be triggered seldomly!!!");
+
         let cache = &mut topn_cache.high;
 
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
