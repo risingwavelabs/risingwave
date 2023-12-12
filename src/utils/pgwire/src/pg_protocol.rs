@@ -158,6 +158,17 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
+/// Record `sql` in the current tracing span.
+fn record_sql_in_span(sql: &str) {
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(truncated_fmt::TruncatedFmt(
+            &sql,
+            *RW_QUERY_LOG_TRUNCATE_LEN,
+        )),
+    );
+}
+
 impl<S, SM> PgProtocol<S, SM>
 where
     S: AsyncWrite + AsyncRead + Unpin,
@@ -197,21 +208,22 @@ where
         self.do_process(msg).await.is_none() || self.is_terminate
     }
 
-    fn span_for_msg(&self, msg: &FeMessage) -> tracing::Span {
+    /// The root tracing span for processing a message. The target of the span is
+    /// [`PGWIRE_ROOT_SPAN_TARGET`].
+    ///
+    /// This is used to provide context for the (slow) query logs and traces.
+    ///
+    /// The span is only effective if there's a current session and the message is
+    /// query-related. Otherwise, `Span::none()` is returned.
+    fn root_span_for_msg(&self, msg: &FeMessage) -> tracing::Span {
         let Some(session_id) = self.session.as_ref().map(|s| s.id().0) else {
             return tracing::Span::none();
         };
 
-        let (mode, sql) = match msg {
-            FeMessage::Query(q) => ("simple query", q.get_sql().unwrap_or("??")),
-            FeMessage::Parse(p) => (
-                "extended query parse",
-                cstr_to_str(&p.sql_bytes).unwrap_or("??"),
-            ),
-            FeMessage::Execute(e) => (
-                "extended query execute",
-                cstr_to_str(&e.portal_name).unwrap_or("??"),
-            ),
+        let mode = match msg {
+            FeMessage::Query(_) => "simple query",
+            FeMessage::Parse(_) => "extended query parse",
+            FeMessage::Execute(_) => "extended query execute",
             _ => return tracing::Span::none(),
         };
 
@@ -220,7 +232,7 @@ where
             "handle_query",
             mode,
             session_id,
-            sql = %truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN),
+            sql = tracing::field::Empty, // record SQL later in each `process` call
         )
     }
 
@@ -228,7 +240,7 @@ where
     /// - `None` means to terminate the current connection
     /// - `Some(())` means to continue processing the next message
     async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
-        let span = self.span_for_msg(&msg);
+        let span = self.root_span_for_msg(&msg);
         let weak_session = self
             .session
             .as_ref()
@@ -542,7 +554,7 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-
+        record_sql_in_span(&*sql);
         let session = self.session.clone().unwrap();
 
         let _exec_context_guard = session.init_exec_context(sql.clone());
@@ -650,6 +662,7 @@ where
 
     fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
+        record_sql_in_span(sql);
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
@@ -784,6 +797,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
+            record_sql_in_span(&*sql);
 
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;

@@ -22,7 +22,9 @@ use risingwave_common::util::query_log::*;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
@@ -246,9 +248,36 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             )
         });
 
-        for (file_name, target) in [
-            ("query.log", PGWIRE_QUERY_LOG),
-            ("slow_query.log", PGWIRE_SLOW_QUERY_LOG),
+        /// Newtype wrapper for `DefaultFields`.
+        ///
+        /// `fmt::Layer` will share the same `FormattedFields` extension for spans across
+        /// different layers, as long as the type of `N: FormatFields` is the same. This
+        /// will cause several problems:
+        ///
+        /// - `with_ansi(false)` does not take effect and it will follow the settings of
+        ///   the primary fmt layer installed above.
+        /// - `Span::record` will update the same `FormattedFields` multiple times,
+        ///   leading to duplicated fields.
+        ///
+        /// As a workaround, we use a newtype wrapper here to get a different type id.
+        /// The const generic parameter `SLOW` is further used to distinguish between the
+        /// query log and the slow query log.
+        #[derive(Default)]
+        struct FmtFields<const SLOW: bool>(DefaultFields);
+
+        impl<'writer, const SLOW: bool> FormatFields<'writer> for FmtFields<SLOW> {
+            fn format_fields<R: tracing_subscriber::field::RecordFields>(
+                &self,
+                writer: tracing_subscriber::fmt::format::Writer<'writer>,
+                fields: R,
+            ) -> std::fmt::Result {
+                self.0.format_fields(writer, fields)
+            }
+        }
+
+        for (file_name, target, is_slow) in [
+            ("query.log", PGWIRE_QUERY_LOG, false),
+            ("slow_query.log", PGWIRE_SLOW_QUERY_LOG, true),
         ] {
             let path = query_log_path.join(file_name);
 
@@ -262,8 +291,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 });
 
             let layer = tracing_subscriber::fmt::layer()
-                // FIXME: this does not always take effect, as the formatted fields of spans might
-                // be shared with the default log layer. May need to introduce a newtype.
                 .with_ansi(false)
                 .with_level(false)
                 .with_file(false)
@@ -271,12 +298,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .with_timer(default_timer.clone())
                 .with_thread_names(true)
                 .with_thread_ids(true)
-                .with_writer(file)
-                .with_filter(
-                    filter::Targets::new()
-                        .with_target(PGWIRE_ROOT_SPAN_TARGET, Level::INFO)
-                        .with_target(target, Level::INFO),
-                );
+                .with_writer(file);
+
+            let layer = match is_slow {
+                true => layer.fmt_fields(FmtFields::<true>::default()).boxed(),
+                false => layer.fmt_fields(FmtFields::<false>::default()).boxed(),
+            };
+
+            let layer = layer.with_filter(
+                filter::Targets::new()
+                    // Root span must be enabled to provide common info like the SQL query.
+                    .with_target(PGWIRE_ROOT_SPAN_TARGET, Level::INFO)
+                    .with_target(target, Level::INFO),
+            );
+
             layers.push(layer.boxed());
         }
     }
