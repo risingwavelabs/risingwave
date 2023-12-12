@@ -45,7 +45,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
 
     pub fn from_safe_epoch_watermarks(
         inner: I,
-        safe_epoch_watermarks: &BTreeMap<u64, PbTableWatermarks>,
+        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
     ) -> Self {
         let watermarks = safe_epoch_watermarks
             .iter()
@@ -67,13 +67,13 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                             vnode_watermark_map
                                 .insert(vnode, watermark.clone())
                                 .is_none(),
-                            "duplicate watermark on vnode {}",
+                            "duplicate table watermark on vnode {}",
                             vnode.to_index()
                         );
                     }
                 }
                 (
-                    TableId::from(*table_id as u32),
+                    TableId::from(*table_id),
                     ReadTableWatermark {
                         direction: if watermarks.is_ascending {
                             WatermarkDirection::Ascending

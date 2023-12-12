@@ -268,14 +268,14 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<u64, TableWatermarks>,
+    pub new_table_watermarks: HashMap<u32, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<u64, TableWatermarks>,
+        new_table_watermarks: HashMap<u32, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {

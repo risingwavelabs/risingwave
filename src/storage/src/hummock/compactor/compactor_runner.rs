@@ -225,6 +225,9 @@ impl CompactorRunner {
                 }
             }
         }
+
+        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introced
+        // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
             SkipWatermarkIterator::from_safe_epoch_watermarks(
                 UnorderedMergeIteratorInner::for_compactor(table_iters),

@@ -116,6 +116,11 @@ message VnodeWatermark {
   common.Buffer vnode_bitmap = 2;
 }
 
+// Table watermark is a lighter weight range delete introduced in
+// https://github.com/risingwavelabs/risingwave/issues/13148
+// It means the lowest (or highest when `is_ascending` is false) visible
+// keys in the table within a vnode. Keys lower (or higher) than the
+// table watermark is invisible and will be cleaned in later compaction.
 message TableWatermarks {
   message EpochNewWatermarks {
     repeated VnodeWatermark watermarks = 1;
@@ -145,7 +150,7 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
-  map<uint64, TableWatermarks> table_watermarks = 5;
+  map<uint32, TableWatermarks> table_watermarks = 5;
 }
 
 message HummockVersionDelta {
@@ -162,7 +167,7 @@ message HummockVersionDelta {
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
-  map<uint64, TableWatermarks> new_table_watermarks = 8;
+  map<uint32, TableWatermarks> new_table_watermarks = 8;
 }
 
 message HummockVersionDeltas {
@@ -339,7 +344,7 @@ message CompactTask {
   map<uint32, uint32> table_vnode_partition = 23;
   // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
   // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
-  map<uint64, TableWatermarks> table_watermarks = 24;
+  map<uint32, TableWatermarks> table_watermarks = 24;
 }
 
 message LevelHandler {

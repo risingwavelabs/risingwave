@@ -94,7 +94,7 @@ impl MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
-        new_table_watermarks: HashMap<u64, TableWatermarks>,
+        new_table_watermarks: HashMap<u32, TableWatermarks>,
     ) -> Result<()> {
         let sst_to_worker = sstables
             .iter()

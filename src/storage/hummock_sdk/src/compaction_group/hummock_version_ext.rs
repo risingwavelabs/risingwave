@@ -193,7 +193,7 @@ impl HummockVersion {
     pub fn safe_epoch_table_watermarks(
         &self,
         existing_table_ids: &[u32],
-    ) -> BTreeMap<u64, PbTableWatermarks> {
+    ) -> BTreeMap<u32, PbTableWatermarks> {
         fn extract_single_table_watermark(
             table_watermarks: &PbTableWatermarks,
             safe_epoch: u64,
