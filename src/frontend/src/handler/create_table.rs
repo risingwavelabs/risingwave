@@ -1070,6 +1070,7 @@ pub async fn generate_stream_graph_for_table(
                 source_watermarks,
                 col_id_gen,
                 append_only,
+                vec![],
             )
             .await?
         }
