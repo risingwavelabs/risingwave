@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -268,7 +269,15 @@ impl TableStreamReader {
     }
 
     #[try_stream(boxed, ok = TxnMsg, error = RwError)]
-    pub async fn into_stream(mut self) {
+    pub async fn into_stream(self) {
+        #[for_await]
+        for txn_msg in self.into_stream_with_rate_limit(None) {
+            yield txn_msg?;
+        }
+    }
+
+    #[try_stream(boxed, ok = TxnMsg, error = RwError)]
+    pub async fn into_stream_with_rate_limit(mut self, rate_limit: Option<NonZeroU64>) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match &txn_msg {
@@ -276,9 +285,13 @@ impl TableStreamReader {
                     _ = notifier.send(0);
                     yield txn_msg;
                 }
-                TxnMsg::Data(_, chunk) => {
+                TxnMsg::Data(txn_id, chunk) => {
+                    if let Some(rate_limit) = rate_limit {
+                        for chunk in chunk.split(rate_limit.get() as usize) {
+                            yield TxnMsg::Data(*txn_id, chunk);
+                        }
+                    }
                     _ = notifier.send(chunk.cardinality());
-                    yield txn_msg;
                 }
             }
         }

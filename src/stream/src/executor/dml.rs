@@ -116,7 +116,7 @@ impl DmlExecutor {
             .dml_manager
             .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let batch_reader = batch_reader.stream_reader().into_stream_with_rate_limit(self.rate_limit);
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
