@@ -113,9 +113,7 @@ pub fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
         };
         Ok(CompatibleSourceSchema::RowFormat(schema))
     } else {
-        Err(ParserError::ParserError(
-            "expect description of the format".to_string(),
-        ))
+        p.expected("description of the format", p.peek_token())
     }
 }
 
