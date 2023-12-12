@@ -13,8 +13,7 @@ with (
     location = 's3a://deltalake/deltalake-test',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.region='us-east-1'
+    s3.endpoint = 'http://127.0.0.1:9301'
 );
 
 statement ok
