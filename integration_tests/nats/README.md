@@ -11,17 +11,17 @@ docker compose up -d
 The cluster contains a RisingWave cluster and its necessary dependencies, a datagen that generates the data, a clichouse for sink.
 
 
-2. test sink: 
+2. test sink:
 
 ```sh
 // use nats to sub the data
 nats sub subject1 --server=localhost:4222
-// connect to risingwave and manually execute the sql file create_sink.sql 
+// connect to risingwave and manually execute the sql file create_sink.sql
 psql -h localhost -p 4566 -d dev -U root
 
 // check the result in your nats, you should see the output:
 -> nats sub subject1 --server=localhost:4222
-19:15:54 Subscribing on event1 
+19:15:54 Subscribing on event1
 [#1] Received on "event1" with reply "_INBOX.LejntfCKRbn7rQ989qw9Bm"
 {"id":2,"name":"Bob"}
 
@@ -38,7 +38,7 @@ psql -h localhost -p 4566 -d dev -U root
 
 3. test source:
 ```sh
-// connect to risingwave and manually execute the sql file create_source.sql 
+// connect to risingwave and manually execute the sql file create_source.sql
 psql -h localhost -p 4566 -d dev -U root
 
 // publish data into nats
@@ -46,7 +46,7 @@ nats pub subject2 --server=localhost:4222 --count=20 "{\"id\":{{Count}},\"name\"
 
 // check result
 dev=> select * from nats_source_table order by id;
- id |  name   
+ id |  name
 ----+---------
   1 | Alice1
   2 | Alice2
