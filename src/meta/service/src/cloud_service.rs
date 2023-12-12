@@ -22,7 +22,7 @@ use risingwave_connector::source::kafka::private_link::insert_privatelink_broker
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
@@ -34,14 +34,14 @@ use tonic::{Request, Response, Status};
 use crate::rpc::cloud_provider::AwsEc2Client;
 
 pub struct CloudServiceImpl {
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     aws_client: Option<AwsEc2Client>,
 }
 
 impl CloudServiceImpl {
-    pub fn new(metadata_fucker: MetadataFucker, aws_client: Option<AwsEc2Client>) -> Self {
+    pub fn new(metadata_manager: MetadataManager, aws_client: Option<AwsEc2Client>) -> Self {
         Self {
-            metadata_fucker,
+            metadata_manager,
             aws_client,
         }
     }
@@ -81,16 +81,14 @@ impl CloudService for CloudServiceImpl {
                 Status::invalid_argument(format!("connection.id is not an integer: {}", e))
             })?;
 
-            let connection = match &self.metadata_fucker {
-                MetadataFucker::V1(fucker) => {
-                    fucker
-                        .catalog_manager
+            let connection = match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
                         .get_connection_by_id(connection_id)
                         .await
                 }
-                MetadataFucker::V2(fucker) => {
-                    fucker
-                        .catalog_controller
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
                         .get_connection_by_id(connection_id as _)
                         .await
                 }

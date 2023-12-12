@@ -57,7 +57,7 @@ use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{LocalNotification, MetaSrvEnv, MetadataFucker, WorkerId};
+use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
@@ -166,7 +166,7 @@ pub struct GlobalBarrierManager {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
 
@@ -515,7 +515,7 @@ impl GlobalBarrierManager {
     pub fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
@@ -527,7 +527,7 @@ impl GlobalBarrierManager {
         let tracker = CreateMviewProgressTracker::new();
 
         let scale_controller = Arc::new(ScaleController::new(
-            &metadata_fucker,
+            &metadata_manager,
             source_manager.clone(),
             env.clone(),
         ));
@@ -536,7 +536,7 @@ impl GlobalBarrierManager {
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
             in_flight_barrier_nums,
-            metadata_fucker,
+            metadata_manager,
             hummock_manager,
             source_manager,
             scale_controller,
@@ -603,11 +603,9 @@ impl GlobalBarrierManager {
         );
 
         if !self.enable_recovery {
-            let job_exist = match &self.metadata_fucker {
-                MetadataFucker::V1(fucker) => {
-                    fucker.fragment_manager.has_any_table_fragments().await
-                }
-                MetadataFucker::V2(fucker) => fucker
+            let job_exist = match &self.metadata_manager {
+                MetadataManager::V1(mgr) => mgr.fragment_manager.has_any_table_fragments().await,
+                MetadataManager::V2(mgr) => mgr
                     .catalog_controller
                     .has_any_streaming_jobs()
                     .await
@@ -735,7 +733,7 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            self.metadata_fucker.clone(),
+            self.metadata_manager.clone(),
             self.hummock_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
@@ -1178,20 +1176,20 @@ impl GlobalBarrierManager {
     ) -> BarrierActorInfo {
         checkpoint_control.pre_resolve(command);
 
-        let info = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
+        let info = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
                 let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
                     checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
                 };
-                let all_nodes = fucker
+                let all_nodes = mgr
                     .cluster_manager
                     .list_active_streaming_compute_nodes()
                     .await;
-                let all_actor_infos = fucker.fragment_manager.load_all_actors(check_state).await;
+                let all_actor_infos = mgr.fragment_manager.load_all_actors(check_state).await;
 
                 BarrierActorInfo::resolve(all_nodes, all_actor_infos)
             }
-            MetadataFucker::V2(fucker) => {
+            MetadataManager::V2(mgr) => {
                 let check_state = |s: ActorState, table_id: ObjectId, actor_id: i32| {
                     checkpoint_control.can_actor_send_or_collect(
                         s,
@@ -1199,7 +1197,7 @@ impl GlobalBarrierManager {
                         actor_id as _,
                     )
                 };
-                let all_nodes = fucker
+                let all_nodes = mgr
                     .cluster_controller
                     .list_active_streaming_workers()
                     .await
@@ -1208,7 +1206,7 @@ impl GlobalBarrierManager {
                     .iter()
                     .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
                     .collect();
-                let all_actor_infos = fucker
+                let all_actor_infos = mgr
                     .catalog_controller
                     .load_all_actors(&pu_mappings, check_state)
                     .await
@@ -1227,13 +1225,9 @@ impl GlobalBarrierManager {
         let mut ddl_progress = self.tracker.lock().await.gen_ddl_progress();
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                for table in fucker
-                    .catalog_manager
-                    .list_persisted_creating_tables()
-                    .await
-                {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                for table in mgr.catalog_manager.list_persisted_creating_tables().await {
                     if table.table_type != TableType::MaterializedView as i32 {
                         continue;
                     }
@@ -1246,8 +1240,8 @@ impl GlobalBarrierManager {
                     }
                 }
             }
-            MetadataFucker::V2(fucker) => {
-                let mviews = fucker
+            MetadataManager::V2(mgr) => {
+                let mviews = mgr
                     .catalog_controller
                     .list_background_creating_mviews()
                     .await

@@ -29,7 +29,7 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
     TableUpstreamMvCountMap,
 };
-use crate::manager::{DdlType, MetadataFucker};
+use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
 use crate::MetaResult;
 
@@ -159,10 +159,10 @@ pub enum TrackingJob {
 }
 
 impl TrackingJob {
-    fn metadata_fucker(&self) -> &MetadataFucker {
+    fn metadata_manager(&self) -> &MetadataManager {
         match self {
-            TrackingJob::New(command) => &command.context.metadata_fucker,
-            TrackingJob::Recovered(recovered) => &recovered.metadata_fucker,
+            TrackingJob::New(command) => &command.context.metadata_manager,
+            TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
         }
     }
 
@@ -191,16 +191,14 @@ impl TrackingJob {
         // Update the state of the table fragments from `Creating` to `Created`, so that the
         // fragments can be scaled.
         if let Some(table_fragments) = table_fragments {
-            match self.metadata_fucker() {
-                MetadataFucker::V1(fucker) => {
-                    fucker
-                        .fragment_manager
+            match self.metadata_manager() {
+                MetadataManager::V1(mgr) => {
+                    mgr.fragment_manager
                         .mark_table_fragments_created(table_fragments.table_id())
                         .await?;
                 }
-                MetadataFucker::V2(fucker) => {
-                    fucker
-                        .catalog_controller
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
                         .finish_streaming_job(table_fragments.table_id().table_id as _)
                         .await?;
                 }
@@ -241,7 +239,7 @@ impl TrackingJob {
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
     pub finished: Notifier,
-    pub metadata_fucker: MetadataFucker,
+    pub metadata_manager: MetadataManager,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -293,7 +291,7 @@ impl CreateMviewProgressTracker {
         version_stats: HummockVersionStats,
         mut finished_notifiers: TableNotifierMap,
         mut table_fragment_map: TableFragmentMap,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -328,7 +326,7 @@ impl CreateMviewProgressTracker {
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
                 finished: finished_notifiers.remove(&creating_table_id).unwrap(),
-                metadata_fucker: metadata_fucker.clone(),
+                metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }

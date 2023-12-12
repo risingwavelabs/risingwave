@@ -29,31 +29,31 @@ use crate::model::{MetadataModel, TableFragments};
 use crate::MetaResult;
 
 #[derive(Clone)]
-pub enum MetadataFucker {
-    V1(MetadataFuckerV1),
-    V2(MetadataFuckerV2),
+pub enum MetadataManager {
+    V1(MetadataManagerV1),
+    V2(MetadataManagerV2),
 }
 
 #[derive(Clone)]
-pub struct MetadataFuckerV1 {
+pub struct MetadataManagerV1 {
     pub cluster_manager: ClusterManagerRef,
     pub catalog_manager: CatalogManagerRef,
     pub fragment_manager: FragmentManagerRef,
 }
 
 #[derive(Clone)]
-pub struct MetadataFuckerV2 {
+pub struct MetadataManagerV2 {
     pub cluster_controller: ClusterControllerRef,
     pub catalog_controller: CatalogControllerRef,
 }
 
-impl MetadataFucker {
+impl MetadataManager {
     pub fn new_v1(
         cluster_manager: ClusterManagerRef,
         catalog_manager: CatalogManagerRef,
         fragment_manager: FragmentManagerRef,
     ) -> Self {
-        Self::V1(MetadataFuckerV1 {
+        Self::V1(MetadataManagerV1 {
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -64,7 +64,7 @@ impl MetadataFucker {
         cluster_controller: ClusterControllerRef,
         catalog_controller: CatalogControllerRef,
     ) -> Self {
-        Self::V2(MetadataFuckerV2 {
+        Self::V2(MetadataManagerV2 {
             cluster_controller,
             catalog_controller,
         })
@@ -72,14 +72,13 @@ impl MetadataFucker {
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker
+            MetadataManager::V1(mgr) => Ok(mgr
                 .cluster_manager
                 .get_worker_by_id(worker_id)
                 .await
                 .map(|w| w.worker_node)),
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .get_worker_by_id(worker_id as _)
                     .await
             }
@@ -88,9 +87,9 @@ impl MetadataFucker {
 
     pub async fn count_worker_node(&self) -> MetaResult<HashMap<WorkerType, u64>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker.cluster_manager.count_worker_node().await),
-            MetadataFucker::V2(fucker) => {
-                let node_map = fucker.cluster_controller.count_worker_by_type().await?;
+            MetadataManager::V1(mgr) => Ok(mgr.cluster_manager.count_worker_node().await),
+            MetadataManager::V2(mgr) => {
+                let node_map = mgr.cluster_controller.count_worker_by_type().await?;
                 Ok(node_map
                     .into_iter()
                     .map(|(ty, cnt)| (ty.into(), cnt as u64))
@@ -101,14 +100,13 @@ impl MetadataFucker {
 
     pub async fn get_worker_info_by_id(&self, worker_id: WorkerId) -> Option<WorkerExtraInfo> {
         match &self {
-            MetadataFucker::V1(fucker) => fucker
+            MetadataManager::V1(mgr) => mgr
                 .cluster_manager
                 .get_worker_by_id(worker_id)
                 .await
                 .map(Into::into),
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .get_worker_info_by_id(worker_id as _)
                     .await
             }
@@ -123,12 +121,12 @@ impl MetadataFucker {
         resource: PbResource,
     ) -> MetaResult<WorkerId> {
         match &self {
-            MetadataFucker::V1(fucker) => fucker
+            MetadataManager::V1(mgr) => mgr
                 .cluster_manager
                 .add_worker_node(r#type, host_address, property, resource)
                 .await
                 .map(|w| w.id),
-            MetadataFucker::V2(fucker) => fucker
+            MetadataManager::V2(mgr) => mgr
                 .cluster_controller
                 .add_worker(r#type, host_address, property, resource)
                 .await
@@ -142,13 +140,12 @@ impl MetadataFucker {
         worker_state: Option<State>,
     ) -> MetaResult<Vec<PbWorkerNode>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker
+            MetadataManager::V1(mgr) => Ok(mgr
                 .cluster_manager
                 .list_worker_node(worker_type, worker_state)
                 .await),
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .list_workers(worker_type.map(Into::into), worker_state.map(Into::into))
                     .await
             }
@@ -157,34 +154,27 @@ impl MetadataFucker {
 
     pub async fn list_active_streaming_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
         match self {
-            MetadataFucker::V1(fucker) => Ok(fucker
+            MetadataManager::V1(mgr) => Ok(mgr
                 .cluster_manager
                 .list_active_streaming_compute_nodes()
                 .await),
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
-                    .list_active_streaming_workers()
-                    .await
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller.list_active_streaming_workers().await
             }
         }
     }
 
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
         match self {
-            MetadataFucker::V1(fucker) => {
-                Ok(fucker.cluster_manager.get_streaming_cluster_info().await)
-            }
-            MetadataFucker::V2(fucker) => {
-                fucker.cluster_controller.get_streaming_cluster_info().await
-            }
+            MetadataManager::V1(mgr) => Ok(mgr.cluster_manager.get_streaming_cluster_info().await),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.get_streaming_cluster_info().await,
         }
     }
 
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<u32, TableOption>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker.catalog_manager.get_all_table_options().await),
-            MetadataFucker::V2(fucker) => fucker
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.get_all_table_options().await),
+            MetadataManager::V2(mgr) => mgr
                 .catalog_controller
                 .get_all_table_options()
                 .await
@@ -194,15 +184,11 @@ impl MetadataFucker {
 
     pub async fn get_table_name_type_mapping(&self) -> MetaResult<HashMap<u32, (String, String)>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker
-                .catalog_manager
-                .get_table_name_and_type_mapping()
-                .await),
-            MetadataFucker::V2(fucker) => {
-                let mappings = fucker
-                    .catalog_controller
-                    .get_table_name_type_mapping()
-                    .await?;
+            MetadataManager::V1(mgr) => {
+                Ok(mgr.catalog_manager.get_table_name_and_type_mapping().await)
+            }
+            MetadataManager::V2(mgr) => {
+                let mappings = mgr.catalog_controller.get_table_name_type_mapping().await?;
                 Ok(mappings
                     .into_iter()
                     .map(|(id, value)| (id as u32, value))
@@ -213,9 +199,9 @@ impl MetadataFucker {
 
     pub async fn get_created_table_ids(&self) -> MetaResult<Vec<u32>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker.catalog_manager.get_created_table_ids().await),
-            MetadataFucker::V2(fucker) => {
-                let table_ids = fucker.catalog_controller.get_created_table_ids().await?;
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.get_created_table_ids().await),
+            MetadataManager::V2(mgr) => {
+                let table_ids = mgr.catalog_controller.get_created_table_ids().await?;
                 Ok(table_ids.into_iter().map(|id| id as u32).collect())
             }
         }
@@ -223,12 +209,12 @@ impl MetadataFucker {
 
     pub async fn get_job_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         match &self {
-            MetadataFucker::V1(fucker) => fucker
+            MetadataManager::V1(mgr) => mgr
                 .fragment_manager
                 .get_mv_id_to_internal_table_ids_mapping(),
-            MetadataFucker::V2(fucker) => {
+            MetadataManager::V2(mgr) => {
                 let job_internal_table_ids =
-                    fucker.catalog_controller.get_job_internal_table_ids().await;
+                    mgr.catalog_controller.get_job_internal_table_ids().await;
                 job_internal_table_ids.map(|ids| {
                     ids.into_iter()
                         .map(|(id, internal_ids)| {
@@ -245,14 +231,13 @@ impl MetadataFucker {
 
     pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<TableFragments> {
         match self {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .fragment_manager
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
                     .select_table_fragments_by_table_id(id)
                     .await
             }
-            MetadataFucker::V2(fucker) => {
-                let pb_table_fragments = fucker
+            MetadataManager::V2(mgr) => {
+                let pb_table_fragments = mgr
                     .catalog_controller
                     .get_job_fragments_by_id(id.table_id as _)
                     .await?;
@@ -266,16 +251,15 @@ impl MetadataFucker {
         ids: &[TableId],
     ) -> MetaResult<Vec<TableFragments>> {
         match self {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .fragment_manager
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
                     .select_table_fragments_by_ids(ids)
                     .await
             }
-            MetadataFucker::V2(fucker) => {
+            MetadataManager::V2(mgr) => {
                 let mut table_fragments = vec![];
                 for id in ids {
-                    let pb_table_fragments = fucker
+                    let pb_table_fragments = mgr
                         .catalog_controller
                         .get_job_fragments_by_id(id.table_id as _)
                         .await?;
@@ -291,12 +275,11 @@ impl MetadataFucker {
         include_inactive: bool,
     ) -> MetaResult<HashMap<WorkerId, Vec<PbStreamActor>>> {
         match &self {
-            MetadataFucker::V1(fucker) => Ok(fucker
-                .fragment_manager
-                .all_node_actors(include_inactive)
-                .await),
-            MetadataFucker::V2(fucker) => {
-                let table_fragments = fucker.catalog_controller.table_fragments().await?;
+            MetadataManager::V1(mgr) => {
+                Ok(mgr.fragment_manager.all_node_actors(include_inactive).await)
+            }
+            MetadataManager::V2(mgr) => {
+                let table_fragments = mgr.catalog_controller.table_fragments().await?;
                 let mut actor_maps = HashMap::new();
                 for (_, fragments) in table_fragments {
                     let tf = TableFragments::from_protobuf(fragments);
@@ -312,13 +295,12 @@ impl MetadataFucker {
 
     pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         match self {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .fragment_manager
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
                     .drop_table_fragments_vec(table_ids)
                     .await
             }
-            MetadataFucker::V2(_) => {
+            MetadataManager::V2(_) => {
                 // Do nothing. Need to refine drop and cancel process.
                 Ok(())
             }

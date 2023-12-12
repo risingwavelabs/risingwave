@@ -35,7 +35,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::manager::MetadataFucker;
+use crate::manager::MetadataManager;
 use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
@@ -43,10 +43,10 @@ pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
-    pub metadata_fucker: MetadataFucker,
+    pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    // TODO: replace it with MetadataFucker.
+    // TODO: replace it with MetadataManager.
     pub meta_store: MetaStoreRef,
 }
 
@@ -105,7 +105,7 @@ pub(super) mod handlers {
             .map_err(|_| anyhow!("invalid worker type"))
             .map_err(err)?;
         let mut result = srv
-            .metadata_fucker
+            .metadata_manager
             .list_worker_node(Some(worker_type), None)
             .await
             .map_err(err)?;
@@ -174,12 +174,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
         let mut node_actors = srv
-            .metadata_fucker
+            .metadata_manager
             .all_node_actors(true)
             .await
             .map_err(err)?;
         let nodes = srv
-            .metadata_fucker
+            .metadata_manager
             .list_active_streaming_compute_nodes()
             .await
             .map_err(err)?;
@@ -234,7 +234,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
-            .metadata_fucker
+            .metadata_manager
             .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await
             .map_err(err)?;
@@ -247,7 +247,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
-            .metadata_fucker
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
             .map_err(err)?
@@ -262,7 +262,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
         let worker_node = srv
-            .metadata_fucker
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
             .map_err(err)?
@@ -281,7 +281,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
         let worker_node = srv
-            .metadata_fucker
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
             .map_err(err)?
@@ -314,7 +314,7 @@ pub(super) mod handlers {
         let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
 
         let worker_node = srv
-            .metadata_fucker
+            .metadata_manager
             .get_worker_by_id(worker_id)
             .await
             .map_err(err)?

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
@@ -28,12 +28,12 @@ use crate::MetaError;
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl {
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
 }
 
 impl ClusterServiceImpl {
-    pub fn new(metadata_fucker: MetadataFucker) -> Self {
-        ClusterServiceImpl { metadata_fucker }
+    pub fn new(metadata_manager: MetadataManager) -> Self {
+        ClusterServiceImpl { metadata_manager }
     }
 }
 
@@ -51,7 +51,7 @@ impl ClusterService for ClusterServiceImpl {
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
         let result = self
-            .metadata_fucker
+            .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
             .await;
         match result {
@@ -84,16 +84,14 @@ impl ClusterService for ClusterServiceImpl {
         let schedulability = req.get_schedulability()?;
         let worker_ids = req.worker_ids;
 
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .cluster_manager
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.cluster_manager
                     .update_schedulability(worker_ids, schedulability)
                     .await?
             }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .update_schedulability(
                         worker_ids.into_iter().map(|id| id as WorkerId).collect(),
                         schedulability,
@@ -113,11 +111,10 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.cluster_manager.activate_worker_node(host).await?,
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.activate_worker_node(host).await?,
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .activate_worker(req.node_id as _)
                     .await?
             }
@@ -131,12 +128,12 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                let _ = fucker.cluster_manager.delete_worker_node(host).await?;
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let _ = mgr.cluster_manager.delete_worker_node(host).await?;
             }
-            MetadataFucker::V2(fucker) => {
-                let _ = fucker.cluster_controller.delete_worker(host).await?;
+            MetadataManager::V2(mgr) => {
+                let _ = mgr.cluster_controller.delete_worker(host).await?;
             }
         }
 
@@ -156,7 +153,7 @@ impl ClusterService for ClusterServiceImpl {
         };
 
         let node_list = self
-            .metadata_fucker
+            .metadata_manager
             .list_worker_node(worker_type, worker_states)
             .await?;
         Ok(Response::new(ListAllNodesResponse {

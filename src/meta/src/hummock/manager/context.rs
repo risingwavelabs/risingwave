@@ -76,7 +76,7 @@ impl HummockManager {
     /// Checks whether `context_id` is valid.
     pub async fn check_context(&self, context_id: HummockContextId) -> Result<bool> {
         Ok(self
-            .metadata_fucker()
+            .metadata_manager()
             .get_worker_by_id(context_id)
             .await
             .map_err(|err| Error::MetaStore(err.into()))?

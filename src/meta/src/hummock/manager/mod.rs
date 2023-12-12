@@ -82,7 +82,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, MetadataFucker, TableId,
+    ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, MetadataManager, TableId,
     META_NODE_ID,
 };
 use crate::model::{
@@ -117,7 +117,7 @@ const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 pub struct HummockManager {
     pub env: MetaSrvEnv,
 
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     /// Lock order: compaction, versioning, compaction_group_manager.
     /// - Lock compaction first, then versioning, and finally compaction_group_manager.
     /// - This order should be strictly followed to prevent deadlock.
@@ -296,7 +296,7 @@ impl CommitEpochInfo {
 impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
@@ -307,7 +307,7 @@ impl HummockManager {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
-            metadata_fucker,
+            metadata_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -335,11 +335,11 @@ impl HummockManager {
                 .await
                 .unwrap();
         let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-        let metadata_fucker =
-            MetadataFucker::new_v1(cluster_manager, catalog_manager, fragment_manager);
+        let metadata_manager =
+            MetadataManager::new_v1(cluster_manager, catalog_manager, fragment_manager);
         Self::new_impl(
             env,
-            metadata_fucker,
+            metadata_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -351,7 +351,7 @@ impl HummockManager {
 
     async fn new_impl(
         env: MetaSrvEnv,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
@@ -412,7 +412,7 @@ impl HummockManager {
                 Default::default(),
             ),
             metrics,
-            metadata_fucker,
+            metadata_manager,
             compaction_group_manager,
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
@@ -805,7 +805,7 @@ impl HummockManager {
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self
-            .metadata_fucker
+            .metadata_manager
             .get_all_table_options()
             .await
             .map_err(|err| Error::MetaStore(err.into()))?;
@@ -2020,8 +2020,8 @@ impl HummockManager {
         .await
     }
 
-    pub fn metadata_fucker(&self) -> &MetadataFucker {
-        &self.metadata_fucker
+    pub fn metadata_manager(&self) -> &MetadataManager {
+        &self.metadata_manager
     }
 
     fn notify_last_version_delta(&self, versioning: &Versioning) {
@@ -2233,7 +2233,7 @@ impl HummockManager {
                                     };
 
                                     if let Some(mv_id_to_all_table_ids) = hummock_manager
-                                        .metadata_fucker
+                                        .metadata_manager
                                         .get_job_id_to_internal_table_ids_mapping()
                                         .await
                                     {
@@ -2480,7 +2480,7 @@ impl HummockManager {
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
-        let created_tables = match self.metadata_fucker.get_created_table_ids().await {
+        let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => created_tables,
             Err(err) => {
                 tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");

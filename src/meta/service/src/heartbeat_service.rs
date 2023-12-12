@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
 }
 
 impl HeartbeatServiceImpl {
-    pub fn new(metadata_fucker: MetadataFucker) -> Self {
-        HeartbeatServiceImpl { metadata_fucker }
+    pub fn new(metadata_manager: MetadataManager) -> Self {
+        HeartbeatServiceImpl { metadata_manager }
     }
 }
 
@@ -42,11 +42,10 @@ impl HeartbeatService for HeartbeatServiceImpl {
             .into_iter()
             .filter_map(|node_info| node_info.info)
             .collect_vec();
-        let result = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.cluster_manager.heartbeat(req.node_id, info).await,
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .cluster_controller
+        let result = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.heartbeat(req.node_id, info).await,
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
                     .heartbeat(req.node_id as _, info)
                     .await
             }

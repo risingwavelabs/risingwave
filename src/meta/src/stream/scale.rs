@@ -50,7 +50,7 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{
     ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
-    MetadataFucker, WorkerId,
+    MetadataManager, WorkerId,
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::serving::{
@@ -378,19 +378,19 @@ pub struct ScaleController {
 
 impl ScaleController {
     pub fn new(
-        metadata_fucker: &MetadataFucker,
+        metadata_manager: &MetadataManager,
         source_manager: SourceManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
-        // TODO: use metadata fucker in scale controller instead.
-        match metadata_fucker {
-            MetadataFucker::V1(fucker) => Self {
-                fragment_manager: fucker.fragment_manager.clone(),
-                cluster_manager: fucker.cluster_manager.clone(),
+        // TODO: use metadata mgr in scale controller instead.
+        match metadata_manager {
+            MetadataManager::V1(mgr) => Self {
+                fragment_manager: mgr.fragment_manager.clone(),
+                cluster_manager: mgr.cluster_manager.clone(),
                 source_manager,
                 env,
             },
-            MetadataFucker::V2(_) => unimplemented!("support v2 in scale controller"),
+            MetadataManager::V2(_) => unimplemented!("support v2 in scale controller"),
         }
     }
 
@@ -2086,11 +2086,11 @@ impl GlobalStreamManager {
             reschedules: reschedule_fragment,
         };
 
-        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unimplemented!("support reschedule in v2");
         };
 
-        let fragment_manager_ref = fucker.fragment_manager.clone();
+        let fragment_manager_ref = mgr.fragment_manager.clone();
 
         revert_funcs.push(Box::pin(async move {
             fragment_manager_ref
@@ -2110,12 +2110,12 @@ impl GlobalStreamManager {
     async fn trigger_scale_out(&self, workers: Vec<WorkerId>) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
-        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unimplemented!("support reschedule in v2");
         };
 
         let fragment_worker_changes = {
-            let guard = fucker.fragment_manager.get_fragment_read_guard().await;
+            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
             let mut fragment_worker_changes = HashMap::new();
             for table_fragments in guard.table_fragments().values() {
                 for fragment_id in table_fragments.fragment_ids() {
@@ -2171,7 +2171,7 @@ impl GlobalStreamManager {
         ticker.reset();
 
         let worker_nodes = self
-            .metadata_fucker
+            .metadata_manager
             .list_active_streaming_compute_nodes()
             .await
             .expect("list active streaming compute nodes");

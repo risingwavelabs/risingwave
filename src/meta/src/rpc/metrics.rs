@@ -42,7 +42,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::ClusterControllerRef;
 use crate::controller::utils::PartialFragmentStateTables;
 use crate::hummock::HummockManagerRef;
-use crate::manager::MetadataFucker;
+use crate::manager::MetadataManager;
 use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
@@ -697,7 +697,7 @@ impl Default for MetaMetrics {
 }
 
 pub fn start_worker_info_monitor(
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
@@ -717,7 +717,7 @@ pub fn start_worker_info_monitor(
                 }
             }
 
-            let node_map = match metadata_fucker.count_worker_node().await {
+            let node_map = match metadata_manager.count_worker_node().await {
                 Ok(node_map) => node_map,
                 Err(err) => {
                     tracing::warn!(error = %err.as_report(), "fail to count worker node");
@@ -875,7 +875,7 @@ pub async fn refresh_fragment_info_metrics_v2(
 }
 
 pub fn start_fragment_info_monitor(
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -897,16 +897,16 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
-            let (cluster_manager, catalog_manager, fragment_manager) = match &metadata_fucker {
-                MetadataFucker::V1(fucker) => (
-                    &fucker.cluster_manager,
-                    &fucker.catalog_manager,
-                    &fucker.fragment_manager,
+            let (cluster_manager, catalog_manager, fragment_manager) = match &metadata_manager {
+                MetadataManager::V1(mgr) => (
+                    &mgr.cluster_manager,
+                    &mgr.catalog_manager,
+                    &mgr.fragment_manager,
                 ),
-                MetadataFucker::V2(fucker) => {
+                MetadataManager::V2(mgr) => {
                     refresh_fragment_info_metrics_v2(
-                        &fucker.catalog_controller,
-                        &fucker.cluster_controller,
+                        &mgr.catalog_controller,
+                        &mgr.cluster_controller,
                         &hummock_manager,
                         meta_metrics.clone(),
                     )

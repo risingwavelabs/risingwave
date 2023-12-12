@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
     FragmentParallelUnitMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
@@ -24,17 +24,17 @@ use crate::serving::ServingVnodeMappingRef;
 
 pub struct ServingServiceImpl {
     serving_vnode_mapping: ServingVnodeMappingRef,
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
 }
 
 impl ServingServiceImpl {
     pub fn new(
         serving_vnode_mapping: ServingVnodeMappingRef,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
     ) -> Self {
         Self {
             serving_vnode_mapping,
-            metadata_fucker,
+            metadata_manager,
         }
     }
 }
@@ -55,9 +55,9 @@ impl ServingService for ServingServiceImpl {
             })
             .collect();
         let fragment_to_table = {
-            match &self.metadata_fucker {
-                MetadataFucker::V1(fucker) => {
-                    let guard = fucker.fragment_manager.get_fragment_read_guard().await;
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    let guard = mgr.fragment_manager.get_fragment_read_guard().await;
                     guard
                         .table_fragments()
                         .iter()
@@ -68,7 +68,7 @@ impl ServingService for ServingServiceImpl {
                         })
                         .collect()
                 }
-                MetadataFucker::V2(fucker) => fucker
+                MetadataManager::V2(mgr) => mgr
                     .catalog_controller
                     .fragment_job_mapping()
                     .await?

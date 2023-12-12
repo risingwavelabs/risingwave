@@ -23,7 +23,7 @@ use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -53,7 +53,7 @@ use crate::{MetaError, MetaResult};
 pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
@@ -64,7 +64,7 @@ impl DdlServiceImpl {
     pub async fn new(
         env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
@@ -76,7 +76,7 @@ impl DdlServiceImpl {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
-            metadata_fucker.clone(),
+            metadata_manager.clone(),
             catalog_manager,
             stream_manager,
             source_manager,
@@ -88,7 +88,7 @@ impl DdlServiceImpl {
         .await;
         Self {
             env,
-            metadata_fucker,
+            metadata_manager,
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
@@ -561,9 +561,9 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.list_tables().await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.list_tables().await?,
+        let tables = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_tables().await?,
         };
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
@@ -613,17 +613,16 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let table = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                let database = fucker
+        let table = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let database = mgr
                     .catalog_manager
                     .list_databases()
                     .await
                     .into_iter()
                     .find(|db| db.name == req.database_name);
                 if let Some(db) = database {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .list_tables()
                         .await
                         .into_iter()
@@ -632,9 +631,8 @@ impl DdlService for DdlServiceImpl {
                     None
                 }
             }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .get_table_by_name(&req.database_name, &req.table_name)
                     .await?
             }
@@ -792,9 +790,9 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.list_connections().await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.list_connections().await?,
+        let conns = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_connections().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_connections().await?,
         };
 
         Ok(Response::new(ListConnectionsResponse {
@@ -848,16 +846,14 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .catalog_manager
+        let ret = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
                     .get_tables(&request.into_inner().table_ids)
                     .await
             }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .get_table_by_ids(
                         request
                             .into_inner()
@@ -890,16 +886,14 @@ impl DdlServiceImpl {
     }
 
     async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .catalog_manager
+        let connection = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
                     .get_connection_by_id(connection_id)
                     .await?
             }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .get_connection_by_id(connection_id as _)
                     .await?
             }

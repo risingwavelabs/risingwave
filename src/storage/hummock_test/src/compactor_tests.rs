@@ -244,7 +244,7 @@ pub(crate) mod tests {
                 .sstable_id_remote_fetch_number,
         ));
         let worker_node_id2 = hummock_manager_ref
-            .metadata_fucker()
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::ComputeNode,
                 HostAddress::default(),

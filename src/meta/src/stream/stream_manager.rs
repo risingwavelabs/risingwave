@@ -33,7 +33,7 @@ use uuid::Uuid;
 use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataFucker, WorkerId};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -180,7 +180,7 @@ pub struct ReplaceTableContext {
 pub struct GlobalStreamManager {
     pub env: MetaSrvEnv,
 
-    pub metadata_fucker: MetadataFucker,
+    pub metadata_manager: MetadataManager,
 
     /// Broadcasts and collect barriers
     pub barrier_scheduler: BarrierScheduler,
@@ -201,19 +201,19 @@ pub struct GlobalStreamManager {
 impl GlobalStreamManager {
     pub fn new(
         env: MetaSrvEnv,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
         let scale_controller = Arc::new(ScaleController::new(
-            &metadata_fucker,
+            &metadata_manager,
             source_manager.clone(),
             env.clone(),
         ));
         Ok(Self {
             env,
-            metadata_fucker,
+            metadata_manager,
             barrier_scheduler,
             source_manager,
             hummock_manager,
@@ -283,7 +283,7 @@ impl GlobalStreamManager {
                     CreatingState::Canceling { finish_tx } => {
                         tracing::debug!(id=?table_id, "cancelling streaming job");
                         if let Ok(table_fragments) = self
-                            .metadata_fucker
+                            .metadata_manager
                             .get_job_fragments_by_id(&table_id)
                             .await
                         {
@@ -298,7 +298,7 @@ impl GlobalStreamManager {
                                 );
                                 let node_actors = table_fragments.worker_actor_ids();
                                 let cluster_info =
-                                    self.metadata_fucker.get_streaming_cluster_info().await?;
+                                    self.metadata_manager.get_streaming_cluster_info().await?;
                                 let node_actors = node_actors
                                     .into_iter()
                                     .map(|(id, actor_ids)| {
@@ -322,7 +322,7 @@ impl GlobalStreamManager {
                                 });
                                 try_join_all(futures).await?;
 
-                                self.metadata_fucker
+                                self.metadata_manager
                                     .drop_streaming_job_by_ids(&HashSet::from_iter(
                                         std::iter::once(table_id),
                                     ))
@@ -482,7 +482,7 @@ impl GlobalStreamManager {
             .await
         {
             if create_type == CreateType::Foreground {
-                self.metadata_fucker
+                self.metadata_manager
                     .drop_streaming_job_by_ids(&HashSet::from_iter(std::iter::once(table_id)))
                     .await?;
             }
@@ -525,7 +525,7 @@ impl GlobalStreamManager {
             })
             .await
         {
-            self.metadata_fucker
+            self.metadata_manager
                 .drop_streaming_job_by_ids(&HashSet::from_iter(std::iter::once(dummy_table_id)))
                 .await?;
             return Err(err);
@@ -549,10 +549,10 @@ impl GlobalStreamManager {
     }
 
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
-        let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unimplemented!("call drop_streaming_jobs_impl_v2 instead.")
         };
-        let table_fragments_vec = fucker
+        let table_fragments_vec = mgr
             .fragment_manager
             .select_table_fragments_by_ids(&table_ids)
             .await?;
@@ -622,7 +622,7 @@ impl GlobalStreamManager {
             tracing::debug!(?id, "cancelling recovered streaming job");
             let result: MetaResult<()> = try {
                 let fragment = self
-                    .metadata_fucker.get_job_fragments_by_id(&id)
+                    .metadata_manager.get_job_fragments_by_id(&id)
                     .await?;
                 if fragment.is_created() {
                     Err(MetaError::invalid_parameter(format!(
@@ -687,7 +687,7 @@ mod tests {
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
-        MetaSrvEnv, MetadataFuckerV1, RelationIdEnum, StreamingClusterInfo,
+        MetaSrvEnv, MetadataManagerV1, RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
@@ -857,7 +857,7 @@ mod tests {
 
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
-            let metadata_fucker = MetadataFucker::new_v1(
+            let metadata_manager = MetadataManager::new_v1(
                 cluster_manager.clone(),
                 catalog_manager.clone(),
                 fragment_manager.clone(),
@@ -865,7 +865,7 @@ mod tests {
 
             let hummock_manager = HummockManager::new(
                 env.clone(),
-                metadata_fucker,
+                metadata_manager,
                 meta_metrics.clone(),
                 compactor_manager.clone(),
                 tx,
@@ -891,7 +891,7 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
-            let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
+            let metadata_manager = MetadataManager::V1(MetadataManagerV1 {
                 cluster_manager: cluster_manager.clone(),
                 catalog_manager: catalog_manager.clone(),
                 fragment_manager: fragment_manager.clone(),
@@ -900,7 +900,7 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
-                metadata_fucker.clone(),
+                metadata_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
                 sink_manager,
@@ -909,7 +909,7 @@ mod tests {
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
-                metadata_fucker,
+                metadata_manager,
                 barrier_scheduler.clone(),
                 source_manager.clone(),
                 hummock_manager,
@@ -950,7 +950,7 @@ mod tests {
                     unschedulable_parallel_units: _,
                 }: StreamingClusterInfo = self
                     .global_stream_manager
-                    .metadata_fucker
+                    .metadata_manager
                     .get_streaming_cluster_info()
                     .await?;
 
@@ -1079,7 +1079,7 @@ mod tests {
         // test get table_fragment;
         let select_err_1 = services
             .global_stream_manager
-            .metadata_fucker
+            .metadata_manager
             .get_job_fragments_by_id(&table_id)
             .await
             .unwrap_err();
@@ -1151,7 +1151,7 @@ mod tests {
 
         let table_fragments = services
             .global_stream_manager
-            .metadata_fucker
+            .metadata_manager
             .get_job_fragments_by_id(&table_id)
             .await
             .unwrap();
@@ -1167,7 +1167,7 @@ mod tests {
         // test get table_fragment;
         let select_err_1 = services
             .global_stream_manager
-            .metadata_fucker
+            .metadata_manager
             .get_job_fragments_by_id(&table_fragments.table_id())
             .await
             .unwrap_err();

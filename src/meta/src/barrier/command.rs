@@ -38,7 +38,7 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, MetadataFucker, WorkerId};
+use crate::manager::{DdlType, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
@@ -238,7 +238,7 @@ impl Command {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub struct CommandContext {
-    pub metadata_fucker: MetadataFucker,
+    pub metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
 
@@ -272,7 +272,7 @@ pub struct CommandContext {
 impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
@@ -286,7 +286,7 @@ impl CommandContext {
         span: tracing::Span,
     ) -> Self {
         Self {
-            metadata_fucker,
+            metadata_manager,
             hummock_manager,
             client_pool,
             info: Arc::new(info),
@@ -354,14 +354,11 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs(table_ids) => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unreachable!("only available in v1");
                 };
 
-                let actors = fucker
-                    .fragment_manager
-                    .get_table_actor_ids(table_ids)
-                    .await?;
+                let actors = mgr.fragment_manager.get_table_actor_ids(table_ids).await?;
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
@@ -447,7 +444,7 @@ impl CommandContext {
             }
 
             Command::RescheduleFragment { reschedules, .. } => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unimplemented!("implement scale functions in v2");
                 };
                 let mut dispatcher_update = HashMap::new();
@@ -456,7 +453,7 @@ impl CommandContext {
                         &reschedule.upstream_fragment_dispatcher_ids
                     {
                         // Find the actors of the upstream fragment.
-                        let upstream_actor_ids = fucker
+                        let upstream_actor_ids = mgr
                             .fragment_manager
                             .get_running_actors_of_fragment(upstream_fragment_id)
                             .await?;
@@ -490,7 +487,7 @@ impl CommandContext {
                 for (&fragment_id, reschedule) in reschedules {
                     for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                         // Find the actors of the downstream fragment.
-                        let downstream_actor_ids = fucker
+                        let downstream_actor_ids = mgr
                             .fragment_manager
                             .get_running_actors_of_fragment(downstream_fragment_id)
                             .await?;
@@ -718,11 +715,10 @@ impl CommandContext {
             Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unimplemented!("implement config change funcs in v2");
                 };
-                fucker
-                    .fragment_manager
+                mgr.fragment_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
                 self.source_manager
@@ -731,15 +727,14 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs(table_ids) => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unreachable!("only available in v1");
                 };
                 // Tell compute nodes to drop actors.
-                let node_actors = fucker.fragment_manager.table_node_actors(table_ids).await?;
+                let node_actors = mgr.fragment_manager.table_node_actors(table_ids).await?;
                 self.clean_up(node_actors).await?;
                 // Drop fragment info in meta store.
-                fucker
-                    .fragment_manager
+                mgr.fragment_manager
                     .drop_table_fragments_vec(table_ids)
                     .await?;
             }
@@ -776,12 +771,12 @@ impl CommandContext {
                     .unregister_table_ids_fail_fast(&table_ids)
                     .await;
 
-                match &self.metadata_fucker {
-                    MetadataFucker::V1(fucker) => {
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
                         // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                         // We need to cleanup the table state. So we can do it here.
                         // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                        if let Err(e) = fucker
+                        if let Err(e) = mgr
                             .catalog_manager
                             .cancel_create_table_procedure(
                                 table_fragments.table_id().table_id,
@@ -800,23 +795,19 @@ impl CommandContext {
                             // Otherwise our persisted state is dirty.
                             let mut table_ids = table_fragments.internal_table_ids();
                             table_ids.push(table_id);
-                            fucker
-                                .catalog_manager
-                                .assert_tables_deleted(table_ids)
-                                .await;
+                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
                         }
 
                         // We need to drop table fragments here,
                         // since this is not done in stream manager (foreground ddl)
                         // OR barrier manager (background ddl)
-                        fucker
-                            .fragment_manager
+                        mgr.fragment_manager
                             .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
                                 table_fragments.table_id(),
                             )))
                             .await?;
                     }
-                    MetadataFucker::V2(_fucker) => {
+                    MetadataManager::V2(_mgr) => {
                         unimplemented!("implement cancel for sql backend")
                     }
                 }
@@ -829,7 +820,7 @@ impl CommandContext {
                 init_split_assignment,
                 ..
             } => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unimplemented!("implement post collect logic for v2");
                 };
                 let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
@@ -841,8 +832,7 @@ impl CommandContext {
                         .collect();
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
-                fucker
-                    .fragment_manager
+                mgr.fragment_manager
                     .post_create_table_fragments(
                         &table_fragments.table_id(),
                         dependent_table_actors,
@@ -877,21 +867,17 @@ impl CommandContext {
                 dispatchers,
                 ..
             } => {
-                let MetadataFucker::V1(fucker) = &self.metadata_fucker else {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unimplemented!("implement replace funcs in v2");
                 };
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
                 // Tell compute nodes to drop actors.
-                let node_actors = fucker
-                    .fragment_manager
-                    .table_node_actors(&table_ids)
-                    .await?;
+                let node_actors = mgr.fragment_manager.table_node_actors(&table_ids).await?;
                 self.clean_up(node_actors).await?;
 
                 // Drop fragment info in meta store.
-                fucker
-                    .fragment_manager
+                mgr.fragment_manager
                     .post_replace_table(
                         old_table_fragments,
                         new_table_fragments,

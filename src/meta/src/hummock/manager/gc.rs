@@ -29,7 +29,7 @@ use risingwave_pb::hummock::FullScanTask;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock, ResponseEvent};
 use crate::hummock::HummockManager;
-use crate::manager::MetadataFucker;
+use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::Transaction;
 
@@ -173,7 +173,7 @@ impl HummockManager {
         let spin_interval =
             Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
         let watermark =
-            collect_global_gc_watermark(self.metadata_fucker().clone(), spin_interval).await?;
+            collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
         metrics.full_gc_last_object_id_watermark.set(watermark as _);
         let candidate_sst_number = object_ids.len();
         metrics
@@ -202,16 +202,16 @@ impl HummockManager {
 /// Returns a global GC watermark. The watermark only guards SSTs created before this
 /// invocation.
 pub async fn collect_global_gc_watermark(
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     spin_interval: Duration,
 ) -> Result<HummockSstableObjectId> {
     let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = [
-        metadata_fucker
+        metadata_manager
             .list_active_streaming_compute_nodes()
             .await
             .map_err(|err| Error::MetaStore(err.into()))?,
-        metadata_fucker
+        metadata_manager
             .list_worker_node(Some(WorkerType::Compactor), Some(Running))
             .await
             .map_err(|err| Error::MetaStore(err.into()))?,
@@ -229,11 +229,13 @@ pub async fn collect_global_gc_watermark(
         // which doesn't correctly guard target SSTs.
         // The second heartbeat guarantees its watermark is took after the start of this method.
         let worker_id = worker.id;
-        let metadata_fucker_clone = metadata_fucker.clone();
+        let metadata_manager_clone = metadata_manager.clone();
         worker_futures.push(tokio::spawn(async move {
             let mut init_version_id: Option<u64> = None;
             loop {
-                let worker_info = match metadata_fucker_clone.get_worker_info_by_id(worker_id).await
+                let worker_info = match metadata_manager_clone
+                    .get_worker_info_by_id(worker_id)
+                    .await
                 {
                     None => {
                         return None;

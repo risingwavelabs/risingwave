@@ -209,7 +209,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     )> {
         let context_id = self
             .hummock_manager
-            .metadata_fucker()
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {

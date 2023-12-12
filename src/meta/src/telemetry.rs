@@ -22,7 +22,7 @@ use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
-use crate::manager::MetadataFucker;
+use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,14 +63,14 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 
 #[derive(Clone)]
 pub struct MetaReportCreator {
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     meta_backend: MetaBackend,
 }
 
 impl MetaReportCreator {
-    pub fn new(metadata_fucker: MetadataFucker, meta_backend: MetaBackend) -> Self {
+    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
         Self {
-            metadata_fucker,
+            metadata_manager,
             meta_backend,
         }
     }
@@ -86,7 +86,7 @@ impl TelemetryReportCreator for MetaReportCreator {
         up_time: u64,
     ) -> TelemetryResult<MetaTelemetryReport> {
         let node_map = self
-            .metadata_fucker
+            .metadata_manager
             .count_worker_node()
             .await
             .map_err(|err| err.as_report().to_string())?;

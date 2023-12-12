@@ -26,7 +26,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::{MetadataFucker, MetadataFuckerV1};
+use risingwave_meta::manager::{MetadataManager, MetadataManagerV1};
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
@@ -421,8 +421,8 @@ pub async fn start_service_as_election_leader(
     );
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    // TODO: init metadata fucker in V2 if sql-backend enabled.
-    let metadata_fucker = MetadataFucker::V1(MetadataFuckerV1 {
+    // TODO: init metadata mgr in V2 if sql-backend enabled.
+    let metadata_manager = MetadataManager::V1(MetadataManagerV1 {
         cluster_manager: cluster_manager.clone(),
         catalog_manager: catalog_manager.clone(),
         fragment_manager: fragment_manager.clone(),
@@ -431,7 +431,7 @@ pub async fn start_service_as_election_leader(
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
     serving::on_meta_start(
         env.notification_manager_ref(),
-        &metadata_fucker,
+        &metadata_manager,
         serving_vnode_mapping.clone(),
     )
     .await;
@@ -442,7 +442,7 @@ pub async fn start_service_as_election_leader(
             .unwrap(),
     );
 
-    let heartbeat_srv = HeartbeatServiceImpl::new(metadata_fucker.clone());
+    let heartbeat_srv = HeartbeatServiceImpl::new(metadata_manager.clone());
 
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
@@ -451,7 +451,7 @@ pub async fn start_service_as_election_leader(
 
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
         compactor_streams_change_tx,
@@ -473,7 +473,7 @@ pub async fn start_service_as_election_leader(
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
             prometheus_selector: opts.prometheus_selector.unwrap_or_default(),
-            metadata_fucker: metadata_fucker.clone(),
+            metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
@@ -508,7 +508,7 @@ pub async fn start_service_as_election_leader(
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
@@ -525,7 +525,7 @@ pub async fn start_service_as_election_leader(
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
-            metadata_fucker.clone(),
+            metadata_manager.clone(),
             barrier_scheduler.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
@@ -571,7 +571,7 @@ pub async fn start_service_as_election_leader(
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         aws_cli.clone(),
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
@@ -585,13 +585,13 @@ pub async fn start_service_as_election_leader(
     let user_srv = UserServiceImpl::new(env.clone(), catalog_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
         barrier_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::new(metadata_fucker.clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
@@ -603,7 +603,7 @@ pub async fn start_service_as_election_leader(
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
@@ -622,8 +622,8 @@ pub async fn start_service_as_election_leader(
         system_params_controller.clone(),
     );
     let serving_srv =
-        ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_fucker.clone());
-    let cloud_srv = CloudServiceImpl::new(metadata_fucker.clone(), aws_cli);
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
+    let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -638,13 +638,13 @@ pub async fn start_service_as_election_leader(
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         election_client.clone(),
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
     sub_tasks.push(start_fragment_info_monitor(
-        metadata_fucker.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
@@ -665,20 +665,20 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
-            metadata_fucker.clone(),
+            metadata_manager.clone(),
             serving_vnode_mapping,
         )
         .await,
     );
 
     if cfg!(not(test)) {
-        let task = match &metadata_fucker {
-            MetadataFucker::V1(fucker) => ClusterManager::start_heartbeat_checker(
-                fucker.cluster_manager.clone(),
+        let task = match &metadata_manager {
+            MetadataManager::V1(mgr) => ClusterManager::start_heartbeat_checker(
+                mgr.cluster_manager.clone(),
                 Duration::from_secs(1),
             ),
-            MetadataFucker::V2(fucker) => ClusterController::start_heartbeat_checker(
-                fucker.cluster_controller.clone(),
+            MetadataManager::V2(mgr) => ClusterController::start_heartbeat_checker(
+                mgr.cluster_controller.clone(),
                 Duration::from_secs(1),
             ),
         };
@@ -708,7 +708,7 @@ pub async fn start_service_as_election_leader(
     let telemetry_manager = TelemetryManager::new(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
-            metadata_fucker.clone(),
+            metadata_manager.clone(),
             meta_store.meta_store_type(),
         )),
     );

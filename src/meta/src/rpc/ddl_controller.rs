@@ -52,7 +52,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, LocalNotification, MetaSrvEnv, MetadataFucker, NotificationVersion,
+    IdCategory, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion,
     RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId,
     UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
@@ -143,7 +143,7 @@ impl DdlCommand {
 pub struct DdlController {
     env: MetaSrvEnv,
 
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     catalog_manager: CatalogManagerRef,
     stream_manager: GlobalStreamManagerRef,
     source_manager: SourceManagerRef,
@@ -218,7 +218,7 @@ impl CreatingStreamingJobPermit {
 impl DdlController {
     pub async fn new(
         env: MetaSrvEnv,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
@@ -230,7 +230,7 @@ impl DdlController {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
             env,
-            metadata_fucker,
+            metadata_manager,
             catalog_manager,
             stream_manager,
             source_manager,
@@ -315,9 +315,9 @@ impl DdlController {
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_database(&database).await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_database(database).await,
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.create_database(&database).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_database(database).await,
         }
     }
 
@@ -375,31 +375,30 @@ impl DdlController {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                self.drop_database_v1(&fucker.catalog_manager, database_id)
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                self.drop_database_v1(&mgr.catalog_manager, database_id)
                     .await
             }
-            MetadataFucker::V2(fucker) => {
-                self.drop_database_v2(&fucker.catalog_controller, database_id)
+            MetadataManager::V2(mgr) => {
+                self.drop_database_v2(&mgr.catalog_controller, database_id)
                     .await
             }
         }
     }
 
     async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_schema(&schema).await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_schema(schema).await,
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.create_schema(&schema).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_schema(schema).await,
         }
     }
 
     async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.drop_schema(schema_id).await,
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_schema(schema_id).await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .drop_schema(schema_id as _, DropMode::Restrict)
                     .await
             }
@@ -407,32 +406,28 @@ impl DdlController {
     }
 
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
 
-                fucker
-                    .catalog_manager
+                mgr.catalog_manager
                     .start_create_source_procedure(&source)
                     .await?;
 
                 if let Err(e) = self.source_manager.register_source(&source).await {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .cancel_create_source_procedure(&source)
                         .await?;
                     return Err(e);
                 }
 
-                fucker
-                    .catalog_manager
+                mgr.catalog_manager
                     .finish_create_source_procedure(source, vec![])
                     .await
             }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .create_source(source, Some(self.source_manager.clone()))
                     .await
             }
@@ -469,37 +464,32 @@ impl DdlController {
 
     // Maybe we can unify `alter_source_column` and `alter_source_name`.
     async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.alter_source_column(source).await,
-            MetadataFucker::V2(fucker) => {
-                fucker.catalog_controller.alter_source_column(source).await
-            }
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.alter_source_column(source).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.alter_source_column(source).await,
         }
     }
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_function(&function).await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_function(function).await,
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.create_function(&function).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_function(function).await,
         }
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.drop_function(function_id).await,
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
-                    .drop_function(function_id as _)
-                    .await
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_function(function_id).await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.drop_function(function_id as _).await
             }
         }
     }
 
     async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_view(&view).await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_view(view).await,
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.create_view(&view).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_view(view).await,
         }
     }
 
@@ -523,16 +513,9 @@ impl DdlController {
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker.catalog_manager.create_connection(connection).await
-            }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
-                    .create_connection(connection)
-                    .await
-            }
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.create_connection(connection).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.create_connection(connection).await,
         }
     }
 
@@ -540,16 +523,10 @@ impl DdlController {
         &self,
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
-        let (version, connection) = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .catalog_manager
-                    .drop_connection(connection_id)
-                    .await?
-            }
-            MetadataFucker::V2(fucker) => {
-                fucker
-                    .catalog_controller
+        let (version, connection) = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.drop_connection(connection_id).await?,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
                     .drop_connection(connection_id as _)
                     .await?
             }
@@ -1318,52 +1295,41 @@ impl DdlController {
         relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => match relation {
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => match relation {
                 alter_name_request::Object::TableId(table_id) => {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .alter_table_name(table_id, new_name)
                         .await
                 }
                 alter_name_request::Object::ViewId(view_id) => {
-                    fucker
-                        .catalog_manager
-                        .alter_view_name(view_id, new_name)
-                        .await
+                    mgr.catalog_manager.alter_view_name(view_id, new_name).await
                 }
                 alter_name_request::Object::IndexId(index_id) => {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .alter_index_name(index_id, new_name)
                         .await
                 }
                 alter_name_request::Object::SinkId(sink_id) => {
-                    fucker
-                        .catalog_manager
-                        .alter_sink_name(sink_id, new_name)
-                        .await
+                    mgr.catalog_manager.alter_sink_name(sink_id, new_name).await
                 }
                 alter_name_request::Object::SourceId(source_id) => {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .alter_source_name(source_id, new_name)
                         .await
                 }
                 alter_name_request::Object::SchemaId(schema_id) => {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .alter_schema_name(schema_id, new_name)
                         .await
                 }
                 alter_name_request::Object::DatabaseId(database_id) => {
-                    fucker
-                        .catalog_manager
+                    mgr.catalog_manager
                         .alter_database_name(database_id, new_name)
                         .await
                 }
             },
-            MetadataFucker::V2(fucker) => {
+            MetadataManager::V2(mgr) => {
                 let (obj_type, id) = match relation {
                     alter_name_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
                     alter_name_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
@@ -1379,8 +1345,7 @@ impl DdlController {
                         (ObjectType::Database, id as ObjectId)
                     }
                 };
-                fucker
-                    .catalog_controller
+                mgr.catalog_controller
                     .alter_name(obj_type, id, new_name)
                     .await
             }
@@ -1392,14 +1357,13 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .catalog_manager
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
                     .alter_owner(self.fragment_manager.clone(), object, owner_id)
                     .await
             }
-            MetadataFucker::V2(fucker) => {
+            MetadataManager::V2(mgr) => {
                 let (obj_type, id) = match object {
                     Object::TableId(id) => (ObjectType::Table, id as ObjectId),
                     Object::ViewId(id) => (ObjectType::View, id as ObjectId),
@@ -1408,8 +1372,7 @@ impl DdlController {
                     Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
                     Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
                 };
-                fucker
-                    .catalog_controller
+                mgr.catalog_controller
                     .alter_owner(obj_type, id, owner_id as _)
                     .await
             }
@@ -1421,14 +1384,13 @@ impl DdlController {
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => {
-                fucker
-                    .catalog_manager
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
                     .alter_set_schema(self.fragment_manager.clone(), object, new_schema_id)
                     .await
             }
-            MetadataFucker::V2(_) => {
+            MetadataManager::V2(_) => {
                 unimplemented!("support set schema in v2")
             }
         }
@@ -1437,9 +1399,9 @@ impl DdlController {
     pub async fn wait(&self) -> MetaResult<()> {
         let timeout_secs = 30 * 60;
         for _ in 0..timeout_secs {
-            match &self.metadata_fucker {
-                MetadataFucker::V1(fucker) => {
-                    if fucker
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    if mgr
                         .catalog_manager
                         .list_creating_background_mvs()
                         .await
@@ -1448,8 +1410,8 @@ impl DdlController {
                         return Ok(());
                     }
                 }
-                MetadataFucker::V2(fucker) => {
-                    if fucker
+                MetadataManager::V2(mgr) => {
+                    if mgr
                         .catalog_controller
                         .list_background_creating_mviews()
                         .await?
@@ -1468,9 +1430,9 @@ impl DdlController {
     }
 
     async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.comment_on(comment).await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.comment_on(comment).await,
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.comment_on(comment).await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
         }
     }
 }

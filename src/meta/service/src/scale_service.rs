@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -32,7 +32,7 @@ use crate::stream::{
 };
 
 pub struct ScaleServiceImpl {
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
@@ -41,18 +41,18 @@ pub struct ScaleServiceImpl {
 
 impl ScaleServiceImpl {
     pub fn new(
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
     ) -> Self {
         let scale_controller = Arc::new(ScaleController::new(
-            &metadata_fucker,
+            &metadata_manager,
             source_manager.clone(),
             stream_manager.env.clone(),
         ));
         Self {
-            metadata_fucker,
+            metadata_manager,
             source_manager,
             stream_manager,
             barrier_manager,
@@ -61,9 +61,9 @@ impl ScaleServiceImpl {
     }
 
     async fn get_revision(&self) -> TableRevision {
-        match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.fragment_manager.get_revision().await,
-            MetadataFucker::V2(_) => unimplemented!("support table revision in v2"),
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.fragment_manager.get_revision().await,
+            MetadataManager::V2(_) => unimplemented!("support table revision in v2"),
         }
     }
 }
@@ -77,8 +77,8 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        let table_fragments = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker
+        let table_fragments = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
                 .fragment_manager
                 .get_fragment_read_guard()
                 .await
@@ -86,7 +86,7 @@ impl ScaleService for ScaleServiceImpl {
                 .values()
                 .map(|tf| tf.to_protobuf())
                 .collect(),
-            MetadataFucker::V2(fucker) => fucker
+            MetadataManager::V2(mgr) => mgr
                 .catalog_controller
                 .table_fragments()
                 .await?
@@ -96,7 +96,7 @@ impl ScaleService for ScaleServiceImpl {
         };
 
         let worker_nodes = self
-            .metadata_fucker
+            .metadata_manager
             .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await?;
 
@@ -115,9 +115,9 @@ impl ScaleService for ScaleServiceImpl {
             })
             .collect();
 
-        let sources = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.catalog_manager.list_sources().await,
-            MetadataFucker::V2(fucker) => fucker.catalog_controller.list_sources().await?,
+        let sources = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sources().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await?,
         };
 
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();

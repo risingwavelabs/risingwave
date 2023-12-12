@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
-use risingwave_meta::manager::MetadataFucker;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
@@ -33,19 +33,19 @@ use crate::RwReceiverStream;
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
     vacuum_manager: VacuumManagerRef,
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
 }
 
 impl HummockServiceImpl {
     pub fn new(
         hummock_manager: HummockManagerRef,
         vacuum_trigger: VacuumManagerRef,
-        metadata_fucker: MetadataFucker,
+        metadata_manager: MetadataManager,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             vacuum_manager: vacuum_trigger,
-            metadata_fucker,
+            metadata_manager,
         }
     }
 }
@@ -240,7 +240,7 @@ impl HummockManagerService for HummockServiceImpl {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
-                .metadata_fucker
+                .metadata_manager
                 .get_job_fragments_by_id(&table_id)
                 .await
             {

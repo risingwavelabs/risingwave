@@ -24,7 +24,7 @@ use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentParallelUnitMappi
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::manager::{LocalNotification, MetadataFucker, NotificationManagerRef};
+use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
 use crate::model::FragmentId;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
@@ -103,11 +103,11 @@ pub(crate) fn to_deleted_fragment_parallel_unit_mapping(
 
 pub async fn on_meta_start(
     notification_manager: NotificationManagerRef,
-    metadata_fucker: &MetadataFucker,
+    metadata_manager: &MetadataManager,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) {
     let (serving_compute_nodes, streaming_parallelisms) =
-        fetch_serving_infos(metadata_fucker).await;
+        fetch_serving_infos(metadata_manager).await;
     let (mappings, _) =
         serving_vnode_mapping.upsert(streaming_parallelisms, &serving_compute_nodes);
     tracing::debug!(
@@ -123,27 +123,25 @@ pub async fn on_meta_start(
 }
 
 async fn fetch_serving_infos(
-    metadata_fucker: &MetadataFucker,
+    metadata_manager: &MetadataManager,
 ) -> (Vec<WorkerNode>, HashMap<FragmentId, usize>) {
-    match metadata_fucker {
-        MetadataFucker::V1(fucker) => (
-            fucker
-                .cluster_manager
+    match metadata_manager {
+        MetadataManager::V1(mgr) => (
+            mgr.cluster_manager
                 .list_active_serving_compute_nodes()
                 .await,
-            fucker
-                .fragment_manager
+            mgr.fragment_manager
                 .running_fragment_parallelisms(None)
                 .await,
         ),
-        MetadataFucker::V2(fucker) => {
+        MetadataManager::V2(mgr) => {
             // TODO: need another mechanism to refresh serving info instead of panic.
-            let parallelisms = fucker
+            let parallelisms = mgr
                 .catalog_controller
                 .running_fragment_parallelisms(None)
                 .await
                 .expect("fail to fetch running parallelisms");
-            let serving_compute_nodes = fucker
+            let serving_compute_nodes = mgr
                 .cluster_controller
                 .list_active_serving_workers()
                 .await
@@ -161,7 +159,7 @@ async fn fetch_serving_infos(
 
 pub async fn start_serving_vnode_mapping_worker(
     notification_manager: NotificationManagerRef,
-    metadata_fucker: MetadataFucker,
+    metadata_manager: MetadataManager,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (local_notification_tx, mut local_notification_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -180,7 +178,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     if w.r#type() != WorkerType::ComputeNode || !w.property.as_ref().map_or(false, |p| p.is_serving) {
                                         continue;
                                     }
-                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_fucker).await;
+                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (mappings, _) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
                                     notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&mappings) }));
@@ -189,7 +187,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
-                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_fucker).await;
+                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
