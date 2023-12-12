@@ -16,7 +16,13 @@
 - input: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
   formatted_sql: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
 - input: CREATE SOURCE src
-  error_msg: 'sql parser error: expect description of the format'
+  error_msg: |-
+    sql parser error: Expected description of the format, found: EOF at the end
+    Near "CREATE SOURCE src"
+- input: CREATE SOURCE src-a FORMAT PLAIN ENCODE JSON
+  error_msg: |-
+    sql parser error: Expected description of the format, found: - at line:1, column:19
+    Near "CREATE SOURCE src"
 - input: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
 - input: CREATE SOURCE mysql_src with ( connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601' )
