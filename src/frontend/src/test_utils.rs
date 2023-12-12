@@ -39,6 +39,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::alter_parallelism_request::PbParallelism;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
     ReplaceTablePlan,
@@ -589,7 +590,11 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn alter_parallelism(&self, object: u32, parallelism: u32) -> Result<()> {
+    async fn alter_parallelism(
+        &self,
+        object: risingwave_pb::ddl_service::alter_parallelism_request::Object,
+        parallelism: PbParallelism,
+    ) -> Result<()> {
         todo!()
     }
 }

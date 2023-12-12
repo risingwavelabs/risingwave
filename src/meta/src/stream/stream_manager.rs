@@ -20,7 +20,12 @@ use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::{bail, catalog};
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::ddl_service::alter_parallelism_request;
+use risingwave_pb::ddl_service::alter_parallelism_request::{
+    FixedParallelism, Object, PbParallelism,
+};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
@@ -37,7 +42,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob,
 };
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, TableFragments, TableFragmentsParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -709,6 +714,34 @@ impl GlobalStreamManager {
 
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
+    }
+
+    async fn tmp_alter_parallelism(
+        &self,
+        object_id: alter_parallelism_request::Object,
+        parallelism: alter_parallelism_request::PbParallelism,
+    ) -> MetaResult<()> {
+        let id = match object_id {
+            Object::TableId(id) | Object::SinkId(id) => id,
+        };
+
+        {
+            let guard = self.fragment_manager.get_fragment_read_guard().await;
+
+            let table_id = catalog::TableId::new(id);
+            let Some(table_fragments) = guard.table_fragments().get(&table_id) else {
+                bail!("123");
+            };
+
+            match (parallelism, &table_fragments.assigned_parallelism) {
+                (
+                    PbParallelism::Fixed(FixedParallelism { parallelism }),
+                    TableFragmentsParallelism::Fixed(n),
+                ) => {}
+            }
+        }
+
+        Ok(())
     }
 }
 

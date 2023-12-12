@@ -18,9 +18,13 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::alter_parallelism_request::{
+    AutoParallelism, FixedParallelism, Object, PbParallelism,
+};
 use risingwave_pb::user::grant_privilege;
-use risingwave_sqlparser::ast::{Ident, ObjectName, SetVariableValue};
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, SetVariableValue, SetVariableValueSingle, Value,
+};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -54,99 +58,54 @@ pub async fn handle_alter_parallelism(
         table.id
     };
 
-    // let catalog_writer = session.catalog_writer()?;
-    // catalog_writer
-    //     .alter_table_name(table_id.table_id, &new_table_name)
-    //     .await?;
-    //
-    // let new_owner_name = Binder::resolve_user_name(vec![new_owner_name].into())?;
-    // let (object, owner_id) = {
-    //     let catalog_reader = session.env().catalog_reader().read_guard();
-    //     let user_reader = session.env().user_info_reader().read_guard();
-    //     let new_owner = user_reader
-    //         .get_user_by_name(&new_owner_name)
-    //         .ok_or(CatalogError::NotFound("user", new_owner_name))?;
-    //     let owner_id = new_owner.id;
-    //     (
-    //         match stmt_type {
-    //             StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
-    //                 let (table, schema_name) =
-    //                     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
-    //                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-    //                 let schema_id = catalog_reader
-    //                     .get_schema_by_name(db_name, schema_name)?
-    //                     .id();
-    //                 check_schema_create_privilege(&session, new_owner, schema_id)?;
-    //                 if table.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::TableId(table.id.table_id)
-    //             }
-    //             StatementType::ALTER_VIEW => {
-    //                 let (view, schema_name) =
-    //                     catalog_reader.get_view_by_name(db_name, schema_path, &real_obj_name)?;
-    //                 session.check_privilege_for_drop_alter(schema_name, &**view)?;
-    //                 let schema_id = catalog_reader
-    //                     .get_schema_by_name(db_name, schema_name)?
-    //                     .id();
-    //                 check_schema_create_privilege(&session, new_owner, schema_id)?;
-    //                 if view.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::ViewId(view.id)
-    //             }
-    //             StatementType::ALTER_SOURCE => {
-    //                 let (source, schema_name) =
-    //                     catalog_reader.get_source_by_name(db_name, schema_path, &real_obj_name)?;
-    //                 session.check_privilege_for_drop_alter(schema_name, &**source)?;
-    //                 let schema_id = catalog_reader
-    //                     .get_schema_by_name(db_name, schema_name)?
-    //                     .id();
-    //                 check_schema_create_privilege(&session, new_owner, schema_id)?;
-    //                 if source.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::SourceId(source.id)
-    //             }
-    //             StatementType::ALTER_SINK => {
-    //                 let (sink, schema_name) =
-    //                     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
-    //                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-    //                 let schema_id = catalog_reader
-    //                     .get_schema_by_name(db_name, schema_name)?
-    //                     .id();
-    //                 check_schema_create_privilege(&session, new_owner, schema_id)?;
-    //                 if sink.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::SinkId(sink.id.sink_id)
-    //             }
-    //             StatementType::ALTER_DATABASE => {
-    //                 let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
-    //                 session.check_privilege_for_drop_alter_db_schema(database)?;
-    //                 if database.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::DatabaseId(database.id())
-    //             }
-    //             StatementType::ALTER_SCHEMA => {
-    //                 let schema =
-    //                     catalog_reader.get_schema_by_name(db_name, &obj_name.real_value())?;
-    //                 session.check_privilege_for_drop_alter_db_schema(schema)?;
-    //                 if schema.owner() == owner_id {
-    //                     return Ok(RwPgResponse::empty_result(stmt_type));
-    //                 }
-    //                 Object::SchemaId(schema.id())
-    //             }
-    //             _ => unreachable!(),
-    //         },
-    //         owner_id,
-    //     )
-    // };
+    let object = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        match stmt_type {
+            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
+                // let (table, schema_name) =
+                //     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
+                // session.check_privilege_for_drop_alter(schema_name, &**table)?;
+                // let schema_id = catalog_reader
+                //     .get_schema_by_name(db_name, schema_name)?
+                //     .id();
+                // check_schema_create_privilege(&session, new_owner, schema_id)?;
+                // if table.owner() == owner_id {
+                //     return Ok(RwPgResponse::empty_result(stmt_type));
+                // }
+                Object::TableId(table_id.table_id)
+            }
+            StatementType::ALTER_SINK => {
+                // let (sink, schema_name) =
+                //     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                // session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+                // let schema_id = catalog_reader
+                //     .get_schema_by_name(db_name, schema_name)?
+                //     .id();
+                // check_schema_create_privilege(&session, new_owner, schema_id)?;
+                // if sink.owner() == owner_id {
+                //     return Ok(RwPgResponse::empty_result(stmt_type));
+                // }
+                Object::TableId(table_id.table_id)
+            }
+            _ => unreachable!(),
+        }
+    };
+
+    let target_parallelism = match parallelism {
+        SetVariableValue::Single(SetVariableValueSingle::Ident(i)) => {
+            PbParallelism::Auto(AutoParallelism {})
+        }
+        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
+            PbParallelism::Fixed(FixedParallelism {
+                parallelism: v.parse().unwrap(),
+            })
+        }
+        _ => unreachable!(),
+    };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_parallelism(table_id.table_id(), owner_id)
+        .alter_parallelism(object, target_parallelism)
         .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))

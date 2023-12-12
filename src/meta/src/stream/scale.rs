@@ -2168,23 +2168,40 @@ impl GlobalStreamManager {
         Ok(())
     }
 
-    async fn trigger_scale_out(&self, workers: Vec<WorkerId>) -> MetaResult<()> {
+    async fn trigger_scale_out(
+        &self,
+        workers: Vec<WorkerId>,
+        fragments: Option<HashSet<FragmentId>>,
+    ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
         let fragment_worker_changes = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
-            let mut fragment_worker_changes = HashMap::new();
-            for table_fragments in guard.table_fragments().values() {
-                for fragment_id in table_fragments.fragment_ids() {
-                    fragment_worker_changes.insert(
-                        fragment_id,
-                        PbWorkerChanges {
-                            include_worker_ids: workers.clone(),
-                            ..Default::default()
-                        },
-                    );
+
+            let fragments = match fragments {
+                None => {
+                    let mut fragments = HashSet::new();
+                    for table_fragments in guard.table_fragments().values() {
+                        for fragment_id in table_fragments.fragment_ids() {
+                            fragments.insert(fragment_id);
+                        }
+                    }
                 }
+                Some(fragments) => fragments,
+            };
+
+            let mut fragment_worker_changes = HashMap::new();
+
+            for fragment_id in fragments {
+                fragment_worker_changes.insert(
+                    fragment_id,
+                    PbWorkerChanges {
+                        include_worker_ids: workers.clone(),
+                        ..Default::default()
+                    },
+                );
             }
+
             fragment_worker_changes
         };
 
