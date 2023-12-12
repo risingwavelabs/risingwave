@@ -125,6 +125,11 @@ pub trait HummockIterator: Send + Sync {
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    /// Returns value meta.
+    ///
+    /// Currently the only value meta is `SSTable` object id of current KV, if any.
+    fn value_meta(&self) -> Option<u64>;
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -160,6 +165,10 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> Option<u64> {
+        unreachable!()
+    }
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -259,6 +268,15 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn value_meta(&self) -> Option<u64> {
+        match self {
+            First(iter) => iter.value_meta(),
+            Second(iter) => iter.value_meta(),
+            Third(iter) => iter.value_meta(),
+            Fourth(iter) => iter.value_meta(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -290,6 +308,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
+    }
+
+    fn value_meta(&self) -> Option<u64> {
+        (*self).deref().value_meta()
     }
 }
 
@@ -439,6 +461,10 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> Option<u64> {
+        None
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]

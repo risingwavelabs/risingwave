@@ -828,6 +828,10 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> Option<u64> {
+        None
+    }
 }
 
 pub struct SharedBufferDeleteRangeIterator {

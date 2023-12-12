@@ -488,6 +488,16 @@ impl HummockIterator for ConcatSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn value_meta(&self) -> Option<u64> {
+        let object_id = self
+            .sstable_iter
+            .as_ref()
+            .expect("no table iter")
+            .sstable_info
+            .object_id;
+        Some(object_id)
+    }
 }
 
 #[cfg(test)]

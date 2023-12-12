@@ -180,4 +180,11 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
             iter.collect_local_statistic(stats);
         }
     }
+
+    fn value_meta(&self) -> Option<u64> {
+        self.sstable_iter
+            .as_ref()
+            .expect("no table iter")
+            .value_meta()
+    }
 }

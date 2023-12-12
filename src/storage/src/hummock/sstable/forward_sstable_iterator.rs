@@ -287,6 +287,10 @@ impl HummockIterator for SstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
     }
+
+    fn value_meta(&self) -> Option<u64> {
+        Some(self.sst.value().id)
+    }
 }
 
 impl SstableIteratorType for SstableIterator {

@@ -403,4 +403,8 @@ where
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
     }
+
+    fn value_meta(&self) -> Option<u64> {
+        self.heap.peek().expect("no inner iter").iter.value_meta()
+    }
 }

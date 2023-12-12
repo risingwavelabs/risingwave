@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
+use risingwave_pb::hummock::{
+    compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo, TableSchema,
+};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -122,6 +124,10 @@ pub struct TaskConfig {
     pub use_block_based_filter: bool,
 
     pub table_vnode_partition: BTreeMap<u32, u32>,
+    /// `TableId` -> `TableSchema`
+    /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
+    /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
+    pub table_schemas: HashMap<u32, TableSchema>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

@@ -57,7 +57,8 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableWatermarks,
+    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    TableWatermarks,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -1128,11 +1129,18 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        while let Some(task) = self
+        while let Some(mut task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
+                task.table_schemas = self
+                    .catalog_manager
+                    .get_versioned_table_schemas(&task.existing_table_ids)
+                    .await
+                    .into_iter()
+                    .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
+                    .collect();
                 return Ok(Some(task));
             }
             assert!(
