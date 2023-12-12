@@ -51,7 +51,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties.initialize_env();
 
         // Validate config
-        let config = ClientConfig::default().with_auth().await.unwrap();
+        let config = ClientConfig::default().with_auth().await?;
         let client = Client::new(config)
             .await
             .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
