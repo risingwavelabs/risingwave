@@ -467,7 +467,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
-                PrefetchOptions::new_with_exhaust_iter(limit.is_none()),
+                PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
 
