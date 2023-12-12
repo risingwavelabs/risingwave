@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::Rng;
-use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;

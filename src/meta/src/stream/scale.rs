@@ -37,7 +37,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::meta::{FragmentParallelUnitMappings, TableParallelism};
+use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
@@ -1692,7 +1692,7 @@ impl ScaleController {
 
         let table_parallelisms: HashMap<u32, TableFragmentsParallelism> = table_parallelisms
             .into_iter()
-            .map(|(id, parallelism)| (id, parallelism.into()))
+            .map(|(id, parallelism)| (id, parallelism))
             .collect();
 
         let mut target_plan = HashMap::new();
@@ -1701,6 +1701,10 @@ impl ScaleController {
             let fragment_map = table_fragment_map.remove(&table_id).unwrap();
 
             for (fragment_id, fragment) in fragment_map {
+                if no_shuffle_target_fragment_ids.contains(&fragment_id) {
+                    continue;
+                }
+
                 let fragment_parallel_unit_ids: BTreeSet<_> = fragment
                     .actors
                     .iter()
@@ -1778,7 +1782,7 @@ impl ScaleController {
                             }
 
                             let rebalance_result =
-                                rebalance_units(worker_parallel_units.clone(), n as usize)?;
+                                rebalance_units(worker_parallel_units.clone(), n)?;
 
                             let target_parallel_unit_ids =
                                 rebalance_result.into_values().flatten().collect();
@@ -2120,8 +2124,8 @@ impl ScaleController {
         Ok(target_plan)
     }
 
-    fn filter_unschedulable_workers(workers: &Vec<WorkerNode>) -> HashSet<WorkerId> {
-        let unschedulable_worker_ids: HashSet<_> = workers
+    fn filter_unschedulable_workers(workers: &[WorkerNode]) -> HashSet<WorkerId> {
+        workers
             .iter()
             .filter(|worker| {
                 worker
@@ -2131,8 +2135,7 @@ impl ScaleController {
                     .unwrap_or(false)
             })
             .map(|worker| worker.id as WorkerId)
-            .collect();
-        unschedulable_worker_ids
+            .collect()
     }
 
     fn diff_parallel_unit_change(

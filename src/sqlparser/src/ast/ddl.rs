@@ -21,8 +21,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{
-    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName,
-    SetVariableValue, SetVariableValueSingle,
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
 };
 use crate::tokenizer::Token;
 

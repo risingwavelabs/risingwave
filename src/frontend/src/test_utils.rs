@@ -591,8 +591,8 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
-        parallelism: PbTableParallelism,
+        _table_id: u32,
+        _parallelism: PbTableParallelism,
     ) -> Result<()> {
         todo!()
     }

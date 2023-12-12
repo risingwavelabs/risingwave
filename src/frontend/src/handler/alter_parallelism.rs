@@ -12,31 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use pgwire::pg_response::StatementType;
-use risingwave_common::acl::AclMode;
-use risingwave_common::error::ErrorCode::PermissionDenied;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_pb::user::grant_privilege;
-use risingwave_sqlparser::ast::{
-    Ident, ObjectName, SetVariableValue, SetVariableValueSingle, Value,
-};
+use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
-use crate::catalog::{CatalogError, OwnedByUserCatalog};
-use crate::session::SessionImpl;
-use crate::user::user_catalog::UserCatalog;
 use crate::Binder;
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
     parallelism: SetVariableValue,
-    stmt_type: StatementType,
+    _stmt_type: StatementType,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();

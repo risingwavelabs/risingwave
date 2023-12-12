@@ -23,8 +23,8 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
-    CustomParallelism, FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism,
-    PbFixedParallelism, PbParallelism,
+    FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
+    PbParallelism,
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism, TableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
