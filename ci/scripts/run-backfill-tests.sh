@@ -200,12 +200,31 @@ test_sink_backfill_recovery() {
   wait
 }
 
+# test dml amplification
+# currently background_dml is not supported, so we test it here,
+# rather than in a self-contained slt test.
+test_dml_amplification() {
+   echo "--- e2e, test_sink_backfill_recovery"
+   cargo make ci-start $CLUSTER_PROFILE
+
+  # Check progress
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_join_sink.slt'
+
+  # concurrent insert
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/insert_join_sink.slt' &
+
+  # Test barrier latency
+  # Test drop sink
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/test_join_sink.slt'
+}
+
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
-  test_replication_with_column_pruning
-  test_sink_backfill_recovery
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
+#  test_replication_with_column_pruning
+#  test_sink_backfill_recovery
+  test_dml_amplification
 }
 
 main

@@ -1,0 +1,19 @@
+# This test will test that barrier latency does not spike
+# when there's rate limit.
+# We test the case where snapshot read is amplified
+
+statement ok
+SET STREAMING_PARALLELISM=2;
+
+statement ok
+SET STREAMING_RATE_LIMIT=1;
+
+statement ok
+CREATE TABLE table (i1 int);
+
+statement ok
+CREATE SINK sink AS
+    SELECT x.i1 as i1 FROM table x
+        JOIN table s1 ON x.i1 = s1.i1
+            JOIN table s2 ON x.i1 = s2.i1
+    WITH (connector = 'blackhole');

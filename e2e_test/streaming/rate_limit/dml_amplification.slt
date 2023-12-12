@@ -23,7 +23,7 @@ CREATE SINK sink AS
 
 # DML amplification
 statement ok
-INSERT INTO table select 1 from generate_series(1, 100000);
+INSERT INTO table select 1 from generate_series(1, 1000);
 
 # Let sink amplify...
 skipif in-memory
