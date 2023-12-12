@@ -273,8 +273,8 @@ fn try_update_failure_metric<T>(
     result: &ObjectResult<T>,
     operation_type: &'static str,
 ) {
-    if let Err(e) = &result {
-        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
+    if let Err(e) = &result && !e.is_object_not_found_error() {
+        tracing::warn!("{:?} failed because of: {:?}", operation_type, e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
