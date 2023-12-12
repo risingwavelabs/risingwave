@@ -30,9 +30,9 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use super::{Locations, ScaleController, ScaleControllerRef};
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob};
 use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -71,6 +71,9 @@ pub struct CreateStreamingJobContext {
     pub create_type: CreateType,
 
     pub ddl_type: DdlType,
+
+    /// Context provided for potential replace table, typically used when sinking into a table.
+    pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
 }
 
 impl CreateStreamingJobContext {
@@ -361,6 +364,7 @@ impl GlobalStreamManager {
         res
     }
 
+    /// First broadcasts the actor info to `WorkerNodes`, and then let them build actors and channels.
     async fn build_actors(
         &self,
         table_fragments: &TableFragments,
@@ -443,8 +447,12 @@ impl GlobalStreamManager {
             internal_tables,
             create_type,
             ddl_type,
+            replace_table_job_info,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
+        let mut replace_table_command = None;
+        let mut replace_table_id = None;
+
         // Register to compaction group beforehand.
         let hummock_manager_ref = self.hummock_manager.clone();
         let registered_table_ids = hummock_manager_ref
@@ -469,6 +477,37 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
+        if let Some((_, context, table_fragments)) = replace_table_job_info {
+            self.build_actors(
+                &table_fragments,
+                &context.building_locations,
+                &context.existing_locations,
+            )
+            .await?;
+
+            // Add table fragments to meta store with state: `State::Initial`.
+            self.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
+                .await?;
+
+            let dummy_table_id = table_fragments.table_id();
+
+            let init_split_assignment = self
+                .source_manager
+                .pre_allocate_splits(&dummy_table_id)
+                .await?;
+
+            replace_table_command = Some(ReplaceTablePlan {
+                old_table_fragments: context.old_table_fragments,
+                new_table_fragments: table_fragments,
+                merge_updates: context.merge_updates,
+                dispatchers: context.dispatchers,
+                init_split_assignment,
+            });
+
+            replace_table_id = Some(dummy_table_id);
+        }
+
         // Add table fragments to meta store with state: `State::Initial`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
@@ -478,23 +517,27 @@ impl GlobalStreamManager {
 
         let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
-        if let Err(err) = self
-            .barrier_scheduler
-            .run_command(Command::CreateStreamingJob {
-                table_fragments,
-                upstream_mview_actors,
-                dispatchers,
-                init_split_assignment,
-                definition: definition.to_string(),
-                ddl_type,
-            })
-            .await
-        {
+        let command = Command::CreateStreamingJob {
+            table_fragments,
+            upstream_mview_actors,
+            dispatchers,
+            init_split_assignment,
+            definition: definition.to_string(),
+            ddl_type,
+            replace_table: replace_table_command,
+        };
+
+        if let Err(err) = self.barrier_scheduler.run_command(command).await {
             if create_type == CreateType::Foreground {
+                let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
+                if let Some(dummy_table_id) = replace_table_id {
+                    table_ids.insert(dummy_table_id);
+                }
                 self.fragment_manager
-                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                    .drop_table_fragments_vec(&table_ids)
                     .await?;
             }
+
             return Err(err);
         }
 
@@ -530,13 +573,13 @@ impl GlobalStreamManager {
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_config_change_command_with_pause(Command::ReplaceTable {
+            .run_config_change_command_with_pause(Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
-            })
+            }))
             .await
         {
             self.fragment_manager

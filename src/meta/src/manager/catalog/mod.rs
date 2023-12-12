@@ -34,8 +34,8 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
-    Source, StreamJobStatus, Table, View,
+    Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
+    Schema, Sink, Source, StreamJobStatus, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -636,6 +636,8 @@ impl CatalogManager {
         Ok(version)
     }
 
+    /// Marks current relation as "creating" and add reference count to dependent relations.
+    /// And persists internal tables for background DDL progress tracking.
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
@@ -646,7 +648,7 @@ impl CatalogManager {
                 self.start_create_table_procedure(table, internal_tables)
                     .await
             }
-            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -1102,6 +1104,13 @@ impl CatalogManager {
             RelationIdEnum::Table(table_id) => {
                 let table = tables.get(&table_id).cloned();
                 if let Some(table) = table {
+                    for incoming_sink in &table.incoming_sinks {
+                        let sink = sinks.get(incoming_sink).cloned();
+                        if let Some(sink) = sink {
+                            deque.push_back(RelationInfo::Sink(sink));
+                        }
+                    }
+
                     deque.push_back(RelationInfo::Table(table));
                 } else {
                     bail!("table doesn't exist");
@@ -1149,6 +1158,7 @@ impl CatalogManager {
                     if !all_table_ids.insert(table_id) {
                         continue;
                     }
+
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
@@ -1343,6 +1353,7 @@ impl CatalogManager {
                     if !all_view_ids.insert(view.id) {
                         continue;
                     }
+
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
                     {
                         if ref_count > 0 {
@@ -1422,6 +1433,34 @@ impl CatalogManager {
             .iter()
             .map(|sink_id| sinks.remove(*sink_id).unwrap())
             .collect_vec();
+
+        if !matches!(relation, RelationIdEnum::Sink(_)) {
+            let table_sinks = sinks_removed
+                .iter()
+                .filter(|sink| {
+                    if let Some(target_table) = sink.target_table {
+                        // Table sink but associated with the table
+                        if matches!(relation, RelationIdEnum::Table(table_id) if table_id == target_table) {
+                            false
+                        } else {
+                            // Table sink
+                            true
+                        }
+                    } else {
+                        // Normal sink
+                        false
+                    }
+                })
+                .collect_vec();
+
+            // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
+            if !table_sinks.is_empty() {
+                bail!(
+                    "Found {} sink(s) into table in dependency, please drop them manually",
+                    table_sinks.len()
+                );
+            }
+        }
 
         let internal_tables = all_internal_table_ids
             .iter()
@@ -2775,7 +2814,11 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
+    pub async fn cancel_create_sink_procedure(
+        &self,
+        sink: &Sink,
+        target_table: &Option<(Table, Option<PbSource>)>,
+    ) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -2792,6 +2835,10 @@ impl CatalogManager {
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
+
+        if let Some((table, source)) = target_table {
+            Self::cancel_replace_table_procedure_inner(source, table, core);
+        }
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
@@ -2838,7 +2885,8 @@ impl CatalogManager {
         &self,
         source: &Option<Source>,
         table: &Table,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
+        incoming_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2877,17 +2925,19 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        let expr_rewriter = ReplaceTableExprRewriter {
-            table_col_index_mapping: table_col_index_mapping.clone(),
-        };
+        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+            let expr_rewriter = ReplaceTableExprRewriter {
+                table_col_index_mapping,
+            };
 
-        for index_id in &index_ids {
-            let mut index = indexes.get_mut(*index_id).unwrap();
-            index
-                .index_item
-                .iter_mut()
-                .for_each(|x| expr_rewriter.rewrite_expr(x));
-            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            for index_id in &index_ids {
+                let mut index = indexes.get_mut(*index_id).unwrap();
+                index
+                    .index_item
+                    .iter_mut()
+                    .for_each(|x| expr_rewriter.rewrite_expr(x));
+                updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            }
         }
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
@@ -2895,7 +2945,12 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
+        if let Some(incoming_sink_id) = incoming_sink_id {
+            table.incoming_sinks.push(incoming_sink_id);
+        }
+
         tables.insert(table.id, table.clone());
+
         commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
@@ -2930,6 +2985,16 @@ impl CatalogManager {
             unreachable!("unexpected job: {stream_job:?}")
         };
         let core = &mut *self.core.lock().await;
+
+        Self::cancel_replace_table_procedure_inner(source, table, core);
+        Ok(())
+    }
+
+    fn cancel_replace_table_procedure_inner(
+        source: &Option<PbSource>,
+        table: &Table,
+        core: &mut CatalogManagerCore,
+    ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
@@ -2955,7 +3020,6 @@ impl CatalogManager {
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
-        Ok(())
     }
 
     pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {

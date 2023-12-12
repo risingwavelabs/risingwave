@@ -30,13 +30,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
@@ -286,7 +286,7 @@ impl LocalStreamManager {
         Ok(result)
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<SyncResult> {
         let timer = self
             .core
             .lock()
@@ -295,17 +295,14 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
-            match store.sync(epoch).await {
-                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
-                Err(e) => {
-                    tracing::error!(
-                        epoch,
-                        error = %e.as_report(),
-                        "Failed to sync state store",
-                    );
-                    Err(e.into())
-                }
-            }
+            store.sync(epoch).await.map_err(|e| {
+                tracing::error!(
+                    epoch,
+                    error = %e.as_report(),
+                    "Failed to sync state store",
+                );
+                e.into()
+            })
         });
         timer.observe_duration();
         res
@@ -670,6 +667,7 @@ impl LocalStreamManagerCore {
                 .map(|b| b.try_into())
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
+            let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
                 .create_nodes(
@@ -691,6 +689,7 @@ impl LocalStreamManagerCore {
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
+                expr_context,
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();

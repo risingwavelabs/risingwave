@@ -294,6 +294,10 @@ impl DatabaseManager {
         self.tables.get(&table_id)
     }
 
+    pub fn get_sink(&self, sink_id: SinkId) -> Option<&Sink> {
+        self.sinks.get(&sink_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()

@@ -54,6 +54,7 @@ use risingwave_pb::connector_service::{
 use risingwave_pb::data::Op;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -214,7 +215,7 @@ where
                     // the exception is already thrown. No need to throw again
                 }
                 _ => {
-                    env.throw(format!("get error while processing: {:?}", e))
+                    env.throw(format!("get error while processing: {:?}", e.as_report()))
                         .expect("should be able to throw");
                 }
             }
@@ -853,7 +854,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = %e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -936,7 +937,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -958,7 +959,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
         match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -1001,7 +1002,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
