@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::{MetadataFucker, MetadataFuckerV1};
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
@@ -472,8 +473,7 @@ pub async fn start_service_as_election_leader(
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
             prometheus_selector: opts.prometheus_selector.unwrap_or_default(),
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
+            metadata_fucker: metadata_fucker.clone(),
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
@@ -671,10 +671,17 @@ pub async fn start_service_as_election_leader(
     );
 
     if cfg!(not(test)) {
-        sub_tasks.push(ClusterManager::start_heartbeat_checker(
-            cluster_manager.clone(),
-            Duration::from_secs(1),
-        ));
+        let task = match &metadata_fucker {
+            MetadataFucker::V1(fucker) => ClusterManager::start_heartbeat_checker(
+                fucker.cluster_manager.clone(),
+                Duration::from_secs(1),
+            ),
+            MetadataFucker::V2(fucker) => ClusterController::start_heartbeat_checker(
+                fucker.cluster_controller.clone(),
+                Duration::from_secs(1),
+            ),
+        };
+        sub_tasks.push(task);
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
         if env.opts.enable_automatic_parallelism_control {

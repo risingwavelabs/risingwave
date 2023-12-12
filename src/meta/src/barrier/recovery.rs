@@ -769,21 +769,7 @@ impl GlobalBarrierManager {
             }));
         }
 
-        let mut node_actors = match &self.metadata_fucker {
-            MetadataFucker::V1(fucker) => fucker.fragment_manager.all_node_actors(false).await,
-            MetadataFucker::V2(fucker) => {
-                let table_fragments = fucker.catalog_controller.table_fragments().await?;
-                let mut actor_maps = HashMap::new();
-                for (_, fragments) in table_fragments {
-                    let tf = TableFragments::from_protobuf(fragments);
-                    for (node_id, actor_ids) in tf.worker_actors(false) {
-                        let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                        node_actor_ids.extend(actor_ids);
-                    }
-                }
-                actor_maps
-            }
-        };
+        let mut node_actors = self.metadata_fucker.all_node_actors(false).await?;
 
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();

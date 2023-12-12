@@ -18,6 +18,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::stream_plan::PbStreamActor;
 
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
@@ -281,6 +282,30 @@ impl MetadataFucker {
                     table_fragments.push(TableFragments::from_protobuf(pb_table_fragments));
                 }
                 Ok(table_fragments)
+            }
+        }
+    }
+
+    pub async fn all_node_actors(
+        &self,
+        include_inactive: bool,
+    ) -> MetaResult<HashMap<WorkerId, Vec<PbStreamActor>>> {
+        match &self {
+            MetadataFucker::V1(fucker) => Ok(fucker
+                .fragment_manager
+                .all_node_actors(include_inactive)
+                .await),
+            MetadataFucker::V2(fucker) => {
+                let table_fragments = fucker.catalog_controller.table_fragments().await?;
+                let mut actor_maps = HashMap::new();
+                for (_, fragments) in table_fragments {
+                    let tf = TableFragments::from_protobuf(fragments);
+                    for (node_id, actor_ids) in tf.worker_actors(include_inactive) {
+                        let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                        node_actor_ids.extend(actor_ids);
+                    }
+                }
+                Ok(actor_maps)
             }
         }
     }

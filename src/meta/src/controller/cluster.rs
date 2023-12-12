@@ -218,7 +218,7 @@ impl ClusterController {
     }
 
     pub fn start_heartbeat_checker(
-        cluster_controller: ClusterController,
+        cluster_controller: ClusterControllerRef,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();

@@ -35,7 +35,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::manager::{ClusterManagerRef, FragmentManagerRef};
+use crate::manager::MetadataFucker;
 use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
@@ -43,10 +43,10 @@ pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
-    pub cluster_manager: ClusterManagerRef,
-    pub fragment_manager: FragmentManagerRef,
+    pub metadata_fucker: MetadataFucker,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
+    // TODO: replace it with MetadataFucker.
     pub meta_store: MetaStoreRef,
 }
 
@@ -105,9 +105,10 @@ pub(super) mod handlers {
             .map_err(|_| anyhow!("invalid worker type"))
             .map_err(err)?;
         let mut result = srv
-            .cluster_manager
+            .metadata_fucker
             .list_worker_node(Some(worker_type), None)
-            .await;
+            .await
+            .map_err(err)?;
         result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
     }
@@ -172,11 +173,16 @@ pub(super) mod handlers {
     pub async fn list_actors(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
-        let mut node_actors = srv.fragment_manager.all_node_actors(true).await;
+        let mut node_actors = srv
+            .metadata_fucker
+            .all_node_actors(true)
+            .await
+            .map_err(err)?;
         let nodes = srv
-            .cluster_manager
+            .metadata_fucker
             .list_active_streaming_compute_nodes()
-            .await;
+            .await
+            .map_err(err)?;
         let actors = nodes
             .into_iter()
             .map(|node| ActorLocation {
@@ -228,9 +234,10 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
-            .cluster_manager
+            .metadata_fucker
             .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await;
+            .await
+            .map_err(err)?;
 
         dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
     }
@@ -240,12 +247,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_fucker
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
     }
@@ -255,12 +262,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_fucker
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
@@ -274,12 +281,12 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
         let worker_node = srv
-            .cluster_manager
+            .metadata_fucker
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
@@ -307,12 +314,12 @@ pub(super) mod handlers {
         let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
 
         let worker_node = srv
-            .cluster_manager
+            .metadata_fucker
             .get_worker_by_id(worker_id)
             .await
-            .context("worker node not found")
             .map_err(err)?
-            .worker_node;
+            .context("worker node not found")
+            .map_err(err)?;
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
