@@ -23,7 +23,7 @@ services:
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
                     --connector-rpc-endpoint 0.0.0.0:50051 \
-                    --parallelism 4 \
+                    # --parallelism 4 \
                     --role both \
                     --meta-address http://0.0.0.0:5690\" \
                  --frontend-opts=\" \
