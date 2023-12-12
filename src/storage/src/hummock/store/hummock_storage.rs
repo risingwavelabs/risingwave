@@ -351,11 +351,7 @@ impl HummockStorage {
                     epoch,
                 )
             } else {
-                let (imm_vec, sst_vec, watermarks) =
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
-                let committed_version = (**pinned_version).clone();
-
-                (imm_vec, sst_vec, committed_version, watermarks)
+                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
             }
         };
 

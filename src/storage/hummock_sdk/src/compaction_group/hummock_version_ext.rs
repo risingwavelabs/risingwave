@@ -195,7 +195,7 @@ impl HummockVersion {
             .iter()
             .map(|(table_id, table_watermarks)| {
                 (
-                    TableId::from(*table_id as u32),
+                    TableId::from(*table_id),
                     TableWatermarks::from_protobuf(table_watermarks)
                         .build_index(self.max_committed_epoch),
                 )

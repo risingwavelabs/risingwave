@@ -468,13 +468,10 @@ pub fn read_filter_for_batch(
     table_id: TableId,
     key_range: &mut TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-) -> StorageResult<(
-    Vec<ImmutableMemtable>,
-    Vec<SstableInfo>,
-    Option<ReadTableWatermark>,
-)> {
+) -> StorageResult<ReadVersionTuple> {
+    assert!(!read_version_vec.is_empty());
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-    let mut max_mce = 0;
+    let mut max_mce_version: Option<CommittedVersion> = None;
     let mut table_watermark: Option<ReadTableWatermark> = None;
     for read_version in &read_version_vec {
         let read_version_guard = read_version.read();
@@ -491,10 +488,14 @@ pub fn read_filter_for_batch(
         };
 
         staging_vec.push((imms, ssts));
-        max_mce = std::cmp::max(
-            max_mce,
-            read_version_guard.committed().max_committed_epoch(),
-        );
+        if let Some(version) = &max_mce_version {
+            if read_version_guard.committed().max_committed_epoch() > version.max_committed_epoch()
+            {
+                max_mce_version = Some(read_version_guard.committed.clone());
+            }
+        } else {
+            max_mce_version = Some(read_version_guard.committed.clone());
+        }
 
         let read_watermark = read_version_guard
             .table_watermarks
@@ -513,11 +514,13 @@ pub fn read_filter_for_batch(
         }
     }
 
+    let max_mce_version = max_mce_version.expect("should exist for once");
+
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
-    let (min_epoch, max_epoch) = (max_mce, epoch);
+    let (min_epoch, max_epoch) = (max_mce_version.max_committed_epoch(), epoch);
     // prune imm and sst with max_mce
     for (staging_imms, staging_ssts) in staging_vec {
         imm_vec.extend(
@@ -534,7 +537,7 @@ pub fn read_filter_for_batch(
         }));
     }
 
-    Ok((imm_vec, sst_vec, table_watermark))
+    Ok((imm_vec, sst_vec, max_mce_version, table_watermark))
 }
 
 pub fn read_filter_for_local(
