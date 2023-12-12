@@ -455,7 +455,9 @@ async fn distribute_execute(
     query: Query,
     can_timeout_cancel: bool,
 ) -> Result<DistributedQueryStream> {
-    let timeout = if can_timeout_cancel {
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
         Some(session.statement_timeout())
     } else {
         None
@@ -476,7 +478,9 @@ async fn local_execute(
     query: Query,
     can_timeout_cancel: bool,
 ) -> Result<LocalQueryStream> {
-    let timeout = if can_timeout_cancel {
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
         Some(session.statement_timeout())
     } else {
         None
