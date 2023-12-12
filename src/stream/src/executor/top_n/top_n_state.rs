@@ -222,8 +222,12 @@ impl<S: StateStore> ManagedTopNState<S> {
             )
             .await?;
         pin_mut!(state_table_iter);
+
+        let mut group_row_count = 0;
+
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 topn_cache
                     .low
@@ -236,6 +240,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
         while let Some(item) = state_table_iter.next().await {
+            group_row_count += 1;
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .middle
@@ -247,6 +252,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_middle_cache_full() {
             let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == middle_last_sort_key {
                     topn_cache
@@ -268,6 +274,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         while !topn_cache.is_high_cache_full()
             && let Some(item) = state_table_iter.next().await
         {
+            group_row_count += 1;
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .high
@@ -276,6 +283,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
@@ -287,10 +295,10 @@ impl<S: StateStore> ManagedTopNState<S> {
             }
         }
 
-        if topn_cache.len() == 0 {
-            // after trying to initially fill in the cache, the length is still 0,
-            // meaning the table is empty
-            topn_cache.update_table_row_count(0);
+        if state_table_iter.next().await.is_none() {
+            // After trying to initially fill in the cache, all table entries are in the cache,
+            // we then get the precise table row count.
+            topn_cache.update_table_row_count(group_row_count);
         }
 
         Ok(())
