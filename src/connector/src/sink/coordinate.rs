@@ -24,9 +24,12 @@ use tracing::warn;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkError, SinkParam};
 
+use super::boxed::BoxCoordinator;
+
 pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     epoch: u64,
-    coordinator_stream_handle: CoordinatorStreamHandle,
+    coordinator_stream_handle: Option<CoordinatorStreamHandle>,
+    mock_coordinator_stream_handle: Option<BoxCoordinator>,
     inner: W,
 }
 
@@ -39,17 +42,43 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter
     ) -> Result<Self> {
         Ok(Self {
             epoch: 0,
-            coordinator_stream_handle: CoordinatorStreamHandle::new(
+            coordinator_stream_handle: Some(CoordinatorStreamHandle::new(
                 client,
                 param.to_proto(),
                 vnode_bitmap,
             )
-            .await?,
+            .await?),
+            mock_coordinator_stream_handle: None,
+            inner,
+        })
+    }
+
+    pub async fn mock(
+        mock_coordinator_stream_handle: BoxCoordinator,
+        inner: W,
+    ) -> Result<Self> {
+        Ok(Self {
+            epoch: 0,
+            coordinator_stream_handle: None,
+            mock_coordinator_stream_handle: Some(mock_coordinator_stream_handle),
             inner,
         })
     }
 }
-
+impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>>  CoordinatedSinkWriter<W>{
+    async fn commit_metadate(&mut self,metadata: SinkMetadata) -> Result<()>{
+        if let Some(coordinator_stream_handle) = self.coordinator_stream_handle.as_mut(){
+            coordinator_stream_handle.commit(self.epoch, metadata).await?;
+            return Ok(());
+        }
+        if let Some(mock_coordinator_stream_handle) = self.mock_coordinator_stream_handle.as_mut(){
+            mock_coordinator_stream_handle.commit(self.epoch, vec![metadata]).await?;
+            Ok(())
+        }else{
+            Err(SinkError::Coordinator(anyhow!("coordinator_stream_handle is None")))
+        }
+    }
+}
 #[async_trait::async_trait]
 impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for CoordinatedSinkWriter<W> {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
@@ -68,8 +97,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
                 SinkError::Coordinator(anyhow!("should get metadata on checkpoint barrier"))
             })?;
             // TODO: add metrics to measure time to commit
-            self.coordinator_stream_handle
-                .commit(self.epoch, metadata)
+            self.commit_metadate(metadata)
                 .await?;
             Ok(())
         } else {

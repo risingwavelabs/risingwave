@@ -15,6 +15,7 @@ aws-smithy-http = { workspace = true }
 aws-smithy-types = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
+serde_yaml = "0.9"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -30,6 +31,7 @@ risingwave_rt = { workspace = true, optional = true }
 risingwave_storage = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_stream = { workspace = true }
+risingwave_pb = { workspace = true }
 futures-async-stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

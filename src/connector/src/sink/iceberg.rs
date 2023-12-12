@@ -364,6 +364,24 @@ impl Sink for IcebergSink {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
+    async fn mock_log_sinker_with_corrdinator(
+        &self,
+        writer_param: SinkWriterParam,coordinator: Self::Coordinator
+    ) -> Result<Self::LogSinker> {
+        let table = self.create_table().await?;
+        let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
+            IcebergWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
+        } else {
+            IcebergWriter::new_append_only(table, &writer_param).await?
+        };
+        Ok(CoordinatedSinkWriter::mock(
+            Box::new(coordinator),
+            inner,
+        )
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let table = self.create_table().await?;
         let partition_type = table.current_partition_type()?;

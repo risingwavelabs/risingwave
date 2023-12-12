@@ -40,6 +40,7 @@ public class IcebergSinkCoordinator implements SinkCoordinator {
 
     @Override
     public void commit(long epoch, List<ConnectorServiceProto.SinkMetadata> metadataList) {
+        System.out.println(metadataList.size());
         List<DataFile> dataFileList = new ArrayList<>(metadataList.size());
         List<DeleteFile> deleteFileList = new ArrayList<>(metadataList.size());
         for (ConnectorServiceProto.SinkMetadata metadata : metadataList) {
