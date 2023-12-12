@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
-pub trait RecentFilterKey = Eq + Ord + Send + Sync + Debug + Clone + 'static;
+pub trait RecentFilterKey = Eq + Hash + Send + Sync + Debug + Clone + 'static;
 
 #[derive(Debug)]
 pub struct RecentFilter<K>
@@ -35,7 +36,7 @@ where
     K: RecentFilterKey,
 {
     last_refresh: Instant,
-    layers: VecDeque<RwLock<BTreeSet<K>>>,
+    layers: VecDeque<RwLock<HashSet<K>>>,
 }
 
 impl<K> RecentFilter<K>
@@ -45,7 +46,7 @@ where
     pub fn new(layers: usize, refresh_interval: Duration) -> Self {
         assert!(layers > 0);
         let layers = (0..layers)
-            .map(|_| BTreeSet::new())
+            .map(|_| HashSet::new())
             .map(RwLock::new)
             .collect();
         let inner = CacheRefillFilterInner {
@@ -63,7 +64,7 @@ where
         if let Some(mut inner) = self.inner.try_write() {
             if inner.last_refresh.elapsed() > self.refresh_interval {
                 inner.layers.pop_front();
-                inner.layers.push_back(RwLock::new(BTreeSet::new()));
+                inner.layers.push_back(RwLock::new(HashSet::new()));
                 inner.last_refresh = Instant::now();
             }
         }
@@ -72,11 +73,39 @@ where
         inner.layers.back().unwrap().write().insert(key);
     }
 
+    pub fn extend(&self, keys: impl IntoIterator<Item = K>) {
+        if let Some(mut inner) = self.inner.try_write() {
+            if inner.last_refresh.elapsed() > self.refresh_interval {
+                inner.layers.pop_front();
+                inner.layers.push_back(RwLock::new(HashSet::new()));
+                inner.last_refresh = Instant::now();
+            }
+        }
+
+        let inner = self.inner.read();
+        let mut guard = inner.layers.back().unwrap().write();
+        for key in keys {
+            guard.insert(key);
+        }
+    }
+
     pub fn contains(&self, key: &K) -> bool {
         let inner = self.inner.read();
         for layer in inner.layers.iter().rev() {
             if layer.read().contains(key) {
                 return true;
+            }
+        }
+        false
+    }
+
+    pub fn contains_one<'a>(&self, keys: impl Iterator<Item = &'a K> + Clone) -> bool {
+        let inner = self.inner.read();
+        for layer in inner.layers.iter().rev() {
+            for key in keys.clone() {
+                if layer.read().contains(key) {
+                    return true;
+                }
             }
         }
         false

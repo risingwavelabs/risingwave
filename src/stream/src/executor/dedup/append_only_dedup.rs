@@ -131,6 +131,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                         yield Message::Chunk(chunk);
                     }
+                    self.state_table.try_flush().await?;
                 }
 
                 Message::Barrier(barrier) => {

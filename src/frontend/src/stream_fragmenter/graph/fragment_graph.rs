@@ -19,9 +19,10 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamEnvironment,
+    DispatchStrategy, FragmentTypeFlag, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
+use thiserror_ext::AsReport;
 
 pub type LocalFragmentId = u32;
 
@@ -92,8 +93,8 @@ pub struct StreamFragmentGraph {
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
 
-    /// Stores the environment for the streaming plan
-    env: StreamEnvironment,
+    /// Stores the streaming context for the streaming plan
+    ctx: StreamContext,
 }
 
 impl StreamFragmentGraph {
@@ -105,7 +106,7 @@ impl StreamFragmentGraph {
                 .map(|(k, v)| (*k, v.to_protobuf()))
                 .collect(),
             edges: self.edges.values().cloned().collect(),
-            env: Some(self.env.clone()),
+            ctx: Some(self.ctx.clone()),
             // To be filled later
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
@@ -156,7 +157,9 @@ impl StreamFragmentGraph {
             .map_err(|e| {
                 format!(
                     "edge between {} and {} already exists: {}",
-                    upstream_id, downstream_id, e
+                    upstream_id,
+                    downstream_id,
+                    e.to_report_string()
                 )
             })
     }

@@ -22,8 +22,8 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, ActorId, ConnectorSplits, FragmentId, FragmentVnodeMapping,
-    I32Array, ObjectId, StreamNode, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, ActorId, ConnectorSplits, ExprContext, FragmentId,
+    FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -34,7 +34,7 @@ use risingwave_pb::meta::{FragmentParallelUnitMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamEnvironment,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -170,6 +170,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: _,
+                expr_context: pb_expr_context,
             } = actor;
 
             let splits = pb_actor_splits.get(&actor_id).cloned().map(ConnectorSplits);
@@ -199,6 +200,7 @@ impl CatalogController {
                     .cloned()
                     .collect::<BTreeSet<_>>()
             );
+            let pb_expr_context = pb_expr_context.expect("no expression context found");
 
             actors.push(actor::Model {
                 actor_id: actor_id as _,
@@ -208,6 +210,7 @@ impl CatalogController {
                 parallel_unit_id,
                 upstream_actor_ids: upstream_actors.into(),
                 vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
+                expr_context: ExprContext(pb_expr_context),
             });
             actor_dispatchers.insert(
                 actor_id as ActorId,
@@ -246,7 +249,7 @@ impl CatalogController {
     pub fn compose_table_fragments(
         table_id: u32,
         state: PbState,
-        env: Option<PbStreamEnvironment>,
+        ctx: Option<PbStreamContext>,
         fragments: Vec<(
             fragment::Model,
             Vec<actor::Model>,
@@ -274,7 +277,7 @@ impl CatalogController {
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            env,
+            ctx,
         };
 
         Ok(table_fragments)
@@ -327,7 +330,7 @@ impl CatalogController {
                 splits,
                 upstream_actor_ids,
                 vnode_bitmap,
-                ..
+                expr_context,
             } = actor;
 
             let upstream_fragment_actors = upstream_actor_ids.into_inner();
@@ -349,6 +352,7 @@ impl CatalogController {
             };
 
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
+            let pb_expr_context = Some(expr_context.into_inner());
 
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
@@ -388,6 +392,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: "".to_string(),
+                expr_context: pb_expr_context,
             })
         }
 
@@ -549,9 +554,7 @@ impl CatalogController {
         Self::compose_table_fragments(
             job_id as _,
             job_info.job_status.into(),
-            job_info
-                .timezone
-                .map(|tz| PbStreamEnvironment { timezone: tz }),
+            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_info,
             parallel_units_map,
         )
@@ -935,12 +938,14 @@ mod tests {
     use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
-        FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
+        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId,
+        VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment};
+    use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
     use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
     use risingwave_pb::stream_plan::{
@@ -1047,6 +1052,9 @@ mod tests {
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
                     mview_definition: "".to_string(),
+                    expr_context: Some(PbExprContext {
+                        time_zone: String::from("America/New_York"),
+                    }),
                 }
             })
             .collect_vec();
@@ -1168,6 +1176,9 @@ mod tests {
                     parallel_unit_id: parallel_unit_id as i32,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
                     vnode_bitmap,
+                    expr_context: ExprContext(PbExprContext {
+                        time_zone: String::from("America/New_York"),
+                    }),
                 }
             })
             .collect_vec();
@@ -1252,6 +1263,7 @@ mod tests {
                 parallel_unit_id,
                 upstream_actor_ids,
                 vnode_bitmap,
+                expr_context,
             },
             PbStreamActor {
                 actor_id: pb_actor_id,
@@ -1261,6 +1273,7 @@ mod tests {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition,
+                expr_context: pb_expr_context,
             },
         ) in actors.into_iter().zip_eq_debug(pb_actors.into_iter())
         {
@@ -1316,6 +1329,8 @@ mod tests {
                     .cloned()
                     .map(ConnectorSplits)
             );
+
+            assert_eq!(Some(expr_context.into_inner()), pb_expr_context);
         }
     }
 

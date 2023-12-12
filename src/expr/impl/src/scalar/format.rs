@@ -18,13 +18,14 @@ use std::str::FromStr;
 use risingwave_common::row::Row;
 use risingwave_common::types::{ScalarRefImpl, ToText};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 use super::string::quote_ident;
 
 /// Formats arguments according to a format string.
 #[function(
     "format(varchar, ...) -> varchar",
-    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_string().into()))?"
+    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
 )]
 fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Result<()> {
     let mut args = row.iter();

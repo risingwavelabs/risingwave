@@ -159,6 +159,7 @@ async fn compaction_test(
         stream_job_status: PbStreamJobStatus::Created.into(),
         create_type: PbCreateType::Foreground.into(),
         description: None,
+        incoming_sinks: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -215,7 +216,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
+        storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,

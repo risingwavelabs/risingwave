@@ -463,6 +463,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -590,6 +591,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -714,6 +716,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
