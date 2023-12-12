@@ -19,6 +19,9 @@ use risingwave_common::types::{
     DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use tokio_postgres::types::{to_sql_checked, ToSql};
+
+use crate::source::cdc::external::ConnectorResult;
 
 pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {
     let mut datums = vec![];
@@ -96,6 +99,76 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
         datums.push(datum);
     }
     datums
+}
+
+pub fn postgres_row_to_datums(
+    row: tokio_postgres::Row,
+    schema: &Schema,
+) -> ConnectorResult<Vec<Datum>> {
+    let mut datums = vec![];
+    for i in 0..schema.fields.len() {
+        let rw_field = &schema.fields[i];
+        let datum = {
+            match rw_field.data_type {
+                DataType::Boolean => {
+                    let v = row.try_get::<_, Option<bool>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int16 => {
+                    let v = row.try_get::<_, Option<i16>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int32 => {
+                    let v = row.try_get::<_, Option<i32>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Int64 => {
+                    let v = row.try_get::<_, Option<i64>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Float32 => {
+                    let v = row.try_get::<_, Option<f32>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Float64 => {
+                    let v = row.try_get::<_, Option<f64>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Decimal => {
+                    let v = row.try_get::<_, Option<RustDecimal>>(i)?;
+                    v.map(|v| ScalarImpl::from(Decimal::from(v)))
+                }
+                DataType::Varchar => {
+                    let v = row.try_get::<_, Option<String>>(i)?;
+                    v.map(ScalarImpl::from)
+                }
+                DataType::Date => {
+                    let v = row.try_get::<_, Option<NaiveDate>>(i)?;
+                    v.map(|v| ScalarImpl::from(Date::from(v)))
+                }
+                DataType::Time => {
+                    let v = row.try_get::<_, Option<chrono::NaiveTime>>(i)?;
+                    v.map(|v| ScalarImpl::from(Time::from(v)))
+                }
+                DataType::Timestamp => {
+                    let v = row.try_get::<_, Option<chrono::NaiveDateTime>>(i)?;
+                    v.map(|v| ScalarImpl::from(Timestamp::from(v)))
+                }
+                DataType::Timestamptz => {
+                    let v = row.try_get::<_, Option<chrono::NaiveDateTime>>(i)?;
+                    v.map(|v| ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros())))
+                }
+                _ => {
+                    // Interval, Struct, List, Int256 are not supported
+                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
+                    None
+                }
+            }
+        };
+        datums.push(datum);
+    }
+
+    Ok(datums)
 }
 
 #[cfg(test)]

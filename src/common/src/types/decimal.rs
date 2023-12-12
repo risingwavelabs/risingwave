@@ -20,7 +20,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
-use postgres_types::{ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
@@ -116,6 +116,49 @@ impl ToBinary for Decimal {
             }
             _ => unreachable!(),
         }
+    }
+}
+
+impl ToSql for Decimal {
+    accepts!(NUMERIC);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        match self {
+            Decimal::Normalized(d) => {
+                return d.to_sql(ty, out);
+            }
+            Decimal::NaN => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xC000);
+                out.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xD000);
+                out.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xF000);
+                out.put_i16(0);
+            }
+        }
+        Ok(IsNull::No)
     }
 }
 

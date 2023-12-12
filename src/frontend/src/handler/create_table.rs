@@ -30,7 +30,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
-use risingwave_connector::source::external::{DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY};
+use risingwave_connector::source::cdc::external::{
+    DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;

@@ -31,7 +31,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, 
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
-use risingwave_connector::source::external::{
+use risingwave_connector::source::r#mod::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
 };
 use risingwave_connector::source::{MockExternalTableReader, SplitImpl};

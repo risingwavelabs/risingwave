@@ -76,6 +76,7 @@ mysql_async = { version = "0.33", default-features = false, features = [
 mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
+tokio-postgres = "0.7"
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 parking_lot = "0.12"

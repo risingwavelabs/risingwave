@@ -18,6 +18,7 @@
 // src/expr/macro/src/types.rs
 
 use std::convert::TryFrom;
+use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::{FromStr, Utf8Error};
@@ -64,6 +65,7 @@ mod struct_type;
 mod successor;
 mod timestamptz;
 mod to_binary;
+mod to_sql;
 mod to_text;
 
 pub use self::datetime::{Date, Time, Timestamp};

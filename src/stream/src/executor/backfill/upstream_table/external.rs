@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{ExternalTableReaderImpl, SchemaTableName};
+use risingwave_connector::source::cdc::external::{ExternalTableReaderImpl, SchemaTableName};
 
 /// This struct represents an external table to be read during backfill
 pub struct ExternalStorageTable {

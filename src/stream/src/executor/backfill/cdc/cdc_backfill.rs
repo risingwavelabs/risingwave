@@ -29,7 +29,7 @@ use risingwave_connector::parser::{
     DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use risingwave_storage::StateStore;
 

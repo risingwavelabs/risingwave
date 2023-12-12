@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
+use risingwave_connector::source::cdc::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
