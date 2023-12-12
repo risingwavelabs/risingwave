@@ -52,7 +52,6 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_parallelism_request::PbParallelism;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -502,12 +501,12 @@ impl MetaClient {
 
     pub async fn alter_parallelism(
         &self,
-        object: alter_parallelism_request::Object,
-        target_parallelism: PbParallelism,
+        table_id: u32,
+        parallelism: PbTableParallelism,
     ) -> Result<CatalogVersion> {
         let request = AlterParallelismRequest {
-            object: Some(object),
-            parallelism: Some(target_parallelism),
+            table_id,
+            parallelism: Some(parallelism),
         };
         let resp = self.inner.alter_parallelism(request).await?;
         Ok(resp.version)

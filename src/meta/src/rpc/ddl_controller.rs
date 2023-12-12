@@ -37,10 +37,10 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_parallelism_request, alter_set_schema_request, DdlProgress,
-    TableJobType,
+    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
@@ -329,12 +329,15 @@ impl DdlController {
         self.barrier_manager.get_ddl_progress().await
     }
 
-    pub async fn tmp_alter_parallelism(
+    pub async fn alter_parallelism(
         &self,
-        object_id: alter_parallelism_request::Object,
-        parallelism: alter_parallelism_request::PbParallelism,
+        table_id: u32,
+        parallelism: PbTableParallelism,
     ) -> MetaResult<()> {
-        self.stream_manager.tmp_alter_parallelism().await
+        todo!()
+        // self.stream_manager
+        //     .tmp_alter_parallelism(table_id, parallelism)
+        //     .await
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {

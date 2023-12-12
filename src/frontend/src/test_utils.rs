@@ -39,7 +39,6 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::alter_parallelism_request::PbParallelism;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
     ReplaceTablePlan,
@@ -54,7 +53,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -592,8 +591,8 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_parallelism(
         &self,
-        object: risingwave_pb::ddl_service::alter_parallelism_request::Object,
-        parallelism: PbParallelism,
+        table_id: u32,
+        parallelism: PbTableParallelism,
     ) -> Result<()> {
         todo!()
     }

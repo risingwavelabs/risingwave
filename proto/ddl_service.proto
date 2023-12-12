@@ -5,6 +5,7 @@ package ddl_service;
 import "catalog.proto";
 import "common.proto";
 import "stream_plan.proto";
+import "meta.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -217,23 +218,8 @@ message AlterSetSchemaResponse {
 }
 
 message AlterParallelismRequest {
-  oneof object {
-    uint32 table_id = 1;
-    uint32 sink_id = 2;
-  }
-
-  message FixedParallelism {
-    uint32 parallelism = 20;
-  }
-
-  message AutoParallelism {
-    // reserved
-  }
-
-  oneof parallelism {
-    AutoParallelism auto = 10;
-    FixedParallelism fixed = 11;
-  }
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
 }
 
 message AlterParallelismResponse {

@@ -2011,6 +2011,9 @@ impl ScaleController {
             Policy::StableResizePolicy(resize) => {
                 self.generate_stable_resize_plan(resize, None).await
             }
+            Policy::TableResizePolicy(table_resize) => {
+                todo!()
+            }
         }
     }
 
@@ -2186,6 +2189,7 @@ impl GlobalStreamManager {
                             fragments.insert(fragment_id);
                         }
                     }
+                    fragments
                 }
                 Some(fragments) => fragments,
             };
@@ -2274,7 +2278,7 @@ impl GlobalStreamManager {
                         continue;
                     }
 
-                    match self.trigger_scale_out(include_workers).await {
+                    match self.trigger_scale_out(include_workers, None).await {
                         Ok(_) => {
                             worker_cache.clear();
                             changed = false;

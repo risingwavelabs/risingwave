@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::Rng;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
@@ -881,11 +882,16 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let object_id = req.get_object().cloned().unwrap();
-        let parallelism = req.get_parallelism().cloned().unwrap();
+        let AlterParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        } = req
+        else {
+            panic!("123e");
+        };
 
         self.ddl_controller
-            .tmp_alter_parallelism(object_id, parallelism)
+            .alter_parallelism(table_id, parallelism)
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {

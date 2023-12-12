@@ -18,9 +18,8 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::ddl_service::alter_parallelism_request::{
-    AutoParallelism, FixedParallelism, Object, PbParallelism,
-};
+use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
+use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, SetVariableValue, SetVariableValueSingle, Value,
@@ -58,54 +57,25 @@ pub async fn handle_alter_parallelism(
         table.id
     };
 
-    let object = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        match stmt_type {
-            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
-                // let (table, schema_name) =
-                //     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
-                // session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                // let schema_id = catalog_reader
-                //     .get_schema_by_name(db_name, schema_name)?
-                //     .id();
-                // check_schema_create_privilege(&session, new_owner, schema_id)?;
-                // if table.owner() == owner_id {
-                //     return Ok(RwPgResponse::empty_result(stmt_type));
-                // }
-                Object::TableId(table_id.table_id)
-            }
-            StatementType::ALTER_SINK => {
-                // let (sink, schema_name) =
-                //     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
-                // session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                // let schema_id = catalog_reader
-                //     .get_schema_by_name(db_name, schema_name)?
-                //     .id();
-                // check_schema_create_privilege(&session, new_owner, schema_id)?;
-                // if sink.owner() == owner_id {
-                //     return Ok(RwPgResponse::empty_result(stmt_type));
-                // }
-                Object::TableId(table_id.table_id)
-            }
-            _ => unreachable!(),
-        }
-    };
+    let table_id = table_id.table_id();
 
     let target_parallelism = match parallelism {
-        SetVariableValue::Single(SetVariableValueSingle::Ident(i)) => {
-            PbParallelism::Auto(AutoParallelism {})
-        }
+        SetVariableValue::Single(SetVariableValueSingle::Ident(_)) => PbTableParallelism {
+            parallelism: Some(PbParallelism::AutoParallelism(AutoParallelism {})),
+        },
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
-            PbParallelism::Fixed(FixedParallelism {
-                parallelism: v.parse().unwrap(),
-            })
+            PbTableParallelism {
+                parallelism: Some(PbParallelism::FixedParallelism(FixedParallelism {
+                    parallelism: v.parse().unwrap(),
+                })),
+            }
         }
         _ => unreachable!(),
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_parallelism(object, target_parallelism)
+        .alter_parallelism(table_id, target_parallelism)
         .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
