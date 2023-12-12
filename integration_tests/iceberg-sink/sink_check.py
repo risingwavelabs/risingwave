@@ -7,7 +7,7 @@ query_sql = open("iceberg-query.sql").read()
 
 print("querying iceberg with presto sql: %s" % query_sql)
 
-query_output_file_name = "query_outout.txt"
+query_output_file_name = "query_output.txt"
 
 query_output_file = open(query_output_file_name, "wb")
 
