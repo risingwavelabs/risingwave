@@ -554,7 +554,7 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&*sql);
+        record_sql_in_span(&sql);
         let session = self.session.clone().unwrap();
 
         let _exec_context_guard = session.init_exec_context(sql.clone());
@@ -797,7 +797,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&*sql);
+            record_sql_in_span(&sql);
 
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
