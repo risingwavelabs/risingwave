@@ -471,13 +471,12 @@ message TableParallelism {
 
   message CustomParallelism {}
 
-  oneof parallelism {
-    FixedParallelism fixed_parallelism = 1;
-    AutoParallelism auto_parallelism = 2;
-    CustomParallelism custom_parallelism = 3;
+  oneof Parallelism {
+    FixedParallelism fixed = 1;
+    AutoParallelism auto = 2;
+    CustomParallelism custom = 3;
   }
 }
-
 
 message GetReschedulePlanRequest {
   uint64 revision = 1;
@@ -493,11 +492,10 @@ message GetReschedulePlanRequest {
     map<uint32, WorkerChanges> fragment_worker_changes = 1;
   }
 
-  message TableResizePolicy {
-    repeated uint32 worker_ids = 1;
-    map<uint32, TableParallelism> table_parallelisms = 2;
-  }
-
+//  message TableResizePolicy {
+//    repeated uint32 worker_ids = 10;
+//    map<uint32, TableParallelism> table_parallelisms = 2;
+//  }
 
   oneof policy {
     // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
@@ -505,7 +503,7 @@ message GetReschedulePlanRequest {
     // Multiple repeated calls may yield different ReschedulePlan results.
     StableResizePolicy stable_resize_policy = 2;
 
-    TableResizePolicy table_resize_policy = 3;
+//    TableResizePolicy table_resize_policy = 3;
   }
 }
 

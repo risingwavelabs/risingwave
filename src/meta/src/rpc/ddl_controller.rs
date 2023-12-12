@@ -334,10 +334,9 @@ impl DdlController {
         table_id: u32,
         parallelism: PbTableParallelism,
     ) -> MetaResult<()> {
-        todo!()
-        // self.stream_manager
-        //     .tmp_alter_parallelism(table_id, parallelism)
-        //     .await
+        self.stream_manager
+            .alter_table_parallelism(table_id, parallelism.into())
+            .await
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {

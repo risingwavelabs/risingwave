@@ -37,7 +37,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::meta::FragmentParallelUnitMappings;
+use risingwave_pb::meta::{FragmentParallelUnitMappings, TableParallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
@@ -1610,6 +1610,200 @@ impl ScaleController {
         Ok(node_dropped_actors)
     }
 
+    pub async fn generate_table_resize_plan(
+        &self,
+        policy: TableResizePolicy,
+    ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
+        let TableResizePolicy {
+            worker_ids,
+            table_parallelisms,
+        } = policy;
+
+        let workers = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let unschedulable_worker_ids = Self::filter_unschedulable_workers(&workers);
+
+        for worker_id in &worker_ids {
+            if unschedulable_worker_ids.contains(worker_id) {
+                bail!("Cannot include unscheduable worker {}", worker_id)
+            }
+        }
+
+        let workers = workers
+            .into_iter()
+            .filter(|worker| worker_ids.contains(&worker.id))
+            .collect::<Vec<_>>();
+
+        let worker_parallel_units = workers
+            .iter()
+            .map(|worker| {
+                (
+                    worker.id,
+                    worker
+                        .parallel_units
+                        .iter()
+                        .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
+                        .collect::<BTreeSet<_>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        // todo, dump code
+
+        let all_table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        // FIXME: only need actor id and dispatcher info, avoid clone it.
+        let mut actor_map = HashMap::new();
+        let mut actor_status = HashMap::new();
+        // FIXME: only need fragment distribution info, should avoid clone it.
+
+        let mut table_fragment_map = HashMap::new();
+        for table_fragments in all_table_fragments {
+            let table_id = table_fragments.table_id().table_id;
+            for (fragment_id, fragment) in table_fragments.fragments {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, actor))
+                    .for_each(|(id, actor)| {
+                        actor_map.insert(id as ActorId, actor.clone());
+                    });
+
+                table_fragment_map
+                    .entry(table_id)
+                    .or_insert(HashMap::new())
+                    .insert(fragment_id, fragment);
+            }
+
+            actor_status.extend(table_fragments.actor_status);
+        }
+
+        let mut no_shuffle_source_fragment_ids = HashSet::new();
+        let mut no_shuffle_target_fragment_ids = HashSet::new();
+
+        Self::build_no_shuffle_relation_index(
+            &actor_map,
+            &mut no_shuffle_source_fragment_ids,
+            &mut no_shuffle_target_fragment_ids,
+        );
+
+        let table_parallelisms: HashMap<u32, TableFragmentsParallelism> = table_parallelisms
+            .into_iter()
+            .map(|(id, parallelism)| (id, parallelism.into()))
+            .collect();
+
+        let mut target_plan = HashMap::new();
+
+        for (table_id, parallelism) in table_parallelisms {
+            let fragment_map = table_fragment_map.remove(&table_id).unwrap();
+
+            for (fragment_id, fragment) in fragment_map {
+                let fragment_parallel_unit_ids: BTreeSet<_> = fragment
+                    .actors
+                    .iter()
+                    .map(|actor| {
+                        actor_status
+                            .get(&actor.actor_id)
+                            .and_then(|status| status.parallel_unit.clone())
+                            .unwrap()
+                            .id as ParallelUnitId
+                    })
+                    .collect();
+
+                let all_available_parallel_unit_ids: BTreeSet<_> =
+                    worker_parallel_units.values().flatten().cloned().collect();
+
+                if all_available_parallel_unit_ids.is_empty() {
+                    bail!(
+                        "No schedulable ParallelUnits available for fragment {}",
+                        fragment_id
+                    );
+                }
+
+                match fragment.get_distribution_type().unwrap() {
+                    FragmentDistributionType::Unspecified => unreachable!(),
+                    FragmentDistributionType::Single => {
+                        let single_parallel_unit_id =
+                            fragment_parallel_unit_ids.iter().exactly_one().unwrap();
+
+                        if all_available_parallel_unit_ids.contains(single_parallel_unit_id) {
+                            // note, shall we continue?
+                            continue;
+                        }
+
+                        let assigned = rebalance_units(worker_parallel_units.clone(), 1)?;
+
+                        let chosen_target_parallel_unit_id = assigned
+                            .values()
+                            .flatten()
+                            .cloned()
+                            .exactly_one()
+                            .map_err(|e| {
+                                anyhow!(
+                                    "Cannot find a single target ParallelUnit for fragment {}: {}",
+                                    fragment_id,
+                                    e
+                                )
+                            })?;
+
+                        target_plan.insert(
+                            fragment_id,
+                            ParallelUnitReschedule {
+                                added_parallel_units: BTreeSet::from([
+                                    chosen_target_parallel_unit_id,
+                                ]),
+                                removed_parallel_units: BTreeSet::from([*single_parallel_unit_id]),
+                            },
+                        );
+                    }
+                    FragmentDistributionType::Hash => match parallelism {
+                        TableFragmentsParallelism::Auto => {
+                            target_plan.insert(
+                                fragment_id,
+                                Self::diff_parallel_unit_change(
+                                    &fragment_parallel_unit_ids,
+                                    &all_available_parallel_unit_ids,
+                                ),
+                            );
+                        }
+                        TableFragmentsParallelism::Fixed(n) => {
+                            if n > all_available_parallel_unit_ids.len() {
+                                bail!(
+                                    "Not enough ParallelUnits available for fragment {}",
+                                    fragment_id
+                                );
+                            }
+
+                            let rebalance_result =
+                                rebalance_units(worker_parallel_units.clone(), n as usize)?;
+
+                            let target_parallel_unit_ids =
+                                rebalance_result.into_values().flatten().collect();
+
+                            target_plan.insert(
+                                fragment_id,
+                                Self::diff_parallel_unit_change(
+                                    &fragment_parallel_unit_ids,
+                                    &target_parallel_unit_ids,
+                                ),
+                            );
+                        }
+                        TableFragmentsParallelism::Custom => unreachable!(),
+                    },
+                }
+            }
+        }
+
+        target_plan.retain(|_, plan| {
+            !(plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty())
+        });
+
+        Ok(target_plan)
+    }
+
     pub async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,
@@ -1626,17 +1820,7 @@ impl ScaleController {
             .list_active_streaming_compute_nodes()
             .await;
 
-        let unschedulable_worker_ids: HashSet<_> = workers
-            .iter()
-            .filter(|worker| {
-                worker
-                    .property
-                    .as_ref()
-                    .map(|p| p.is_unschedulable)
-                    .unwrap_or(false)
-            })
-            .map(|worker| worker.id as WorkerId)
-            .collect();
+        let unschedulable_worker_ids = Self::filter_unschedulable_workers(&workers);
 
         for changes in fragment_worker_changes.values() {
             for worker_id in &changes.include_worker_ids {
@@ -1830,35 +2014,93 @@ impl ScaleController {
                 // then we re-add the limited parallel units from the limited workers
                 target_parallel_unit_ids.extend(limited_worker_parallel_unit_ids.into_iter());
             }
+            match fragment.get_distribution_type().unwrap() {
+                FragmentDistributionType::Unspecified => unreachable!(),
+                FragmentDistributionType::Single => {
+                    let single_parallel_unit_id =
+                        fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
-            match fragment_parallelism.get(&fragment_id) {
-                None => unreachable!(),
-                Some(TableFragmentsParallelism::Fixed(target)) => {
-                    if no_shuffle_target_fragment_ids.contains(&fragment_id) {
-                        continue;
+                    let mut target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
+                        .keys()
+                        .filter(|id| !unschedulable_worker_ids.contains(*id))
+                        .filter(|id| !exclude_worker_ids.contains(*id))
+                        .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
+                        .collect();
+
+                    if let Some(target_parallelism_per_worker) = target_parallelism_per_worker {
+                        refilter_parallel_unit_id_by_target_parallelism(
+                            &worker_parallel_units,
+                            &include_worker_ids,
+                            &include_worker_parallel_unit_ids,
+                            &mut target_parallel_unit_ids,
+                            target_parallelism_per_worker,
+                        );
                     }
 
-                    let target = match fragment.get_distribution_type().unwrap() {
-                        FragmentDistributionType::Unspecified => unreachable!(),
-                        FragmentDistributionType::Single => 1,
-                        FragmentDistributionType::Hash => *target,
-                    };
+                    if target_parallel_unit_ids.is_empty() {
+                        bail!(
+                            "No schedulable ParallelUnits available for single distribution fragment {}",
+                            fragment_id
+                        );
+                    }
 
-                    // we use all available parallel units
-                    let available_parallel_unit_ids: BTreeMap<_, BTreeSet<_>> =
-                        worker_parallel_units
-                            .clone()
-                            .into_iter()
-                            .filter(|&(id, _)| !unschedulable_worker_ids.contains(&id))
-                            .filter(|&(id, _)| !exclude_worker_ids.contains(&id))
-                            .map(|(id, units)| (id, units.into_iter().collect()))
-                            .collect();
+                    if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
+                        let sorted_target_parallel_unit_ids =
+                            target_parallel_unit_ids.into_iter().sorted().collect_vec();
 
-                    let target_distribution =
-                        rebalance_units(available_parallel_unit_ids, target as usize)?;
+                        let chosen_target_parallel_unit_id = sorted_target_parallel_unit_ids
+                            [fragment_id as usize % sorted_target_parallel_unit_ids.len()];
 
-                    let target_parallel_unit_ids =
-                        target_distribution.into_values().flatten().collect();
+                        target_plan.insert(
+                            fragment_id,
+                            ParallelUnitReschedule {
+                                added_parallel_units: BTreeSet::from([
+                                    chosen_target_parallel_unit_id,
+                                ]),
+                                removed_parallel_units: BTreeSet::from([*single_parallel_unit_id]),
+                            },
+                        );
+                    }
+                }
+                FragmentDistributionType::Hash => {
+                    let mut target_parallel_unit_ids: BTreeSet<_> =
+                        fragment_parallel_unit_ids.clone();
+                    target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
+                    target_parallel_unit_ids
+                        .retain(|id| !exclude_worker_parallel_unit_ids.contains(id));
+
+                    if target_parallel_unit_ids.is_empty() {
+                        bail!(
+                            "No schedulable ParallelUnits available for fragment {}",
+                            fragment_id
+                        );
+                    }
+
+                    match (target_parallelism, target_parallelism_per_worker) {
+                        (Some(_), Some(_)) => {
+                            bail!("Cannot specify both target parallelism and target parallelism per worker");
+                        }
+                        (Some(target_parallelism), _) => {
+                            if target_parallel_unit_ids.len() < target_parallelism {
+                                bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                            }
+
+                            target_parallel_unit_ids = target_parallel_unit_ids
+                                .into_iter()
+                                .take(target_parallelism)
+                                .collect();
+                        }
+                        (_, Some(target_parallelism_per_worker)) => {
+                            refilter_parallel_unit_id_by_target_parallelism(
+                                &worker_parallel_units,
+                                &include_worker_ids,
+                                &include_worker_parallel_unit_ids,
+                                &mut target_parallel_unit_ids,
+                                target_parallelism_per_worker,
+                            );
+                        }
+                        _ => {}
+                    }
 
                     target_plan.insert(
                         fragment_id,
@@ -1868,111 +2110,6 @@ impl ScaleController {
                         ),
                     );
                 }
-                Some(TableFragmentsParallelism::Adaptive) => {
-                    match fragment.get_distribution_type().unwrap() {
-                        FragmentDistributionType::Unspecified => unreachable!(),
-                        FragmentDistributionType::Single => {
-                            let single_parallel_unit_id =
-                                fragment_parallel_unit_ids.iter().exactly_one().unwrap();
-
-                            let mut target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
-                                .keys()
-                                .filter(|id| !unschedulable_worker_ids.contains(*id))
-                                .filter(|id| !exclude_worker_ids.contains(*id))
-                                .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
-                                .collect();
-
-                            if let Some(target_parallelism_per_worker) =
-                                target_parallelism_per_worker
-                            {
-                                refilter_parallel_unit_id_by_target_parallelism(
-                                    &worker_parallel_units,
-                                    &include_worker_ids,
-                                    &include_worker_parallel_unit_ids,
-                                    &mut target_parallel_unit_ids,
-                                    target_parallelism_per_worker,
-                                );
-                            }
-
-                            if target_parallel_unit_ids.is_empty() {
-                                bail!(
-                                    "No schedulable ParallelUnits available for single distribution fragment {}",
-                                    fragment_id
-                                );
-                            }
-
-                            if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
-                                let sorted_target_parallel_unit_ids =
-                                    target_parallel_unit_ids.into_iter().sorted().collect_vec();
-
-                                let chosen_target_parallel_unit_id =
-                                    sorted_target_parallel_unit_ids[fragment_id as usize
-                                        % sorted_target_parallel_unit_ids.len()];
-
-                                target_plan.insert(
-                                    fragment_id,
-                                    ParallelUnitReschedule {
-                                        added_parallel_units: BTreeSet::from([
-                                            chosen_target_parallel_unit_id,
-                                        ]),
-                                        removed_parallel_units: BTreeSet::from([
-                                            *single_parallel_unit_id,
-                                        ]),
-                                    },
-                                );
-                            }
-                        }
-                        FragmentDistributionType::Hash => {
-                            let mut target_parallel_unit_ids: BTreeSet<_> =
-                                fragment_parallel_unit_ids.clone();
-                            target_parallel_unit_ids
-                                .extend(include_worker_parallel_unit_ids.iter());
-                            target_parallel_unit_ids
-                                .retain(|id| !exclude_worker_parallel_unit_ids.contains(id));
-
-                            if target_parallel_unit_ids.is_empty() {
-                                bail!(
-                                    "No schedulable ParallelUnits available for fragment {}",
-                                    fragment_id
-                                );
-                            }
-
-                            match (target_parallelism, target_parallelism_per_worker) {
-                                (Some(_), Some(_)) => {
-                                    bail!("Cannot specify both target parallelism and target parallelism per worker");
-                                }
-                                (Some(target_parallelism), _) => {
-                                    if target_parallel_unit_ids.len() < target_parallelism {
-                                        bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
-                                    }
-
-                                    target_parallel_unit_ids = target_parallel_unit_ids
-                                        .into_iter()
-                                        .take(target_parallelism)
-                                        .collect();
-                                }
-                                (_, Some(target_parallelism_per_worker)) => {
-                                    refilter_parallel_unit_id_by_target_parallelism(
-                                        &worker_parallel_units,
-                                        &include_worker_ids,
-                                        &include_worker_parallel_unit_ids,
-                                        &mut target_parallel_unit_ids,
-                                        target_parallelism_per_worker,
-                                    );
-                                }
-                                _ => {}
-                            }
-
-                            target_plan.insert(
-                                fragment_id,
-                                Self::diff_parallel_unit_change(
-                                    &fragment_parallel_unit_ids,
-                                    &target_parallel_unit_ids,
-                                ),
-                            );
-                        }
-                    }
-                }
             }
         }
 
@@ -1981,6 +2118,21 @@ impl ScaleController {
         });
 
         Ok(target_plan)
+    }
+
+    fn filter_unschedulable_workers(workers: &Vec<WorkerNode>) -> HashSet<WorkerId> {
+        let unschedulable_worker_ids: HashSet<_> = workers
+            .iter()
+            .filter(|worker| {
+                worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id as WorkerId)
+            .collect();
+        unschedulable_worker_ids
     }
 
     fn diff_parallel_unit_change(
@@ -2010,10 +2162,9 @@ impl ScaleController {
         match policy {
             Policy::StableResizePolicy(resize) => {
                 self.generate_stable_resize_plan(resize, None).await
-            }
-            Policy::TableResizePolicy(table_resize) => {
-                todo!()
-            }
+            } /* Policy::TableResizePolicy(table_resize) => {
+               *     todo!()
+               * } */
         }
     }
 
@@ -2117,6 +2268,10 @@ impl ScaleController {
     }
 }
 
+pub struct TableResizePolicy {
+    pub(crate) worker_ids: BTreeSet<WorkerId>,
+    pub(crate) table_parallelisms: HashMap<u32, TableFragmentsParallelism>,
+}
 impl GlobalStreamManager {
     pub async fn reschedule_actors(
         &self,

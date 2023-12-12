@@ -61,11 +61,11 @@ pub async fn handle_alter_parallelism(
 
     let target_parallelism = match parallelism {
         SetVariableValue::Single(SetVariableValueSingle::Ident(_)) => PbTableParallelism {
-            parallelism: Some(PbParallelism::AutoParallelism(AutoParallelism {})),
+            parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
         },
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
             PbTableParallelism {
-                parallelism: Some(PbParallelism::FixedParallelism(FixedParallelism {
+                parallelism: Some(PbParallelism::Fixed(FixedParallelism {
                     parallelism: v.parse().unwrap(),
                 })),
             }

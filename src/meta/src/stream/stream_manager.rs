@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::{bail, catalog};
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
@@ -32,7 +33,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{Locations, ScaleController, ScaleControllerRef};
+use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
@@ -712,18 +713,43 @@ impl GlobalStreamManager {
         cancelled_ids
     }
 
-    pub(crate) async fn tmp_alter_parallelism(
+    pub(crate) async fn alter_table_parallelism(
         &self,
-        table_id: TableId,
+        table_id: u32,
         parallelism: TableFragmentsParallelism,
     ) -> MetaResult<()> {
-        {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
+        let _reschedule_job_lock = self.reschedule_lock.write().await;
 
-            let Some(table_fragments) = guard.table_fragments().get(&table_id) else {
-                bail!("123");
-            };
+        let worker_nodes = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let worker_ids = worker_nodes
+            .iter()
+            .filter(|w| w.property.as_ref().map_or(true, |p| !p.is_unschedulable))
+            .map(|node| node.id)
+            .collect::<BTreeSet<_>>();
+
+        let reschedules = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids,
+                table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
+            })
+            .await?;
+
+        if reschedules.is_empty() {
+            return Ok(());
         }
+
+        self.reschedule_actors(
+            reschedules,
+            RescheduleOptions {
+                resolve_no_shuffle_upstream: false,
+            },
+        )
+        .await?;
 
         Ok(())
     }

@@ -22,7 +22,11 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::PbTableFragments;
+use risingwave_pb::meta::table_parallelism::{
+    CustomParallelism, FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism,
+    PbFixedParallelism, PbParallelism,
+};
+use risingwave_pb::meta::{PbTableFragments, PbTableParallelism, TableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -37,10 +41,41 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TableFragmentsParallelism {
-    Adaptive,
-    Fixed(u32),
+    Auto,
+    Fixed(usize),
+    Custom,
+}
+
+impl From<PbTableParallelism> for TableFragmentsParallelism {
+    fn from(value: PbTableParallelism) -> Self {
+        use Parallelism::*;
+        match &value.parallelism {
+            Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
+            Some(Auto(_)) => Self::Auto,
+            Some(Custom(_)) => Self::Custom,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<TableFragmentsParallelism> for PbTableParallelism {
+    fn from(value: TableFragmentsParallelism) -> Self {
+        use TableFragmentsParallelism::*;
+
+        let parallelism = match value {
+            Auto => PbParallelism::Auto(PbAutoParallelism {}),
+            Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
+                parallelism: n as u32,
+            }),
+            Custom => PbParallelism::Custom(PbCustomParallelism {}),
+        };
+
+        Self {
+            parallelism: Some(parallelism),
+        }
+    }
 }
 
 /// Fragments of a streaming job.
@@ -130,7 +165,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
-            assigned_parallelism: TableFragmentsParallelism::Adaptive,
+            assigned_parallelism: TableFragmentsParallelism::Auto,
         }
     }
 
@@ -178,7 +213,7 @@ impl TableFragments {
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
-            assigned_parallelism: TableFragmentsParallelism::Adaptive,
+            assigned_parallelism: TableFragmentsParallelism::Auto,
         }
     }
 
