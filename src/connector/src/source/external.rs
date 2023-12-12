@@ -592,6 +592,7 @@ mod tests {
             format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
+            target_table: None,
         };
 
         let rw_schema = param.schema();

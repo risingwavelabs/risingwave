@@ -53,3 +53,9 @@
     );
   expected_outputs:
     - explain_output
+- id: create_emit_on_close_sink
+  sql: |
+    create table t2 (a int, b int, watermark for b as b - 4) append only;
+    explain create sink sk1 from t2 emit on window close with (connector='blackhole');
+  expected_outputs:
+    - explain_output

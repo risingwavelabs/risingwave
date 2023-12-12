@@ -47,6 +47,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
@@ -579,6 +580,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             let _ = builder.take(batch_len);
         }
 
+        let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
@@ -589,6 +591,16 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .or_insert(msg.offset.clone());
 
                 continue;
+            }
+
+            // calculate process_time - event_time lag
+            if let SourceMeta::DebeziumCdc(msg_meta) = &msg.meta {
+                let lag_ms = process_time_ms - msg_meta.source_ts_ms;
+                // report to promethus
+                GLOBAL_SOURCE_METRICS
+                    .direct_cdc_event_lag_latency
+                    .with_label_values(&[&msg_meta.full_table_name])
+                    .observe(lag_ms as f64);
             }
 
             split_offset_mapping.insert(msg.split_id.clone(), msg.offset.clone());

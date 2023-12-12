@@ -33,6 +33,7 @@ use risingwave_sqlparser::ast::{
     self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
+use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -788,7 +789,7 @@ impl Binder {
                         ""
                     };
                     inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
-                        ErrorCode::BindError(format!("{e} in `recv`.{hint}"))
+                        ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
                     })?;
                     Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
                 }))),

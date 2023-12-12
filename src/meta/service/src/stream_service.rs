@@ -199,7 +199,7 @@ impl StreamManagerService for StreamServiceImpl {
                                     .collect_vec(),
                             })
                             .collect_vec(),
-                        env: Some(tf.env.to_protobuf()),
+                        ctx: Some(tf.ctx.to_protobuf()),
                     },
                 )
             })
