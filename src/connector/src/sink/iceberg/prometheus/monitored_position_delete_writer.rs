@@ -20,12 +20,12 @@ use icelake::Result;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
-pub struct PositionDeleteWriterWithMetricsBuilder<B: FileWriterBuilder> {
+pub struct MonitoredPositionDeleteWriterBuilder<B: FileWriterBuilder> {
     current_cache_number: LabelGuardedIntGauge<2>,
     inner: PositionDeleteWriterBuilder<B>,
 }
 
-impl<B: FileWriterBuilder> PositionDeleteWriterWithMetricsBuilder<B> {
+impl<B: FileWriterBuilder> MonitoredPositionDeleteWriterBuilder<B> {
     pub fn new(
         inner: PositionDeleteWriterBuilder<B>,
         current_cache_number: LabelGuardedIntGauge<2>,
@@ -39,13 +39,13 @@ impl<B: FileWriterBuilder> PositionDeleteWriterWithMetricsBuilder<B> {
 
 #[async_trait::async_trait]
 impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
-    for PositionDeleteWriterWithMetricsBuilder<B>
+    for MonitoredPositionDeleteWriterBuilder<B>
 {
-    type R = PositionDeleteWriterWithMetrics<B>;
+    type R = MonitoredPositionDeleteWriter<B>;
 
     async fn build(self, schema: &arrow_schema::SchemaRef) -> Result<Self::R> {
         let writer = self.inner.build(schema).await?;
-        Ok(PositionDeleteWriterWithMetrics {
+        Ok(MonitoredPositionDeleteWriter {
             writer,
             cache_number: self.current_cache_number,
             current_metrics: PositionDeleteMetrics {
@@ -55,7 +55,7 @@ impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
     }
 }
 
-pub struct PositionDeleteWriterWithMetrics<B: FileWriterBuilder> {
+pub struct MonitoredPositionDeleteWriter<B: FileWriterBuilder> {
     writer: PositionDeleteWriter<B>,
 
     // metrics
@@ -63,7 +63,7 @@ pub struct PositionDeleteWriterWithMetrics<B: FileWriterBuilder> {
     current_metrics: PositionDeleteMetrics,
 }
 
-impl<B: FileWriterBuilder> PositionDeleteWriterWithMetrics<B> {
+impl<B: FileWriterBuilder> MonitoredPositionDeleteWriter<B> {
     fn update_metrics(&mut self) -> Result<()> {
         let last_metrics = std::mem::replace(&mut self.current_metrics, self.writer.metrics());
         {
@@ -76,9 +76,7 @@ impl<B: FileWriterBuilder> PositionDeleteWriterWithMetrics<B> {
 }
 
 #[async_trait::async_trait]
-impl<B: FileWriterBuilder> IcebergWriter<PositionDeleteInput>
-    for PositionDeleteWriterWithMetrics<B>
-{
+impl<B: FileWriterBuilder> IcebergWriter<PositionDeleteInput> for MonitoredPositionDeleteWriter<B> {
     type R = <PositionDeleteWriter<B> as IcebergWriter<PositionDeleteInput>>::R;
 
     async fn write(&mut self, input: PositionDeleteInput) -> Result<()> {

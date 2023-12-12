@@ -20,13 +20,13 @@ use icelake::Result;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 
 #[derive(Clone)]
-pub struct WriteMetricsWriterBuilder<B: IcebergWriterBuilder> {
+pub struct MonitoredWriteWriterBuilder<B: IcebergWriterBuilder> {
     inner: B,
     write_qps: LabelGuardedIntCounter<2>,
     write_latency: LabelGuardedHistogram<2>,
 }
 
-impl<B: IcebergWriterBuilder> WriteMetricsWriterBuilder<B> {
+impl<B: IcebergWriterBuilder> MonitoredWriteWriterBuilder<B> {
     /// Create writer context.
     pub fn new(
         inner: B,
@@ -42,12 +42,12 @@ impl<B: IcebergWriterBuilder> WriteMetricsWriterBuilder<B> {
 }
 
 #[async_trait::async_trait]
-impl<B: IcebergWriterBuilder> IcebergWriterBuilder for WriteMetricsWriterBuilder<B> {
-    type R = WriteMetricsWriter<B::R>;
+impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredWriteWriterBuilder<B> {
+    type R = MonitoredWriteWriter<B::R>;
 
     async fn build(self, schema: &SchemaRef) -> Result<Self::R> {
         let appender = self.inner.build(schema).await?;
-        Ok(WriteMetricsWriter {
+        Ok(MonitoredWriteWriter {
             appender,
             write_qps: self.write_qps,
             write_latency: self.write_latency,
@@ -55,19 +55,19 @@ impl<B: IcebergWriterBuilder> IcebergWriterBuilder for WriteMetricsWriterBuilder
     }
 }
 
-pub struct WriteMetricsWriter<F: IcebergWriter> {
+pub struct MonitoredWriteWriter<F: IcebergWriter> {
     appender: F,
     write_qps: LabelGuardedIntCounter<2>,
     write_latency: LabelGuardedHistogram<2>,
 }
 
 #[async_trait]
-impl<F: IcebergWriter> IcebergWriter for WriteMetricsWriter<F> {
+impl<F: IcebergWriter> IcebergWriter for MonitoredWriteWriter<F> {
     type R = F::R;
 
     async fn write(&mut self, record: RecordBatch) -> Result<()> {
         self.write_qps.inc();
-        let _ = self.write_latency.start_timer();
+        let _timer = self.write_latency.start_timer();
         self.appender.write(record).await
     }
 

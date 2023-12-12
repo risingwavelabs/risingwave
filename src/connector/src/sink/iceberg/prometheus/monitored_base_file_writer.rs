@@ -22,13 +22,13 @@ use icelake::Result;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
-pub struct BaseFileWriterWithMetricsBuilder<B: FileWriterBuilder> {
+pub struct MonitoredBaseFileWriterBuilder<B: FileWriterBuilder> {
     inner: BaseFileWriterBuilder<B>,
     // metrics
     unflush_data_file: LabelGuardedIntGauge<2>,
 }
 
-impl<B: FileWriterBuilder> BaseFileWriterWithMetricsBuilder<B> {
+impl<B: FileWriterBuilder> MonitoredBaseFileWriterBuilder<B> {
     pub fn new(
         inner: BaseFileWriterBuilder<B>,
         unflush_data_file: LabelGuardedIntGauge<2>,
@@ -41,11 +41,11 @@ impl<B: FileWriterBuilder> BaseFileWriterWithMetricsBuilder<B> {
 }
 
 #[async_trait::async_trait]
-impl<B: FileWriterBuilder> FileWriterBuilder for BaseFileWriterWithMetricsBuilder<B> {
-    type R = BaseFileWriterWithMetrics<B>;
+impl<B: FileWriterBuilder> FileWriterBuilder for MonitoredBaseFileWriterBuilder<B> {
+    type R = MonitoredBaseFileWriter<B>;
 
     async fn build(self, schema: &SchemaRef) -> Result<Self::R> {
-        Ok(BaseFileWriterWithMetrics {
+        Ok(MonitoredBaseFileWriter {
             inner: self.inner.build(schema).await?,
             unflush_data_file: self.unflush_data_file,
             cur_metrics: BaseFileWriterMetrics {
@@ -55,7 +55,7 @@ impl<B: FileWriterBuilder> FileWriterBuilder for BaseFileWriterWithMetricsBuilde
     }
 }
 
-pub struct BaseFileWriterWithMetrics<B: FileWriterBuilder> {
+pub struct MonitoredBaseFileWriter<B: FileWriterBuilder> {
     inner: BaseFileWriter<B>,
 
     // metrics
@@ -65,7 +65,7 @@ pub struct BaseFileWriterWithMetrics<B: FileWriterBuilder> {
 }
 
 #[async_trait::async_trait]
-impl<B: FileWriterBuilder> FileWriter for BaseFileWriterWithMetrics<B> {
+impl<B: FileWriterBuilder> FileWriter for MonitoredBaseFileWriter<B> {
     type R = <<B as FileWriterBuilder>::R as FileWriter>::R;
 
     /// Write a record batch. The `DataFileWriter` will create a new file when the current row num is greater than `target_file_row_num`.
@@ -91,7 +91,7 @@ impl<B: FileWriterBuilder> FileWriter for BaseFileWriterWithMetrics<B> {
     }
 }
 
-impl<B: FileWriterBuilder> CurrentFileStatus for BaseFileWriterWithMetrics<B> {
+impl<B: FileWriterBuilder> CurrentFileStatus for MonitoredBaseFileWriter<B> {
     fn current_file_path(&self) -> String {
         self.inner.current_file_path()
     }

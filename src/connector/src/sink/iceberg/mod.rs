@@ -43,9 +43,9 @@ use serde_derive::Deserialize;
 use url::Url;
 use with_options::WithOptions;
 
-use self::prometheus::base_file_metrics_writer::BaseFileWriterWithMetricsBuilder;
-use self::prometheus::partition_metrics_writer::FanoutPartitionedWriterWithMetricsBuilder;
-use self::prometheus::position_delete_metrics_writer::PositionDeleteWriterWithMetricsBuilder;
+use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
+use self::prometheus::monitored_partition_writer::MonitoredFanoutPartitionedWriterBuilder;
+use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -394,7 +394,7 @@ impl IcebergWriter {
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
 
-        let data_file_builder = DataFileWriterBuilder::new(BaseFileWriterWithMetricsBuilder::new(
+        let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
             writer_param
@@ -402,7 +402,7 @@ impl IcebergWriter {
                 .iceberg_rolling_unflushed_data_file
                 .clone(),
         ));
-        let partition_data_file_builder = FanoutPartitionedWriterWithMetricsBuilder::new(
+        let partition_data_file_builder = MonitoredFanoutPartitionedWriterBuilder::new(
             builder_helper.fanout_partition_writer_builder(data_file_builder.clone())?,
             writer_param.sink_metrics.iceberg_partition_num.clone(),
         );
@@ -434,7 +434,7 @@ impl IcebergWriter {
         writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
-        let data_file_builder = DataFileWriterBuilder::new(BaseFileWriterWithMetricsBuilder::new(
+        let data_file_builder = DataFileWriterBuilder::new(MonitoredBaseFileWriterBuilder::new(
             builder_helper
                 .rolling_writer_builder(builder_helper.parquet_writer_builder(0, None)?)?,
             writer_param
@@ -442,22 +442,22 @@ impl IcebergWriter {
                 .iceberg_rolling_unflushed_data_file
                 .clone(),
         ));
-        let position_delete_builder = PositionDeleteWriterWithMetricsBuilder::new(
+        let position_delete_builder = MonitoredPositionDeleteWriterBuilder::new(
             builder_helper.position_delete_writer_builder(0, 1024)?,
             writer_param
                 .sink_metrics
                 .iceberg_position_delete_cache_num
                 .clone(),
         );
-        let euality_delete_builder =
+        let equality_delete_builder =
             builder_helper.equality_delete_writer_builder(unique_column_ids.clone(), 0)?;
         let delta_builder = EqualityDeltaWriterBuilder::new(
             data_file_builder,
             position_delete_builder,
-            euality_delete_builder,
+            equality_delete_builder,
             unique_column_ids,
         );
-        let partition_delta_builder = FanoutPartitionedWriterWithMetricsBuilder::new(
+        let partition_delta_builder = MonitoredFanoutPartitionedWriterBuilder::new(
             builder_helper.fanout_partition_writer_builder(delta_builder.clone())?,
             writer_param.sink_metrics.iceberg_partition_num.clone(),
         );

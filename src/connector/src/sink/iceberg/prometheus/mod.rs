@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod base_file_metrics_writer;
-pub mod partition_metrics_writer;
-pub mod position_delete_metrics_writer;
-pub mod write_metrics_writer;
+pub mod monitored_base_file_writer;
+pub mod monitored_partition_writer;
+pub mod monitored_position_delete_writer;
+pub mod monitored_write_writer;

@@ -21,12 +21,12 @@ use icelake::Result;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
-pub struct FanoutPartitionedWriterWithMetricsBuilder<B: IcebergWriterBuilder> {
+pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
     inner: FanoutPartitionedWriterBuilder<B>,
     partition_num: LabelGuardedIntGauge<2>,
 }
 
-impl<B: IcebergWriterBuilder> FanoutPartitionedWriterWithMetricsBuilder<B> {
+impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
     pub fn new(
         inner: FanoutPartitionedWriterBuilder<B>,
         partition_num: LabelGuardedIntGauge<2>,
@@ -39,15 +39,12 @@ impl<B: IcebergWriterBuilder> FanoutPartitionedWriterWithMetricsBuilder<B> {
 }
 
 #[async_trait::async_trait]
-impl<B: IcebergWriterBuilder> IcebergWriterBuilder for FanoutPartitionedWriterWithMetricsBuilder<B>
-where
-    B::R: IcebergWriter,
-{
-    type R = FanoutPartitionedWriterWithMetrics<B>;
+impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredFanoutPartitionedWriterBuilder<B> {
+    type R = MonitoredFanoutPartitionedWriter<B>;
 
     async fn build(self, schema: &SchemaRef) -> Result<Self::R> {
         let writer = self.inner.build(schema).await?;
-        Ok(FanoutPartitionedWriterWithMetrics {
+        Ok(MonitoredFanoutPartitionedWriter {
             inner: writer,
             partition_num: self.partition_num,
             current_metrics: FanoutPartitionedWriterMetrics { partition_num: 0 },
@@ -55,19 +52,13 @@ where
     }
 }
 
-pub struct FanoutPartitionedWriterWithMetrics<B: IcebergWriterBuilder>
-where
-    B::R: IcebergWriter,
-{
+pub struct MonitoredFanoutPartitionedWriter<B: IcebergWriterBuilder> {
     inner: FanoutPartitionedWriter<B>,
     partition_num: LabelGuardedIntGauge<2>,
     current_metrics: FanoutPartitionedWriterMetrics,
 }
 
-impl<B: IcebergWriterBuilder> FanoutPartitionedWriterWithMetrics<B>
-where
-    B::R: IcebergWriter,
-{
+impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriter<B> {
     pub fn update_metrics(&mut self) -> Result<()> {
         let last_metrics = std::mem::replace(&mut self.current_metrics, self.inner.metrics());
         {
@@ -80,10 +71,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<B: IcebergWriterBuilder> IcebergWriter for FanoutPartitionedWriterWithMetrics<B>
-where
-    B::R: IcebergWriter,
-{
+impl<B: IcebergWriterBuilder> IcebergWriter for MonitoredFanoutPartitionedWriter<B> {
     type R = <FanoutPartitionedWriter<B> as IcebergWriter>::R;
 
     async fn write(&mut self, batch: arrow_array::RecordBatch) -> Result<()> {
