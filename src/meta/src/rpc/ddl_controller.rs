@@ -629,7 +629,6 @@ impl DdlController {
     async fn inject_replace_table_job_for_table_sink(
         &self,
         stream_ctx: StreamContext,
-        env: StreamEnvironment,
         sink: Option<&Sink>,
         creating_sink_table_fragments: Option<&TableFragments>,
         dropping_sink_id: Option<SinkId>,
@@ -914,9 +913,8 @@ impl DdlController {
         };
 
         if let Some(replace_table_info) = target_replace_info {
-            let env = StreamEnvironment::from_protobuf(
-                replace_table_info.fragment_graph.get_env().unwrap(),
-            );
+            let stream_ctx =
+                StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());
 
             let StreamingJobId::Sink(sink_id) = job_id else {
                 panic!("additional replace table event only occurs when dropping sink into table")
@@ -924,7 +922,7 @@ impl DdlController {
 
             let (streaming_job, context, table_fragments) = self
                 .inject_replace_table_job_for_table_sink(
-                    env,
+                    stream_ctx,
                     None,
                     None,
                     Some(sink_id),
@@ -1094,7 +1092,7 @@ impl DdlController {
 
                 Some(
                     self.inject_replace_table_job_for_table_sink(
-                        env,
+                        stream_ctx,
                         Some(s),
                         Some(&table_fragments),
                         None,
