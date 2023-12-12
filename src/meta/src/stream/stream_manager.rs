@@ -33,11 +33,9 @@ use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, RelationIdEnum,
-    StreamingJob,
+    CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob,
 };
 use crate::model::{ActorId, TableFragments};
-use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -676,11 +674,8 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                self.catalog_manager.drop_relation(
-                    RelationIdEnum::Table(id.table_id),
-                    self.fragment_manager.clone(),
-                    DropMode::Restrict,
-                ).await?;
+                self.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
                     .await?;
