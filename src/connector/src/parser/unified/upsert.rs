@@ -24,7 +24,7 @@ use crate::source::SourceColumnDesc;
 pub struct UpsertChangeEvent<K, V> {
     key_accessor: Option<K>,
     value_accessor: Option<V>,
-    key_as_column_name: Option<String>,
+    key_column_name: Option<String>,
 }
 
 impl<K, V> Default for UpsertChangeEvent<K, V> {
@@ -32,7 +32,7 @@ impl<K, V> Default for UpsertChangeEvent<K, V> {
         Self {
             key_accessor: None,
             value_accessor: None,
-            key_as_column_name: None,
+            key_column_name: None,
         }
     }
 }
@@ -54,8 +54,8 @@ impl<K, V> UpsertChangeEvent<K, V> {
         self
     }
 
-    pub fn with_key_as_column_name(mut self, name: impl ToString) -> Self {
-        self.key_as_column_name = Some(name.to_string());
+    pub fn with_key_column_name(mut self, name: impl ToString) -> Self {
+        self.key_column_name = Some(name.to_string());
         self
     }
 }
@@ -108,15 +108,12 @@ where
         // access value firstly
         match desc.additional_column_type {
             AdditionalColumnType::Key => {
-                match self.access(&["key", &desc.name], Some(&desc.data_type)) {
-                    Err(AccessError::Undefined { .. }) => (), // fallthrough
-                    other => return other,
-                };
-                if let Some(key_as_column_name) = &self.key_as_column_name
+                return if let Some(key_as_column_name) = &self.key_column_name
                     && &desc.name == key_as_column_name
                 {
-                    // todo: check logic later
-                    return self.access(&["key"], Some(&desc.data_type));
+                    self.access(&["key"], Some(&desc.data_type))
+                } else {
+                    self.access(&["key", &desc.name], Some(&desc.data_type))
                 }
             }
             AdditionalColumnType::Unspecified => {

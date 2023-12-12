@@ -15,12 +15,10 @@
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::only_parse_payload;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
@@ -54,7 +52,8 @@ impl PlainParser {
         };
 
         let payload_builder = match props.encoding_config {
-            EncodingProperties::Protobuf(_)
+            EncodingProperties::Json(_)
+            | EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
             | EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?

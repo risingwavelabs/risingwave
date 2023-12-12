@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::AdditionalColumnType;
@@ -25,7 +24,6 @@ use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::extract_key_config;
 use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -53,7 +51,7 @@ async fn build_accessor_builder(
     }
 }
 
-pub fn get_key_column_name(columns: &Vec<SourceColumnDesc>) -> Option<String> {
+pub fn get_key_column_name(columns: &[SourceColumnDesc]) -> Option<String> {
     columns.iter().find_map(|column| {
         if column.additional_column_type == AdditionalColumnType::Key {
             Some(column.name.clone())

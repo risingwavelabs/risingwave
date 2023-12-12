@@ -22,8 +22,8 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
+    KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -133,37 +133,6 @@ async fn extract_avro_table_schema(
             is_hidden: false,
         })
         .collect_vec())
-}
-
-/// Extract Avro primary key columns.
-async fn extract_upsert_avro_table_pk_columns(
-    info: &StreamSourceInfo,
-    with_properties: &HashMap<String, String>,
-) -> Result<Option<Vec<String>>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
-    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
-    let vec_column_desc = conf.map_to_columns()?;
-
-    conf.extract_pks()
-        .ok()
-        .map(|pk_desc| {
-            pk_desc
-                .into_iter()
-                .map(|desc| {
-                    vec_column_desc
-                        .iter()
-                        .find(|x| x.name == desc.name)
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "Can not found primary key column {} in value schema",
-                                desc.name
-                            )))
-                        })
-                })
-                .map_ok(|desc| desc.name.clone())
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()
 }
 
 async fn extract_debezium_avro_table_pk_columns(
@@ -739,7 +708,7 @@ pub(crate) fn bind_all_columns(
 pub(crate) async fn bind_source_pk(
     source_schema: &ConnectorSchema,
     source_info: &StreamSourceInfo,
-    columns: &mut Vec<ColumnCatalog>,
+    columns: &mut [ColumnCatalog],
     sql_defined_pk_names: Vec<String>,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
@@ -937,18 +906,6 @@ fn check_and_add_timestamp_column(
         };
         columns.push(kafka_timestamp_column);
     }
-}
-
-fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
-    let column = ColumnCatalog {
-        column_desc: ColumnDesc::named(
-            DEFAULT_KEY_COLUMN_NAME,
-            (columns.len() as i32).into(),
-            DataType::Bytea,
-        ),
-        is_hidden: false,
-    };
-    columns.push(column);
 }
 
 pub(super) fn bind_source_watermark(
