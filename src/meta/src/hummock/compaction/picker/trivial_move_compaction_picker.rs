@@ -24,6 +24,7 @@ pub struct TrivialMovePicker {
     level: usize,
     target_level: usize,
     overlap_strategy: Arc<dyn OverlapStrategy>,
+    min_size: u64, // avoid small file
 }
 
 impl TrivialMovePicker {
@@ -31,11 +32,13 @@ impl TrivialMovePicker {
         level: usize,
         target_level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        min_size: u64,
     ) -> Self {
         Self {
             level,
             target_level,
             overlap_strategy,
+            min_size,
         }
     }
 
@@ -47,11 +50,18 @@ impl TrivialMovePicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<SstableInfo> {
         let mut skip_by_pending = false;
+        let mut skip_by_size = false;
         for sst in select_tables {
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 skip_by_pending = true;
                 continue;
             }
+
+            if sst.get_file_size() < self.min_size {
+                skip_by_size = true;
+                continue;
+            }
+
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             overlap_info.update(sst);
             let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
@@ -63,6 +73,10 @@ impl TrivialMovePicker {
 
         if skip_by_pending {
             stats.skip_by_pending_files += 1;
+        }
+
+        if skip_by_size {
+            stats.skip_by_count_limit += 1;
         }
 
         None

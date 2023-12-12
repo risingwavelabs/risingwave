@@ -192,7 +192,15 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
+            let min_trivial_size = if self.config.split_weight_by_vnode > 0 {
+                self.config.sub_level_max_compaction_bytes
+                    / self.config.split_weight_by_vnode as u64
+            } else {
+                self.config.target_file_size_base / 4
+            };
+
+            let trivial_move_picker =
+                TrivialMovePicker::new(0, 0, overlap_strategy.clone(), min_trivial_size);
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,

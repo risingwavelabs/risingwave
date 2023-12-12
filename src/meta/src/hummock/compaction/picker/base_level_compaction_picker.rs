@@ -113,8 +113,18 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let trivial_move_picker =
-            TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
+        let min_trivial_size = if self.config.split_weight_by_vnode > 0 {
+            self.config.sub_level_max_compaction_bytes / self.config.split_weight_by_vnode as u64
+        } else {
+            self.config.target_file_size_base / 4
+        };
+
+        let trivial_move_picker = TrivialMovePicker::new(
+            0,
+            self.target_level,
+            overlap_strategy.clone(),
+            min_trivial_size,
+        );
 
         trivial_move_picker.pick_trivial_move_task(
             &l0.sub_levels[0].table_infos,
@@ -678,6 +688,7 @@ pub mod tests {
                 .max_compaction_bytes(500000)
                 .level0_sub_level_compact_level_count(2)
                 .sub_level_max_compaction_bytes(1000)
+                .split_weight_by_vnode(100)
                 .build(),
         );
 
@@ -696,5 +707,40 @@ pub mod tests {
             .unwrap();
         assert_eq!(3, ret.input_levels.len());
         assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
+    }
+
+    #[test]
+    fn test_l0_to_base_trivial_move_size_limit() {
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
+            vec![
+                generate_table(4, 1, 10, 90, 1),
+                generate_table(5, 1, 1000, 2000, 1),
+            ],
+            vec![generate_table(6, 1, 10, 90, 1)],
+        ]);
+
+        let levels = Levels {
+            l0: Some(l0),
+            levels: vec![generate_level(1, vec![generate_table(3, 1, 1, 100, 1)])],
+            member_table_ids: vec![1],
+            ..Default::default()
+        };
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut local_stats = LocalPickerStatistic::default();
+
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(500000)
+                .level0_sub_level_compact_level_count(2)
+                .sub_level_max_compaction_bytes(1000)
+                .build(),
+        );
+
+        let mut picker = LevelCompactionPicker::new(1, config);
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        // not trivial_move
+        assert_eq!(3, ret.input_levels.len());
     }
 }
