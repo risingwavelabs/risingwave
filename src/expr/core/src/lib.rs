@@ -25,11 +25,11 @@
 extern crate self as risingwave_expr;
 
 pub mod aggregate;
-pub mod captured_execution_context;
 #[doc(hidden)]
 pub mod codegen;
 mod error;
 pub mod expr;
+pub mod expr_context;
 pub mod scalar;
 pub mod sig;
 pub mod table_function;

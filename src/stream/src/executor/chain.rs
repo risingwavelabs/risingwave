@@ -136,7 +136,9 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Barrier, Executor, ExecutorInfo, Message, Mutation, PkIndices};
+    use crate::executor::{
+        AddMutation, Barrier, Executor, ExecutorInfo, Message, Mutation, PkIndices,
+    };
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -163,17 +165,19 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-                    adds: maplit::hashmap! {
-                        0 => vec![Dispatcher {
-                            downstream_actor_id: vec![actor_id],
-                            ..Default::default()
-                        }],
+                Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
+                    AddMutation {
+                        adds: maplit::hashmap! {
+                            0 => vec![Dispatcher {
+                                downstream_actor_id: vec![actor_id],
+                                ..Default::default()
+                            }],
+                        },
+                        added_actors: maplit::hashset! { actor_id },
+                        splits: Default::default(),
+                        pause: false,
                     },
-                    added_actors: maplit::hashset! { actor_id },
-                    splits: Default::default(),
-                    pause: false,
-                })),
+                ))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],

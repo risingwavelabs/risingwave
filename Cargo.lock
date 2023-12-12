@@ -3629,7 +3629,7 @@ dependencies = [
  "google-cloud-metadata",
  "google-cloud-token",
  "home",
- "jsonwebtoken",
+ "jsonwebtoken 8.3.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -4097,7 +4097,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal",
+ "opendal 0.41.0",
  "ordered-float 3.9.1",
  "parquet",
  "prometheus",
@@ -4381,6 +4381,21 @@ dependencies = [
  "base64 0.21.4",
  "pem 1.1.1",
  "ring 0.16.20",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
+name = "jsonwebtoken"
+version = "9.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7ea04a7c5c055c175f189b6dc6ba036fd62306b58c66c9f6389036c503a3f4"
+dependencies = [
+ "base64 0.21.4",
+ "js-sys",
+ "pem 3.0.2",
+ "ring 0.17.5",
  "serde",
  "serde_json",
  "simple_asn1",
@@ -5538,6 +5553,38 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prometheus",
+ "quick-xml 0.30.0",
+ "reqsign",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "opendal"
+version = "0.43.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c04ac25bc94e2b572a0f41bcc650cb39dd09255efce72b68eb5dc188b018c52a"
+dependencies = [
+ "anyhow",
+ "async-compat",
+ "async-trait",
+ "backon",
+ "base64 0.21.4",
+ "bytes",
+ "chrono",
+ "flagset",
+ "futures",
+ "http 0.2.9",
+ "log",
+ "md-5",
+ "once_cell",
+ "parking_lot 0.12.1",
+ "percent-encoding",
+ "pin-project",
  "quick-xml 0.30.0",
  "reqsign",
  "reqwest",
@@ -7085,9 +7132,9 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.14.3"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad14258ddd8ef6e564d57a94613e138cc9c21ef8a1fec547206d853213c7959"
+checksum = "6f52b6eef6975eb2decff7d7e95744c8a6b6bb8558bc9b4230c0a3431a74f59c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7098,7 +7145,7 @@ dependencies = [
  "hmac",
  "home",
  "http 0.2.9",
- "jsonwebtoken",
+ "jsonwebtoken 9.2.0",
  "log",
  "once_cell",
  "percent-encoding",
@@ -7258,6 +7305,15 @@ dependencies = [
  "enum-iterator",
  "fs-err",
  "itertools 0.12.0",
+]
+
+[[package]]
+name = "risingwave-fields-derive"
+version = "1.3.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
 ]
 
 [[package]]
@@ -7481,6 +7537,7 @@ dependencies = [
  "rand",
  "regex",
  "reqwest",
+ "risingwave-fields-derive",
  "risingwave_common_proc_macro",
  "risingwave_error",
  "risingwave_pb",
@@ -7783,6 +7840,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "size",
+ "thiserror-ext",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -7887,6 +7945,7 @@ dependencies = [
  "sha2",
  "sql-json-path",
  "thiserror",
+ "thiserror-ext",
  "tracing",
  "workspace-hack",
 ]
@@ -7916,6 +7975,7 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap",
+ "ctor",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
@@ -7962,6 +8022,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-stream",
  "tracing",
  "tracing-futures",
@@ -8076,6 +8137,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "thiserror-ext",
  "tracing",
 ]
 
@@ -8259,7 +8321,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal",
+ "opendal 0.43.0",
  "prometheus",
  "risingwave_common",
  "rustls",

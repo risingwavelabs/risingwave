@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -82,8 +83,9 @@ pub(super) fn handle_set_time_zone(
     value: SetTimeZoneValue,
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
-        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Local => {
+            iana_time_zone::get_timezone().context("Failed to get local time zone")
+        }
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))

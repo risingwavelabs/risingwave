@@ -40,6 +40,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+    ReplaceTablePlan,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -310,7 +311,12 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
+    async fn create_sink(
+        &self,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }
 
@@ -429,7 +435,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        _target_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_string(),

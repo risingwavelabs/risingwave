@@ -159,6 +159,6 @@ message Cardinality {
 }
 
 // Provide statement-local context, e.g. session info like time zone, for execution.
-message CapturedExecutionContext {
+message ExprContext {
   string time_zone = 1;
 }

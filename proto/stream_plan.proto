@@ -90,19 +90,11 @@ message ThrottleMutation {
   map<uint32, RateLimit> actor_throttle = 1;
 }
 
-message Barrier {
-  enum BarrierKind {
-    BARRIER_KIND_UNSPECIFIED = 0;
-    // The first barrier after a fresh start or recovery.
-    // There will be no data associated with the previous epoch of the barrier.
-    BARRIER_KIND_INITIAL = 1;
-    // A normal barrier. Data should be flushed locally.
-    BARRIER_KIND_BARRIER = 2;
-    // A checkpoint barrier. Data should be synchorized to the shared storage.
-    BARRIER_KIND_CHECKPOINT = 3;
-  }
+message CombinedMutation {
+  repeated BarrierMutation mutations = 1;
+}
 
-  data.Epoch epoch = 1;
+message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
     AddMutation add = 3;
@@ -119,7 +111,27 @@ message Barrier {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
+    // Combined mutation.
+    CombinedMutation combined = 100;
   }
+}
+
+message Barrier {
+  enum BarrierKind {
+    BARRIER_KIND_UNSPECIFIED = 0;
+    // The first barrier after a fresh start or recovery.
+    // There will be no data associated with the previous epoch of the barrier.
+    BARRIER_KIND_INITIAL = 1;
+    // A normal barrier. Data should be flushed locally.
+    BARRIER_KIND_BARRIER = 2;
+    // A checkpoint barrier. Data should be synchorized to the shared storage.
+    BARRIER_KIND_CHECKPOINT = 3;
+  }
+
+  data.Epoch epoch = 1;
+
+  BarrierMutation mutation = 3;
+
   // Used for tracing.
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
@@ -210,6 +222,7 @@ message SinkDesc {
   // it is the name of the sink itself.
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
+  optional uint32 target_table = 14;
 }
 
 enum SinkLogStoreType {
@@ -810,6 +823,8 @@ message StreamActor {
   common.Buffer vnode_bitmap = 8;
   // The SQL definition of this materialized view. Used for debugging only.
   string mview_definition = 9;
+  // Provide the necessary context, e.g. session info like time zone, for the actor.
+  plan_common.ExprContext expr_context = 10;
 }
 
 enum FragmentTypeFlag {
@@ -825,8 +840,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
 }
 
-// The environment associated with a stream plan
-message StreamEnvironment {
+// The streaming context associated with a stream plan
+message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
 }
@@ -874,7 +889,7 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
-  StreamEnvironment env = 5;
+  StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
 }
