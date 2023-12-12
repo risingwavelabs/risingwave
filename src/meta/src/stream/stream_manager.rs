@@ -667,6 +667,7 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
+                self.fragment_manager.drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(id))).await?;
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
                     .await?;
