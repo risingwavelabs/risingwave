@@ -59,6 +59,7 @@ use crate::controller::utils::{
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
+use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
 pub type CatalogControllerRef = Arc<CatalogController>;
@@ -601,7 +602,11 @@ impl CatalogController {
         todo!()
     }
 
-    pub async fn create_source(&self, mut pb_source: PbSource) -> MetaResult<NotificationVersion> {
+    pub async fn create_source(
+        &self,
+        mut pb_source: PbSource,
+        source_manager_ref: Option<SourceManagerRef>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
@@ -627,6 +632,14 @@ impl CatalogController {
         pb_source.id = source_obj.oid as _;
         let source: source::ActiveModel = pb_source.clone().into();
         source.insert(&txn).await?;
+
+        if let Some(src_manager) = source_manager_ref {
+            let ret = src_manager.register_source(&pb_source).await;
+            if let Err(e) = ret {
+                txn.rollback().await?;
+                return Err(e);
+            }
+        }
         txn.commit().await?;
 
         let version = self
@@ -778,10 +791,11 @@ impl CatalogController {
     pub async fn drop_connection(
         &self,
         connection_id: ConnectionId,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(NotificationVersion, PbConnection)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let connection_obj = Object::find_by_id(connection_id)
+        let (conn, conn_obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
@@ -805,19 +819,16 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let pb_connection: PbConnection = ObjectModel(conn, conn_obj.unwrap()).into();
+
         self.notify_users_update(user_infos).await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
-                NotificationInfo::Connection(PbConnection {
-                    id: connection_id as _,
-                    schema_id: connection_obj.schema_id.unwrap() as _,
-                    database_id: connection_obj.database_id.unwrap() as _,
-                    ..Default::default()
-                }),
+                NotificationInfo::Connection(pb_connection.clone()),
             )
             .await;
-        Ok(version)
+        Ok((version, pb_connection))
     }
 
     pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {
@@ -1569,6 +1580,74 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
+        let inner = self.inner.read().await;
+        let db_objs = Database::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(db_objs
+            .into_iter()
+            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn get_table_by_name(
+        &self,
+        database_name: &str,
+        table_name: &str,
+    ) -> MetaResult<Option<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find()
+            .find_also_related(Object)
+            .join(JoinType::InnerJoin, object::Relation::Database.def())
+            .filter(
+                table::Column::Name
+                    .eq(table_name)
+                    .and(database::Column::Name.eq(database_name)),
+            )
+            .one(&inner.db)
+            .await?;
+        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
+    }
+
+    pub async fn get_table_by_ids(&self, table_ids: Vec<TableId>) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::TableId.is_in(table_ids))
+            .all(&inner.db)
+            .await?;
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_connections(&self) -> MetaResult<Vec<PbConnection>> {
+        let inner = self.inner.read().await;
+        let conn_objs = Connection::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(conn_objs
+            .into_iter()
+            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .collect())
+    }
+
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         let inner = self.inner.read().await;
         let table_options: Vec<(TableId, Property)> = Table::find()
@@ -1804,7 +1883,7 @@ mod tests {
                 .to_string(),
             ..Default::default()
         };
-        mgr.create_source(pb_source).await?;
+        mgr.create_source(pb_source, None).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)

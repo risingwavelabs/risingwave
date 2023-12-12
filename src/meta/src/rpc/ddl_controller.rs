@@ -28,7 +28,10 @@ use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
+use risingwave_pb::catalog::connection::PrivateLinkService;
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
@@ -46,11 +49,12 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
-    IGNORED_NOTIFICATION_VERSION,
+    IdCategory, IndexId, LocalNotification, MetaSrvEnv, MetadataFucker, NotificationVersion,
+    RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId,
+    UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -139,6 +143,7 @@ impl DdlCommand {
 pub struct DdlController {
     env: MetaSrvEnv,
 
+    metadata_fucker: MetadataFucker,
     catalog_manager: CatalogManagerRef,
     stream_manager: GlobalStreamManagerRef,
     source_manager: SourceManagerRef,
@@ -213,6 +218,7 @@ impl CreatingStreamingJobPermit {
 impl DdlController {
     pub async fn new(
         env: MetaSrvEnv,
+        metadata_fucker: MetadataFucker,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
@@ -224,6 +230,7 @@ impl DdlController {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
             env,
+            metadata_fucker,
             catalog_manager,
             stream_manager,
             source_manager,
@@ -308,13 +315,20 @@ impl DdlController {
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_database(&database).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_database(&database).await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_database(database).await,
+        }
     }
 
-    async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
+    async fn drop_database_v1(
+        &self,
+        catalog_manager: &CatalogManagerRef,
+        database_id: DatabaseId,
+    ) -> MetaResult<NotificationVersion> {
         // 1. drop all catalogs in this database.
         let (version, streaming_ids, source_ids, connections_dropped) =
-            self.catalog_manager.drop_database(database_id).await?;
+            catalog_manager.drop_database(database_id).await?;
         // 2. Unregister source connector worker.
         self.source_manager.unregister_sources(source_ids).await;
         // 3. drop streaming jobs.
@@ -329,32 +343,100 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn drop_database_v2(
+        &self,
+        catalog_controller: &CatalogControllerRef,
+        database_id: DatabaseId,
+    ) -> MetaResult<NotificationVersion> {
+        let (
+            ReleaseContext {
+                streaming_jobs,
+                source_ids,
+                connections,
+                ..
+            },
+            version,
+        ) = catalog_controller.drop_database(database_id as _).await?;
+        self.source_manager
+            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
+            .await;
+        self.stream_manager
+            .drop_streaming_jobs(
+                streaming_jobs
+                    .into_iter()
+                    .map(|id| (id as u32).into())
+                    .collect(),
+            )
+            .await;
+        for svc in connections {
+            self.delete_vpc_endpoint_v2(svc.into_inner()).await?;
+        }
+        Ok(version)
+    }
+
+    async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                self.drop_database_v1(&fucker.catalog_manager, database_id)
+                    .await
+            }
+            MetadataFucker::V2(fucker) => {
+                self.drop_database_v2(&fucker.catalog_controller, database_id)
+                    .await
+            }
+        }
+    }
+
     async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_schema(&schema).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_schema(&schema).await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_schema(schema).await,
+        }
     }
 
     async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_schema(schema_id).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.drop_schema(schema_id).await,
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .drop_schema(schema_id as _, DropMode::Restrict)
+                    .await
+            }
+        }
     }
 
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
-        // set the initialized_at_epoch to the current epoch.
-        source.initialized_at_epoch = Some(Epoch::now().0);
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                // set the initialized_at_epoch to the current epoch.
+                source.initialized_at_epoch = Some(Epoch::now().0);
 
-        self.catalog_manager
-            .start_create_source_procedure(&source)
-            .await?;
+                fucker
+                    .catalog_manager
+                    .start_create_source_procedure(&source)
+                    .await?;
 
-        if let Err(e) = self.source_manager.register_source(&source).await {
-            self.catalog_manager
-                .cancel_create_source_procedure(&source)
-                .await?;
-            return Err(e);
+                if let Err(e) = self.source_manager.register_source(&source).await {
+                    fucker
+                        .catalog_manager
+                        .cancel_create_source_procedure(&source)
+                        .await?;
+                    return Err(e);
+                }
+
+                fucker
+                    .catalog_manager
+                    .finish_create_source_procedure(source, vec![])
+                    .await
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .create_source(source, Some(self.source_manager.clone()))
+                    .await
+            }
         }
-
-        self.catalog_manager
-            .finish_create_source_procedure(source, vec![])
-            .await
     }
 
     async fn drop_source(
@@ -387,19 +469,38 @@ impl DdlController {
 
     // Maybe we can unify `alter_source_column` and `alter_source_name`.
     async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.alter_source_column(source).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.alter_source_column(source).await,
+            MetadataFucker::V2(fucker) => {
+                fucker.catalog_controller.alter_source_column(source).await
+            }
+        }
     }
 
     async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_function(&function).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_function(&function).await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_function(function).await,
+        }
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_function(function_id).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.drop_function(function_id).await,
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .drop_function(function_id as _)
+                    .await
+            }
+        }
     }
 
     async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_view(&view).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.create_view(&view).await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.create_view(view).await,
+        }
     }
 
     async fn drop_view(
@@ -422,14 +523,38 @@ impl DdlController {
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_connection(connection).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker.catalog_manager.create_connection(connection).await
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .create_connection(connection)
+                    .await
+            }
+        }
     }
 
     async fn drop_connection(
         &self,
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
-        let (version, connection) = self.catalog_manager.drop_connection(connection_id).await?;
+        let (version, connection) = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker
+                    .catalog_manager
+                    .drop_connection(connection_id)
+                    .await?
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .drop_connection(connection_id as _)
+                    .await?
+            }
+        };
+
         self.delete_vpc_endpoint(&connection).await?;
         Ok(version)
     }
@@ -439,6 +564,21 @@ impl DdlController {
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
             && svc.get_provider()? == PbPrivateLinkProvider::Aws
         {
+            if let Some(aws_cli) = self.aws_client.as_ref() {
+                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
+            } else {
+                warn!(
+                    "AWS client is not initialized, skip deleting vpc endpoint {}",
+                    svc.endpoint_id
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
+        // delete AWS vpc endpoint
+        if svc.get_provider()? == PbPrivateLinkProvider::Aws {
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
@@ -1178,40 +1318,70 @@ impl DdlController {
         relation: alter_name_request::Object,
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        match relation {
-            alter_name_request::Object::TableId(table_id) => {
-                self.catalog_manager
-                    .alter_table_name(table_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::ViewId(view_id) => {
-                self.catalog_manager
-                    .alter_view_name(view_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::IndexId(index_id) => {
-                self.catalog_manager
-                    .alter_index_name(index_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::SinkId(sink_id) => {
-                self.catalog_manager
-                    .alter_sink_name(sink_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::SourceId(source_id) => {
-                self.catalog_manager
-                    .alter_source_name(source_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::SchemaId(schema_id) => {
-                self.catalog_manager
-                    .alter_schema_name(schema_id, new_name)
-                    .await
-            }
-            alter_name_request::Object::DatabaseId(database_id) => {
-                self.catalog_manager
-                    .alter_database_name(database_id, new_name)
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => match relation {
+                alter_name_request::Object::TableId(table_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_table_name(table_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::ViewId(view_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_view_name(view_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::IndexId(index_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_index_name(index_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::SinkId(sink_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_sink_name(sink_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::SourceId(source_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_source_name(source_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::SchemaId(schema_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_schema_name(schema_id, new_name)
+                        .await
+                }
+                alter_name_request::Object::DatabaseId(database_id) => {
+                    fucker
+                        .catalog_manager
+                        .alter_database_name(database_id, new_name)
+                        .await
+                }
+            },
+            MetadataFucker::V2(fucker) => {
+                let (obj_type, id) = match relation {
+                    alter_name_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
+                    alter_name_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
+                    alter_name_request::Object::IndexId(id) => (ObjectType::Index, id as ObjectId),
+                    alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
+                    alter_name_request::Object::SourceId(id) => {
+                        (ObjectType::Source, id as ObjectId)
+                    }
+                    alter_name_request::Object::SchemaId(id) => {
+                        (ObjectType::Schema, id as ObjectId)
+                    }
+                    alter_name_request::Object::DatabaseId(id) => {
+                        (ObjectType::Database, id as ObjectId)
+                    }
+                };
+                fucker
+                    .catalog_controller
+                    .alter_name(obj_type, id, new_name)
                     .await
             }
         }
@@ -1222,9 +1392,28 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager
-            .alter_owner(self.fragment_manager.clone(), object, owner_id)
-            .await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker
+                    .catalog_manager
+                    .alter_owner(self.fragment_manager.clone(), object, owner_id)
+                    .await
+            }
+            MetadataFucker::V2(fucker) => {
+                let (obj_type, id) = match object {
+                    Object::TableId(id) => (ObjectType::Table, id as ObjectId),
+                    Object::ViewId(id) => (ObjectType::View, id as ObjectId),
+                    Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
+                    Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
+                    Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
+                    Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
+                };
+                fucker
+                    .catalog_controller
+                    .alter_owner(obj_type, id, owner_id as _)
+                    .await
+            }
+        }
     }
 
     async fn alter_set_schema(
@@ -1232,22 +1421,45 @@ impl DdlController {
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager
-            .alter_set_schema(self.fragment_manager.clone(), object, new_schema_id)
-            .await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker
+                    .catalog_manager
+                    .alter_set_schema(self.fragment_manager.clone(), object, new_schema_id)
+                    .await
+            }
+            MetadataFucker::V2(_) => {
+                unimplemented!("support set schema in v2")
+            }
+        }
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
         let timeout_secs = 30 * 60;
         for _ in 0..timeout_secs {
-            if self
-                .catalog_manager
-                .list_creating_background_mvs()
-                .await
-                .is_empty()
-            {
-                return Ok(());
+            match &self.metadata_fucker {
+                MetadataFucker::V1(fucker) => {
+                    if fucker
+                        .catalog_manager
+                        .list_creating_background_mvs()
+                        .await
+                        .is_empty()
+                    {
+                        return Ok(());
+                    }
+                }
+                MetadataFucker::V2(fucker) => {
+                    if fucker
+                        .catalog_controller
+                        .list_background_creating_mviews()
+                        .await?
+                        .is_empty()
+                    {
+                        return Ok(());
+                    }
+                }
             }
+
             sleep(Duration::from_secs(1)).await;
         }
         Err(MetaError::cancelled(format!(
@@ -1256,6 +1468,9 @@ impl DdlController {
     }
 
     async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.comment_on(comment).await
+        match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.comment_on(comment).await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.comment_on(comment).await,
+        }
     }
 }

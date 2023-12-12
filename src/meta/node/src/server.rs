@@ -571,6 +571,7 @@ pub async fn start_service_as_election_leader(
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         aws_cli.clone(),
+        metadata_fucker.clone(),
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),

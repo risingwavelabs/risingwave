@@ -23,6 +23,7 @@ use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
+use risingwave_meta::manager::MetadataFucker;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -52,7 +53,7 @@ use crate::{MetaError, MetaResult};
 pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef,
+    metadata_fucker: MetadataFucker,
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
@@ -63,6 +64,7 @@ impl DdlServiceImpl {
     pub async fn new(
         env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
+        metadata_fucker: MetadataFucker,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
@@ -74,7 +76,8 @@ impl DdlServiceImpl {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
-            catalog_manager.clone(),
+            metadata_fucker.clone(),
+            catalog_manager,
             stream_manager,
             source_manager,
             cluster_manager,
@@ -85,7 +88,7 @@ impl DdlServiceImpl {
         .await;
         Self {
             env,
-            catalog_manager,
+            metadata_fucker,
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
@@ -558,7 +561,10 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = self.catalog_manager.list_tables().await;
+        let tables = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.list_tables().await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.list_tables().await?,
+        };
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
@@ -607,23 +613,34 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let database = self
-            .catalog_manager
-            .list_databases()
-            .await
-            .into_iter()
-            .find(|db| db.name == req.database_name);
-        if let Some(db) = database {
-            let table = self
-                .catalog_manager
-                .list_tables()
-                .await
-                .into_iter()
-                .find(|t| t.name == req.table_name && t.database_id == db.id);
-            Ok(Response::new(GetTableResponse { table }))
-        } else {
-            Ok(Response::new(GetTableResponse { table: None }))
-        }
+        let table = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                let database = fucker
+                    .catalog_manager
+                    .list_databases()
+                    .await
+                    .into_iter()
+                    .find(|db| db.name == req.database_name);
+                if let Some(db) = database {
+                    fucker
+                        .catalog_manager
+                        .list_tables()
+                        .await
+                        .into_iter()
+                        .find(|t| t.name == req.table_name && t.database_id == db.id)
+                } else {
+                    None
+                }
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .get_table_by_name(&req.database_name, &req.table_name)
+                    .await?
+            }
+        };
+
+        Ok(Response::new(GetTableResponse { table }))
     }
 
     async fn alter_name(
@@ -775,7 +792,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = self.catalog_manager.list_connections().await;
+        let conns = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => fucker.catalog_manager.list_connections().await,
+            MetadataFucker::V2(fucker) => fucker.catalog_controller.list_connections().await?,
+        };
+
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
         }))
@@ -827,10 +848,28 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = self
-            .catalog_manager
-            .get_tables(&request.into_inner().table_ids)
-            .await;
+        let ret = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker
+                    .catalog_manager
+                    .get_tables(&request.into_inner().table_ids)
+                    .await
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .get_table_by_ids(
+                        request
+                            .into_inner()
+                            .table_ids
+                            .into_iter()
+                            .map(|id| id as _)
+                            .collect(),
+                    )
+                    .await?
+            }
+        };
+
         let mut tables = HashMap::default();
         for table in ret {
             tables.insert(table.id, table);
@@ -851,10 +890,20 @@ impl DdlServiceImpl {
     }
 
     async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = self
-            .catalog_manager
-            .get_connection_by_id(connection_id)
-            .await?;
+        let connection = match &self.metadata_fucker {
+            MetadataFucker::V1(fucker) => {
+                fucker
+                    .catalog_manager
+                    .get_connection_by_id(connection_id)
+                    .await?
+            }
+            MetadataFucker::V2(fucker) => {
+                fucker
+                    .catalog_controller
+                    .get_connection_by_id(connection_id as _)
+                    .await?
+            }
+        };
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {
