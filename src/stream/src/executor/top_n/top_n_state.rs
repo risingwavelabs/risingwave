@@ -159,9 +159,10 @@ impl<S: StateStore> ManagedTopNState<S> {
             .await?;
         pin_mut!(state_table_iter);
 
-        let mut group_row_count = Some(0);
+        let mut group_row_count = 0;
+
         while let Some(item) = state_table_iter.next().await {
-            *group_row_count.as_mut().unwrap() += 1; // try count rows of the group in the state table
+            group_row_count += 1;
 
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
@@ -172,18 +173,15 @@ impl<S: StateStore> ManagedTopNState<S> {
             }
             cache.insert(topn_row.cache_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
-                group_row_count = None; // cache becomes full, we cannot get precise table row count this time
                 break;
             }
-        }
-
-        if let Some(row_count) = group_row_count {
-            topn_cache.update_table_row_count(row_count);
         }
 
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
+                group_row_count += 1;
+
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
@@ -193,6 +191,11 @@ impl<S: StateStore> ManagedTopNState<S> {
                     break;
                 }
             }
+        }
+
+        if state_table_iter.next().await.is_none() {
+            // We can only update the row count when we have seen all rows of the group in the table.
+            topn_cache.update_table_row_count(group_row_count);
         }
 
         Ok(())
