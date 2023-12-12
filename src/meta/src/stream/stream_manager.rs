@@ -32,8 +32,12 @@ use uuid::Uuid;
 use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, RelationIdEnum,
+    StreamingJob,
+};
 use crate::model::{ActorId, TableFragments};
+use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -194,6 +198,9 @@ pub struct GlobalStreamManager {
     /// Maintains streaming sources from external system like kafka
     pub source_manager: SourceManagerRef,
 
+    /// Catalog manager for cleaning up state from deleted stream jobs
+    pub catalog_manager: CatalogManagerRef,
+
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
@@ -212,6 +219,7 @@ impl GlobalStreamManager {
         cluster_manager: ClusterManagerRef,
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
+        catalog_manager: CatalogManagerRef,
     ) -> MetaResult<Self> {
         let scale_controller = Arc::new(ScaleController::new(
             fragment_manager.clone(),
@@ -229,6 +237,7 @@ impl GlobalStreamManager {
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             reschedule_lock: RwLock::new(()),
             scale_controller,
+            catalog_manager,
         })
     }
 
@@ -667,7 +676,11 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                self.fragment_manager.drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(id))).await?;
+                self.catalog_manager.drop_relation(
+                    RelationIdEnum::Table(id.table_id),
+                    self.fragment_manager.clone(),
+                    DropMode::Restrict,
+                ).await?;
                 self.barrier_scheduler
                     .run_command(Command::CancelStreamingJob(fragment))
                     .await?;
@@ -944,6 +957,7 @@ mod tests {
                 cluster_manager.clone(),
                 source_manager.clone(),
                 hummock_manager,
+                catalog_manager.clone(),
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
