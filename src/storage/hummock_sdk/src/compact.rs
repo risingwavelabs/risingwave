@@ -53,14 +53,23 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .table_infos
             .iter()
             .map(|table| {
-                format!(
-                    "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
-                    table.get_sst_id(),
-                    table.object_id,
-                    table.file_size / 1024,
-                    (table.stale_key_count * 100 / table.total_key_count),
-                    (table.range_tombstone_count * 100 / table.total_key_count),
-                )
+                if table.total_key_count != 0 {
+                    format!(
+                        "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
+                        table.get_sst_id(),
+                        table.object_id,
+                        table.file_size / 1024,
+                        (table.stale_key_count * 100 / table.total_key_count),
+                        (table.range_tombstone_count * 100 / table.total_key_count),
+                    )
+                } else {
+                    format!(
+                        "[id: {}, obj_id: {} {}KB]",
+                        table.get_sst_id(),
+                        table.object_id,
+                        table.file_size / 1024,
+                    )
+                }
             })
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
