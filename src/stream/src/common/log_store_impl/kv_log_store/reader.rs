@@ -24,7 +24,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -131,7 +130,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 state_store
                     .iter(
                         (Included(range_start), Excluded(range_end)),
-                        MAX_EPOCH,
+                        HummockEpoch::MAX,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),

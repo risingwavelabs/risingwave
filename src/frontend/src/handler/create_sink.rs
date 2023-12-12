@@ -159,7 +159,7 @@ pub fn gen_sink_plan(
                 true
             } else {
                 return Err(ErrorCode::BindError(
-                    "`without_backfill` only support `create sink from mv or table`".to_string(),
+                    "`without_backfill` only support `CREATE SINK FROM MV or TABLE`".to_string(),
                 )
                 .into());
             }
