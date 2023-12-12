@@ -47,6 +47,7 @@ use super::{
 use crate::sink::writer::SinkWriterExt;
 
 pub const DELTALAKE_SINK: &str = "deltalake_rust";
+pub const DEFAULT_REGION: &str = "us-east-1";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
@@ -78,9 +79,17 @@ impl DeltaLakeCommon {
                         SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
                     })?,
                 );
-                if let Some(s3_region) = &self.s3_region {
-                    storage_options.insert(AWS_REGION.to_string(), s3_region.clone());
+                if self.s3_endpoint.is_none() && self.s3_region.is_none() {
+                    return Err(SinkError::Config(anyhow!(
+                        "s3.endpoint and s3.region need to be filled with at least one"
+                    )));
                 }
+                storage_options.insert(
+                    AWS_REGION.to_string(),
+                    self.s3_region
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_REGION.to_string()),
+                );
                 if let Some(s3_endpoint) = &self.s3_endpoint {
                     storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
                 }
