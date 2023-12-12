@@ -31,6 +31,7 @@ use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
+use thiserror_ext::AsReport;
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -398,7 +399,7 @@ fn bench_expr(c: &mut Criterion) {
         }) {
             Ok(agg) => agg,
             Err(e) => {
-                println!("error: {e}");
+                println!("error: {}", e.as_report());
                 continue;
             }
         };

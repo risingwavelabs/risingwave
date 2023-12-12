@@ -15,6 +15,7 @@
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::common::hummock_service::{HummockServiceOpts, Metrics};
@@ -68,9 +69,9 @@ impl CtlContext {
                 .await
             {
                 tracing::warn!(
-                    "failed to unregister ctl worker {}: {}",
-                    meta_client.worker_id(),
-                    e
+                    error = %e.as_report(),
+                    worker_id = %meta_client.worker_id(),
+                    "failed to unregister ctl worker",
                 );
             }
         }

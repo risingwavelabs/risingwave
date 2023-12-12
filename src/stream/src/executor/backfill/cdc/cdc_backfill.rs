@@ -35,8 +35,8 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
-use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
-use crate::executor::backfill::upstream_table::snapshot::{
+use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
@@ -417,7 +417,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
-            "CdcBackfill has already finished and forward messages directly to the downstream"
+            "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 
         // Wait for first barrier to come after backfill is finished.

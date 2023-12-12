@@ -12,15 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_expr::{define_context, Result as ExprResult};
-use risingwave_pb::plan_common::CapturedExecutionContext;
+use risingwave_pb::plan_common::ExprContext;
 
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
 }
 
-pub fn capture_execution_context() -> ExprResult<CapturedExecutionContext> {
+pub fn capture_expr_context() -> ExprResult<ExprContext> {
     let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
-    Ok(CapturedExecutionContext { time_zone })
+    Ok(ExprContext { time_zone })
+}
+
+pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output
+where
+    Fut: Future,
+{
+    TIME_ZONE::scope(expr_context.time_zone.to_owned(), future).await
 }

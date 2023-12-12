@@ -19,7 +19,7 @@ import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/udf/python")  # noqa
+sys.path.append("src/expr/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 
