@@ -127,7 +127,7 @@ impl DataChunkBuilder {
         AppendDataChunk {
             builder: self,
             remaining: (data_chunk.capacity() > 0) // defensive check for empty chunk
-                .then_some(SlicedDataChunk::new_checked(data_chunk)),
+                .then(|| SlicedDataChunk::new_checked(data_chunk)),
         }
     }
 
