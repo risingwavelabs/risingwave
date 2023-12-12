@@ -1,4 +1,5 @@
 from protobuf import user_pb2
+from google.protobuf.source_context_pb2 import SourceContext
 import sys
 from confluent_kafka import Producer
 from confluent_kafka.serialization import (
@@ -21,6 +22,7 @@ def get_user(i):
         address="Address_{}".format(i),
         city="City_{}".format(i),
         gender=user_pb2.MALE if i % 2 == 0 else user_pb2.FEMALE,
+        sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
     )
 
 
@@ -29,7 +31,7 @@ def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records):
     serializer = ProtobufSerializer(
         user_pb2.User,
         schema_registry_client,
-        {"use.deprecated.format": False},
+        {"use.deprecated.format": False, 'skip.known.types': True},
     )
 
     producer = Producer(producer_conf)

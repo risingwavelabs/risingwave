@@ -8,13 +8,13 @@ insert into t1 (v2) values (1), (2);
 statement ok
 flush;
 
-query IIIR
+query IIIR rowsort
 select * from t1;
 ----
 0 1 2 2.02
 1 2 3 3.02
 
-statement error QueryError: Bind error: update modifying the generated column is unsupported
+statement error update modifying the generated column is unsupported
 update t1 set v1 = 1;
 
 statement ok
@@ -52,7 +52,7 @@ insert into t2 values (1), (2);
 statement ok
 flush;
 
-query II
+query II rowsort
 select * from t2;
 ----
 1 2
@@ -124,7 +124,7 @@ sleep 2s
 statement ok
 flush;
 
-query TT
+query TT rowsort
 select v, t >= date '2021-01-01' as later_than_2021 from mv;
 ----
 1 t
@@ -140,7 +140,7 @@ statement ok
 drop source t4;
 
 # create a table with generated column now
-statement error QueryError: Bind error: failed to bind expression: now()
+statement error Failed to bind expression: now()
 CREATE TABLE t (v INT, t timestamptz as now()) WITH (
   connector = 'datagen',
   fields.v.kind = 'sequence',
@@ -151,7 +151,7 @@ CREATE TABLE t (v INT, t timestamptz as now()) WITH (
 ) FORMAT PLAIN ENCODE JSON;
 
 # create a table with impure generated column as pk.
-statement error QueryError: Bind error: Generated columns should not be part of the primary key. Here column "v2" is defined as part of the primary key.
+statement error Generated columns with impure expressions should not be part of the primary key. Here column "v2" is defined as part of the primary key.
 CREATE TABLE t (
   v1 INT,
   v2 timestamptz AS proctime(),

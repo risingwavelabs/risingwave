@@ -66,7 +66,7 @@ impl Format {
         match format_code {
             0 => Ok(Format::Text),
             1 => Ok(Format::Binary),
-            _ => Err(PsqlError::Internal(
+            _ => Err(PsqlError::Uncategorized(
                 format!("Unknown format code: {}", format_code).into(),
             )),
         }
@@ -102,7 +102,7 @@ impl<'a, 'b> FormatIterator<'a, 'b> {
             ));
         }
 
-        let default_format = provided_formats.get(0).copied().unwrap_or(Format::Text);
+        let default_format = provided_formats.first().copied().unwrap_or(Format::Text);
 
         Ok(Self {
             _formats: provided_formats,

@@ -17,18 +17,18 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
-use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup};
+use crate::executor::aggregation::AggGroup;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -52,10 +52,13 @@ pub struct SimpleAggExecutor<S: StateStore> {
 }
 
 struct ExecutorInner<S: StateStore> {
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
     input_pk_indices: Vec<usize>,
 
     /// Schema from input.
@@ -87,8 +90,6 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
-
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -131,16 +132,12 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
+                version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
-                },
+                info: args.info,
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
@@ -151,7 +148,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
-                metrics: args.metrics,
             },
         })
     }
@@ -169,8 +165,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let vis =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let vis = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(vis);
         }
 
@@ -183,13 +178,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
-                this.actor_ctx.clone(),
             )
             .await?;
 
         // Materialize input chunk if needed and possible.
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
@@ -213,8 +207,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
-            vars.distinct_dedup
-                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
+            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
             // Flush states into intermediate state table.
             let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
@@ -245,6 +238,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(chunk)
     }
 
+    async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
+            .await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let Self {
@@ -258,9 +258,22 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
+        let mut distinct_dedup = DistinctDeduplicater::new(
+            &this.agg_calls,
+            this.watermark_epoch.clone(),
+            &this.distinct_dedup_tables,
+            this.actor_ctx.clone(),
+        );
+        distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
+
+        yield Message::Barrier(barrier);
+
         let mut vars = ExecutionVars {
             // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
+                this.version,
                 None,
                 &this.agg_calls,
                 &this.agg_funcs,
@@ -272,21 +285,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(
-                &this.agg_calls,
-                &this.watermark_epoch,
-                &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
-            ),
+            distinct_dedup,
             state_changed: false,
         };
-
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
-
-        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
@@ -295,6 +296,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     if let Some(chunk) =
@@ -318,7 +320,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 

@@ -55,18 +55,17 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
   compactor-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: compute-node-0
     volumes:
       - "./server/udf.py:/udf.py"
       - "./mfa-start.sql:/mfa-start.sql"
       - "./mfa-mock.sql:/mfa-mock.sql"
   feature-store:
-    image: rust:1.67
     build:
       context: .
       target: feature-store-server
@@ -76,19 +75,15 @@ services:
       - ".log:/opt/feature-store/.log"
   etcd-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: meta-node-0
     ports:
       - "8815:8815"
@@ -96,16 +91,12 @@ services:
       [kafka]
   minio-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose.yml
+      file: ../../docker/docker-compose-distributed.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 volumes:
   etcd-0:
     external: false

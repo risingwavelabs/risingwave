@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
@@ -30,15 +31,18 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats,
+    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use crate::hummock::error::Result;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{read_lock, write_lock};
+use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
+use crate::model::{ValTransaction, VarTransaction};
+use crate::storage::Transaction;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
@@ -250,7 +254,7 @@ impl HummockManager {
         if new_write_limits == guard.write_limit {
             return false;
         }
-        tracing::info!("Hummock stopped write is updated: {:#?}", new_write_limits);
+        tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
         guard.write_limit = new_write_limits;
         self.env
@@ -276,6 +280,16 @@ impl HummockManager {
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
         let guard = read_lock!(self, versioning).await;
         guard.branched_ssts.clone()
+    }
+
+    #[named]
+    pub async fn rebuild_table_stats(&self) -> Result<()> {
+        let mut versioning = write_lock!(self, versioning).await;
+        let new_stats = rebuild_table_stats(&versioning.current_version);
+        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        *version_stats = new_stats;
+        commit_multi_var!(self, None, Transaction::default(), version_stats)?;
+        Ok(())
     }
 }
 
@@ -325,6 +339,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         levels: Default::default(),
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
+        table_watermarks: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -338,6 +353,47 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
     init_version
 }
 
+/// Rebuilds table stats from the given version.
+/// Note that the result is approximate value. See `estimate_table_stats`.
+fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
+    let mut stats = HummockVersionStats {
+        hummock_version_id: version.id,
+        table_stats: Default::default(),
+    };
+    for level in version.get_combined_levels() {
+        for sst in &level.table_infos {
+            let changes = estimate_table_stats(sst);
+            add_prost_table_stats_map(&mut stats.table_stats, &changes);
+        }
+    }
+    stats
+}
+
+/// Estimates table stats change from the given file.
+/// - The file stats is evenly distributed among multiple tables within the file.
+/// - The total key size and total value size are estimated based on key range and file size.
+/// - Branched files may lead to an overestimation.
+fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
+    let mut changes: HashMap<u32, TableStats> = HashMap::default();
+    let weighted_value =
+        |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
+    let key_range = sst.key_range.as_ref().unwrap();
+    let estimated_key_size: u64 = (key_range.left.len() + key_range.right.len()) as u64 / 2;
+    let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
+    if estimated_total_key_size > sst.uncompressed_file_size {
+        estimated_total_key_size = sst.uncompressed_file_size / 2;
+        tracing::warn!(sst.sst_id, "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.", estimated_total_key_size, sst.uncompressed_file_size);
+    }
+    let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
+    for table_id in &sst.table_ids {
+        let e = changes.entry(*table_id).or_default();
+        e.total_key_count += weighted_value(sst.total_key_count as i64);
+        e.total_key_size += weighted_value(estimated_total_key_size as i64);
+        e.total_value_size += weighted_value(estimated_total_value_size as i64);
+    }
+    changes
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -346,10 +402,15 @@ mod tests {
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
-    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersion, Level, OverlappingLevel};
+    use risingwave_pb::hummock::{
+        HummockPinnedVersion, HummockVersion, HummockVersionStats, KeyRange, Level,
+        OverlappingLevel, SstableInfo,
+    };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::manager::versioning::{calc_new_write_limits, Versioning};
+    use crate::hummock::manager::versioning::{
+        calc_new_write_limits, estimate_table_stats, rebuild_table_stats, Versioning,
+    };
     use crate::hummock::model::CompactionGroup;
 
     #[test]
@@ -469,5 +530,94 @@ mod tests {
             new_write_limits.get(&1).as_ref().unwrap().reason,
             "too many L0 sub levels: 11 > 5"
         );
+    }
+
+    #[test]
+    fn test_estimate_table_stats() {
+        let sst = SstableInfo {
+            key_range: Some(KeyRange {
+                left: vec![1; 10],
+                right: vec![1; 20],
+                ..Default::default()
+            }),
+            table_ids: vec![1, 2, 3],
+            total_key_count: 6000,
+            uncompressed_file_size: 6_000_000,
+            ..Default::default()
+        };
+        let changes = estimate_table_stats(&sst);
+        assert_eq!(changes.len(), 3);
+        for stats in changes.values() {
+            assert_eq!(stats.total_key_count, 6000 / 3);
+            assert_eq!(stats.total_key_size, (10 + 20) / 2 * 6000 / 3);
+            assert_eq!(
+                stats.total_value_size,
+                (6_000_000 - (10 + 20) / 2 * 6000) / 3
+            );
+        }
+
+        let mut version = HummockVersion {
+            id: 123,
+            levels: Default::default(),
+            max_committed_epoch: 0,
+            safe_epoch: 0,
+            table_watermarks: HashMap::new(),
+        };
+        for cg in 1..3 {
+            version.levels.insert(
+                cg,
+                Levels {
+                    levels: vec![Level {
+                        table_infos: vec![sst.clone()],
+                        ..Default::default()
+                    }],
+                    l0: Some(Default::default()),
+                    ..Default::default()
+                },
+            );
+        }
+        let HummockVersionStats {
+            hummock_version_id,
+            table_stats,
+        } = rebuild_table_stats(&version);
+        assert_eq!(hummock_version_id, version.id);
+        assert_eq!(table_stats.len(), 3);
+        for (tid, stats) in table_stats {
+            assert_eq!(
+                stats.total_key_count,
+                changes.get(&tid).unwrap().total_key_count * 2
+            );
+            assert_eq!(
+                stats.total_key_size,
+                changes.get(&tid).unwrap().total_key_size * 2
+            );
+            assert_eq!(
+                stats.total_value_size,
+                changes.get(&tid).unwrap().total_value_size * 2
+            );
+        }
+    }
+
+    #[test]
+    fn test_estimate_table_stats_large_key_range() {
+        let sst = SstableInfo {
+            key_range: Some(KeyRange {
+                left: vec![1; 1000],
+                right: vec![1; 2000],
+                ..Default::default()
+            }),
+            table_ids: vec![1, 2, 3],
+            total_key_count: 6000,
+            uncompressed_file_size: 60_000,
+            ..Default::default()
+        };
+        let changes = estimate_table_stats(&sst);
+        assert_eq!(changes.len(), 3);
+        for t in &sst.table_ids {
+            let stats = changes.get(t).unwrap();
+            assert_eq!(stats.total_key_count, 6000 / 3);
+            assert_eq!(stats.total_key_size, 60_000 / 2 / 3);
+            assert_eq!(stats.total_value_size, (60_000 - 60_000 / 2) / 3);
+        }
     }
 }

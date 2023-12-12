@@ -19,11 +19,13 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
-use jni::objects::{JByteArray, JValue, JValueOwned};
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::JVM;
-use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
+use risingwave_pb::connector_service::{
+    SourceCommonParam, SourceType, ValidateSourceRequest, ValidateSourceResponse,
+};
 
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, CdcSplitBase, Citus, DebeziumCdcSplit, MySqlCdcSplit, Mysql,
@@ -54,7 +56,7 @@ where
         context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<Self> {
         let server_addrs = props
-            .props
+            .properties
             .get(DATABASE_SERVERS_KEY)
             .map(|s| {
                 s.split(',')
@@ -69,46 +71,51 @@ where
             SourceType::from(T::source_type())
         );
 
-        let mut env = JVM.as_ref()?.attach_current_thread()?;
+        let source_id = context.info.source_id;
+        tokio::task::spawn_blocking(move || {
+            let mut env = JVM.get_or_init()?.attach_current_thread()?;
 
-        let validate_source_request = ValidateSourceRequest {
-            source_id: context.info.source_id as u64,
-            source_type: props.get_source_type_pb() as _,
-            properties: props.props,
-            table_schema: Some(props.table_schema),
-        };
+            let validate_source_request = ValidateSourceRequest {
+                source_id: source_id as u64,
+                source_type: props.get_source_type_pb() as _,
+                properties: props.properties,
+                table_schema: Some(props.table_schema),
+                common_param: Some(SourceCommonParam {
+                    is_multi_table_shared: props.is_multi_table_shared,
+                }),
+            };
 
-        let validate_source_request_bytes =
-            env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
+            let validate_source_request_bytes =
+                env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
 
-        // validate connector properties
-        let response = env.call_static_method(
-            "com/risingwave/connector/source/JniSourceValidateHandler",
-            "validate",
-            "([B)[B",
-            &[JValue::Object(&validate_source_request_bytes)],
-        )?;
+            let validate_source_response_bytes = call_static_method!(
+                env,
+                {com.risingwave.connector.source.JniSourceValidateHandler},
+                {byte[] validate(byte[] validateSourceRequestBytes)},
+                &validate_source_request_bytes
+            )?;
 
-        let validate_source_response_bytes = match response {
-            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
-            _ => unreachable!(),
-        };
+            let validate_source_response: ValidateSourceResponse = Message::decode(
+                risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?
+                    .deref(),
+            )?;
 
-        let validate_source_response: ValidateSourceResponse = Message::decode(
-            risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?
-                .deref(),
-        )?;
-
-        validate_source_response.error.map_or(Ok(()), |err| {
-            Err(anyhow!(format!(
-                "source cannot pass validation: {}",
-                err.error_message
-            )))
-        })?;
+            validate_source_response.error.map_or_else(
+                || Ok(()),
+                |err| {
+                    Err(anyhow!(format!(
+                        "source cannot pass validation: {}",
+                        err.error_message
+                    )))
+                },
+            )
+        })
+        .await
+        .map_err(|e| anyhow!("failed to validate source: {:?}", e))??;
 
         tracing::debug!("validate cdc source properties success");
         Ok(Self {
-            source_id: context.info.source_id,
+            source_id,
             worker_node_addrs: server_addrs,
             _phantom: PhantomData,
         })

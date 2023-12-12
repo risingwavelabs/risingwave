@@ -31,7 +31,8 @@ macro_rules! for_all_classified_sources {
                 { Datagen, $crate::source::datagen::DatagenProperties, $crate::source::datagen::DatagenSplit },
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
-                { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit }
+                { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
+                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
             }
             $(
                 ,$extra_args
@@ -152,7 +153,7 @@ macro_rules! dispatch_split_impl {
 macro_rules! impl_split {
     ({$({ $variant_name:ident, $prop_name:ty, $split:ty}),*}) => {
 
-        #[derive(Debug, Clone, EnumAsInner, PartialEq, Hash)]
+        #[derive(Debug, Clone, EnumAsInner, PartialEq)]
         pub enum SplitImpl {
             $(
                 $variant_name($split),
@@ -233,12 +234,13 @@ macro_rules! impl_cdc_source_type {
             $(
                 $cdc_source_type,
             )*
+            Unspecified,
         }
 
         impl From<PbSourceType> for CdcSourceType {
             fn from(value: PbSourceType) -> Self {
                 match value {
-                    PbSourceType::Unspecified => unreachable!(),
+                    PbSourceType::Unspecified => CdcSourceType::Unspecified,
                     $(
                         PbSourceType::$cdc_source_type => CdcSourceType::$cdc_source_type,
                     )*
@@ -252,8 +254,10 @@ macro_rules! impl_cdc_source_type {
                     $(
                         CdcSourceType::$cdc_source_type => PbSourceType::$cdc_source_type,
                     )*
+                   CdcSourceType::Unspecified => PbSourceType::Unspecified,
                 }
             }
         }
+
     }
 }

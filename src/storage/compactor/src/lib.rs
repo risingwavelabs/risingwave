@@ -14,13 +14,15 @@
 
 mod compactor_observer;
 mod rpc;
-mod server;
+pub mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
+use risingwave_common::config::{
+    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
+};
 
-use crate::server::compactor_serve;
+use crate::server::{compactor_serve, shared_compactor_serve};
 
 /// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -75,18 +77,16 @@ pub struct CompactorOpts {
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
+    #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
+    pub compactor_mode: Option<CompactorMode>,
+
+    #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    pub proxy_rpc_endpoint: String,
 }
 
 use std::future::Future;
@@ -95,28 +95,42 @@ use std::pin::Pin;
 pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
-    Box::pin(async move {
-        tracing::info!("Compactor node options: {:?}", opts);
-        tracing::info!("meta address: {}", opts.meta_address.clone());
+    match opts.compactor_mode {
+        Some(CompactorMode::Shared) => Box::pin(async move {
+            tracing::info!("Shared compactor pod options: {:?}", opts);
+            tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
-        let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_addr);
+            let listen_addr = opts.listen_addr.parse().unwrap();
 
-        let advertise_addr = opts
-            .advertise_addr
-            .as_ref()
-            .unwrap_or_else(|| {
-                tracing::warn!("advertise addr is not specified, defaulting to listen address");
-                &opts.listen_addr
-            })
-            .parse()
-            .unwrap();
-        tracing::info!(" address is {}", advertise_addr);
+            let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
 
-        let (join_handle, observer_join_handle, _shutdown_sender) =
-            compactor_serve(listen_addr, advertise_addr, opts).await;
+            tracing::info!("Server listening at {}", listen_addr);
 
-        join_handle.await.unwrap();
-        observer_join_handle.abort();
-    })
+            join_handle.await.unwrap();
+        }),
+        None | Some(CompactorMode::Dedicated) => Box::pin(async move {
+            tracing::info!("Compactor node options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
+
+            let listen_addr = opts.listen_addr.parse().unwrap();
+
+            let advertise_addr = opts
+                .advertise_addr
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::warn!("advertise addr is not specified, defaulting to listen address");
+                    &opts.listen_addr
+                })
+                .parse()
+                .unwrap();
+            tracing::info!(" address is {}", advertise_addr);
+            let (join_handle, observer_join_handle, _shutdown_sender) =
+                compactor_serve(listen_addr, advertise_addr, opts).await;
+
+            tracing::info!("Server listening at {}", listen_addr);
+
+            join_handle.await.unwrap();
+            observer_join_handle.abort();
+        }),
+    }
 }

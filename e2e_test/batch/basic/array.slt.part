@@ -134,8 +134,8 @@ double precision[]
 query T
 select pg_typeof(arr::varchar[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
 ----
-varchar[]
-varchar[]
+character varying[]
+character varying[]
 
 # Test explicit cast to nested integer array
 query T
@@ -157,14 +157,13 @@ select pg_typeof((v1::integer[][])[2][1]), (v1::integer[][])[2][1] from (values 
 integer 2
 
 # Test multiple castings of the same input.
-query TTI
+query TI
 select
-    (arr::varchar[][])[1][2] as double_varchar,
     (arr::varchar[][][])[1][2][3] as triple_varchar,
     (arr::integer[][][])[1][2][3] as triple_integer
 from (values ('{{{1, 2, 3}, {44, 55, 66}}}')) as t(arr);
 ----
-{44, 55, 66} 66 66
+66 66
 
 # Test cast from array to string
 query T

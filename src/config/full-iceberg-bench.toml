@@ -75,6 +75,7 @@ stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
 stream_dml_channel_initial_permits = 32768
+stream_hash_agg_max_dirty_groups_heap_size = 67108864
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -118,7 +119,6 @@ lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
-reclaim_rate_limit_mb = 0
 refill_levels = []
 
 [storage.meta_file_cache]
@@ -134,7 +134,6 @@ lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
-reclaim_rate_limit_mb = 0
 refill_levels = []
 
 [system]

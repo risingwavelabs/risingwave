@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Sub;
 use std::process::exit;
 
 use inquire::Confirm;
@@ -24,6 +25,7 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_stream::task::FragmentId;
 use serde_yaml;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
@@ -60,6 +62,7 @@ impl From<ScaleHorizonCommands> for ScaleCommandContext {
             yes,
             fragments,
             target_parallelism_per_worker: None,
+            exclusive_for_vertical: false,
         }
     }
 }
@@ -76,6 +79,7 @@ impl From<ScaleVerticalCommands> for ScaleCommandContext {
                     yes,
                     fragments,
                 },
+            exclusive,
         } = value;
 
         Self {
@@ -87,6 +91,7 @@ impl From<ScaleVerticalCommands> for ScaleCommandContext {
             yes,
             fragments,
             target_parallelism_per_worker,
+            exclusive_for_vertical: exclusive,
         }
     }
 }
@@ -100,6 +105,7 @@ pub struct ScaleCommandContext {
     yes: bool,
     fragments: Option<Vec<u32>>,
     target_parallelism_per_worker: Option<u32>,
+    exclusive_for_vertical: bool,
 }
 
 pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> anyhow::Result<()> {
@@ -114,7 +120,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
     } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            fail!("Failed to fetch cluster info: {}", e);
+            fail!("Failed to fetch cluster info: {}", e.as_report());
         }
     };
 
@@ -191,10 +197,11 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
         output,
         yes,
         fragments,
+        exclusive_for_vertical,
     } = scale_ctx;
 
     let worker_changes = {
-        let exclude_worker_ids =
+        let mut exclude_worker_ids =
             worker_input_to_worker_ids(exclude_workers.unwrap_or_default(), false);
         let include_worker_ids =
             worker_input_to_worker_ids(include_workers.unwrap_or_default(), true);
@@ -229,6 +236,20 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
                     include_worker_id
                 );
             }
+        }
+
+        if exclusive_for_vertical {
+            let all_worker_ids: HashSet<_> =
+                streaming_workers_index_by_id.keys().cloned().collect();
+
+            let include_worker_id_set: HashSet<_> = include_worker_ids.iter().cloned().collect();
+            let generated_exclude_worker_ids = all_worker_ids.sub(&include_worker_id_set);
+
+            exclude_worker_ids = exclude_worker_ids
+                .into_iter()
+                .chain(generated_exclude_worker_ids)
+                .unique()
+                .collect();
         }
 
         WorkerChanges {
@@ -280,7 +301,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
     } = match response {
         Ok(response) => response,
         Err(e) => {
-            fail!("Failed to generate plan: {:?}", e);
+            fail!("Failed to generate plan: {}", e.as_report());
         }
     };
 
@@ -344,7 +365,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
             match meta_client.reschedule(reschedules, revision, false).await {
                 Ok(response) => response,
                 Err(e) => {
-                    fail!("Failed to execute plan: {:?}", e);
+                    fail!("Failed to execute plan: {}", e.as_report());
                 }
             };
 
@@ -371,7 +392,7 @@ pub async fn update_schedulability(
     let GetClusterInfoResponse { worker_nodes, .. } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            fail!("Failed to get cluster info: {:?}", e);
+            fail!("Failed to get cluster info: {}", e.as_report());
         }
     };
 
@@ -393,7 +414,9 @@ pub async fn update_schedulability(
             .ok()
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
-        if let Some(worker_id) = worker_id && worker_ids.contains(&worker_id){
+        if let Some(worker_id) = worker_id
+            && worker_ids.contains(&worker_id)
+        {
             if !target_worker_ids.insert(worker_id) {
                 println!("Warn: {} and {} are the same worker", worker, worker_id);
             }

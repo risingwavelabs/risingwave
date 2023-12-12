@@ -12,22 +12,27 @@ repository = { workspace = true }
 async-trait = "0.1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
-aws-sdk-s3 = { version = "0.2", package = "madsim-aws-sdk-s3" }
-aws-smithy-client = { workspace = true }
+aws-sdk-s3 = { version = "0.5", package = "madsim-aws-sdk-s3" }
 aws-smithy-http = { workspace = true }
+aws-smithy-runtime = { workspace = true }
+aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crc32fast = "1.3.2"
+either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14"
+hyper = { version = "0.14", features = ["tcp", "client"] }
+hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
-itertools = "0.11"
-opendal = "0.39"
+itertools = "0.12"
+opendal = "0.43"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
+rustls = "0.21.8"
 spin = "0.9"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tokio-retry = "0.3"
 tracing = "0.1"

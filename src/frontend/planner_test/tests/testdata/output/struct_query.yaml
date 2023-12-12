@@ -262,20 +262,19 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select (v1).v2 from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (v1).v2
+  binder_error: |
+    Failed to bind expression: (v1).v2
 
     Caused by:
       Bind error: column notation .v2 applied to type bigint, which is not a composite type
 - sql: |
     create materialized view t as select * from s;
     select (country + country) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (country + country)
+  binder_error: |
+    Failed to bind expression: (country + country)
 
     Caused by:
-      Feature is not yet implemented: Add[Struct, Struct]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function add(struct<address character varying, zipcode character varying>, struct<address character varying, zipcode character varying>) does not exist
   create_source:
     format: plain
     encode: protobuf
@@ -296,11 +295,11 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: avg(country)
+  binder_error: |
+    Failed to bind expression: avg(country)
 
     Caused by:
-      Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)
+      function avg(struct<address character varying, zipcode character varying>) does not exist
   create_source:
     format: plain
     encode: protobuf
@@ -321,8 +320,8 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).city from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (country).city
+  binder_error: |
+    Failed to bind expression: (country).city
 
     Caused by:
       Bind error: column "city" not found in struct type
@@ -346,7 +345,7 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).address.* from t;
-  binder_error: 'Bind error: type "varchar" is not composite'
+  binder_error: 'Bind error: type "character varying" is not composite'
   create_source:
     format: plain
     encode: protobuf
@@ -422,7 +421,7 @@
 - sql: |
     CREATE TABLE a (c STRUCT<i STRUCT<a INTEGER>, j INTEGER>);
     INSERT INTO a VALUES (1);
-  binder_error: 'Bind error: cannot cast type "integer" to "struct<i struct<a integer>,j integer>" in Assign context'
+  binder_error: 'Bind error: cannot cast type "integer" to "struct<i struct<a integer>, j integer>" in Assign context'
 - name: test struct type alignment in CASE expression
   sql: |
     select CASE WHEN false THEN ROW(0, INTERVAL '1') WHEN true THEN ROW(1.1, INTERVAL '1') ELSE ROW(1, INTERVAL '1') END;

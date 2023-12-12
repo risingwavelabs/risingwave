@@ -260,15 +260,16 @@
     └─LogicalScan { table: t2, columns: [t2.v2], predicate: (t2.v2 > ('2021-04-01 00:00:00+00:00':Timestamptz + '01:00:00':Interval)) }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      │ └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
-      │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      │   └─StreamExchange { dist: Broadcast }
-      │     └─StreamProject { exprs: [AddWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
-      │       └─StreamNow { output: [now] }
-      └─StreamExchange { dist: HashShard(t2.v2) }
-        └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
+        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   └─StreamExchange { dist: Broadcast }
+        │     └─StreamProject { exprs: [AddWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+        │       └─StreamNow { output: [now] }
+        └─StreamExchange { dist: HashShard(t2.v2) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: now() in a complex cmp expr does not get pushed down
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -279,7 +280,9 @@
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
+  stream_error: |-
+    Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
+    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -290,7 +293,9 @@
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
+  stream_error: |-
+    Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
+    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: now() does not get pushed to scan, but others do
   sql: |
     create table t1(v1 timestamp with time zone, v2 int);
@@ -343,14 +348,15 @@
     └─LogicalScan { table: t2, columns: [t2.v2], predicate: (t2.v2 > '2021-04-01 00:00:00+00:00':Timestamptz) }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      │ └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
-      │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      │   └─StreamExchange { dist: Broadcast }
-      │     └─StreamNow { output: [now] }
-      └─StreamExchange { dist: HashShard(t2.v2) }
-        └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id], cleaned_by_watermark: true }
+        │   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   └─StreamExchange { dist: Broadcast }
+        │     └─StreamNow { output: [now] }
+        └─StreamExchange { dist: HashShard(t2.v2) }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: eq-predicate derived condition is banned for mismatching types
   sql: |
     create table t1(v1 int, v2 int);

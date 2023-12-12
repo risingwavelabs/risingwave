@@ -22,18 +22,9 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 
-pub const AWS_DEFAULT_CONFIG: [&str; 7] = [
-    "region",
-    "arn",
-    "profile",
-    "access_key",
-    "secret_access",
-    "session_token",
-    "endpoint_url",
-];
-pub const AWS_CUSTOM_CONFIG_KEY: [&str; 3] = ["retry_times", "conn_timeout", "read_timeout"];
+const AWS_CUSTOM_CONFIG_KEY: [&str; 3] = ["retry_times", "conn_timeout", "read_timeout"];
 
 pub fn default_conn_config() -> HashMap<String, u64> {
     let mut default_conn_config = HashMap::new();
@@ -114,7 +105,6 @@ pub fn s3_client(
 }
 
 // TODO(Tao): Probably we should never allow to use S3 URI.
-/// properties require keys: refer to [`AWS_DEFAULT_CONFIG`]
 pub async fn load_file_descriptor_from_s3(
     location: &Url,
     config: &AwsAuthProps,

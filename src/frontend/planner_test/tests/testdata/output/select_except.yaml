@@ -34,11 +34,12 @@
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v3, v2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, v1], pk_columns: [t._row_id, t._row_id#1, v1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v3, t.v2, t._row_id, t._row_id] }
-      ├─StreamExchange { dist: HashShard(t.v1) }
-      │ └─StreamTableScan { table: t, columns: [t.v1, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamExchange { dist: HashShard(t.v1) }
-        └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamExchange { dist: HashShard(t.v1, t._row_id, t._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v3, t.v2, t._row_id, t._row_id] }
+        ├─StreamExchange { dist: HashShard(t.v1) }
+        │ └─StreamTableScan { table: t, columns: [t.v1, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: qualified wildcard
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -52,17 +53,18 @@
         └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, v1], pk_columns: [t._row_id, t._row_id#1, v1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v2, t.v3, t._row_id, t._row_id] }
-      ├─StreamExchange { dist: HashShard(t.v1) }
-      │ └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamExchange { dist: HashShard(t.v1) }
-        └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamExchange { dist: HashShard(t.v1, t._row_id, t._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v2, t.v3, t._row_id, t._row_id] }
+        ├─StreamExchange { dist: HashShard(t.v1) }
+        │ └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: except with unknown column
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select * except (v1, v4) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: v4
+  binder_error: |
+    Failed to bind expression: v4
 
     Caused by:
       Item not found: Invalid column: v4
@@ -75,8 +77,8 @@
   sql: |
     create table t (v1 int, v2 int);
     select * except (v1) from t t1 cross join t t2
-  binder_error: |-
-    Bind error: failed to bind expression: v1
+  binder_error: |
+    Failed to bind expression: v1
 
     Caused by:
       internal error: Ambiguous column name: v1

@@ -28,6 +28,7 @@ mod bind_param;
 mod create;
 mod delete;
 mod expr;
+mod for_system;
 mod insert;
 mod query;
 mod relation;
@@ -41,13 +42,13 @@ mod values;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
+pub use for_system::*;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, ResolveQualifiedNameErrorKind,
-    WindowTableFunctionKind,
+    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
@@ -211,7 +212,7 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             session_config: session.shared_config(),
-            search_path: session.config().get_search_path(),
+            search_path: session.config().search_path(),
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
@@ -363,6 +364,13 @@ impl Binder {
     }
 }
 
+/// The column name stored in [`BindContext`] for a column without an alias.
+pub const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";
+/// The table name stored in [`BindContext`] for a column group.
+const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";
+
 #[cfg(test)]
 pub mod test_utils {
     use risingwave_common::types::DataType;
@@ -380,10 +388,3 @@ pub mod test_utils {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 }
-
-/// The column name stored in [`BindContext`] for a column without an alias.
-pub const UNNAMED_COLUMN: &str = "?column?";
-/// The table name stored in [`BindContext`] for a subquery without an alias.
-const UNNAMED_SUBQUERY: &str = "?subquery?";
-/// The table name stored in [`BindContext`] for a column group.
-const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";

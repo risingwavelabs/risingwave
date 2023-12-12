@@ -15,11 +15,10 @@
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
-#![cfg_attr(coverage, feature(no_coverage))]
-#![feature(generators)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
@@ -28,15 +27,15 @@
 #![feature(let_chains)]
 #![feature(bound_map)]
 #![feature(int_roundings)]
-#![feature(async_fn_in_trait)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
-#![feature(return_position_impl_trait_in_trait)]
+#![feature(array_methods)]
+#![feature(error_generic_member_access)]
 
-mod error;
+pub mod error;
 pub mod exchange_source;
 pub mod execution;
 pub mod executor;
@@ -48,3 +47,6 @@ pub mod task;
 extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

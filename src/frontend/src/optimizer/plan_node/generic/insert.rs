@@ -61,7 +61,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Insert<PlanRef> {
         }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         None
     }
 

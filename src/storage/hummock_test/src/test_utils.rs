@@ -18,10 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
+pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
@@ -30,7 +30,6 @@ use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
-use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -50,16 +49,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
-pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
-    TableKey(Bytes::from(
-        [vnode.to_be_bytes().as_slice(), payload].concat(),
-    ))
-}
-
-pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
-    gen_key_from_bytes(vnode, payload.as_bytes())
-}
-
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
@@ -72,7 +61,7 @@ pub async fn prepare_first_valid_version(
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
-    let backup_manager = BackupReader::unused();
+    let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
@@ -268,9 +257,17 @@ impl HummockTestEnv {
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
         self.meta_client
-            .commit_epoch(epoch, res.uncommitted_ssts)
+            .commit_epoch_with_watermark(
+                epoch,
+                res.uncommitted_ssts,
+                res.table_watermarks
+                    .into_iter()
+                    .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
+                    .collect(),
+            )
             .await
             .unwrap();
+
         self.storage.try_wait_epoch_for_test(epoch).await;
     }
 }

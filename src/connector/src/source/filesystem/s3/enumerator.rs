@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use aws_sdk_s3::error::DisplayErrorContext;
-use itertools::Itertools;
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
+use crate::common::AwsAuthProps;
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
+use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
 
 /// Get the prefix from a glob
-fn get_prefix(glob: &str) -> String {
+pub fn get_prefix(glob: &str) -> String {
     let mut escaped = false;
     let mut escaped_filter = false;
     glob.chars()
@@ -59,11 +57,14 @@ fn get_prefix(glob: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub struct S3SplitEnumerator {
-    bucket_name: String,
+    pub(crate) bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
-    prefix: Option<String>,
-    matcher: Option<glob::Pattern>,
-    client: Client,
+    pub(crate) prefix: Option<String>,
+    pub(crate) matcher: Option<glob::Pattern>,
+    pub(crate) client: Client,
+
+    // token get the next page, used when the current page is truncated
+    pub(crate) next_continuation_token: Option<String>,
 }
 
 #[async_trait]
@@ -92,53 +93,26 @@ impl SplitEnumerator for S3SplitEnumerator {
             matcher,
             prefix,
             client: s3_client,
+            next_continuation_token: None,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
         let mut objects = Vec::new();
-        let mut next_continuation_token = None;
         loop {
-            let mut req = self
-                .client
-                .list_objects_v2()
-                .bucket(&self.bucket_name)
-                .set_prefix(self.prefix.clone());
-            if let Some(continuation_token) = next_continuation_token.take() {
-                req = req.continuation_token(continuation_token);
-            }
-            let mut res = req
-                .send()
-                .await
-                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
-            objects.extend(res.contents.take().unwrap_or_default());
-            if res.is_truncated() {
-                next_continuation_token = Some(res.next_continuation_token.unwrap())
-            } else {
+            let (files, has_finished) = self.get_next_page::<FsSplit>().await?;
+            objects.extend(files);
+            if has_finished {
                 break;
             }
         }
-
-        let matched_objs = objects
-            .iter()
-            .filter(|obj| obj.key().is_some())
-            .filter(|obj| {
-                self.matcher
-                    .as_ref()
-                    .map(|m| m.matches(obj.key().unwrap()))
-                    .unwrap_or(true)
-            })
-            .collect_vec();
-
-        Ok(matched_objs
-            .into_iter()
-            .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
-            .collect_vec())
+        Ok(objects)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
 
     #[test]
     fn test_get_prefix() {

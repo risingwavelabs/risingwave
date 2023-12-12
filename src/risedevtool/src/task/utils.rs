@@ -19,9 +19,6 @@ use itertools::Itertools;
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
 
-#[allow(dead_code)]
-pub(crate) const DEFAULT_QUERY_LOG_PATH: &str = ".risingwave/log/";
-
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {
@@ -125,6 +122,10 @@ pub fn add_hummock_backend(
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}", opendal.bucket));
             }
+            else if opendal.engine == "obs"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+obs://{}", opendal.bucket));
+            }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+oss://{}", opendal.bucket));
@@ -140,7 +141,7 @@ pub fn add_hummock_backend(
             else if opendal.engine == "fs"{
                 println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg("hummock+fs://");
+                .arg(format!("hummock+fs://{}", opendal.bucket));
             }
             else{
                 unimplemented!()

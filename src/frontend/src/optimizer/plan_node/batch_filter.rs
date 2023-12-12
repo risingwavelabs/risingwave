@@ -16,45 +16,47 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
-    pub base: PlanBase,
-    logical: generic::Filter<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Filter<PlanRef>,
 }
 
 impl BatchFilter {
-    pub fn new(logical: generic::Filter<PlanRef>) -> Self {
+    pub fn new(core: generic::Filter<PlanRef>) -> Self {
         // TODO: derive from input
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
-            logical.input.distribution().clone(),
-            logical.input.order().clone(),
+        let base = PlanBase::new_batch_with_core(
+            &core,
+            core.input.distribution().clone(),
+            core.input.order().clone(),
         );
-        BatchFilter { base, logical }
+        BatchFilter { base, core }
     }
 
     pub fn predicate(&self) -> &Condition {
-        &self.logical.predicate
+        &self.core.predicate
     }
 }
-impl_distill_by_unit!(BatchFilter, logical, "BatchFilter");
+impl_distill_by_unit!(BatchFilter, core, "BatchFilter");
 
 impl PlanTreeNodeUnary for BatchFilter {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -70,7 +72,7 @@ impl ToDistributedBatch for BatchFilter {
 impl ToBatchPb for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
-            search_condition: Some(ExprImpl::from(self.logical.predicate.clone()).to_expr_proto()),
+            search_condition: Some(ExprImpl::from(self.core.predicate.clone()).to_expr_proto()),
         })
     }
 }
@@ -88,8 +90,14 @@ impl ExprRewritable for BatchFilter {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchFilter {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v)
     }
 }

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::WatermarkFilterNode;
 
 use super::*;
@@ -23,7 +23,6 @@ use crate::executor::WatermarkFilterExecutor;
 
 pub struct WatermarkFilterBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for WatermarkFilterBuilder {
     type Node = WatermarkFilterNode;
 
@@ -36,7 +35,8 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_descs = node.get_watermark_descs().clone();
         let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
-        let watermark_expr = build_from_prost(&watermark_desc.expr.unwrap())?;
+        let watermark_expr =
+            build_non_strict_from_prost(&watermark_desc.expr.unwrap(), params.eval_error_report)?;
         let event_time_col_idx = watermark_desc.watermark_idx as usize;
         let vnodes = Arc::new(
             params
@@ -50,10 +50,11 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
 
         Ok(WatermarkFilterExecutor::new(
+            params.actor_context,
+            params.info,
             input,
             watermark_expr,
             event_time_col_idx,
-            params.actor_context,
             table,
         )
         .boxed())

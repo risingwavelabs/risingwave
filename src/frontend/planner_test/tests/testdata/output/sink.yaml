@@ -37,3 +37,39 @@
   explain_output: |
     StreamSink { type: append-only, columns: [v1, v2, v3, v5] }
     └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5] }
+- id: create_upsert_kafka_sink_with_downstream_pk1
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='kafka',
+      topic='abc',
+      type='upsert',
+      primary_key='v1,v2'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
+      └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
+- id: downstream_pk_same_with_upstream
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v2, v1, count(*) from t1 group by v1, v2 WITH (
+      connector='kafka',
+      topic='abc',
+      type='upsert',
+      primary_key='v2,v1'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [v2, v1, count], pk: [t1.v1, t1.v2] }
+    └─StreamProject { exprs: [t1.v2, t1.v1, count] }
+      └─StreamHashAgg { group_key: [t1.v1, t1.v2], aggs: [count] }
+        └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
+          └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4] }
+- id: create_emit_on_close_sink
+  sql: |
+    create table t2 (a int, b int, watermark for b as b - 4) append only;
+    explain create sink sk1 from t2 emit on window close with (connector='blackhole');
+  explain_output: |
+    StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], pk: [t2._row_id] }
+    └─StreamEowcSort { sort_column: t2.b }
+      └─StreamTableScan { table: t2, columns: [a, b, _row_id] }

@@ -2,54 +2,89 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t(v1 boolean, v2 int, v3 varchar, v4 jsonb);
+create table t(v1 boolean, v2 int, v3 varchar, v4 jsonb, v5 timestamp, v6 interval);
 
 statement ok
 insert into t values
-    (null, null, null, null),
-    (false, 1, 'ccc', 'null'),
-    (true, 2, 'bbb', 'false'),
-    (true, 3, 'aaa', '{}');
+    (null, null, null, null, null, null),
+    (false, 1, 'ccc', 'null',  '2019-01-01 01:00:00', '1 day'),
+    (true,  2, 'bbb', 'false', '2020-01-01 02:00:00', '2 days'),
+    (true,  3, 'aaa', '{}',    '2021-01-01 03:00:00', '3 days');
 
 query T
-select jsonb_agg(v1) from t;
+select jsonb_agg(v1 order by v1) from t;
 ----
-[null, false, true, true]
+[false, true, true, null]
 
 query T
-select jsonb_agg(v2) from t;
+select jsonb_agg(v2::int2 order by v2) from t;
 ----
-[null, 1, 2, 3]
+[1, 2, 3, null]
 
 query T
-select jsonb_agg(v2::int2) from t;
+select jsonb_agg(v2::int4 order by v2) from t;
 ----
-[null, 1, 2, 3]
+[1, 2, 3, null]
 
 query T
-select jsonb_agg(v2::int8) from t;
+select jsonb_agg(v2::int8 order by v2) from t;
 ----
-[null, 1, 2, 3]
+[1, 2, 3, null]
 
 query T
-select jsonb_agg(v2::float4) from t;
+select jsonb_agg(v2::float4 order by v2) from t;
 ----
-[null, 1.0, 2.0, 3.0]
+[1.0, 2.0, 3.0, null]
 
 query T
-select jsonb_agg(v2::float8) from t;
+select jsonb_agg(v2::float8 order by v2) from t;
 ----
-[null, 1.0, 2.0, 3.0]
+[1.0, 2.0, 3.0, null]
 
 query T
-select jsonb_agg(v3) from t;
+select jsonb_agg(v2::decimal order by v2) from t;
 ----
-[null, "ccc", "bbb", "aaa"]
+[1.0, 2.0, 3.0, null]
 
 query T
-select jsonb_agg(v4) from t;
+select jsonb_agg(v3 order by v3) from t;
 ----
-[null, null, false, {}]
+["aaa", "bbb", "ccc", null]
+
+query T
+select jsonb_agg(v3::bytea order by v3) from t;
+----
+["\\x616161", "\\x626262", "\\x636363", null]
+
+query T
+select jsonb_agg(v4 order by v4) from t;
+----
+[false, null, {}, null]
+
+query T
+select jsonb_agg(v5::date order by v5) from t;
+----
+["2019-01-01", "2020-01-01", "2021-01-01", null]
+
+query T
+select jsonb_agg(v5::time order by v5) from t;
+----
+["01:00:00", "02:00:00", "03:00:00", null]
+
+query T
+select jsonb_agg(v5::timestamp order by v5) from t;
+----
+["2019-01-01T01:00:00", "2020-01-01T02:00:00", "2021-01-01T03:00:00", null]
+
+query T
+select jsonb_agg(v5::timestamptz order by v5) from t;
+----
+["2019-01-01T01:00:00+00:00", "2020-01-01T02:00:00+00:00", "2021-01-01T03:00:00+00:00", null]
+
+query T
+select jsonb_agg(v6 order by v6) from t;
+----
+["1 day", "2 days", "3 days", null]
 
 # query T
 # select jsonb_agg(distinct v1) from t;
@@ -62,27 +97,87 @@ select jsonb_agg(v2 order by v3 desc) from t;
 [null, 1, 2, 3]
 
 query T
-select jsonb_agg(v2) filter (where v3 >= 'bbb') from t;
+select jsonb_agg(v2 order by v3) filter (where v3 >= 'bbb') from t;
 ----
-[1, 2]
+[2, 1]
 
 statement error field name must not be null
 select jsonb_object_agg(v3, v1) from t;
 
 query T
-select jsonb_object_agg(v3, v1) filter (where v3 is not null) from t;
+select jsonb_object_agg(v3, v1 order by v3) filter (where v3 is not null) from t;
 ----
 {"aaa": true, "bbb": true, "ccc": false}
 
 query T
-select jsonb_object_agg(v3, v2) filter (where v3 is not null) from t;
+select jsonb_object_agg(v3, v2::int2 order by v3) filter (where v3 is not null) from t;
 ----
 {"aaa": 3, "bbb": 2, "ccc": 1}
 
 query T
-select jsonb_object_agg(v3, v4) filter (where v3 is not null) from t;
+select jsonb_object_agg(v3, v2::int4 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": 3, "bbb": 2, "ccc": 1}
+
+query T
+select jsonb_object_agg(v3, v2::int8 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": 3, "bbb": 2, "ccc": 1}
+
+query T
+select jsonb_object_agg(v3, v2::float4 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": 3.0, "bbb": 2.0, "ccc": 1.0}
+
+query T
+select jsonb_object_agg(v3, v2::float8 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": 3.0, "bbb": 2.0, "ccc": 1.0}
+
+query T
+select jsonb_object_agg(v3, v2::decimal order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": 3.0, "bbb": 2.0, "ccc": 1.0}
+
+query T
+select jsonb_object_agg(v3, v3 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "aaa", "bbb": "bbb", "ccc": "ccc"}
+
+query T
+select jsonb_object_agg(v3, v3::bytea order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "\\x616161", "bbb": "\\x626262", "ccc": "\\x636363"}
+
+query T
+select jsonb_object_agg(v3, v4 order by v3) filter (where v3 is not null) from t;
 ----
 {"aaa": {}, "bbb": false, "ccc": null}
+
+query T
+select jsonb_object_agg(v3, v5::date order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "2021-01-01", "bbb": "2020-01-01", "ccc": "2019-01-01"}
+
+query T
+select jsonb_object_agg(v3, v5::time order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "03:00:00", "bbb": "02:00:00", "ccc": "01:00:00"}
+
+query T
+select jsonb_object_agg(v3, v5::timestamp order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "2021-01-01T03:00:00", "bbb": "2020-01-01T02:00:00", "ccc": "2019-01-01T01:00:00"}
+
+query T
+select jsonb_object_agg(v3, v5::timestamptz order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "2021-01-01T03:00:00+00:00", "bbb": "2020-01-01T02:00:00+00:00", "ccc": "2019-01-01T01:00:00+00:00"}
+
+query T
+select jsonb_object_agg(v3, v6 order by v3) filter (where v3 is not null) from t;
+----
+{"aaa": "3 days", "bbb": "2 days", "ccc": "1 day"}
 
 statement ok
 drop table t;

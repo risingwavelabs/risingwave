@@ -12,13 +12,14 @@ async-trait = "0.1"
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
+aws-smithy-types = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hdrhistogram = "7"
-itertools = "0.11"
+itertools = "0.12"
 libc = "0.2"
 opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"], optional = true }
 parking_lot = "0.12"
@@ -38,7 +39,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-stream = "0.1"
-toml = "0.7"
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3.17"
 

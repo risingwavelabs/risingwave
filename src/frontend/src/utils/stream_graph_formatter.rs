@@ -163,6 +163,12 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(source.get_state_table().unwrap()),
                 ));
             }
+            stream_node::NodeBody::StreamFsFetch(node) if let Some(fetch) = &node.node_inner => {
+                fields.push((
+                    "fs fetch state table",
+                    self.pretty_add_table(fetch.get_state_table().unwrap()),
+                ))
+            }
             stream_node::NodeBody::Materialize(node) => fields.push((
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
@@ -255,56 +261,63 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
-            stream_node::NodeBody::Chain(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ))
-            }
-            stream_node::NodeBody::Sort(node) =>  {
+            stream_node::NodeBody::StreamScan(node) => fields.push((
+                "state table",
+                self.pretty_add_table(node.get_state_table().unwrap()),
+            )),
+            stream_node::NodeBody::StreamCdcScan(node) => fields.push((
+                "state table",
+                self.pretty_add_table(node.get_state_table().unwrap()),
+            )),
+            stream_node::NodeBody::Sort(node) => {
                 fields.push((
                     "state table",
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
             stream_node::NodeBody::WatermarkFilter(node) => {
-                let vec = node.tables.iter().map(|tb| self.pretty_add_table(tb) ).collect_vec();
-                fields.push(("state tables", Pretty::Array(vec)
-            ));
+                let vec = node
+                    .tables
+                    .iter()
+                    .map(|tb| self.pretty_add_table(tb))
+                    .collect_vec();
+                fields.push(("state tables", Pretty::Array(vec)));
             }
             stream_node::NodeBody::EowcOverWindow(node) => {
-                fields.push((
-                     "state table",
-                      self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::OverWindow(node) =>{
                 fields.push((
                     "state table",
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
-            stream_node::NodeBody::Project(_) |
-            stream_node::NodeBody::Filter(_) |
-            stream_node::NodeBody::StatelessSimpleAgg(_) |
-            stream_node::NodeBody::HopWindow(_) |
-            stream_node::NodeBody::Merge(_) |
-            stream_node::NodeBody::Exchange(_) |
-            stream_node::NodeBody::BatchPlan(_) |
-            stream_node::NodeBody::Lookup(_) |
-            stream_node::NodeBody::LookupUnion(_) |
-            stream_node::NodeBody::Union(_) |
-            stream_node::NodeBody::DeltaIndexJoin(_) |
-            stream_node::NodeBody::Sink(_) |
-            stream_node::NodeBody::Expand(_) |
-            stream_node::NodeBody::ProjectSet(_) |
-            stream_node::NodeBody::Dml(_) |
-            stream_node::NodeBody::RowIdGen(_) |
-            stream_node::NodeBody::TemporalJoin(_) |
-            stream_node::NodeBody::BarrierRecv(_) |
-            stream_node::NodeBody::Values(_) |
-            stream_node::NodeBody::Source(_) |
-            stream_node::NodeBody::NoOp(_) => {}
+            stream_node::NodeBody::OverWindow(node) => {
+                fields.push((
+                    "state table",
+                    self.pretty_add_table(node.get_state_table().unwrap()),
+                ));
+            }
+            stream_node::NodeBody::Project(_)
+            | stream_node::NodeBody::Filter(_)
+            | stream_node::NodeBody::CdcFilter(_)
+            | stream_node::NodeBody::StatelessSimpleAgg(_)
+            | stream_node::NodeBody::HopWindow(_)
+            | stream_node::NodeBody::Merge(_)
+            | stream_node::NodeBody::Exchange(_)
+            | stream_node::NodeBody::BatchPlan(_)
+            | stream_node::NodeBody::Lookup(_)
+            | stream_node::NodeBody::LookupUnion(_)
+            | stream_node::NodeBody::Union(_)
+            | stream_node::NodeBody::DeltaIndexJoin(_)
+            | stream_node::NodeBody::Sink(_)
+            | stream_node::NodeBody::Expand(_)
+            | stream_node::NodeBody::ProjectSet(_)
+            | stream_node::NodeBody::Dml(_)
+            | stream_node::NodeBody::RowIdGen(_)
+            | stream_node::NodeBody::TemporalJoin(_)
+            | stream_node::NodeBody::BarrierRecv(_)
+            | stream_node::NodeBody::Values(_)
+            | stream_node::NodeBody::Source(_)
+            | stream_node::NodeBody::StreamFsFetch(_)
+            | stream_node::NodeBody::NoOp(_) => {}
         };
 
         if self.verbose {

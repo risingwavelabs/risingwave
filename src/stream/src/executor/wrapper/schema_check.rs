@@ -45,7 +45,7 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             }
             Message::Barrier(_) => Ok(()),
         }
-        .unwrap_or_else(|e| panic!("schema check failed on {}: {}", info.identity, e));
+        .unwrap_or_else(|e| panic!("schema check failed on {:?}: {}", info, e));
 
         yield message;
     }

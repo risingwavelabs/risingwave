@@ -32,12 +32,14 @@ use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
+use thiserror_ext::AsReport;
 
 use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
 pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
-use crate::error::{BoxedError, ErrorCode, Result as RwResult};
+use crate::cast::{str_to_bool, str_to_bytea};
+use crate::error::BoxedError;
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 use crate::{
@@ -47,6 +49,7 @@ use crate::{
 
 mod datetime;
 mod decimal;
+mod fields;
 mod interval;
 mod jsonb;
 mod macros;
@@ -63,6 +66,10 @@ mod successor;
 mod timestamptz;
 mod to_binary;
 mod to_text;
+mod with_data_type;
+
+pub use fields::Fields;
+pub use risingwave_fields_derive::Fields;
 
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
@@ -80,6 +87,7 @@ pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
+pub use self::with_data_type::WithDataType;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
@@ -121,8 +129,8 @@ pub enum DataType {
     #[display("date")]
     #[from_str(regex = "(?i)^date$")]
     Date,
-    #[display("varchar")]
-    #[from_str(regex = "(?i)^varchar$")]
+    #[display("character varying")]
+    #[from_str(regex = "(?i)^character varying$|^varchar$")]
     Varchar,
     #[display("time without time zone")]
     #[from_str(regex = "(?i)^time$|^time without time zone$")]
@@ -137,7 +145,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^interval$")]
     Interval,
     #[display("{0}")]
-    #[from_str(ignore)]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
@@ -351,6 +359,14 @@ impl DataType {
         DataTypeName::from(self).is_scalar()
     }
 
+    pub fn is_array(&self) -> bool {
+        matches!(self, DataType::List(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, DataType::Struct(_))
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
@@ -407,14 +423,14 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Timestamptz(Timestamptz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(Interval::MIN),
-            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::null()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .types()
                     .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
-            DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+            DataType::List(data_type) => ScalarImpl::List(ListValue::empty(data_type)),
         }
     }
 
@@ -448,6 +464,7 @@ impl DataType {
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
             _ => self == other,
         }
     }
@@ -557,18 +574,13 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
+#[auto_impl::auto_impl(&)]
 pub trait ToDatumRef: PartialEq + Eq + Debug {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
 
 impl ToDatumRef for Datum {
-    #[inline(always)]
-    fn to_datum_ref(&self) -> DatumRef<'_> {
-        self.as_ref().map(|d| d.as_scalar_ref_impl())
-    }
-}
-impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
@@ -750,94 +762,95 @@ impl From<JsonbRef<'_>> for ScalarImpl {
     }
 }
 
+/// Error type for [`ScalarImpl::from_binary`] and [`ScalarImpl::from_text`].
+#[derive(Debug, thiserror::Error, thiserror_ext::Construct)]
+pub enum FromSqlError {
+    #[error(transparent)]
+    FromBinary(BoxedError),
+
+    #[error("Invalid param: {0}")]
+    FromText(String),
+
+    #[error("Unsupported data type: {0}")]
+    Unsupported(DataType),
+}
+
 impl ScalarImpl {
-    pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {
+    pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> Result<Self, FromSqlError> {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(
                 String::from_sql(&Type::VARCHAR, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Bytea => Self::Bytea(
                 Vec::<u8>::from_sql(&Type::BYTEA, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
-            DataType::Boolean => Self::Bool(
-                bool::from_sql(&Type::BOOL, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
-            ),
-            DataType::Int16 => Self::Int16(
-                i16::from_sql(&Type::INT2, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
-            ),
-            DataType::Int32 => Self::Int32(
-                i32::from_sql(&Type::INT4, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
-            ),
-            DataType::Int64 => Self::Int64(
-                i64::from_sql(&Type::INT8, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
-            ),
+            DataType::Boolean => {
+                Self::Bool(bool::from_sql(&Type::BOOL, bytes).map_err(FromSqlError::from_binary)?)
+            }
+            DataType::Int16 => {
+                Self::Int16(i16::from_sql(&Type::INT2, bytes).map_err(FromSqlError::from_binary)?)
+            }
+            DataType::Int32 => {
+                Self::Int32(i32::from_sql(&Type::INT4, bytes).map_err(FromSqlError::from_binary)?)
+            }
+            DataType::Int64 => {
+                Self::Int64(i64::from_sql(&Type::INT8, bytes).map_err(FromSqlError::from_binary)?)
+            }
 
             DataType::Serial => Self::Serial(Serial::from(
-                i64::from_sql(&Type::INT8, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
+                i64::from_sql(&Type::INT8, bytes).map_err(FromSqlError::from_binary)?,
             )),
             DataType::Float32 => Self::Float32(
                 f32::from_sql(&Type::FLOAT4, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Float64 => Self::Float64(
                 f64::from_sql(&Type::FLOAT8, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Decimal => Self::Decimal(
                 rust_decimal::Decimal::from_sql(&Type::NUMERIC, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Date => Self::Date(
                 chrono::NaiveDate::from_sql(&Type::DATE, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Time => Self::Time(
                 chrono::NaiveTime::from_sql(&Type::TIME, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Timestamp => Self::Timestamp(
                 chrono::NaiveDateTime::from_sql(&Type::TIMESTAMP, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Timestamptz => Self::Timestamptz(
                 chrono::DateTime::<chrono::Utc>::from_sql(&Type::TIMESTAMPTZ, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
+                    .map_err(FromSqlError::from_binary)?
                     .into(),
             ),
             DataType::Interval => Self::Interval(
-                Interval::from_sql(&Type::INTERVAL, bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
+                Interval::from_sql(&Type::INTERVAL, bytes).map_err(FromSqlError::from_binary)?,
             ),
-            DataType::Jsonb => {
-                Self::Jsonb(JsonbVal::value_deserialize(bytes).ok_or_else(|| {
-                    ErrorCode::InvalidInputSyntax("Invalid value of Jsonb".to_string())
-                })?)
+            DataType::Jsonb => Self::Jsonb(
+                JsonbVal::value_deserialize(bytes)
+                    .ok_or_else(|| FromSqlError::from_binary("Invalid value of Jsonb"))?,
+            ),
+            DataType::Int256 => {
+                Self::Int256(Int256::from_binary(bytes).map_err(FromSqlError::from_binary)?)
             }
-            DataType::Int256 => Self::Int256(
-                Int256::from_binary(bytes)
-                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
-            ),
             DataType::Struct(_) | DataType::List { .. } => {
-                return Err(ErrorCode::NotSupported(
-                    format!("param type: {}", data_type),
-                    "".to_string(),
-                )
-                .into())
+                return Err(FromSqlError::Unsupported(data_type.clone()));
             }
         };
         Ok(res)
@@ -852,91 +865,76 @@ impl ScalarImpl {
         std::str::from_utf8(without_null)
     }
 
-    pub fn from_text(bytes: &[u8], data_type: &DataType) -> RwResult<Self> {
-        let str = Self::cstr_to_str(bytes).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!("Invalid param string: {:?}", bytes))
-        })?;
+    pub fn from_text(bytes: &[u8], data_type: &DataType) -> Result<Self, FromSqlError> {
+        let str =
+            Self::cstr_to_str(bytes).map_err(|_| FromSqlError::from_text(format!("{bytes:?}")))?;
         let res = match data_type {
             DataType::Varchar => Self::Utf8(str.to_string().into()),
-            DataType::Boolean => Self::Bool(bool::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int16 => Self::Int16(i16::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int32 => Self::Int32(i32::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Int256 => Self::Int256(Int256::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?)),
+            DataType::Boolean => {
+                Self::Bool(bool::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Int16 => {
+                Self::Int16(i16::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Int32 => {
+                Self::Int32(i32::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Int64 => {
+                Self::Int64(i64::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Int256 => {
+                Self::Int256(Int256::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Serial => Self::Serial(Serial::from(
+                i64::from_str(str).map_err(|_| FromSqlError::from_text(str))?,
+            )),
             DataType::Float32 => Self::Float32(
                 f32::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
+                    .map_err(|_| FromSqlError::from_text(str))?
                     .into(),
             ),
             DataType::Float64 => Self::Float64(
                 f64::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
+                    .map_err(|_| FromSqlError::from_text(str))?
                     .into(),
             ),
             DataType::Decimal => Self::Decimal(
                 rust_decimal::Decimal::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
+                    .map_err(|_| FromSqlError::from_text(str))?
                     .into(),
             ),
-            DataType::Date => Self::Date(Date::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Time => Self::Time(Time::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Timestamp => Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Timestamptz => {
-                Self::Timestamptz(Timestamptz::from_str(str).map_err(|_| {
-                    ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                })?)
+            DataType::Date => {
+                Self::Date(Date::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
             }
-            DataType::Interval => Self::Interval(Interval::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-            })?),
-            DataType::List(datatype) => {
+            DataType::Time => {
+                Self::Time(Time::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Timestamp => {
+                Self::Timestamp(Timestamp::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Timestamptz => Self::Timestamptz(
+                Timestamptz::from_str(str).map_err(|_| FromSqlError::from_text(str))?,
+            ),
+            DataType::Interval => {
+                Self::Interval(Interval::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::Jsonb => {
+                Self::Jsonb(JsonbVal::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+            }
+            DataType::List(elem_type) => {
                 // TODO: support nested list
                 if !(str.starts_with('{') && str.ends_with('}')) {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid param string: {str}",
-                    ))
-                    .into());
+                    return Err(FromSqlError::from_text(str));
                 }
-                let mut values = vec![];
+                let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                 }
-                Self::List(ListValue::new(values))
+                Self::List(ListValue::new(builder.finish()))
             }
             DataType::Struct(s) => {
-                if !(str.starts_with('{') && str.ends_with('}')) {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid param string: {str}",
-                    ))
-                    .into());
+                if !(str.starts_with('(') && str.ends_with(')')) {
+                    return Err(FromSqlError::from_text(str));
                 }
                 let mut fields = Vec::with_capacity(s.len());
                 for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(s.types()) {
@@ -945,18 +943,58 @@ impl ScalarImpl {
                 ScalarImpl::Struct(StructValue::new(fields))
             }
             DataType::Bytea => {
-                return Err(ErrorCode::NotSupported(
-                    format!("param type: {}", data_type),
-                    "".to_string(),
-                )
-                .into())
+                return Err(FromSqlError::unsupported(data_type.clone()));
             }
         };
         Ok(res)
     }
 }
 
+impl From<ScalarRefImpl<'_>> for ScalarImpl {
+    fn from(scalar_ref: ScalarRefImpl<'_>) -> Self {
+        scalar_ref.into_scalar_impl()
+    }
+}
+
+impl<'a> From<&'a ScalarImpl> for ScalarRefImpl<'a> {
+    fn from(scalar: &'a ScalarImpl) -> Self {
+        scalar.as_scalar_ref_impl()
+    }
+}
+
 impl ScalarImpl {
+    /// A lite version of casting from string to target type. Used by frontend to handle types that have
+    /// to be created by casting.
+    ///
+    /// For example, the user can input `1` or `true` directly, but they have to use
+    /// `'2022-01-01'::date`.
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, BoxedError> {
+        Ok(match t {
+            DataType::Boolean => str_to_bool(s)?.into(),
+            DataType::Int16 => i16::from_str(s)?.into(),
+            DataType::Int32 => i32::from_str(s)?.into(),
+            DataType::Int64 => i64::from_str(s)?.into(),
+            DataType::Int256 => Int256::from_str(s)?.into(),
+            DataType::Serial => return Err("not supported".into()),
+            DataType::Decimal => Decimal::from_str(s)?.into(),
+            DataType::Float32 => F32::from_str(s)?.into(),
+            DataType::Float64 => F64::from_str(s)?.into(),
+            DataType::Varchar => s.into(),
+            DataType::Date => Date::from_str(s)?.into(),
+            DataType::Timestamp => Timestamp::from_str(s)?.into(),
+            // We only handle the case with timezone here, and leave the implicit session timezone case
+            // for later phase.
+            DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
+            DataType::Time => Time::from_str(s)?.into(),
+            DataType::Interval => Interval::from_str(s)?.into(),
+            DataType::List { .. } => ListValue::from_str(s, t)?.into(),
+            // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
+            DataType::Struct(_) => return Err("not supported".into()),
+            DataType::Jsonb => JsonbVal::from_str(s)?.into(),
+            DataType::Bytea => str_to_bytea(s)?.into(),
+        })
+    }
+
     /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
     pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
         dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().into() })
@@ -999,7 +1037,7 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self, data_type: &DataType) -> RwResult<Bytes> {
+    pub fn binary_format(&self, data_type: &DataType) -> to_binary::Result<Bytes> {
         self.to_binary_with_type(data_type).transpose().unwrap()
     }
 
@@ -1075,18 +1113,19 @@ impl ScalarImpl {
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
                 Time::with_secs_nano(secs, nano)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamp => Self::Timestamp({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
                 Timestamp::with_secs_nsecs(secs, nsecs)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
@@ -1149,7 +1188,7 @@ mod tests {
         }
 
         assert_item_size_eq!(StructArray, 16); // Box<[Datum]>
-        assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(ListArray, 8); // Box<ArrayImpl>
         assert_item_size_eq!(Utf8Array, 16); // Box<str>
         assert_item_size_eq!(IntervalArray, 16);
         assert_item_size_eq!(TimestampArray, 12);
@@ -1158,6 +1197,7 @@ mod tests {
         assert_item_size_eq!(DecimalArray, 20);
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 24);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
         const_assert_eq!(std::mem::size_of::<StructType>(), 8);
         const_assert_eq!(std::mem::size_of::<DataType>(), 16);
@@ -1169,7 +1209,10 @@ mod tests {
             vec![DataType::Int32, DataType::Varchar],
             vec!["i".to_string(), "j".to_string()],
         );
-        assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
+        assert_eq!(
+            format!("{}", d),
+            "struct<i integer, j character varying>".to_string()
+        );
     }
 
     #[test]
@@ -1251,7 +1294,7 @@ mod tests {
                     ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
-                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
+                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::null()), DataType::Jsonb),
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),
@@ -1263,10 +1306,7 @@ mod tests {
                     ])),
                 ),
                 DataTypeName::List => (
-                    ScalarImpl::List(ListValue::new(vec![
-                        ScalarImpl::Int64(233).into(),
-                        ScalarImpl::Int64(2333).into(),
-                    ])),
+                    ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
             };
@@ -1425,6 +1465,18 @@ mod tests {
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
             DataType::List(Box::new(DataType::Interval))
+        );
+
+        assert_eq!(
+            DataType::from_str("record").unwrap(),
+            DataType::Struct(StructType::unnamed(vec![]))
+        );
+        assert_eq!(
+            DataType::from_str("struct<a int4, b varchar>").unwrap(),
+            DataType::Struct(StructType::new(vec![
+                ("a", DataType::Int32),
+                ("b", DataType::Varchar)
+            ]))
         );
     }
 }

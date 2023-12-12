@@ -72,13 +72,12 @@ public class HummockReadDemo {
             try (HummockIterator iter = new HummockIterator(readPlan)) {
                 int count = 0;
                 while (true) {
-                    try (KeyedRow row = iter.next()) {
-                        if (row == null) {
-                            break;
-                        }
-                        count += 1;
-                        validateRow(row);
+                    KeyedRow row = iter.next();
+                    if (row == null) {
+                        break;
                     }
+                    count += 1;
+                    validateRow(row);
                 }
                 int expectedCount = 30000;
                 if (count != expectedCount) {

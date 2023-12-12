@@ -239,20 +239,24 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', $re$\s*$re$) AS foo;
 --@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', $re$\s*$re$);
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', '') AS foo;
---@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', '');
+SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', '');
+
 --@ -- case insensitive
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i') AS foo;
---@ SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i');
---@ -- no match of pattern
+SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i');
+
+-- no match of pattern
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', 'nomatch') AS foo;
---@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', 'nomatch');
---@ -- some corner cases
---@ SELECT regexp_split_to_array('123456','1');
---@ SELECT regexp_split_to_array('123456','6');
---@ SELECT regexp_split_to_array('123456','.');
---@ SELECT regexp_split_to_array('123456','');
---@ SELECT regexp_split_to_array('123456','(?:)');
---@ SELECT regexp_split_to_array('1','');
+SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', 'nomatch');
+
+-- some corner cases
+SELECT regexp_split_to_array('123456','1');
+SELECT regexp_split_to_array('123456','6');
+SELECT regexp_split_to_array('123456','.');
+SELECT regexp_split_to_array('123456','');
+SELECT regexp_split_to_array('123456','(?:)');
+SELECT regexp_split_to_array('1','');
+
 --@ -- errors
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'zippy') AS foo;
 --@ SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'iz');

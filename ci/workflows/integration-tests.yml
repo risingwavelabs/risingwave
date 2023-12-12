@@ -5,142 +5,23 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
-  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "ad-click"
-          - "ad-ctr"
-          - "cdn-metrics"
-          - "clickstream"
-          - "livestream"
-          - "prometheus"
-          - "schema-registry"
-          - "mysql-cdc"
-          - "postgres-cdc"
-          - "mysql-sink"
-          - "postgres-sink"
-          - "iceberg-sink"
-          - "debezium-mysql"
-        format:
-          - "json"
-          - "protobuf"
-      adjustments:
-        - with:
-            testcase: "ad-click"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "ad-ctr"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "cdn-metrics"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "clickstream"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "prometheus"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "schema-registry"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "mysql-cdc"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "postgres-cdc"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "mysql-sink"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "postgres-sink"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "iceberg-sink"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "debezium-mysql"
-            format: "protobuf"
-          skip: true
+  # You may update `gen-integration-test-yaml.py` to add integration test case
+  - label: "gen and upload integration test pipeline"
+    command: "ci/scripts/gen-integration-test-yaml.py"
 
-  # NOTE: buildkite matrix-limits
-  # Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
-  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
-    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
-    timeout_in_minutes: 30
-    retry: *auto-retry
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-      - ./ci/plugins/docker-compose-logs
-    matrix:
-      setup:
-        testcase:
-          - "twitter"
-          - "twitter-pulsar"
-          # - "debezium-mongo"
-          - "debezium-postgres"
-          - "tidb-cdc-sink"
-          - "debezium-sqlserver"
-          - "citus-cdc"
-          - "kinesis-s3-source"
-          - "clickhouse-sink"
-        format:
-          - "json"
-          - "protobuf"
-      adjustments:
-        - with:
-            testcase: "twitter-pulsar"
-            format: "protobuf"
-          skip: true
-        # - with:
-        #     testcase: "debezium-mongo"
-        #     format: "protobuf"
-        #   skip: true
-        - with:
-            testcase: "debezium-postgres"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "tidb-cdc-sink"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "debezium-sqlserver"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "citus-cdc"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "kinesis-s3-source"
-            format: "protobuf"
-          skip: true
-        - with:
-            testcase: "clickhouse-sink"
-            format: "protobuf"
-          skip: true
+  # Notification test.
+  - key: "test-notify"
+    if: build.message =~ /test-notify/i
+    command: |
+      bash -c 'echo test && exit -1'
+
+  - wait: true
+    continue_on_failure: true
+    allow_dependency_failure: true
+
+  # Notifies on test failure for certain tests.
+  # You may update `notify.py` to add tests and people to notify.
+  # This should be the LAST part of this file.
+  - label: "trigger failed test notification"
+    if: build.source == "schedule"
+    command: "ci/scripts/notify.py"

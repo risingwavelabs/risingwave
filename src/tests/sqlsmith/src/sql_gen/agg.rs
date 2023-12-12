@@ -15,7 +15,8 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::sig::SigDataType;
 use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
 };
@@ -30,13 +31,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        if matches!(
-            (func.func, func.inputs_type.as_slice()),
-            (
-                AggKind::Min | AggKind::Max,
-                [DataType::Boolean | DataType::Jsonb]
+        if matches!(func.name.as_aggregate(), AggKind::Min | AggKind::Max)
+            && matches!(
+                func.ret_type,
+                SigDataType::Exact(DataType::Boolean | DataType::Jsonb)
             )
-        ) {
+        {
             return self.gen_simple_scalar(ret);
         }
 
@@ -45,13 +45,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(t, context))
+            .map(|t| self.gen_expr(t.as_exact(), context))
             .collect();
 
         // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
         // one argument and only the first being non-constant. See `Binder::bind_normal_agg`
         // for more details.
-        let distinct_allowed = func.func != AggKind::ApproxCountDistinct
+        let distinct_allowed = func.name.as_aggregate() != AggKind::ApproxCountDistinct
             && !exprs.is_empty()
             && exprs.iter().skip(1).all(|e| matches!(e, Expr::Value(_)));
         let distinct = distinct_allowed && self.flip_coin();
@@ -79,7 +79,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         } else {
             vec![]
         };
-        self.make_agg_expr(func.func, &exprs, distinct, filter, order_by)
+        self.make_agg_expr(func.name.as_aggregate(), &exprs, distinct, filter, order_by)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 

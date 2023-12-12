@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
 use tokio::time::Instant;
 
@@ -107,7 +107,7 @@ impl CompactionStatistics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
@@ -119,9 +119,9 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
-    pub split_by_table: bool,
-    pub split_weight_by_vnode: u32,
     pub use_block_based_filter: bool,
+
+    pub table_vnode_partition: BTreeMap<u32, u32>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -158,6 +158,63 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
+const MAX_FILE_COUNT: usize = 32;
+
+fn generate_splits_fast(
+    sstable_infos: &Vec<SstableInfo>,
+    compaction_size: u64,
+    context: CompactorContext,
+) -> HummockResult<Vec<KeyRange_vec>> {
+    let worker_num = context.compaction_executor.worker_num();
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
+
+    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
+
+    let parallelism = std::cmp::min(
+        worker_num,
+        std::cmp::min(
+            parallelism as usize,
+            context.storage_opts.max_sub_compaction as usize,
+        ),
+    );
+    let mut indexes = vec![];
+    for sst in sstable_infos {
+        let key_range = sst.key_range.as_ref().unwrap();
+        indexes.push(
+            FullKey {
+                user_key: FullKey::decode(&key_range.left).user_key,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            }
+            .encode(),
+        );
+        indexes.push(
+            FullKey {
+                user_key: FullKey::decode(&key_range.right).user_key,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            }
+            .encode(),
+        );
+    }
+    indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.as_ref(), b.as_ref()));
+    indexes.dedup();
+    if indexes.len() <= parallelism {
+        return Ok(vec![]);
+    }
+    let mut splits = vec![];
+    splits.push(KeyRange_vec::new(vec![], vec![]));
+    let parallel_key_count = indexes.len() / parallelism;
+    let mut last_split_key_count = 0;
+    for key in indexes {
+        if last_split_key_count >= parallel_key_count {
+            splits.last_mut().unwrap().right = key.clone();
+            splits.push(KeyRange_vec::new(key.clone(), vec![]));
+            last_split_key_count = 0;
+        }
+        last_split_key_count += 1;
+    }
+    Ok(splits)
+}
+
 pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
@@ -165,6 +222,9 @@ pub async fn generate_splits(
 ) -> HummockResult<Vec<KeyRange_vec>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
+        if sstable_infos.len() > MAX_FILE_COUNT {
+            return generate_splits_fast(sstable_infos, compaction_size, context);
+        }
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
@@ -181,7 +241,7 @@ pub async fn generate_splits(
                         let data_size = block.len;
                         let full_key = FullKey {
                             user_key: FullKey::decode(&block.smallest_key).user_key,
-                            epoch: HummockEpoch::MAX,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
                         }
                         .encode();
                         (data_size as u64, full_key)
@@ -193,6 +253,7 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
+
         let worker_num = context.compaction_executor.worker_num();
 
         let parallelism = std::cmp::min(

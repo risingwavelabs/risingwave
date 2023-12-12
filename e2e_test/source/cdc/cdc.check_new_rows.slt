@@ -47,3 +47,21 @@ select v1, v2, v3 from mytable order by v1;
 2 2 yes
 3 3 no
 4 4 no
+
+# shared cdc source
+query I
+SELECT * from products_test_cnt
+----
+13
+
+query I
+SELECT * from orders_test_cnt
+----
+5
+
+query ITT
+SELECT * FROM products_test order by id limit 3
+----
+101 RW Small 2-wheel scooter
+102 RW 12V car battery
+103 RW 12-pack of drill bits with sizes ranging from #40 to #3

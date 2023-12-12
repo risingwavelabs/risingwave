@@ -53,6 +53,8 @@ CREATE TABLE t_types (
     jsonb_column JSONB
 );
 
+CREATE TABLE t1_uuid (v1 int primary key, v2 uuid, v3 varchar);
+
 CREATE SCHEMA biz;
 CREATE TABLE biz.t_types (
     id BIGINT PRIMARY KEY,
@@ -71,7 +73,11 @@ CREATE TABLE biz.t_types (
     interval_column INTERVAL,
     jsonb_column JSONB,
     array_column VARCHAR[],
-    array_column2 DECIMAL[]
+    array_column2 FLOAT[],
+    array_column3 SMALLINT[],
+    array_column4 INTEGER[],
+    array_column5 BIGINT[],
+    array_column6 DOUBLE PRECISION[]
 );
 
 CREATE TABLE biz.t2 (

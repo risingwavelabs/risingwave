@@ -16,18 +16,14 @@ use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::{build_sink, Sink, SinkParam};
 use risingwave_pb::catalog::PbSink;
-use risingwave_rpc_client::ConnectorClient;
 
 use crate::MetaResult;
 
-pub async fn validate_sink(
-    prost_sink_catalog: &PbSink,
-    connector_client: Option<ConnectorClient>,
-) -> MetaResult<()> {
+pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
     let param = SinkParam::from(sink_catalog);
 
     let sink = build_sink(param)?;
 
-    dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
+    dispatch_sink!(sink, sink, Ok(sink.validate().await?))
 }

@@ -15,10 +15,7 @@
 package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
-import com.risingwave.connector.source.common.MySqlValidator;
-import com.risingwave.connector.source.common.PostgresValidator;
-import com.risingwave.connector.source.common.ValidatorUtils;
+import com.risingwave.connector.source.common.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
@@ -65,8 +62,8 @@ public class SourceValidateHandler {
                 .build();
     }
 
-    public static void ensurePropNotNull(Map<String, String> props, String name) {
-        if (!props.containsKey(name)) {
+    public static void ensurePropNotBlank(Map<String, String> props, String name) {
+        if (StringUtils.isBlank(props.get(name))) {
             throw ValidatorUtils.invalidArgument(
                     String.format("'%s' not found, please check the WITH properties", name));
         }
@@ -76,33 +73,41 @@ public class SourceValidateHandler {
             throws Exception {
         var props = request.getPropertiesMap();
 
-        ensurePropNotNull(props, DbzConnectorConfig.HOST);
-        ensurePropNotNull(props, DbzConnectorConfig.PORT);
-        ensurePropNotNull(props, DbzConnectorConfig.DB_NAME);
-        ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
-        ensurePropNotNull(props, DbzConnectorConfig.USER);
-        ensurePropNotNull(props, DbzConnectorConfig.PASSWORD);
+        ensurePropNotBlank(props, DbzConnectorConfig.HOST);
+        ensurePropNotBlank(props, DbzConnectorConfig.PORT);
+        ensurePropNotBlank(props, DbzConnectorConfig.DB_NAME);
+        ensurePropNotBlank(props, DbzConnectorConfig.USER);
+        ensurePropNotBlank(props, DbzConnectorConfig.PASSWORD);
+
+        var commonParam = request.getCommonParam();
+        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+        // ensure table name is passed by user in non-sharing mode
+        if (!isMultiTableShared) {
+            ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
+        }
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SLOT_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_CREATE);
+                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
                 try (var validator = new PostgresValidator(props, tableSchema)) {
-                    validator.validateAll();
+                    validator.validateAll(isMultiTableShared);
                 }
                 break;
 
             case CITUS:
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
-                try (var coordinatorValidator = new PostgresValidator(props, tableSchema)) {
+                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();
                     coordinatorValidator.validateTable();
                 }
 
-                ensurePropNotNull(props, DbzConnectorConfig.DB_SERVERS);
+                ensurePropNotBlank(props, DbzConnectorConfig.DB_SERVERS);
                 var workerServers =
                         StringUtils.split(props.get(DbzConnectorConfig.DB_SERVERS), ',');
                 // props extracted from grpc request, clone it to modify
@@ -110,13 +115,12 @@ public class SourceValidateHandler {
                 for (String workerAddr : workerServers) {
                     String[] hostPort = StringUtils.split(workerAddr, ':');
                     if (hostPort.length != 2) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format("invalid database.servers"));
+                        throw ValidatorUtils.invalidArgument("invalid database.servers");
                     }
                     // set HOST for each worker server
                     mutableProps.put(DbzConnectorConfig.HOST, hostPort[0]);
                     mutableProps.put(DbzConnectorConfig.PORT, hostPort[1]);
-                    try (var workerValidator = new PostgresValidator(mutableProps, tableSchema)) {
+                    try (var workerValidator = new CitusValidator(mutableProps, tableSchema)) {
                         workerValidator.validateDbConfig();
                         workerValidator.validateUserPrivilege();
                     }
@@ -124,8 +128,9 @@ public class SourceValidateHandler {
 
                 break;
             case MYSQL:
+                ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 try (var validator = new MySqlValidator(props, tableSchema)) {
-                    validator.validateAll();
+                    validator.validateAll(isMultiTableShared);
                 }
                 break;
             default:

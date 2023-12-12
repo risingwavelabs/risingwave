@@ -15,18 +15,20 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
-    HummockStorage, SstableStore,
+    set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
+    RecentFilter, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -428,6 +430,13 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            if let Some(expected) = &mut self.expected {
+                expected.try_flush().await?;
+            }
+            self.actual.try_flush().await
+        }
+
         async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
             self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
@@ -436,11 +445,11 @@ pub mod verify {
             Ok(())
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.actual.seal_current_epoch(next_epoch);
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             if let Some(expected) = &mut self.expected {
-                expected.seal_current_epoch(next_epoch);
+                expected.seal_current_epoch(next_epoch, opts.clone());
             }
+            self.actual.seal_current_epoch(next_epoch, opts);
         }
 
         fn epoch(&self) -> u64 {
@@ -525,37 +534,42 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
-        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
-            FileCache::none()
+        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
+            (FileCache::none(), None)
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
-                buffer_pool_size: opts.data_file_cache_buffer_pool_size_mb * MB,
                 device_align: opts.data_file_cache_device_align,
                 device_io_size: opts.data_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.data_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
-                flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
-                reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                event_listener: vec![],
-                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
+                ring_buffer_capacity: opts.data_file_cache_ring_buffer_capacity_mb * MB,
+                catalog_bits: opts.data_file_cache_catalog_bits,
+                admissions: vec![],
+                reinsertions: vec![],
+                compression: opts
+                    .data_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            let cache = FileCache::open(config)
                 .await
-                .map_err(HummockError::file_cache)?
+                .map_err(HummockError::file_cache)?;
+            let filter = Some(Arc::new(RecentFilter::new(
+                opts.cache_refill_recent_filter_layers,
+                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
+            )));
+            (cache, filter)
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -563,48 +577,43 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
-                buffer_pool_size: opts.meta_file_cache_buffer_pool_size_mb * MB,
                 device_align: opts.meta_file_cache_device_align,
                 device_io_size: opts.meta_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.meta_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
-                flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
-                reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                event_listener: vec![],
-                enable_filter: false,
+                ring_buffer_capacity: opts.meta_file_cache_ring_buffer_capacity_mb * MB,
+                catalog_bits: opts.meta_file_cache_catalog_bits,
+                admissions: vec![],
+                reinsertions: vec![],
+                compression: opts
+                    .meta_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            FileCache::open(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
+                let object_store = build_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    opts.object_store_config.clone(),
                 )
                 .await;
-                object_store.set_opts(
-                    opts.object_store_streaming_read_timeout_ms,
-                    opts.object_store_streaming_upload_timeout_ms,
-                    opts.object_store_read_timeout_ms,
-                    opts.object_store_upload_timeout_ms,
-                );
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
@@ -612,8 +621,10 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
+                    opts.prefetch_buffer_capacity_mb * (1 << 20),
                     data_file_cache,
                     meta_file_cache,
+                    recent_filter,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
@@ -770,13 +781,15 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize>;
 
+        async fn try_flush(&mut self) -> StorageResult<()>;
+
         fn epoch(&self) -> u64;
 
         fn is_dirty(&self) -> bool;
 
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
-        fn seal_current_epoch(&mut self, next_epoch: u64);
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
     }
 
     #[async_trait::async_trait]
@@ -825,6 +838,10 @@ pub mod boxed_state_store {
             self.flush(delete_ranges).await
         }
 
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            self.try_flush().await
+        }
+
         fn epoch(&self) -> u64 {
             self.epoch()
         }
@@ -837,8 +854,8 @@ pub mod boxed_state_store {
             self.init(options).await
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.seal_current_epoch(next_epoch)
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.seal_current_epoch(next_epoch, opts)
         }
     }
 
@@ -891,6 +908,10 @@ pub mod boxed_state_store {
             self.deref_mut().flush(delete_ranges)
         }
 
+        fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().try_flush()
+        }
+
         fn epoch(&self) -> u64 {
             self.deref().epoch()
         }
@@ -906,8 +927,8 @@ pub mod boxed_state_store {
             self.deref_mut().init(options)
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.deref_mut().seal_current_epoch(next_epoch)
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.deref_mut().seal_current_epoch(next_epoch, opts)
         }
     }
 

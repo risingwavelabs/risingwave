@@ -116,16 +116,16 @@
 
     Fragment 1
     StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [$expr1] }
-    └── Chain { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 1 }
+    └── StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 1 }
         ├── Upstream
         └── BatchPlanNode
 
     Table 0 { columns: [ $expr1, max(t_b), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -215,3 +215,37 @@
       └─StreamEowcSort { sort_column: t.tm }
         └─StreamExchange { dist: HashShard(t.bar) }
           └─StreamTableScan { table: t, columns: [tm, foo, bar, _row_id] }
+- sql: |
+    CREATE table s1 (id int, value int, ts TIMESTAMP, WATERMARK FOR ts AS ts - INTERVAL '20' SECOND ) append only;
+    CREATE table s2 (id int, value int, ts TIMESTAMP, WATERMARK FOR ts AS ts - INTERVAL '20' SECOND) append only;
+    select *, count(*) over (partition by value2 order by ts2) from (
+      SELECT s1.id AS id1,
+      s1.value AS value1,
+      s2.id AS id2,
+      s2.value AS value2,
+      s1.ts as ts1,
+      s2.ts as ts2
+      FROM s1 JOIN s2
+      ON s1.id = s2.id and s1.ts >= s2.ts   and s1.ts - INTERVAL '1' MINUTE <= s2.ts
+    );
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, value1, id2, value2, ts1, ts2, s1._row_id(hidden), s2._row_id(hidden), count], stream_key: [s1._row_id, s2._row_id, id1, value2], pk_columns: [s1._row_id, s2._row_id, id1, value2], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY s2.value ORDER BY s2.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamExchange { dist: HashShard(s2.value) }
+        └─StreamHashJoin [interval, append_only] { type: Inner, predicate: s1.id = s2.id AND (s1.ts >= s2.ts) AND ($expr1 <= s2.ts), conditions_to_clean_left_state_table: (s1.ts >= s2.ts), conditions_to_clean_right_state_table: ($expr1 <= s2.ts), output_watermarks: [s1.ts, s2.ts], output: [s1.id, s1.value, s2.id, s2.value, s1.ts, s2.ts, s1._row_id, s2._row_id] }
+          ├─StreamExchange { dist: HashShard(s1.id) }
+          │ └─StreamProject { exprs: [s1.id, s1.value, s1.ts, (s1.ts - '00:01:00':Interval) as $expr1, s1._row_id], output_watermarks: [s1.ts, $expr1] }
+          │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], pk: [s1._row_id], dist: UpstreamHashShard(s1._row_id) }
+          └─StreamExchange { dist: HashShard(s2.id) }
+            └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], pk: [s2._row_id], dist: UpstreamHashShard(s2._row_id) }
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [id1, value1, id2, value2, ts1, ts2, s1._row_id(hidden), s2._row_id(hidden), count], stream_key: [s1._row_id, s2._row_id, id1, value2], pk_columns: [s1._row_id, s2._row_id, id1, value2], pk_conflict: NoCheck }
+    └─StreamEowcOverWindow { window_functions: [count() OVER(PARTITION BY s2.value ORDER BY s2.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamEowcSort { sort_column: s2.ts }
+        └─StreamExchange { dist: HashShard(s2.value) }
+          └─StreamHashJoin [interval, append_only] { type: Inner, predicate: s1.id = s2.id AND (s1.ts >= s2.ts) AND ($expr1 <= s2.ts), conditions_to_clean_left_state_table: (s1.ts >= s2.ts), conditions_to_clean_right_state_table: ($expr1 <= s2.ts), output_watermarks: [s1.ts, s2.ts], output: [s1.id, s1.value, s2.id, s2.value, s1.ts, s2.ts, s1._row_id, s2._row_id] }
+            ├─StreamExchange { dist: HashShard(s1.id) }
+            │ └─StreamProject { exprs: [s1.id, s1.value, s1.ts, (s1.ts - '00:01:00':Interval) as $expr1, s1._row_id], output_watermarks: [s1.ts, $expr1] }
+            │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], pk: [s1._row_id], dist: UpstreamHashShard(s1._row_id) }
+            └─StreamExchange { dist: HashShard(s2.id) }
+              └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], pk: [s2._row_id], dist: UpstreamHashShard(s2._row_id) }

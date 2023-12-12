@@ -21,11 +21,15 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(is_sorted)]
+#![feature(let_chains)]
+#![feature(btree_cursors)]
+#![feature(split_array)]
 
 mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
+use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -39,6 +43,7 @@ pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
+pub mod table_watermark;
 
 pub use compact::*;
 
@@ -265,4 +270,72 @@ pub fn version_checkpoint_path(root_dir: &str) -> String {
 
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
+}
+
+/// Represents an epoch with a gap.
+///
+/// When a spill of the mem table occurs between two epochs, `EpochWithGap` generates an offset.
+/// This offset is encoded when performing full key encoding. When returning to the upper-level
+/// interface, a pure epoch with the lower 16 bits set to 0 should be returned.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
+pub struct EpochWithGap(u64);
+
+impl EpochWithGap {
+    #[allow(unused_variables)]
+    pub fn new(epoch: u64, spill_offset: u16) -> Self {
+        // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
+        // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
+        //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            if risingwave_common::util::epoch::is_max_epoch(epoch) {
+                EpochWithGap::new_max_epoch()
+            } else {
+                debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+                EpochWithGap(epoch + spill_offset as u64)
+            }
+        }
+        #[cfg(feature = "enable_test_epoch")]
+        {
+            EpochWithGap(epoch)
+        }
+    }
+
+    pub fn new_from_epoch(epoch: u64) -> Self {
+        EpochWithGap::new(epoch, 0)
+    }
+
+    pub fn new_min_epoch() -> Self {
+        EpochWithGap(0)
+    }
+
+    pub fn new_max_epoch() -> Self {
+        EpochWithGap(HummockEpoch::MAX)
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn as_u64(&self) -> HummockEpoch {
+        self.0
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn from_u64(epoch_with_gap: u64) -> Self {
+        EpochWithGap(epoch_with_gap)
+    }
+
+    // return the pure epoch without spill offset
+    pub fn pure_epoch(&self) -> HummockEpoch {
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            self.0 & !EPOCH_SPILL_TIME_MASK
+        }
+        #[cfg(feature = "enable_test_epoch")]
+        {
+            self.0
+        }
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.0 & EPOCH_SPILL_TIME_MASK
+    }
 }

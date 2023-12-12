@@ -68,7 +68,8 @@ pub async fn list_prometheus_cluster(
     if let Some(ref client) = srv.prometheus_client {
         // assume job_name is one of compute, meta, frontend
         let now = SystemTime::now();
-        let cpu_query = "sum(rate(process_cpu_seconds_total{job=~\"compute|meta|frontend\"}[60s])) by (job,instance)";
+        let cpu_query =
+            format!("sum(rate(process_cpu_seconds_total{{job=~\"compute|meta|frontend\",{}}}[60s])) by (job,instance)", srv.prometheus_selector);
         let result = client
             .query_range(
                 cpu_query,
@@ -92,7 +93,7 @@ pub async fn list_prometheus_cluster(
             .map(PrometheusVector::from)
             .collect();
         let memory_query =
-            "avg(process_resident_memory_bytes{job=~\"compute|meta|frontend\"}) by (job,instance)";
+            format!("avg(process_resident_memory_bytes{{job=~\"compute|meta|frontend\",{}}}) by (job,instance)", srv.prometheus_selector);
         let result = client
             .query_range(
                 memory_query,
@@ -134,7 +135,8 @@ pub async fn list_prometheus_actor_back_pressure(
 ) -> Result<Json<ActorBackPressure>> {
     if let Some(ref client) = srv.prometheus_client {
         let now = SystemTime::now();
-        let back_pressure_query = "rate(stream_actor_output_buffer_blocking_duration_ns{job=~\"compute\"}[60s]) / 1000000000";
+        let back_pressure_query =
+            format!("avg(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) / 1000000000", srv.prometheus_selector);
         let result = client
             .query_range(
                 back_pressure_query,

@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -213,10 +213,10 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_row_with_pk_range(
-                    &pk_range,
+                buffer_table.iter_with_vnode(
                     vnode,
-                    PrefetchOptions::new_with_exhaust_iter(filler.capacity().is_none()),
+                    &pk_range,
+                    PrefetchOptions::new(filler.capacity().is_none(), false),
                 )
             }))
             .await?
@@ -258,7 +258,7 @@ fn key_value_to_full_row<S: StateStore>(
     let key = table
         .pk_serde()
         .deserialize(keyed_row.key())
-        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?;
+        .context("failed to deserialize pk")?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }

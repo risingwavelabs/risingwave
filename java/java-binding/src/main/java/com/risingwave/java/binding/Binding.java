@@ -30,65 +30,67 @@ public class Binding {
 
     // hummock iterator method
     // Return a pointer to the iterator
-    static native long hummockIteratorNew(byte[] readPlan);
+    static native long iteratorNewHummock(byte[] readPlan);
 
-    // return a pointer to the next row
-    static native long hummockIteratorNext(long pointer);
+    static native long iteratorNewStreamChunk(long pointer);
 
-    // Since the underlying rust does not have garbage collection, we will have to manually call
-    // close on the iterator to release the iterator instance pointed by the pointer.
-    static native void hummockIteratorClose(long pointer);
+    static native boolean iteratorNext(long pointer);
 
-    // row method
-    static native byte[] rowGetKey(long pointer);
+    static native void iteratorClose(long pointer);
 
-    static native int rowGetOp(long pointer);
+    static native long newStreamChunkFromPayload(byte[] streamChunkPayload);
 
-    static native boolean rowIsNull(long pointer, int index);
+    static native long newStreamChunkFromPretty(String str);
 
-    static native short rowGetInt16Value(long pointer, int index);
+    static native void streamChunkClose(long pointer);
 
-    static native int rowGetInt32Value(long pointer, int index);
+    static native byte[] iteratorGetKey(long pointer);
 
-    static native long rowGetInt64Value(long pointer, int index);
+    static native int iteratorGetOp(long pointer);
 
-    static native float rowGetFloatValue(long pointer, int index);
+    static native boolean iteratorIsNull(long pointer, int index);
 
-    static native double rowGetDoubleValue(long pointer, int index);
+    static native short iteratorGetInt16Value(long pointer, int index);
 
-    static native boolean rowGetBooleanValue(long pointer, int index);
+    static native int iteratorGetInt32Value(long pointer, int index);
 
-    static native String rowGetStringValue(long pointer, int index);
+    static native long iteratorGetInt64Value(long pointer, int index);
 
-    static native java.sql.Timestamp rowGetTimestampValue(long pointer, int index);
+    static native float iteratorGetFloatValue(long pointer, int index);
 
-    static native java.math.BigDecimal rowGetDecimalValue(long pointer, int index);
+    static native double iteratorGetDoubleValue(long pointer, int index);
 
-    static native java.sql.Time rowGetTimeValue(long pointer, int index);
+    static native boolean iteratorGetBooleanValue(long pointer, int index);
 
-    static native java.sql.Date rowGetDateValue(long pointer, int index);
+    static native String iteratorGetStringValue(long pointer, int index);
 
-    static native String rowGetIntervalValue(long pointer, int index);
+    static native java.sql.Timestamp iteratorGetTimestampValue(long pointer, int index);
 
-    static native String rowGetJsonbValue(long pointer, int index);
+    static native java.math.BigDecimal iteratorGetDecimalValue(long pointer, int index);
 
-    static native byte[] rowGetByteaValue(long pointer, int index);
+    static native java.sql.Time iteratorGetTimeValue(long pointer, int index);
+
+    static native java.sql.Date iteratorGetDateValue(long pointer, int index);
+
+    static native String iteratorGetIntervalValue(long pointer, int index);
+
+    static native String iteratorGetJsonbValue(long pointer, int index);
+
+    static native byte[] iteratorGetByteaValue(long pointer, int index);
 
     // TODO: object or object array?
-    static native Object rowGetArrayValue(long pointer, int index, Class<?> clazz);
-
-    // Since the underlying rust does not have garbage collection, we will have to manually call
-    // close on the row to release the row instance pointed by the pointer.
-    static native void rowClose(long pointer);
-
-    // stream chunk iterator method
-    static native long streamChunkIteratorNew(byte[] streamChunkPayload);
-
-    static native long streamChunkIteratorNext(long pointer);
-
-    static native void streamChunkIteratorClose(long pointer);
-
-    static native long streamChunkIteratorFromPretty(String str);
+    static native Object iteratorGetArrayValue(long pointer, int index, Class<?> clazz);
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
+
+    public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
+            recvSinkWriterRequestFromChannel(long channelPtr);
+
+    public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
+
+    public static native boolean sendSinkWriterErrorToChannel(long channelPtr, String msg);
+
+    public static native byte[] recvSinkCoordinatorRequestFromChannel(long channelPtr);
+
+    public static native boolean sendSinkCoordinatorResponseToChannel(long channelPtr, byte[] msg);
 }

@@ -28,15 +28,8 @@ shift $((OPTIND -1))
 
 git config --global --add safe.directory /risingwave
 
-download_and_prepare_rw "$profile" common
-
-echo "--- e2e, ci-backfill, build"
-cargo make ci-start ci-backfill
+download_and_prepare_rw "$profile" source
 
 ################ TESTS
 
-echo "--- e2e, ci-backfill, run backfill test"
 ./ci/scripts/run-backfill-tests.sh
-
-echo "--- Kill cluster"
-cargo make kill

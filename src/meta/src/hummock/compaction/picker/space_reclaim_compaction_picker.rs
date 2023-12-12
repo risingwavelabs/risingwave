@@ -63,12 +63,16 @@ impl SpaceReclaimCompactionPicker {
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let mut select_input_ssts = vec![];
-        if let Some(l0) = levels.l0.as_ref() && state.last_level == 0 {
+        if let Some(l0) = levels.l0.as_ref()
+            && state.last_level == 0
+        {
             // only pick trivial reclaim sstables because this kind of task could be optimized and do not need send to compactor.
             for level in &l0.sub_levels {
                 for sst in &level.table_infos {
                     let exist_count = self.exist_table_count(sst);
-                    if exist_count == sst.table_ids.len() ||  level_handlers[0].is_pending_compact( &sst.sst_id) {
+                    if exist_count == sst.table_ids.len()
+                        || level_handlers[0].is_pending_compact(&sst.sst_id)
+                    {
                         if !select_input_ssts.is_empty() {
                             break;
                         }
@@ -104,7 +108,6 @@ impl SpaceReclaimCompactionPicker {
         }
         while state.last_level <= levels.levels.len() {
             let mut is_trivial_task = true;
-            let mut select_file_size = 0;
             for sst in &levels.levels[state.last_level - 1].table_infos {
                 let exist_count = self.exist_table_count(sst);
                 let need_reclaim = exist_count < sst.table_ids.len();
@@ -122,15 +125,14 @@ impl SpaceReclaimCompactionPicker {
                 }
 
                 if !is_trivial_sst {
-                    if !select_input_ssts.is_empty() && is_trivial_task {
+                    if !select_input_ssts.is_empty() {
                         break;
                     }
                     is_trivial_task = false;
                 }
 
                 select_input_ssts.push(sst.clone());
-                select_file_size += sst.file_size;
-                if select_file_size > self.max_space_reclaim_bytes && !is_trivial_task {
+                if !is_trivial_task {
                     break;
                 }
             }
@@ -170,16 +172,17 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
         generate_table_with_ids_and_epochs,
     };
-    use crate::hummock::compaction::level_selector::SpaceReclaimCompactionSelector;
-    use crate::hummock::compaction::{LevelSelector, LocalSelectorStatistic};
+    use crate::hummock::compaction::selector::{
+        CompactionSelector, LocalSelectorStatistic, SpaceReclaimCompactionSelector,
+    };
     use crate::hummock::model::CompactionGroup;
 
     #[test]

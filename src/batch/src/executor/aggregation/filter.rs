@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{AggregateFunction, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::Expression;
 use risingwave_expr::Result;
 
@@ -74,8 +74,8 @@ impl AggregateFunction for Filter {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::agg::{build_append_only, AggCall};
-    use risingwave_expr::expr::{build_from_pretty, Expression, LiteralExpression};
+    use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_expr::expr::{build_from_pretty, ExpressionBoxExt, LiteralExpression};
 
     use super::*;
 

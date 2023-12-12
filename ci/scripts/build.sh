@@ -51,13 +51,12 @@ cargo build \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
-    -p risingwave_backup_cmd \
     -p risingwave_e2e_extended_mode_test \
     $RISINGWAVE_FEATURE_FLAGS \
     --profile "$profile"
 
 
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
+artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
 echo "--- Show link info"
 ldd target/"$profile"/risingwave
@@ -70,3 +69,4 @@ rm -rf target
 
 echo "--- Show sccache stats"
 sccache --show-stats
+sccache --zero-stats

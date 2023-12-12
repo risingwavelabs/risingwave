@@ -33,6 +33,8 @@ message ExprNode {
     LESS_THAN_OR_EQUAL = 11;
     GREATER_THAN = 12;
     GREATER_THAN_OR_EQUAL = 13;
+    GREATEST = 14;
+    LEAST = 15;
     // logical operators
     AND = 21;
     OR = 22;
@@ -64,6 +66,7 @@ message ExprNode {
     CAST_WITH_TIME_ZONE = 108;
     ADD_WITH_TIME_ZONE = 109;
     SUBTRACT_WITH_TIME_ZONE = 110;
+    MAKE_TIMESTAMPTZ = 112;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -104,6 +107,8 @@ message ExprNode {
     REGEXP_MATCH = 232;
     REGEXP_REPLACE = 280;
     REGEXP_COUNT = 281;
+    REGEXP_SPLIT_TO_ARRAY = 282;
+    REGEXP_EQ = 283;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -170,6 +175,10 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    PGWIRE_SEND = 320;
+    PGWIRE_RECV = 321;
+    CONVERT_FROM = 322;
+    CONVERT_TO = 323;
 
     // Unary operators
     NEG = 401;
@@ -201,19 +210,53 @@ message ExprNode {
     ARRAY_MAX = 547;
     ARRAY_SUM = 548;
     ARRAY_SORT = 549;
+    ARRAY_CONTAINS = 550;
+    ARRAY_CONTAINED = 551;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
 
     // Jsonb functions
 
-    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
-    JSONB_ACCESS_INNER = 600;
-    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    // jsonb -> int, jsonb -> text that returns jsonb
+    JSONB_ACCESS = 600;
+    // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
+    // jsonb #> text[] -> jsonb
+    JSONB_EXTRACT_PATH = 613;
+    // jsonb #>> text[] -> text
+    JSONB_EXTRACT_PATH_TEXT = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
+    JSONB_CONCAT = 605;
+    JSONB_OBJECT = 606;
+    JSONB_PRETTY = 607;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED = 609;
+    // jsonb ? text
+    JSONB_EXISTS = 610;
+    // jsonb ?| text[]
+    JSONB_EXISTS_ANY = 611;
+    // jsonb ?& text[]
+    JSONB_EXISTS_ALL = 612;
+    // see SUBTRACT for:
+    // jsonb - text -> jsonb
+    // jsonb - text[] -> jsonb
+    // jsonb - integer -> jsonb
+    //
+    // jsonb #- text[] -> jsonb
+    JSONB_DELETE_PATH = 615;
+    JSONB_STRIP_NULLS = 616;
+    TO_JSONB = 617;
+    JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_OBJECT = 619;
+    JSONB_PATH_EXISTS = 620;
+    JSONB_PATH_MATCH = 621;
+    JSONB_PATH_QUERY_ARRAY = 622;
+    JSONB_PATH_QUERY_FIRST = 623;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -227,6 +270,7 @@ message ExprNode {
 
     // Adminitration functions
     COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
@@ -247,12 +291,15 @@ message TableFunction {
     REGEXP_MATCHES = 3;
     RANGE = 4;
     GENERATE_SUBSCRIPTS = 5;
+    // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
+    _PG_EXPANDARRAY = 6;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;
     JSONB_EACH = 12;
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
+    JSONB_PATH_QUERY = 15;
     // User defined table function
     UDTF = 100;
   }
@@ -341,6 +388,7 @@ message AggCall {
     MODE = 24;
     LAST_VALUE = 25;
     GROUPING = 26;
+    INTERNAL_LAST_SEEN_VALUE = 27;
   }
   Type type = 1;
   repeated InputRef args = 2;

@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -22,10 +22,10 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::{
+use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::{ExprError, Result};
+use risingwave_expr::Result;
 
 /// `ProjectionOrderBy` is a wrapper of `AggregateFunction` that sorts rows by given columns and
 /// then projects columns.
@@ -77,7 +77,7 @@ impl ProjectionOrderBy {
     fn push_row(&self, state: &mut State, row: RowRef<'_>) -> Result<()> {
         let key =
             memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
-                .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
+                .context("failed to encode row")?;
         let projected_row = row.project(&self.arg_indices).to_owned_row();
 
         state.unordered_values_estimated_heap_size +=
@@ -151,7 +151,7 @@ impl AggregateFunction for ProjectionOrderBy {
 mod tests {
     use risingwave_common::array::{ListValue, StreamChunk};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
 
     use super::super::build;
 
@@ -172,15 +172,7 @@ mod tests {
         agg.update(&mut state, &chunk).await.unwrap();
         assert_eq!(
             agg.get_result(&state).await.unwrap(),
-            Some(
-                ListValue::new(vec![
-                    Some(789.into()),
-                    Some(456.into()),
-                    Some(123.into()),
-                    Some(321.into()),
-                ])
-                .into()
-            )
+            Some(ListValue::from_iter([789, 456, 123, 321]).into())
         );
     }
 

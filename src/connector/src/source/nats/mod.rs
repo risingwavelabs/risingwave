@@ -17,6 +17,7 @@ pub mod source;
 pub mod split;
 
 use serde::Deserialize;
+use with_options::WithOptions;
 
 use crate::common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
@@ -25,7 +26,7 @@ use crate::source::SourceProperties;
 
 pub const NATS_CONNECTOR: &str = "nats";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,
@@ -33,11 +34,15 @@ pub struct NatsProperties {
     #[serde(rename = "scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "scan.startup.timestamp_millis"
+    )]
     pub start_time: Option<String>,
-}
 
-impl NatsProperties {}
+    #[serde(rename = "stream")]
+    pub stream: String,
+}
 
 impl SourceProperties for NatsProperties {
     type Split = NatsSplit;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
@@ -23,10 +24,11 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedWriteOptions,
+    TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -36,15 +38,14 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }
@@ -120,7 +121,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.exhaust_iter = false;
+            read_options.prefetch_options.prefetch = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -160,6 +161,8 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -234,6 +237,7 @@ pub trait LocalStateStore: StaticSendSync {
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
@@ -244,12 +248,12 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -267,29 +271,44 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// Since the streaming-read of object-storage may hung in some case, we still use sync short read
+/// for both batch-query and streaming process. So this configure is unused.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
-    pub exhaust_iter: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_exhaust_iter() -> Self {
-        Self::new_with_exhaust_iter(true)
+    pub fn prefetch_for_large_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: true,
+        }
     }
 
-    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self { exhaust_iter }
+    pub fn prefetch_for_small_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: false,
+        }
+    }
+
+    pub fn new(prefetch: bool, for_large_query: bool) -> Self {
+        Self {
+            prefetch,
+            for_large_query,
+        }
     }
 }
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -297,7 +316,8 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -479,5 +499,34 @@ impl From<TracedInitOptions> for InitOptions {
         InitOptions {
             epoch: value.epoch.into(),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SealCurrentEpochOptions {}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(_value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {}
+    }
+}
+
+impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
+        Ok(SealCurrentEpochOptions {})
+    }
+}
+
+impl SealCurrentEpochOptions {
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test() -> Self {
+        Self::new()
     }
 }

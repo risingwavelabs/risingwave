@@ -16,14 +16,17 @@ rw-dynamic-link = ["zstd-sys"]
 
 [dependencies]
 log = { version = "0.4", features = ["release_max_level_debug"] }
-# FIXME: 0.9.93 upgrades openssl-src to openssl@3, but we failed to build it.
-# fix it later https://github.com/risingwavelabs/risingwave/pull/12198
-openssl-sys = { version = "=0.9.92", optional = true, features = ["vendored"] }
+openssl-sys = { version = "0.9.96", optional = true, features = ["vendored"] }
 sasl2-sys = { version = "0.1", optional = true, features = ["gssapi-vendored"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 zstd-sys = { version = "2", optional = true, default-features = false, features = ["pkg-config"] }
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
+
+# FIXME(xxchan): This is a temporary fix due to how cargo and hakari works. See related PR for more details.
+# We will revisit how to handle workspace-hack and build-dependency issues later.
+[build-dependencies]
+openssl-sys = { version = "0.9.96", optional = true, features = ["vendored"] }
 
 [lints]
 workspace = true

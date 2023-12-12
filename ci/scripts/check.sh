@@ -42,15 +42,8 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run doctest"
-cargo test --doc
+RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
-
-echo "--- Run audit check"
-cargo audit \
-  --ignore RUSTSEC-2023-0052 --ignore RUSTSEC-2022-0093
- # https://github.com/risingwavelabs/risingwave/issues/11842
- # https://github.com/risingwavelabs/risingwave/issues/11986
-

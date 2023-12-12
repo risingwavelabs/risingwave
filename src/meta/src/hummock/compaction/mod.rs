@@ -15,41 +15,36 @@
 #![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
 
 pub mod compaction_config;
-mod level_selector;
 mod overlap_strategy;
-mod tombstone_compaction_selector;
 use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 
 mod picker;
-use std::collections::{HashMap, HashSet};
+pub mod selector;
+
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
+use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
-    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
+pub use selector::CompactionSelector;
 
-pub use crate::hummock::compaction::level_selector::{
-    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, EmergencySelector,
-    LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
-};
+use self::selector::LocalSelectorStatistic;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
-use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
-pub use crate::hummock::compaction::tombstone_compaction_selector::TombstoneCompactionSelector;
+use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
-use crate::rpc::metrics::MetaMetrics;
 
 pub struct CompactStatus {
-    pub(crate) compaction_group_id: CompactionGroupId,
-    pub(crate) level_handlers: Vec<LevelHandler>,
+    pub compaction_group_id: CompactionGroupId,
+    pub level_handlers: Vec<LevelHandler>,
 }
 
 impl Debug for CompactStatus {
@@ -83,7 +78,6 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
-    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -111,7 +105,7 @@ impl CompactStatus {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
-        selector: &mut Box<dyn LevelSelector>,
+        selector: &mut Box<dyn CompactionSelector>,
         table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
@@ -150,17 +144,21 @@ impl CompactStatus {
             compression_algorithm,
             target_file_size: ret.target_file_size,
             compaction_filter_mask: 0,
-            table_options: HashMap::default(),
+            table_options: BTreeMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
-            split_by_state_table: group.compaction_config.split_by_state_table,
-            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
+            table_vnode_partition: BTreeMap::default(),
+            ..Default::default()
         };
         Some(compact_task)
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
+        if task.task_type() != TaskType::Dynamic && task.task_type() != TaskType::Emergency {
+            return false;
+        }
+
         if task.input_ssts.len() == 1 {
             return task.input_ssts[0].level_idx == 0
                 && can_concat(&task.input_ssts[0].table_infos);
@@ -209,74 +207,6 @@ impl CompactStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ManualCompactionOption {
-    /// Filters out SSTs to pick. Has no effect if empty.
-    pub sst_ids: Vec<HummockSstableId>,
-    /// Filters out SSTs to pick.
-    pub key_range: KeyRange,
-    /// Filters out SSTs to pick. Has no effect if empty.
-    pub internal_table_id: HashSet<StateTableId>,
-    /// Input level.
-    pub level: usize,
-}
-
-impl Default for ManualCompactionOption {
-    fn default() -> Self {
-        Self {
-            sst_ids: vec![],
-            key_range: KeyRange {
-                left: vec![],
-                right: vec![],
-                right_exclusive: false,
-            },
-            internal_table_id: HashSet::default(),
-            level: 1,
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct LocalSelectorStatistic {
-    skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
-}
-
-impl LocalSelectorStatistic {
-    pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
-        for (start_level, target_level, stats) in &self.skip_picker {
-            let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
-            if stats.skip_by_write_amp_limit > 0 {
-                metrics
-                    .compact_skip_frequency
-                    .with_label_values(&[level_label.as_str(), "write-amp"])
-                    .inc();
-            }
-            if stats.skip_by_count_limit > 0 {
-                metrics
-                    .compact_skip_frequency
-                    .with_label_values(&[level_label.as_str(), "count"])
-                    .inc();
-            }
-            if stats.skip_by_pending_files > 0 {
-                metrics
-                    .compact_skip_frequency
-                    .with_label_values(&[level_label.as_str(), "pending-files"])
-                    .inc();
-            }
-            if stats.skip_by_overlapping > 0 {
-                metrics
-                    .compact_skip_frequency
-                    .with_label_values(&[level_label.as_str(), "overlapping"])
-                    .inc();
-            }
-            metrics
-                .compact_skip_frequency
-                .with_label_values(&[level_label.as_str(), "picker"])
-                .inc();
-        }
-    }
-}
-
 pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
@@ -307,7 +237,6 @@ pub fn create_compaction_task(
         input,
         target_file_size,
         compaction_task_type,
-        enable_split_by_table: false,
     }
 }
 

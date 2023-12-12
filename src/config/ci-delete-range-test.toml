@@ -6,6 +6,3 @@ telemetry_enabled = false
 
 [system]
 max_concurrent_creating_streaming_jobs = 0
-
-[meta.compaction_config]
-level0_stop_write_threshold_sub_level_number = 1000

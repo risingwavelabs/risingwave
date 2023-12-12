@@ -14,7 +14,7 @@
 
 //! Streaming Simple Aggregator
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::agg_common::{
@@ -27,7 +27,6 @@ use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -58,10 +57,11 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
                 .await;
 
         Ok(SimpleAggExecutor::new(AggExecutorArgs {
+            version: node.version(),
+
             input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
 
             extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 
@@ -71,7 +71,6 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             intermediate_state_table,
             distinct_dedup_tables,
             watermark_epoch: stream.get_watermark_epoch(),
-            metrics: params.executor_stats,
             extra: SimpleAggExecutorExtraArgs {},
         })?
         .boxed())

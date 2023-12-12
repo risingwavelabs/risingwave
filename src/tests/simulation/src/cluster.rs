@@ -114,6 +114,27 @@ impl Configuration {
         }
     }
 
+    pub fn for_auto_scale() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-auto-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
     /// Returns the config for backfill test.
     pub fn for_backfill() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
@@ -133,6 +154,34 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 4,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
+    pub fn for_background_ddl() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("background_ddl.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            // NOTE(kwannoel): The cancel test depends on `processlist`,
+            // which will cancel a stream job within the process.
+            // so we cannot have multiple frontend node, since a new session spawned
+            // to cancel the job could be routed to a different frontend node,
+            // in a different process.
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
         }
@@ -255,7 +304,7 @@ impl Cluster {
 
         // meta node
         for i in 1..=conf.meta_nodes {
-            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+            let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
                 "meta-node",
                 "--config-path",
                 conf.config_path.as_str(),
@@ -276,7 +325,7 @@ impl Cluster {
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta::start(opts.clone()))
+                .init(move || risingwave_meta_node::start(opts.clone()))
                 .build();
         }
 
@@ -562,6 +611,43 @@ impl Cluster {
         .await;
     }
 
+    #[cfg_or_panic(madsim)]
+    pub async fn kill_nodes_and_restart(
+        &self,
+        nodes: impl IntoIterator<Item = impl AsRef<str>>,
+        restart_delay_secs: u32,
+    ) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+            tokio::time::sleep(Duration::from_secs(restart_delay_secs as u64)).await;
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_kill_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_restart_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
     /// Create a node for kafka producer and prepare data.
     #[cfg_or_panic(madsim)]
     pub async fn create_kafka_producer(&self, datadir: &str) {
@@ -655,6 +741,12 @@ impl Session {
         self.query_tx.send((sql.into(), tx)).await?;
         rx.await?
     }
+
+    /// Run `FLUSH` on the session.
+    pub async fn flush(&mut self) -> Result<()> {
+        self.run("FLUSH").await?;
+        Ok(())
+    }
 }
 
 /// Options for killing nodes.
@@ -677,5 +769,13 @@ impl KillOpts {
         kill_compute: true,
         kill_compactor: true,
         restart_delay_secs: 20,
+    };
+    pub const ALL_FAST: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+        restart_delay_secs: 2,
     };
 }

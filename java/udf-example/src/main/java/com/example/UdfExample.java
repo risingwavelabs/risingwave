@@ -35,10 +35,13 @@ public class UdfExample {
     public static void main(String[] args) throws IOException {
         try (var server = new UdfServer("0.0.0.0", 8815)) {
             server.addFunction("int_42", new Int42());
+            server.addFunction("float_to_decimal", new FloatToDecimal());
+            server.addFunction("sleep", new Sleep());
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd3());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
+            server.addFunction("decimal_add", new DecimalAdd());
             server.addFunction("array_access", new ArrayAccess());
             server.addFunction("jsonb_access", new JsonbAccess());
             server.addFunction("jsonb_concat", new JsonbConcat());
@@ -59,6 +62,23 @@ public class UdfExample {
     public static class Int42 implements ScalarFunction {
         public int eval() {
             return 42;
+        }
+    }
+
+    public static class FloatToDecimal implements ScalarFunction {
+        public BigDecimal eval(Double f) {
+            return new BigDecimal(f);
+        }
+    }
+
+    public static class Sleep implements ScalarFunction {
+        public int eval(int x) {
+            try {
+                Thread.sleep(x * 1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return 0;
         }
     }
 
@@ -111,6 +131,12 @@ public class UdfExample {
                 return null;
             }
             return new BigDecimal(new BigInteger(hex, 16));
+        }
+    }
+
+    public static class DecimalAdd implements ScalarFunction {
+        public BigDecimal eval(BigDecimal a, BigDecimal b) {
+            return a.add(b);
         }
     }
 
@@ -178,6 +204,16 @@ public class UdfExample {
             public String str;
             public byte[] bytes;
             public @DataTypeHint("JSONB") String jsonb;
+            public Struct struct;
+        }
+
+        public static class Struct {
+            public Integer f1;
+            public Integer f2;
+
+            public String toString() {
+                return String.format("(%d, %d)", f1, f2);
+            }
         }
 
         public Row eval(
@@ -194,7 +230,8 @@ public class UdfExample {
                 PeriodDuration interval,
                 String str,
                 byte[] bytes,
-                @DataTypeHint("JSONB") String jsonb) {
+                @DataTypeHint("JSONB") String jsonb,
+                Struct struct) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -210,6 +247,7 @@ public class UdfExample {
             row.str = str;
             row.bytes = bytes;
             row.jsonb = jsonb;
+            row.struct = struct;
             return row;
         }
     }
@@ -230,6 +268,16 @@ public class UdfExample {
             public String[] str;
             public byte[][] bytes;
             public @DataTypeHint("JSONB[]") String[] jsonb;
+            public Struct[] struct;
+        }
+
+        public static class Struct {
+            public Integer f1;
+            public Integer f2;
+
+            public String toString() {
+                return String.format("(%d, %d)", f1, f2);
+            }
         }
 
         public Row eval(
@@ -246,7 +294,8 @@ public class UdfExample {
                 PeriodDuration[] interval,
                 String[] str,
                 byte[][] bytes,
-                @DataTypeHint("JSONB[]") String[] jsonb) {
+                @DataTypeHint("JSONB[]") String[] jsonb,
+                Struct[] struct) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -262,6 +311,7 @@ public class UdfExample {
             row.str = str;
             row.bytes = bytes;
             row.jsonb = jsonb;
+            row.struct = struct;
             return row;
         }
     }

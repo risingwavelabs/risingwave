@@ -20,12 +20,12 @@ use std::sync::LazyLock;
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
@@ -33,6 +33,7 @@ use risingwave_sqlparser::ast::{
     self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
+use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -59,26 +60,37 @@ impl Binder {
             [schema, name] => {
                 let schema_name = schema.real_value();
                 if schema_name == PG_CATALOG_SCHEMA_NAME {
+                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
+                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
                     name.real_value()
+                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                    // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
+                    //
+                    // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
+                    let function_name = name.real_value();
+                    if function_name != "_pg_expandarray" {
+                        bail_not_implemented!(
+                            issue = 12422,
+                            "Unsupported function name under schema: {}",
+                            schema_name
+                        );
+                    }
+                    function_name
                 } else {
-                    return Err(ErrorCode::BindError(format!(
+                    bail_not_implemented!(
+                        issue = 12422,
                         "Unsupported function name under schema: {}",
                         schema_name
-                    ))
-                    .into());
+                    );
                 }
             }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("qualified function: {}", f.name),
-                    112.into(),
-                )
-                .into());
-            }
+            _ => bail_not_implemented!(issue = 112, "qualified function {}", f.name),
         };
 
         // agg calls
-        if f.over.is_none() && let Ok(kind) = function_name.parse() {
+        if f.over.is_none()
+            && let Ok(kind) = function_name.parse()
+        {
             return self.bind_agg(f, kind);
         }
 
@@ -124,11 +136,11 @@ impl Binder {
             ))
             .into());
         } else if f.over.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                format!("Unrecognized window function: {}", function_name),
-                8961.into(),
-            )
-            .into());
+            bail_not_implemented!(
+                issue = 8961,
+                "Unrecognized window function: {}",
+                function_name
+            );
         }
 
         // table function
@@ -138,12 +150,13 @@ impl Binder {
         }
 
         // user defined function
-        // TODO: resolve schema name
-        if let Ok(schema) = self.first_valid_schema() &&
-            let Some(func) = schema.get_function_by_name_args(
+        // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
+        if let Ok(schema) = self.first_valid_schema()
+            && let Some(func) = schema.get_function_by_name_args(
                 &function_name,
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-        ) {
+            )
+        {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
@@ -254,25 +267,13 @@ impl Binder {
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
-                    return Err(ErrorCode::NotImplemented(
-                        "subquery in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("subquery in filter clause");
                 }
                 if expr.has_agg_call() {
-                    return Err(ErrorCode::NotImplemented(
-                        "aggregation function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("aggregation function in filter clause");
                 }
                 if expr.has_table_function() {
-                    return Err(ErrorCode::NotImplemented(
-                        "table function in filter clause".to_string(),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!("table function in filter clause");
                 }
                 Condition::with_expr(expr)
             }
@@ -330,11 +331,7 @@ impl Binder {
                 .flatten_ok()
                 .try_collect()?;
             if args.iter().any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant direct arguments for ordered-set aggregation is not supported now".to_string(),
-                    None.into()
-                )
-                .into());
+                bail_not_implemented!("non-constant direct arguments for ordered-set aggregation is not supported now");
             }
             args
         };
@@ -345,8 +342,12 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok() && let Ok(casted) = fraction.fold_const() {
-                    if let Some(ref casted) = casted && !(0.0..=1.0).contains(&casted.as_float64().0) {
+                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
+                    && let Ok(casted) = fraction.fold_const()
+                {
+                    if let Some(ref casted) = casted
+                        && !(0.0..=1.0).contains(&casted.as_float64().0)
+                    {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "direct arg in `{}` must between 0.0 and 1.0",
                             kind
@@ -448,12 +449,7 @@ impl Binder {
             // restrict arguments[1..] to be constant because we don't support multiple distinct key
             // indices for now
             if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
-                return Err(ErrorCode::NotImplemented(
-                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
-                        .to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("non-constant arguments other than the first one for DISTINCT aggregation is not supported now");
             }
 
             // restrict ORDER BY to align with PG, which says:
@@ -498,14 +494,11 @@ impl Binder {
                 match exclusion {
                     WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
                     WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!(
-                                "window frame exclusion `{}` is not supported yet",
-                                exclusion
-                            ),
-                            9124.into(),
-                        )
-                        .into());
+                        bail_not_implemented!(
+                            issue = 9124,
+                            "window frame exclusion `{}` is not supported yet",
+                            exclusion
+                        );
                     }
                     WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
                 }
@@ -534,14 +527,11 @@ impl Binder {
                     FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            "window frame in `{}` mode is not supported yet",
-                            frame.units
-                        ),
-                        9124.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        issue = 9124,
+                        "window frame in `{}` mode is not supported yet",
+                        frame.units
+                    );
                 }
             };
             if !bounds.is_valid() {
@@ -736,6 +726,7 @@ impl Binder {
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
                 ("date_part", raw_call(ExprType::DatePart)),
                 ("to_date", raw_call(ExprType::CharToDate)),
+                ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -766,6 +757,7 @@ impl Binder {
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
                 ("regexp_replace", raw_call(ExprType::RegexpReplace)),
                 ("regexp_count", raw_call(ExprType::RegexpCount)),
+                ("regexp_split_to_array", raw_call(ExprType::RegexpSplitToArray)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -779,6 +771,8 @@ impl Binder {
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
+                ("convert_from", raw_call(ExprType::ConvertFrom)),
+                ("convert_to", raw_call(ExprType::ConvertTo)),
                 ("sha1", raw_call(ExprType::Sha1)),
                 ("sha224", raw_call(ExprType::Sha224)),
                 ("sha256", raw_call(ExprType::Sha256)),
@@ -786,6 +780,19 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("int8send", raw_call(ExprType::PgwireSend)),
+                ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
+                    // Similar to `cast` from string, return type is set explicitly rather than inferred.
+                    let hint = if !inputs[0].is_untyped() && inputs[0].return_type() == DataType::Varchar {
+                        " Consider `decode` or cast."
+                    } else {
+                        ""
+                    };
+                    inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
+                        ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
+                    })?;
+                    Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
+                }))),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -803,6 +810,10 @@ impl Binder {
                 ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("array_contains", raw_call(ExprType::ArrayContains)),
+                ("arraycontains", raw_call(ExprType::ArrayContains)),
+                ("array_contained", raw_call(ExprType::ArrayContained)),
+                ("arraycontained", raw_call(ExprType::ArrayContained)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 (
                     "array_ndims",
@@ -842,14 +853,65 @@ impl Binder {
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
-                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
-                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccess)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_extract_path", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPath, inputs, DataType::Jsonb).into())
+                })),
+                ("jsonb_extract_path_text", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path_text(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path_text(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPathText, inputs, DataType::Varchar).into())
+                })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
+                ("jsonb_object", raw_call(ExprType::JsonbObject)),
+                ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
+                ("jsonb_contains", raw_call(ExprType::JsonbContains)),
+                ("jsonb_contained", raw_call(ExprType::JsonbContained)),
+                ("jsonb_exists", raw_call(ExprType::JsonbExists)),
+                ("jsonb_exists_any", raw_call(ExprType::JsonbExistsAny)),
+                ("jsonb_exists_all", raw_call(ExprType::JsonbExistsAll)),
+                ("jsonb_delete", raw_call(ExprType::Subtract)),
+                ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
+                ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
+                ("to_jsonb", raw_call(ExprType::ToJsonb)),
+                ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
+                ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
+                ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
+                ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
+                ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 // Functions that return a constant value
                 ("pi", pi()),
+                // greatest and least
+                ("greatest", raw_call(ExprType::Greatest)),
+                ("least", raw_call(ExprType::Least)),
                 // System information operations.
                 (
                     "pg_typeof",
@@ -885,10 +947,7 @@ impl Binder {
                         .map_err(|_| no_match_err)?;
 
                     let ExprImpl::Literal(literal) = &input else {
-                        return Err(ErrorCode::NotImplemented(
-                            "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
-                        )
-                        .into());
+                        bail_not_implemented!("Only boolean literals are supported in `current_schemas`.");
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
@@ -913,12 +972,12 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(Some(schema_name.into()));
+                            schema_names.push(schema_name.as_str());
                         }
                     }
 
                     Ok(ExprImpl::literal_list(
-                        ListValue::new(schema_names),
+                        ListValue::from_iter(schema_names),
                         DataType::Varchar,
                     ))
                 })),
@@ -1094,7 +1153,7 @@ impl Binder {
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(setting_name, vec![new_value.to_string()], ())?;
+                    session_config.set(setting_name, new_value.to_string(), &mut())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
@@ -1147,6 +1206,12 @@ impl Binder {
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()
@@ -1184,7 +1249,7 @@ impl Binder {
                     )
                 };
 
-                ErrorCode::NotImplemented(err_msg, 112.into()).into()
+                not_implemented!(issue = 112, "{}", err_msg).into()
             }),
         }
     }

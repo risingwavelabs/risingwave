@@ -23,9 +23,7 @@ pub struct CseExprCounter {
     pub counter: HashMap<FunctionCall, usize>,
 }
 
-impl ExprVisitor<()> for CseExprCounter {
-    fn merge(_: (), _: ()) {}
-
+impl ExprVisitor for CseExprCounter {
     fn visit_expr(&mut self, expr: &ExprImpl) {
         // Considering this sql, `In` expression needs to ensure its in-clauses to be const.
         // If we extract it into a common sub-expression (finally be a `InputRef`) which will
@@ -86,8 +84,6 @@ impl ExprVisitor<()> for CseExprCounter {
         func_call
             .inputs()
             .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

@@ -15,23 +15,21 @@
 use std::fmt;
 use std::hash::Hash;
 
-use postgres_types::{FromSql as _, ToSql as _, Type};
-use serde_json::Value;
+use bytes::Buf;
+use jsonbb::{Value, ValueRef};
 
 use crate::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JsonbVal(pub(crate) Box<Value>); // The `Box` is just to keep `size_of::<ScalarImpl>` smaller.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JsonbVal(pub(crate) Value);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct JsonbRef<'a>(pub(crate) &'a Value);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct JsonbRef<'a>(pub(crate) ValueRef<'a>);
 
 impl EstimateSize for JsonbVal {
     fn estimated_heap_size(&self) -> usize {
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        // FIXME: correctly handle jsonb size
-        0
+        self.0.capacity()
     }
 }
 
@@ -63,27 +61,11 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
     type ScalarType = JsonbVal;
 
     fn to_owned_scalar(&self) -> Self::ScalarType {
-        JsonbVal(self.0.clone().into())
+        JsonbVal(self.0.into())
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash(state)
-    }
-}
-
-impl Hash for JsonbRef<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // We do not intend to support hashing `jsonb` type.
-        // Before #7981 is done, we do not panic but just hash its string representation.
-        // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
-        // So its string form always have keys sorted.
-        self.0.to_string().hash(state)
-    }
-}
-
-impl Hash for JsonbVal {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.to_string().hash(state)
     }
 }
 
@@ -125,19 +107,6 @@ impl Ord for JsonbRef<'_> {
 
 impl crate::types::to_text::ToText for JsonbRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        struct FmtToIoUnchecked<F>(F);
-        impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let s = unsafe { std::str::from_utf8_unchecked(buf) };
-                self.0.write_str(s).map_err(|_| std::io::ErrorKind::Other)?;
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
         // Use custom [`ToTextFormatter`] to serialize. If we are okay with the default, this can be
         // just `write!(f, "{}", self.0)`
         use serde::Serialize as _;
@@ -159,10 +128,8 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> crate::error::Result<Option<bytes::Bytes>> {
-        let mut output = bytes::BytesMut::new();
-        self.0.to_sql(&Type::JSONB, &mut output).unwrap();
-        Ok(Some(output.freeze()))
+    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
+        Ok(Some(self.value_serialize().into()))
     }
 }
 
@@ -170,43 +137,77 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v: Value = s.parse()?;
-        Ok(Self(v.into()))
+        Ok(Self(s.parse()?))
     }
 }
 
 impl JsonbVal {
-    /// Constructs a value without specific meaning. Usually used as a lightweight placeholder.
-    pub fn dummy() -> Self {
-        Self(Value::Null.into())
+    /// Returns a jsonb `null`.
+    pub fn null() -> Self {
+        Self(Value::null())
     }
 
+    /// Returns an empty array `[]`.
+    pub fn empty_array() -> Self {
+        Self(Value::array([]))
+    }
+
+    /// Returns an empty array `{}`.
+    pub fn empty_object() -> Self {
+        Self(Value::object([]))
+    }
+
+    /// Deserialize from a memcomparable encoding.
     pub fn memcmp_deserialize(
         deserializer: &mut memcomparable::Deserializer<impl bytes::Buf>,
     ) -> memcomparable::Result<Self> {
-        let v: Value = <String as serde::Deserialize>::deserialize(deserializer)?
+        let v = <String as serde::Deserialize>::deserialize(deserializer)?
             .parse()
             .map_err(|_| memcomparable::Error::Message("invalid json".into()))?;
-        Ok(Self(v.into()))
+        Ok(Self(v))
     }
 
-    pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
-        let v = Value::from_sql(&Type::JSONB, buf).ok()?;
-        Some(Self(v.into()))
+    /// Deserialize from a pgwire "BINARY" encoding.
+    pub fn value_deserialize(mut buf: &[u8]) -> Option<Self> {
+        if buf.is_empty() || buf.get_u8() != 1 {
+            return None;
+        }
+        Value::from_text(buf).ok().map(Self)
     }
 
-    pub fn take(mut self) -> Value {
-        self.0.take()
+    /// Convert the value to a [`serde_json::Value`].
+    pub fn take(self) -> serde_json::Value {
+        self.0.into()
     }
+}
 
-    pub fn as_serde_mut(&mut self) -> &mut Value {
-        &mut self.0
+impl From<serde_json::Value> for JsonbVal {
+    fn from(v: serde_json::Value) -> Self {
+        Self(v.into())
     }
 }
 
 impl From<Value> for JsonbVal {
     fn from(v: Value) -> Self {
+        Self(v)
+    }
+}
+
+impl From<JsonbRef<'_>> for JsonbVal {
+    fn from(v: JsonbRef<'_>) -> Self {
+        Self(v.0.to_owned())
+    }
+}
+
+impl From<f64> for JsonbVal {
+    fn from(v: f64) -> Self {
         Self(v.into())
+    }
+}
+
+impl<'a> From<JsonbRef<'a>> for ValueRef<'a> {
+    fn from(v: JsonbRef<'a>) -> Self {
+        v.0
     }
 }
 
@@ -221,49 +222,75 @@ impl<'a> JsonbRef<'a> {
         serde::Serialize::serialize(&s, serializer)
     }
 
+    /// Serialize to a pgwire "BINARY" encoding.
     pub fn value_serialize(&self) -> Vec<u8> {
+        use std::io::Write;
         // Reuse the pgwire "BINARY" encoding for jsonb type.
         // It is not truly binary, but one byte of version `1u8` followed by string form.
         // This version number helps us maintain compatibility when we switch to more efficient
         // encoding later.
-        let mut output = bytes::BytesMut::new();
-        self.0.to_sql(&Type::JSONB, &mut output).unwrap();
-        output.freeze().into()
+        let mut buf = Vec::with_capacity(self.0.capacity());
+        buf.push(1);
+        write!(&mut buf, "{}", self.0).unwrap();
+        buf
     }
 
+    /// Returns a jsonb `null` value.
+    pub fn null() -> Self {
+        Self(ValueRef::Null)
+    }
+
+    /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
-        matches!(self.0, Value::Null)
+        self.0.is_null()
     }
 
+    /// Returns true if this is a jsonb null, boolean, number or string.
+    pub fn is_scalar(&self) -> bool {
+        matches!(
+            self.0,
+            ValueRef::Null | ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::String(_)
+        )
+    }
+
+    /// Returns true if this is a jsonb array.
+    pub fn is_array(&self) -> bool {
+        self.0.is_array()
+    }
+
+    /// Returns true if this is a jsonb object.
+    pub fn is_object(&self) -> bool {
+        self.0.is_object()
+    }
+
+    /// Returns the type name of this jsonb.
+    ///
+    /// Possible values are: `null`, `boolean`, `number`, `string`, `array`, `object`.
     pub fn type_name(&self) -> &'static str {
         match self.0 {
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
+            ValueRef::Null => "null",
+            ValueRef::Bool(_) => "boolean",
+            ValueRef::Number(_) => "number",
+            ValueRef::String(_) => "string",
+            ValueRef::Array(_) => "array",
+            ValueRef::Object(_) => "object",
         }
     }
 
+    /// Returns the length of this json array.
     pub fn array_len(&self) -> Result<usize, String> {
-        match self.0 {
-            Value::Array(v) => Ok(v.len()),
-            _ => Err(format!(
-                "cannot get array length of a jsonb {}",
-                self.type_name()
-            )),
-        }
+        let array = self
+            .0
+            .as_array()
+            .ok_or_else(|| format!("cannot get array length of a jsonb {}", self.type_name()))?;
+        Ok(array.len())
     }
 
+    /// If the JSON is a boolean, returns the associated bool.
     pub fn as_bool(&self) -> Result<bool, String> {
-        match self.0 {
-            Value::Bool(v) => Ok(*v),
-            _ => Err(format!(
-                "cannot cast jsonb {} to type boolean",
-                self.type_name()
-            )),
-        }
+        self.0
+            .as_bool()
+            .ok_or_else(|| format!("cannot cast jsonb {} to type boolean", self.type_name()))
     }
 
     /// Attempt to read jsonb as a JSON number.
@@ -271,13 +298,11 @@ impl<'a> JsonbRef<'a> {
     /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
     /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
     pub fn as_number(&self) -> Result<f64, String> {
-        match self.0 {
-            Value::Number(v) => v.as_f64().ok_or_else(|| "jsonb number out of range".into()),
-            _ => Err(format!(
-                "cannot cast jsonb {} to type number",
-                self.type_name()
-            )),
-        }
+        self.0
+            .as_number()
+            .ok_or_else(|| format!("cannot cast jsonb {} to type number", self.type_name()))?
+            .as_f64()
+            .ok_or_else(|| "jsonb number out of range".into())
     }
 
     /// This is part of the `->>` or `#>>` syntax to access a child as string.
@@ -291,9 +316,9 @@ impl<'a> JsonbRef<'a> {
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
-            Value::String(v) => writer.write_str(v),
-            Value::Null => Ok(()),
-            Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
+            ValueRef::String(v) => writer.write_str(v),
+            ValueRef::Null => Ok(()),
+            ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::Array(_) | ValueRef::Object(_) => {
                 use crate::types::to_text::ToText as _;
                 self.write_with_type(&crate::types::DataType::Jsonb, writer)
             }
@@ -316,34 +341,48 @@ impl<'a> JsonbRef<'a> {
 
     /// Returns an iterator over the elements if this is an array.
     pub fn array_elements(self) -> Result<impl Iterator<Item = JsonbRef<'a>>, String> {
-        match &self.0 {
-            Value::Array(array) => Ok(array.iter().map(Self)),
-            _ => Err(format!(
-                "cannot extract elements from a jsonb {}",
-                self.type_name()
-            )),
-        }
+        let array = self
+            .0
+            .as_array()
+            .ok_or_else(|| format!("cannot extract elements from a jsonb {}", self.type_name()))?;
+        Ok(array.iter().map(Self))
     }
 
     /// Returns an iterator over the keys if this is an object.
     pub fn object_keys(self) -> Result<impl Iterator<Item = &'a str>, String> {
-        match &self.0 {
-            Value::Object(object) => Ok(object.keys().map(|s| s.as_str())),
-            _ => Err(format!(
+        let object = self.0.as_object().ok_or_else(|| {
+            format!(
                 "cannot call jsonb_object_keys on a jsonb {}",
                 self.type_name()
-            )),
-        }
+            )
+        })?;
+        Ok(object.keys())
     }
 
     /// Returns an iterator over the key-value pairs if this is an object.
     pub fn object_key_values(
         self,
     ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, String> {
-        match &self.0 {
-            Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
-            _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
-        }
+        let object = self
+            .0
+            .as_object()
+            .ok_or_else(|| format!("cannot deconstruct a jsonb {}", self.type_name()))?;
+        Ok(object.iter().map(|(k, v)| (k, Self(v))))
+    }
+
+    /// Pretty print the jsonb value to the given writer, with 4 spaces indentation.
+    pub fn pretty(self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        use serde::Serialize;
+        use serde_json::ser::{PrettyFormatter, Serializer};
+
+        let mut ser =
+            Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
+        self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
+    }
+
+    /// Returns the capacity of the underlying buffer.
+    pub fn capacity(self) -> usize {
+        self.0.capacity()
     }
 }
 
@@ -379,5 +418,20 @@ impl serde_json::ser::Formatter for ToTextFormatter {
         W: ?Sized + std::io::Write,
     {
         writer.write_all(b": ")
+    }
+}
+
+/// A wrapper of [`std::fmt::Write`] to implement [`std::io::Write`].
+struct FmtToIoUnchecked<F>(F);
+
+impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let s = unsafe { std::str::from_utf8_unchecked(buf) };
+        self.0.write_str(s).map_err(|_| std::io::ErrorKind::Other)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

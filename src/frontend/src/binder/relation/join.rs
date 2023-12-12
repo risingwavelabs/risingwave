@@ -193,7 +193,9 @@ impl Binder {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
-                    if let Some(cols) = &using_columns && !cols.contains(&column) {
+                    if let Some(cols) = &using_columns
+                        && !cols.contains(&column)
+                    {
                         continue;
                     }
                     let indices_l = match old_context.get_unqualified_indices(&column.real_value())

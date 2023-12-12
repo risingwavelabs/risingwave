@@ -7,20 +7,36 @@ create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 statement ok
 create view v3 as select sum(v2) as sum_v2 from t3;
 
-query TT
+statement ok
+comment on table t3 is 'volutpat vitae';
+
+statement ok
+comment on column t3.v1 is 'turpis vehicula';
+
+statement ok
+comment on column t3.v2 is 'Lorem ipsum dolor sit amet';
+
+statement ok
+comment on column public.t3._row_id is 'consectetur adipiscing elit';
+
+query TTTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
+v1                 integer  false  turpis vehicula
+v2                 integer  false  Lorem ipsum dolor sit amet
+v3                 integer  false  NULL
+_row_id             serial   true  consectetur adipiscing elit
+primary key        _row_id   NULL  NULL
+distribution key   _row_id   NULL  NULL
+table description       t3   NULL  volutpat vitae
 
-query TT
+query TTT
 show columns from t3;
 ----
-v1 integer
-v2 integer
-v3 integer
+v1 integer false turpis vehicula
+v2 integer false Lorem ipsum dolor sit amet
+v3 integer false NULL
+_row_id serial true consectetur adipiscing elit
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -30,14 +46,29 @@ show indexes from t3;
 ----
 idx1 t3 v1 ASC, v2 ASC v3 v1
 
-query TT
+statement ok
+comment on table public.t3 is 'consectetur turpis';
+
+statement ok
+comment on column t3.v1 is 'Nemo enim ipsam';
+
+statement ok
+comment on column t3.v2 is '';
+
+statement ok
+comment on column t3._row_id is NULL;
+
+query TTTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
-idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1)
+v1                 integer  false  Nemo enim ipsam
+v2                 integer  false  NULL
+v3                 integer  false  NULL
+_row_id             serial   true  NULL
+primary key        _row_id   NULL  NULL
+distribution key   _row_id   NULL  NULL
+idx1               index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
+table description       t3   NULL  consectetur turpis
 
 query TT
 show create index idx1;
@@ -134,29 +165,53 @@ statement ok
 drop view v1;
 
 statement ok
+CREATE SINK sink3 AS select * from t3 WITH (
+    connector = 'blackhole'
+);
+
+query TTTT
+describe sink3;
+----
+v1 integer false NULL
+v2 integer false NULL
+v3 integer false NULL
+t3._row_id serial true NULL
+distribution key t3._row_id NULL NULL
+table description sink3 NULL NULL
+
+query TTTT
+show columns from sink3;
+----
+v1 integer false NULL
+v2 integer false NULL
+v3 integer false NULL
+t3._row_id serial true NULL
+
+statement ok
+drop sink sink3;
+
+statement ok
 drop table t3;
 
-# todo: re-enable it when we support these commands on view
-# https://github.com/risingwavelabs/risingwave/issues/11234
-#query TT
-#describe pg_matviews;
-#----
-#schemaname varchar
-#matviewname varchar
-#matviewowner integer
-#definition varchar
-#matviewid integer
-#matviewtimezone varchar
-#matviewgraph varchar
-#primary key schemaname, matviewname
-#
-#query TT
-#show columns from pg_catalog.pg_matviews;
-#----
-#schemaname varchar
-#matviewname varchar
-#matviewowner integer
-#definition varchar
-#matviewid integer
-#matviewtimezone varchar
-#matviewgraph varchar
+query TTTT
+describe pg_matviews;
+----
+schemaname character varying false NULL
+matviewname character varying false NULL
+matviewowner integer false NULL
+definition character varying false NULL
+matviewid integer false NULL
+matviewtimezone character varying false NULL
+matviewgraph character varying false NULL
+table description pg_matviews NULL NULL
+
+query TTTT
+show columns from pg_catalog.pg_matviews;
+----
+schemaname character varying false NULL
+matviewname character varying false NULL
+matviewowner integer false NULL
+definition character varying false NULL
+matviewid integer false NULL
+matviewtimezone character varying false NULL
+matviewgraph character varying false NULL

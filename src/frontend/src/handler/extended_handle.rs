@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use pgwire::types::Format;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
@@ -57,11 +58,7 @@ impl std::fmt::Display for Portal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self {
             Portal::Empty => write!(f, "Empty"),
-            Portal::Portal(portal) => write!(
-                f,
-                "{}, params = {:?}",
-                portal.statement, portal.bound_result.parsed_params
-            ),
+            Portal::Portal(portal) => portal.fmt(f),
             Portal::PureStatement(stmt) => write!(f, "{}", stmt),
         }
     }
@@ -74,14 +71,24 @@ pub struct PortalResult {
     pub result_formats: Vec<Format>,
 }
 
+impl std::fmt::Display for PortalResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}, params = {:?}",
+            self.statement, self.bound_result.parsed_params
+        )
+    }
+}
+
 pub fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
     specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
-    let str_sql = statement.to_string();
-    let handler_args = HandlerArgs::new(session, &statement, &str_sql)?;
+    let sql: Arc<str> = Arc::from(statement.to_string());
+    let handler_args = HandlerArgs::new(session, &statement, sql)?;
     match &statement {
         Statement::Query(_)
         | Statement::Insert { .. }
@@ -91,32 +98,24 @@ pub fn handle_parse(
         }
         Statement::CreateView { query, .. } => {
             if have_parameter_in_query(query) {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE VIEW with parameters".to_string(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("CREATE VIEW with parameters");
             }
             Ok(PrepareStatement::PureStatement(statement))
         }
         Statement::CreateTable { query, .. } => {
-            if let Some(query) = query && have_parameter_in_query(query) {
-                Err(ErrorCode::NotImplemented(
-                    "CREATE TABLE AS SELECT with parameters".to_string(),
-                    None.into(),
-                )
-                .into())
+            if let Some(query) = query
+                && have_parameter_in_query(query)
+            {
+                bail_not_implemented!("CREATE TABLE AS SELECT with parameters");
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
         }
         Statement::CreateSink { stmt } => {
-            if let CreateSink::AsQuery(query) = &stmt.sink_from && have_parameter_in_query(query) {
-                Err(ErrorCode::NotImplemented(
-                    "CREATE SINK AS SELECT with parameters".to_string(),
-                    None.into(),
-                )
-                .into())
+            if let CreateSink::AsQuery(query) = &stmt.sink_from
+                && have_parameter_in_query(query)
+            {
+                bail_not_implemented!("CREATE SINK AS SELECT with parameters");
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -177,8 +176,8 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
-            let str_sql = portal.statement.to_string();
-            let handler_args = HandlerArgs::new(session, &portal.statement, &str_sql)?;
+            let sql: Arc<str> = Arc::from(portal.statement.to_string());
+            let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
             match &portal.statement {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -188,8 +187,8 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             }
         }
         Portal::PureStatement(stmt) => {
-            let sql = stmt.to_string();
-            handle(session, stmt, &sql, vec![]).await
+            let sql: Arc<str> = Arc::from(stmt.to_string());
+            handle(session, stmt, sql, vec![]).await
         }
     }
 }

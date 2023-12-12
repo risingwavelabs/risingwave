@@ -39,7 +39,4 @@ public class ArraySinkRow implements SinkRow {
     public int size() {
         return values.length;
     }
-
-    @Override
-    public void close() throws Exception {}
 }

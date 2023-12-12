@@ -17,17 +17,18 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};
+use crate::expr::{try_derive_watermark, ExprRewriter, ExprVisitor, WatermarkDerivation};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
-    pub base: PlanBase,
-    logical: generic::ProjectSet<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::ProjectSet<PlanRef>,
     /// All the watermark derivations, (input_column_idx, expr_idx). And the
     /// derivation expression is the project_set's expression itself.
     watermark_derivations: Vec<(usize, usize)>,
@@ -37,16 +38,16 @@ pub struct StreamProjectSet {
 }
 
 impl StreamProjectSet {
-    pub fn new(logical: generic::ProjectSet<PlanRef>) -> Self {
-        let input = logical.input.clone();
-        let distribution = logical
+    pub fn new(core: generic::ProjectSet<PlanRef>) -> Self {
+        let input = core.input.clone();
+        let distribution = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
-        for (expr_idx, expr) in logical.select_list.iter().enumerate() {
+        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        for (expr_idx, expr) in core.select_list.iter().enumerate() {
             match try_derive_watermark(expr) {
                 WatermarkDerivation::Watermark(input_idx) => {
                     if input.watermark_columns().contains(input_idx) {
@@ -67,8 +68,8 @@ impl StreamProjectSet {
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             distribution,
             input.append_only(),
             input.emit_on_window_close(),
@@ -76,24 +77,24 @@ impl StreamProjectSet {
         );
         StreamProjectSet {
             base,
-            logical,
+            core,
             watermark_derivations,
             nondecreasing_exprs,
         }
     }
 }
-impl_distill_by_unit!(StreamProjectSet, logical, "StreamProjectSet");
+impl_distill_by_unit!(StreamProjectSet, core, "StreamProjectSet");
 impl_plan_tree_node_for_unary! { StreamProjectSet }
 
 impl PlanTreeNodeUnary for StreamProjectSet {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -106,7 +107,7 @@ impl StreamNode for StreamProjectSet {
             .unzip();
         PbNodeBody::ProjectSet(ProjectSetNode {
             select_list: self
-                .logical
+                .core
                 .select_list
                 .iter()
                 .map(|select_item| select_item.to_project_set_select_item_proto())
@@ -124,8 +125,14 @@ impl ExprRewritable for StreamProjectSet {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for StreamProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

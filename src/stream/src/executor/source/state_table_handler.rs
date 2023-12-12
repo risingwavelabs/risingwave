@@ -14,8 +14,10 @@
 
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
+use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
@@ -56,6 +58,21 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
+    pub async fn from_table_catalog_with_vnodes(
+        table_catalog: &PbTable,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
+        Self {
+            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
+        }
+    }
+
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.state_store.init_epoch(epoch);
     }
@@ -84,11 +101,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_row_with_pk_range(
-                &(start, end),
-                VirtualNode::ZERO,
-                PrefetchOptions::new_for_exhaust_iter(),
-            )
+            .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
             .await?;
 
         let mut set = HashSet::new();
@@ -159,7 +172,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+    pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
             self.state_store.delete(prev_row);
         }

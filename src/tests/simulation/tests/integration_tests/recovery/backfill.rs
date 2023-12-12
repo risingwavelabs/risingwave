@@ -30,7 +30,7 @@ const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 static EXPECTED_NO_BACKFILL: LazyLock<String> = LazyLock::new(|| {
     (0..=255)
-        .map(|vnode| format!("{} NULL t", vnode))
+        .map(|vnode| format!("{} NULL t 0", vnode))
         .join("\n")
 });
 
@@ -77,7 +77,7 @@ async fn test_snapshot_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -124,7 +124,7 @@ async fn test_backfill_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -175,7 +175,10 @@ async fn test_index_backfill() -> Result<()> {
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("index"), no_identity_contains("chain")])
+        .locate_one_fragment([
+            identity_contains("index"),
+            no_identity_contains("StreamTableScan"),
+        ])
         .await?;
 
     let id = fragment.id();

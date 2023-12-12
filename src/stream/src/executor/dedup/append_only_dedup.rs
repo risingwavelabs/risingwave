@@ -29,8 +29,8 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, PkIndicesRef, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -41,9 +41,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     state_table: StateTable<S>,
     cache: DedupCache<OwnedRow>,
 
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
+    info: ExecutorInfo,
     ctx: ActorContextRef,
 }
 
@@ -51,22 +49,18 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
         state_table: StateTable<S>,
-        pk_indices: PkIndices,
-        executor_id: u64,
+        info: ExecutorInfo,
         ctx: ActorContextRef,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let schema = input.schema().clone();
         let metrics_info =
             MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
         Self {
             input: Some(input),
             state_table,
             cache: DedupCache::new(watermark_epoch, metrics_info),
-            pk_indices,
-            identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
-            schema,
+            info,
             ctx,
         }
     }
@@ -137,6 +131,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                         yield Message::Chunk(chunk);
                     }
+                    self.state_table.try_flush().await?;
                 }
 
                 Message::Barrier(barrier) => {
@@ -206,15 +201,15 @@ impl<S: StateStore> Executor for AppendOnlyDedupExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -258,12 +253,16 @@ mod tests {
         )
         .await;
 
-        let (mut tx, input) = MockSource::channel(schema, pk_indices.clone());
+        let (mut tx, input) = MockSource::channel(schema.clone(), pk_indices.clone());
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "AppendOnlyDedupExecutor".to_string(),
+        };
         let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
             Box::new(input),
             state_table,
-            pk_indices,
-            1,
+            info,
             ActorContext::create(123),
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),

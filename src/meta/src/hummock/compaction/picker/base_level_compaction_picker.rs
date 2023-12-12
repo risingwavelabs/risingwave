@@ -137,7 +137,7 @@ impl LevelCompactionPicker {
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
-            std::cmp::min(
+            std::cmp::max(
                 self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
@@ -240,12 +240,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
-        generate_l0_overlapping_sublevels, generate_level, generate_table,
-        push_table_level0_nonoverlapping, push_table_level0_overlapping,
-        push_tables_level0_nonoverlapping,
-    };
+    use crate::hummock::compaction::selector::tests::*;
     use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
@@ -573,6 +568,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(100010)
+                .max_bytes_for_level_base(512)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );

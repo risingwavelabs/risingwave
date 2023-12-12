@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -19,17 +20,17 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common::heap_profiling::{
-    self, AUTO_DUMP_MID_NAME, COLLAPSED_SUFFIX, MANUALLY_DUMP_MID_NAME,
-};
+use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_stream::task::LocalStreamManager;
-use tonic::{Request, Response, Status};
+use thiserror_ext::AsReport;
+use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
@@ -54,7 +55,7 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,
@@ -86,7 +87,7 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn profiling(
         &self,
         request: Request<ProfilingRequest>,
@@ -110,18 +111,17 @@ impl MonitorService for MonitorServiceImpl {
                 Ok(Response::new(ProfilingResponse { result: buf }))
             }
             Err(err) => {
-                tracing::warn!("failed to generate flamegraph: {}", err);
-                Err(Status::internal(err.to_string()))
+                tracing::warn!(error = %err.as_report(), "failed to generate flamegraph");
+                Err(err.to_status(Code::Internal, "monitor"))
             }
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        use std::ffi::CStr;
         use std::fs::create_dir_all;
         use std::path::PathBuf;
 
@@ -139,9 +139,9 @@ impl MonitorService for MonitorServiceImpl {
             ));
         }
 
-        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_MID_NAME);
-        let arg_dir = request.into_inner().get_dir().clone();
+        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+        let file_name = format!("{}.{}", time_prefix, MANUALLY_DUMP_SUFFIX);
+        let arg_dir = request.into_inner().dir;
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.heap_profiling.dir
         } else {
@@ -153,23 +153,22 @@ impl MonitorService for MonitorServiceImpl {
         let file_path = file_path_buf
             .to_str()
             .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
+        let file_path_c =
+            CString::new(file_path).map_err(|_| Status::internal("0 byte in file path"))?;
 
-        let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
-        let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-        let file_path_ptr = file_path_bytes.as_mut_ptr();
-        let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
-            CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
-        ) {
+        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
+        if let Err(e) =
+            tikv_jemalloc_ctl::prof::dump::write(unsafe { &*(file_path_c.as_c_str() as *const _) })
+        {
             tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
+            tracing::info!("Manually Jemalloc dump heap file created: {}", file_path);
             Ok(Response::new(HeapProfilingResponse {}))
-        };
-        let _ = unsafe { Box::from_raw(file_path_ptr) };
-        response
+        }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
@@ -182,7 +181,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(AUTO_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(AUTO_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -195,7 +194,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(MANUALLY_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(MANUALLY_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -209,7 +208,7 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn analyze_heap(
         &self,
         request: Request<AnalyzeHeapRequest>,
@@ -220,7 +219,12 @@ impl MonitorService for MonitorServiceImpl {
 
         // run jeprof if the target was not analyzed before
         if !collapsed_path.exists() {
-            heap_profiling::jeprof::run(dumped_path_str, collapsed_path_str.clone()).await?;
+            risingwave_common_heap_profiling::jeprof::run(
+                dumped_path_str,
+                collapsed_path_str.clone(),
+            )
+            .await
+            .map_err(|e| e.to_status(Code::Internal, "monitor"))?;
         }
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
@@ -243,7 +247,7 @@ pub mod grpc_middleware {
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<u64>>>;
+    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -307,12 +311,14 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            let key = if let Some(authority) = req.uri().authority() {
+                format!("{authority} - {id}")
+            } else {
+                format!("?? - {id}")
+            };
 
             Either::Right(async move {
-                let root = registry
-                    .lock()
-                    .await
-                    .register(id, format!("{}:{}", req.uri().path(), id));
+                let root = registry.lock().await.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

@@ -2,7 +2,7 @@
 
 This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://risingwave.com/slack) to join the channel.
 
 To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/risingwave/issues/new/choose).
 
@@ -23,6 +23,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
 - [Debug playground using vscode](#debug-playground-using-vscode)
+- [Use standalone-mode](#use-standalone-mode)
 - [Develop the dashboard](#develop-the-dashboard)
 - [Observability components](#observability-components)
   * [Cluster Control](#cluster-control)
@@ -46,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
 - [Understanding RisingWave Macros](#understanding-risingwave-macros)
+- [CI Labels Guide](#ci-labels-guide)
 
 ## Read the design docs
 
@@ -84,13 +86,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RiseDev!
 
-> **Note**
+> [!NOTE]
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
@@ -143,7 +145,7 @@ To manually add those components into the cluster, you will need to configure Ri
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
 ./risedev configure enable minio                  # enable MinIO
 ```
-> **Note**
+> [!NOTE]
 >
 > Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
@@ -163,7 +165,7 @@ For example, you can modify the default section to:
       persist-data: true
 ```
 
-> **Note**
+> [!NOTE]
 >
 > The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
@@ -205,6 +207,10 @@ psql -h localhost -p 4566 -d dev -U root
 ## Debug playground using vscode
 
 To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`.
+
+## Use standalone-mode
+
+Please refer to [README](../src/cmd_all/src/README.md) for more details.
 
 ## Develop the dashboard
 
@@ -329,7 +335,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 ./risedev slt-all -p 4566 -d dev -j 1
 ```
 
-> **Note**
+> [!NOTE]
 >
 > Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
@@ -518,3 +524,20 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 - [CPU Profiling Guide](./cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./memory-profiling.md)
 - [Microbench Guide](./microbenchmarks.md)
+
+## CI Labels Guide
+
+- `[ci/run-xxx ...]`: Run additional steps indicated by `ci/run-xxx` in your PR.
+- `ci/skip-ci` + `[ci/run-xxx ...]` : Skip steps except for those indicated by `ci/run-xxx` in your **DRAFT PR.**
+- `ci/run-main-cron`: Run full `main-cron`.
+- `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
+  from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
+- To reference `[ci/run-xxx ...]` labels, you may look at steps from `pull-request.yml` and `main-cron.yml`.
+- **Be sure to add all the dependencies.**
+
+  For example to run `e2e-test` for `main-cron` in your pull request:
+  1. Add `ci/run-build`, `ci/run-build-other`, `ci/run-docslt` .
+     These correspond to its `depends` field in `pull-request.yml` and `main-cron.yml` .
+  2. Add `ci/run-e2e-test` to run the step as well.
+  3. Add `ci/run-main-cron` to run `main-cron` workflow in your pull request,
+  4. Add `ci/main-cron/skip-ci` to skip all other steps which were not selected with `ci/run-xxx`.

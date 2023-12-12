@@ -18,16 +18,18 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamValues` implements `LogicalValues.to_stream()`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     logical: LogicalValues,
 }
 
@@ -40,7 +42,7 @@ impl StreamValues {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.logical_pk().to_vec(),
+            logical.stream_key().map(|v| v.to_vec()),
             logical.functional_dependency().clone(),
             Distribution::Single,
             true,
@@ -87,4 +89,29 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {}
+impl ExprRewritable for StreamValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        )
+        .into()
+    }
+}
+
+impl ExprVisitable for StreamValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .rows()
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}

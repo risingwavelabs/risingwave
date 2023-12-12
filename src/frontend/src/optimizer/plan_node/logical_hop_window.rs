@@ -17,13 +17,15 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::Interval;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, Logical,
+    LogicalFilter, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -32,7 +34,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::HopWindow<PlanRef>,
 }
 
@@ -63,23 +65,12 @@ impl LogicalHopWindow {
             output_indices,
         };
 
-        let _schema = core.schema();
-        let _pk_indices = core.logical_pk();
         let ctx = core.ctx();
-
-        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        // let pk_indices = match pk_indices {
-        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-        //         functional_dependency.minimize_key(&pk_indices)
-        //     }
-        //     _ => pk_indices.unwrap_or_default(),
-        // };
 
         let base = PlanBase::new_logical(
             ctx,
             core.schema(),
-            core.logical_pk().unwrap_or_default(),
+            core.stream_key(),
             core.functional_dependency(),
         );
 
@@ -88,6 +79,10 @@ impl LogicalHopWindow {
 
     pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         self.core.into_parts()
+    }
+
+    pub fn output_indices_are_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.core.internal_column_num()).collect_vec()
     }
 
     /// used for binder and planner. The function will add a filter operator to ignore records with
@@ -281,6 +276,8 @@ impl ColPrunable for LogicalHopWindow {
 
 impl ExprRewritable for LogicalHopWindow {}
 
+impl ExprVisitable for LogicalHopWindow {}
+
 impl PredicatePushdown for LogicalHopWindow {
     /// Keep predicate on time window parameters (`window_start`, `window_end`),
     /// the rest may be pushed-down.
@@ -344,7 +341,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.core.i2o_col_mapping();
         output_indices.extend(
             input
-                .logical_pk()
+                .expect_stream_key()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),
@@ -453,7 +450,7 @@ mod test {
         // 0, 1 --> 2
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),

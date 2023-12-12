@@ -12,27 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
-use risingwave_pb::compactor::{EchoRequest, EchoResponse};
+use risingwave_pb::compactor::{
+    DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
+};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 #[derive(Default)]
-pub struct CompactorServiceImpl {}
-
+pub struct CompactorServiceImpl {
+    sender: Option<mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>>,
+}
+impl CompactorServiceImpl {
+    pub fn new(sender: mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>) -> Self {
+        Self {
+            sender: Some(sender),
+        }
+    }
+}
 #[async_trait::async_trait]
 impl CompactorService for CompactorServiceImpl {
     async fn echo(&self, _request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         Ok(Response::new(EchoResponse {}))
+    }
+
+    async fn dispatch_compaction_task(
+        &self,
+        request: Request<DispatchCompactionTaskRequest>,
+    ) -> Result<Response<DispatchCompactionTaskResponse>, Status> {
+        match &self.sender.as_ref() {
+            Some(sender) => {
+                sender
+                    .send(request)
+                    .expect("DispatchCompactionTaskRequest should be able to send");
+            }
+            None => {
+                tracing::error!(
+                    "fail to send DispatchCompactionTaskRequest, sender has not been initialized."
+                );
+            }
+        }
+        Ok(Response::new(DispatchCompactionTaskResponse {
+            status: None,
+        }))
     }
 }
 
@@ -53,7 +84,7 @@ impl MonitorService for MonitorServiceImpl {
         _request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
         let compaction_task_traces = match &self.await_tree_reg {
-            None => HashMap::default(),
+            None => Default::default(),
             Some(await_tree_reg) => await_tree_reg
                 .read()
                 .iter()

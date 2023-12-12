@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::test_utils::FakeExchangeSource;

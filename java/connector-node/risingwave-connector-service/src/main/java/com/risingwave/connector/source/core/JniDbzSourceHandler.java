@@ -14,11 +14,13 @@
 
 package com.risingwave.connector.source.core;
 
+import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +29,7 @@ import org.slf4j.LoggerFactory;
 
 /** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
-    static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
+    static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
 
     private final DbzConnectorConfig config;
 
@@ -46,28 +48,37 @@ public class JniDbzSourceHandler {
         // userProps extracted from request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
+        var commonParam = request.getCommonParam();
+        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
         var config =
                 new DbzConnectorConfig(
                         SourceTypeE.valueOf(request.getSourceType()),
                         request.getSourceId(),
                         request.getStartOffset(),
                         mutableUserProps,
-                        request.getSnapshotDone());
+                        request.getSnapshotDone(),
+                        isMultiTableShared);
         JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
         handler.start(channelPtr);
     }
 
     public void start(long channelPtr) {
-        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config);
+        var runner = DbzCdcEngineRunner.create(config);
         if (runner == null) {
             return;
         }
 
         try {
             // Start the engine
-            runner.start();
-            LOG.info("Start consuming events of table {}", config.getSourceId());
+            var startOk = runner.start();
+            if (!sendHandshakeMessage(runner, channelPtr, startOk)) {
+                LOG.error(
+                        "Failed to send handshake message to channel. sourceId={}",
+                        config.getSourceId());
+                return;
+            }
 
+            LOG.info("Start consuming events of table {}", config.getSourceId());
             while (runner.isRunning()) {
                 // check whether the send queue has room for new messages
                 // Thread will block on the channel to get output from engine
@@ -78,7 +89,7 @@ public class JniDbzSourceHandler {
                             config.getSourceType().toString(),
                             String.valueOf(config.getSourceId()),
                             resp.getEventsCount());
-                    LOG.info(
+                    LOG.debug(
                             "Engine#{}: emit one chunk {} events to network ",
                             config.getSourceId(),
                             resp.getEventsCount());
@@ -103,5 +114,26 @@ public class JniDbzSourceHandler {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
+    }
+
+    private boolean sendHandshakeMessage(CdcEngineRunner runner, long channelPtr, boolean startOk)
+            throws Exception {
+        // send a handshake message to notify the Source executor
+        // if the handshake is not ok, the split reader will return error to source actor
+        var controlInfo =
+                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
+
+        var handshakeMsg =
+                GetEventStreamResponse.newBuilder()
+                        .setSourceId(config.getSourceId())
+                        .setControl(controlInfo)
+                        .build();
+        var success = Binding.sendCdcSourceMsgToChannel(channelPtr, handshakeMsg.toByteArray());
+        if (!success) {
+            LOG.info(
+                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
+            runner.stop();
+        }
+        return success;
     }
 }

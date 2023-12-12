@@ -40,7 +40,13 @@ statement ok
 create function split(varchar) returns table (word varchar, length int) as split using link 'http://localhost:8815';
 
 statement ok
+create function float_to_decimal(float8) returns decimal as float_to_decimal using link 'http://localhost:8815';
+
+statement ok
 create function hex_to_dec(varchar) returns decimal as hex_to_dec using link 'http://localhost:8815';
+
+statement ok
+create function decimal_add(decimal, decimal) returns decimal as decimal_add using link 'http://localhost:8815';
 
 statement ok
 create function array_access(varchar[], int) returns varchar as array_access using link 'http://localhost:8815';
@@ -59,32 +65,34 @@ create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns 
 as jsonb_array_struct_identity using link 'http://localhost:8815';
 
 statement ok
-create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB)
-returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB>
+create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB,STRUCT<f1 INT,f2 INT>)
+returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB, struct STRUCT<f1 INT,f2 INT>>
 as return_all using link 'http://localhost:8815';
 
 statement ok
-create function return_all_arrays(BOOLEAN[],SMALLINT[],INT[],BIGINT[],FLOAT4[],FLOAT8[],DECIMAL[],DATE[],TIME[],TIMESTAMP[],INTERVAL[],VARCHAR[],BYTEA[],JSONB[])
-returns struct<bool BOOLEAN[], i16 SMALLINT[], i32 INT[], i64 BIGINT[], f32 FLOAT4[], f64 FLOAT8[], decimal DECIMAL[], date DATE[], time TIME[], timestamp TIMESTAMP[], interval INTERVAL[], varchar VARCHAR[], bytea BYTEA[], jsonb JSONB[]>
+create function return_all_arrays(BOOLEAN[],SMALLINT[],INT[],BIGINT[],FLOAT4[],FLOAT8[],DECIMAL[],DATE[],TIME[],TIMESTAMP[],INTERVAL[],VARCHAR[],BYTEA[],JSONB[],STRUCT<f1 INT,f2 INT>[])
+returns struct<bool BOOLEAN[], i16 SMALLINT[], i32 INT[], i64 BIGINT[], f32 FLOAT4[], f64 FLOAT8[], decimal DECIMAL[], date DATE[], time TIME[], timestamp TIMESTAMP[], interval INTERVAL[], varchar VARCHAR[], bytea BYTEA[], jsonb JSONB[], struct STRUCT<f1 INT,f2 INT>[]>
 as return_all_arrays using link 'http://localhost:8815';
 
 query TTTTT rowsort
 show functions
 ----
-array_access varchar[], integer varchar (empty) http://localhost:8815
-extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> (empty) http://localhost:8815
+array_access character varying[], integer character varying (empty) http://localhost:8815
+decimal_add numeric, numeric numeric (empty) http://localhost:8815
+extract_tcp_info bytea struct<src_ip character varying, dst_ip character varying, src_port smallint, dst_port smallint> (empty) http://localhost:8815
+float_to_decimal double precision numeric (empty) http://localhost:8815
 gcd integer, integer integer (empty) http://localhost:8815
 gcd integer, integer, integer integer (empty) http://localhost:8815
-hex_to_dec varchar numeric (empty) http://localhost:8815
+hex_to_dec character varying numeric (empty) http://localhost:8815
 int_42 (empty) integer (empty) http://localhost:8815
 jsonb_access jsonb, integer jsonb (empty) http://localhost:8815
 jsonb_array_identity jsonb[] jsonb[] (empty) http://localhost:8815
-jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> (empty) http://localhost:8815
+jsonb_array_struct_identity struct<v jsonb[], len integer> struct<v jsonb[], len integer> (empty) http://localhost:8815
 jsonb_concat jsonb[] jsonb (empty) http://localhost:8815
-return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, varchar, bytea, jsonb struct<bool boolean,i16 smallint,i32 integer,i64 bigint,f32 real,f64 double precision,decimal numeric,date date,time time without time zone,timestamp timestamp without time zone,interval interval,varchar varchar,bytea bytea,jsonb jsonb> (empty) http://localhost:8815
-return_all_arrays boolean[], smallint[], integer[], bigint[], real[], double precision[], numeric[], date[], time without time zone[], timestamp without time zone[], interval[], varchar[], bytea[], jsonb[] struct<bool boolean[],i16 smallint[],i32 integer[],i64 bigint[],f32 real[],f64 double precision[],decimal numeric[],date date[],time time without time zone[],timestamp timestamp without time zone[],interval interval[],varchar varchar[],bytea bytea[],jsonb jsonb[]> (empty) http://localhost:8815
+return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, character varying, bytea, jsonb, struct<f1 integer, f2 integer> struct<bool boolean, i16 smallint, i32 integer, i64 bigint, f32 real, f64 double precision, decimal numeric, date date, time time without time zone, timestamp timestamp without time zone, interval interval, varchar character varying, bytea bytea, jsonb jsonb, struct struct<f1 integer, f2 integer>> (empty) http://localhost:8815
+return_all_arrays boolean[], smallint[], integer[], bigint[], real[], double precision[], numeric[], date[], time without time zone[], timestamp without time zone[], interval[], character varying[], bytea[], jsonb[], struct<f1 integer, f2 integer>[] struct<bool boolean[], i16 smallint[], i32 integer[], i64 bigint[], f32 real[], f64 double precision[], decimal numeric[], date date[], time time without time zone[], timestamp timestamp without time zone[], interval interval[], varchar character varying[], bytea bytea[], jsonb jsonb[], struct struct<f1 integer, f2 integer>[]> (empty) http://localhost:8815
 series integer integer (empty) http://localhost:8815
-split varchar struct<word varchar,length integer> (empty) http://localhost:8815
+split character varying struct<word character varying, length integer> (empty) http://localhost:8815
 
 query I
 select int_42();
@@ -105,6 +113,16 @@ query I
 select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
 ----
 233276425899864771438119478
+
+query I
+select float_to_decimal('-1e-10'::float8);
+----
+-0.0000000001000000000000000036
+
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
 
 query T
 select array_access(ARRAY['a', 'b', 'c'], 2);
@@ -132,47 +150,71 @@ select jsonb_array_identity(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]
 query T
 select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
 ----
-({NULL,1,"\"str\"","{}"},4)
+("{NULL,1,""\\""str\\"""",""{}""}",4)
 
 query T
-select return_all(
+select (return_all(
     true,
     1 ::smallint,
     1 ::int,
     1 ::bigint,
     1 ::float4,
     1 ::float8,
-    1234567890123456789012345678 ::decimal,
+    12345678901234567890.12345678 ::decimal,
     date '2023-06-01',
     time '01:02:03.456789',
     timestamp '2023-06-01 01:02:03.456789',
     interval '1 month 2 days 3 seconds',
     'string',
     'bytes'::bytea,
-    '{"key":1}'::jsonb
-);
+    '{"key":1}'::jsonb,
+    row(1, 2)::struct<f1 int, f2 int>
+)).*;
 ----
-(t,1,1,1,1,1,1234567890123456789012345678,2023-06-01,01:02:03.456789,2023-06-01 01:02:03.456789,1 mon 2 days 00:00:03,string,\x6279746573,{"key": 1})
+t 1 1 1 1 1 12345678901234567890.12345678 2023-06-01 01:02:03.456789 2023-06-01 01:02:03.456789 1 mon 2 days 00:00:03 string \x6279746573 {"key": 1} (1,2)
 
 query T
-select return_all_arrays(
+select (return_all_arrays(
     array[null, true],
     array[null, 1 ::smallint],
     array[null, 1 ::int],
     array[null, 1 ::bigint],
     array[null, 1 ::float4],
     array[null, 1 ::float8],
-    array[null, 1234567890123456789012345678 ::decimal],
+    array[null, 12345678901234567890.12345678 ::decimal],
     array[null, date '2023-06-01'],
     array[null, time '01:02:03.456789'],
     array[null, timestamp '2023-06-01 01:02:03.456789'],
     array[null, interval '1 month 2 days 3 seconds'],
     array[null, 'string'],
     array[null, 'bytes'::bytea],
-    array[null, '{"key":1}'::jsonb]
-);
+    array[null, '{"key":1}'::jsonb],
+    array[null, row(1, 2)::struct<f1 int, f2 int>]
+)).*;
 ----
-({NULL,t},{NULL,1},{NULL,1},{NULL,1},{NULL,1},{NULL,1},{NULL,1234567890123456789012345678},{NULL,2023-06-01},{NULL,01:02:03.456789},{NULL,"2023-06-01 01:02:03.456789"},{NULL,"1 mon 2 days 00:00:03"},{NULL,string},{NULL,"\\x6279746573"},{NULL,"{\"key\": 1}"})
+{NULL,t} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,1} {NULL,12345678901234567890.12345678} {NULL,2023-06-01} {NULL,01:02:03.456789} {NULL,"2023-06-01 01:02:03.456789"} {NULL,"1 mon 2 days 00:00:03"} {NULL,string} {NULL,"\\x6279746573"} {NULL,"{\"key\": 1}"} {NULL,"(1,2)"}
+
+# test large string output
+query I
+select length((return_all(
+    null::boolean,
+    null::smallint,
+    null::int,
+    null::bigint,
+    null::float4,
+    null::float8,
+    null::decimal,
+    null::date,
+    null::time,
+    null::timestamp,
+    null::interval,
+    repeat('a', 100000)::varchar,
+    repeat('a', 100000)::bytea,
+    null::jsonb,
+    null::struct<f1 int, f2 int>
+)).varchar);
+----
+100000
 
 query I
 select series(5);
@@ -239,7 +281,7 @@ insert into t values (1), (2), (3);
 statement ok
 flush;
 
-query II
+query II rowsort
 select * from mv;
 ----
 1 0
@@ -311,7 +353,13 @@ statement ok
 drop function split;
 
 statement ok
+drop function float_to_decimal;
+
+statement ok
 drop function hex_to_dec;
+
+statement ok
+drop function decimal_add;
 
 statement ok
 drop function array_access;

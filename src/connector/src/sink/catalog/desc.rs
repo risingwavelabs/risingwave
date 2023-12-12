@@ -21,7 +21,7 @@ use risingwave_common::catalog::{
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
-use super::{SinkCatalog, SinkId, SinkType};
+use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {
@@ -55,12 +55,18 @@ pub struct SinkDesc {
     // options in `properties`.
     pub sink_type: SinkType,
 
+    // The format and encode of the sink.
+    pub format_desc: Option<SinkFormatDesc>,
+
     /// Name of the database
     pub db_name: String,
 
     /// Name of the "table" field for Debezium. If the sink is from table or mv,
     /// it is the name of table/mv. Otherwise, it is the name of the sink.
     pub sink_from_name: String,
+
+    /// Id of the target table for sink into table.
+    pub target_table: Option<TableId>,
 }
 
 impl SinkDesc {
@@ -86,11 +92,13 @@ impl SinkDesc {
             dependent_relations,
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
+            format_desc: self.format_desc,
             connection_id,
             created_at_epoch: None,
             initialized_at_epoch: None,
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
+            target_table: self.target_table,
         }
     }
 
@@ -109,8 +117,10 @@ impl SinkDesc {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 }

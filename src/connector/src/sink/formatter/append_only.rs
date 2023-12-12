@@ -19,12 +19,12 @@ use crate::sink::encoder::RowEncoder;
 use crate::tri;
 
 pub struct AppendOnlyFormatter<KE, VE> {
-    key_encoder: KE,
+    key_encoder: Option<KE>,
     val_encoder: VE,
 }
 
 impl<KE, VE> AppendOnlyFormatter<KE, VE> {
-    pub fn new(key_encoder: KE, val_encoder: VE) -> Self {
+    pub fn new(key_encoder: Option<KE>, val_encoder: VE) -> Self {
         Self {
             key_encoder,
             val_encoder,
@@ -40,12 +40,15 @@ impl<KE: RowEncoder, VE: RowEncoder> SinkFormatter for AppendOnlyFormatter<KE, V
         &self,
         chunk: &StreamChunk,
     ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>> {
-        std::iter::from_generator(|| {
+        std::iter::from_coroutine(|| {
             for (op, row) in chunk.rows() {
                 if op != Op::Insert {
                     continue;
                 }
-                let event_key_object = Some(tri!(self.key_encoder.encode(row)));
+                let event_key_object = match &self.key_encoder {
+                    Some(key_encoder) => Some(tri!(key_encoder.encode(row))),
+                    None => None,
+                };
                 let event_object = Some(tri!(self.val_encoder.encode(row)));
 
                 yield Ok((event_key_object, event_object))

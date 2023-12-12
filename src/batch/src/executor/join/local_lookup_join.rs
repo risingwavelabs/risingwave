@@ -15,10 +15,10 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
@@ -40,6 +40,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
 
+use crate::error::Result;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
@@ -87,9 +88,10 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             .map(|&k| k as usize)
             .collect_vec();
 
-        let virtual_node =
-            scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
-        virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
+        let virtual_node = scan_range
+            .try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices)
+            .context("Could not compute vnode for lookup join")?;
+        Ok(virtual_node)
     }
 
     /// Creates the `RowSeqScanNode` that will be used for scanning the inner side table
@@ -110,7 +112,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             scan_ranges,
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
-            chunk_size: None,
+            limit: None,
         });
 
         Ok(row_seq_scan_node)
@@ -118,9 +120,10 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
     /// Creates the `PbExchangeSource` using the given `id`.
     fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<PbExchangeSource> {
-        let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for the given parallel unit id.")
-        })?;
+        let worker = self
+            .pu_to_worker_mapping
+            .get(id)
+            .context("No worker node found for the given parallel unit id.")?;
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
@@ -186,9 +189,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                return Err(internal_error(format!(
-                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
-                )));
+                bail!("Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}");
             };
 
             scan_range.eq_conds.push(datum);
@@ -692,7 +693,7 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
-        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:float4 $3:float4)");
 
         do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
@@ -709,7 +710,7 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
-        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:float4 $3:float4)");
 
         do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
@@ -722,7 +723,7 @@ mod tests {
              2 5.5
              2 8.4",
         );
-        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:float4 $3:float4)");
 
         do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
@@ -736,7 +737,7 @@ mod tests {
             5 9.1
             . .",
         );
-        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean 5:float4 $3:float4)");
 
         do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }

@@ -18,7 +18,7 @@ mod agg_common;
 mod append_only_dedup;
 mod barrier_recv;
 mod batch_query;
-mod chain;
+mod cdc_filter;
 mod dml;
 mod dynamic_filter;
 mod eowc_over_window;
@@ -43,6 +43,8 @@ mod sink;
 mod sort;
 mod source;
 mod stateless_simple_agg;
+mod stream_cdc_scan;
+mod stream_scan;
 mod temporal_join;
 mod top_n;
 mod union;
@@ -58,7 +60,7 @@ use risingwave_storage::StateStore;
 use self::append_only_dedup::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
-use self::chain::*;
+use self::cdc_filter::CdcFilterExecutorBuilder;
 use self::dml::*;
 use self::dynamic_filter::*;
 use self::eowc_over_window::*;
@@ -83,6 +85,8 @@ use self::sink::*;
 use self::sort::*;
 use self::source::*;
 use self::stateless_simple_agg::*;
+use self::stream_cdc_scan::*;
+use self::stream_scan::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
@@ -92,17 +96,16 @@ use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-#[async_trait::async_trait]
 trait ExecutorBuilder {
     type Node;
 
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    async fn new_boxed_executor(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor>;
+    ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
 }
 
 macro_rules! build_executor {
@@ -140,11 +143,13 @@ pub async fn create_executor(
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
-        NodeBody::Chain => ChainExecutorBuilder,
+        NodeBody::StreamScan => StreamScanExecutorBuilder,
+        NodeBody::StreamCdcScan => StreamCdcScanExecutorBuilder,
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
         NodeBody::Filter => FilterExecutorBuilder,
+        NodeBody::CdcFilter => CdcFilterExecutorBuilder,
         NodeBody::Arrange => ArrangeExecutorBuilder,
         NodeBody::Lookup => LookupExecutorBuilder,
         NodeBody::Union => UnionExecutorBuilder,
@@ -166,5 +171,6 @@ pub async fn create_executor(
         NodeBody::NoOp => NoOpExecutorBuilder,
         NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
         NodeBody::OverWindow => OverWindowExecutorBuilder,
+        NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
     }
 }

@@ -10,11 +10,15 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 bytes = "1"
+cfg-or-panic = "0.2"
+chrono = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.11"
+itertools = "0.12"
 jni = "0.21.1"
-prost = "0.11"
+paste = "1"
+prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_object_store = { workspace = true }
@@ -23,6 +27,7 @@ risingwave_storage = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -35,7 +40,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [dev-dependencies]
+expect-test = "1"
 risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 
 [lints]
 workspace = true

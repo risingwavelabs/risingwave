@@ -17,13 +17,43 @@
 use std::fmt::Write;
 
 use arrow_array::Array as ArrowArray;
-use arrow_schema::{Field, Schema, DECIMAL256_MAX_PRECISION};
+use arrow_cast::cast;
+use arrow_schema::{Field, Schema, SchemaRef, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
-use crate::util::iter_util::ZipEqDebug;
+use crate::util::iter_util::ZipEqFast;
+
+/// Converts RisingWave array to Arrow array with the schema.
+/// This function will try to convert the array if the type is not same with the schema.
+pub fn to_record_batch_with_schema(
+    schema: SchemaRef,
+    chunk: &DataChunk,
+) -> Result<arrow_array::RecordBatch, ArrayError> {
+    if !chunk.is_compacted() {
+        let c = chunk.clone();
+        return to_record_batch_with_schema(schema, &c.compact());
+    }
+    let columns: Vec<_> = chunk
+        .columns()
+        .iter()
+        .zip_eq_fast(schema.fields().iter())
+        .map(|(column, field)| {
+            let column: arrow_array::ArrayRef = column.as_ref().try_into()?;
+            if column.data_type() == field.data_type() {
+                Ok(column)
+            } else {
+                cast(&column, field.data_type()).map_err(ArrayError::from_arrow)
+            }
+        })
+        .try_collect::<_, _, ArrayError>()?;
+
+    let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+    arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
+        .map_err(ArrayError::to_arrow)
+}
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
@@ -53,7 +83,7 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
         arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
-            .map_err(|err| ArrayError::ToArrow(err.to_string()))
+            .map_err(ArrayError::to_arrow)
     }
 }
 
@@ -98,7 +128,7 @@ macro_rules! converts_generic {
                             .unwrap()
                             .try_into()?,
                     )),)*
-                    t => Err(ArrayError::FromArrow(format!("unsupported data type: {t:?}"))),
+                    t => Err(ArrayError::from_arrow(format!("unsupported data type: {t:?}"))),
                 }
             }
         }
@@ -112,7 +142,10 @@ converts_generic! {
     { arrow_array::Float64Array, Float64, ArrayImpl::Float64 },
     { arrow_array::StringArray, Utf8, ArrayImpl::Utf8 },
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
-    { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
+    // Arrow doesn't have a data type to represent unconstrained numeric (`DECIMAL` in RisingWave and
+    // Postgres). So we pick a special type `LargeBinary` for it.
+    // Values stored in the array are the string representation of the decimal. e.g. b"1.234", b"+inf"
+    { arrow_array::LargeBinaryArray, LargeBinary, ArrayImpl::Decimal },
     { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, None), ArrayImpl::Timestamp },
@@ -138,7 +171,7 @@ impl From<&arrow_schema::DataType> for DataType {
             Int64 => Self::Int64,
             Float32 => Self::Float32,
             Float64 => Self::Float64,
-            Decimal128(_, _) => Self::Decimal,
+            LargeBinary => Self::Decimal,
             Decimal256(_, _) => Self::Int256,
             Date32 => Self::Date,
             Time64(Microsecond) => Self::Time,
@@ -166,6 +199,17 @@ impl From<&arrow_schema::Fields> for StructType {
     }
 }
 
+impl TryFrom<&StructType> for arrow_schema::Fields {
+    type Error = ArrayError;
+
+    fn try_from(struct_type: &StructType) -> Result<Self, Self::Error> {
+        struct_type
+            .iter()
+            .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+            .try_collect()
+    }
+}
+
 impl From<arrow_schema::DataType> for DataType {
     fn from(value: arrow_schema::DataType) -> Self {
         (&value).into()
@@ -173,7 +217,7 @@ impl From<arrow_schema::DataType> for DataType {
 }
 
 impl TryFrom<&DataType> for arrow_schema::DataType {
-    type Error = String;
+    type Error = ArrayError;
 
     fn try_from(value: &DataType) -> Result<Self, Self::Error> {
         match value {
@@ -195,28 +239,36 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Varchar => Ok(Self::Utf8),
             DataType::Jsonb => Ok(Self::LargeUtf8),
             DataType::Bytea => Ok(Self::Binary),
-            DataType::Decimal => Ok(Self::Decimal128(38, 0)), // arrow precision can not be 0
+            DataType::Decimal => Ok(Self::LargeBinary),
             DataType::Struct(struct_type) => Ok(Self::Struct(
                 struct_type
                     .iter()
                     .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
-                    .try_collect::<_, _, String>()?,
+                    .try_collect::<_, _, ArrayError>()?,
             )),
             DataType::List(datatype) => Ok(Self::List(Arc::new(Field::new(
                 "item",
                 datatype.as_ref().try_into()?,
                 true,
             )))),
-            DataType::Serial => Err("Serial type is not supported to convert to arrow".to_string()),
+            DataType::Serial => Err(ArrayError::to_arrow(
+                "Serial type is not supported to convert to arrow",
+            )),
         }
     }
 }
 
 impl TryFrom<DataType> for arrow_schema::DataType {
-    type Error = String;
+    type Error = ArrayError;
 
     fn try_from(value: DataType) -> Result<Self, Self::Error> {
         (&value).try_into()
+    }
+}
+
+impl From<&Bitmap> for arrow_buffer::NullBuffer {
+    fn from(bitmap: &Bitmap) -> Self {
+        bitmap.iter().collect()
     }
 }
 
@@ -412,53 +464,33 @@ impl FromIntoArrow for Interval {
     }
 }
 
-// RisingWave Decimal type is self-contained, but Arrow is not.
-// In Arrow DecimalArray, the scale is stored in data type as metadata, and the mantissa is stored
-// as i128 in the array.
-impl From<&DecimalArray> for arrow_array::Decimal128Array {
+impl From<&DecimalArray> for arrow_array::LargeBinaryArray {
     fn from(array: &DecimalArray) -> Self {
-        let max_scale = array
-            .iter()
-            .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
-            .max()
-            .unwrap_or(0) as u32;
-        let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
-            .with_data_type(arrow_schema::DataType::Decimal128(38, max_scale as i8));
+        let mut builder =
+            arrow_array::builder::LargeBinaryBuilder::with_capacity(array.len(), array.len() * 8);
         for value in array.iter() {
-            builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
+            builder.append_option(value.map(|d| d.to_string()));
         }
         builder.finish()
     }
 }
 
-fn decimal_to_i128(value: Decimal, scale: u32) -> i128 {
-    match value {
-        Decimal::Normalized(mut d) => {
-            d.rescale(scale);
-            d.mantissa()
-        }
-        Decimal::NaN => i128::MIN + 1,
-        Decimal::PositiveInf => i128::MAX,
-        Decimal::NegativeInf => i128::MIN,
-    }
-}
+impl TryFrom<&arrow_array::LargeBinaryArray> for DecimalArray {
+    type Error = ArrayError;
 
-impl From<&arrow_array::Decimal128Array> for DecimalArray {
-    fn from(array: &arrow_array::Decimal128Array) -> Self {
-        assert!(array.scale() >= 0, "todo: support negative scale");
-        let from_arrow = |value| {
-            const NAN: i128 = i128::MIN + 1;
-            match value {
-                NAN => Decimal::NaN,
-                i128::MAX => Decimal::PositiveInf,
-                i128::MIN => Decimal::NegativeInf,
-                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
-                    value,
-                    array.scale() as u32,
-                )),
-            }
-        };
-        array.iter().map(|o| o.map(from_arrow)).collect()
+    fn try_from(array: &arrow_array::LargeBinaryArray) -> Result<Self, Self::Error> {
+        array
+            .iter()
+            .map(|o| {
+                o.map(|s| {
+                    let s = std::str::from_utf8(s)
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid decimal: {s:?}")))?;
+                    s.parse()
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid decimal: {s:?}")))
+                })
+                .transpose()
+            })
+            .try_collect()
     }
 }
 
@@ -488,7 +520,7 @@ impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
             .map(|o| {
                 o.map(|s| {
                     s.parse()
-                        .map_err(|_| ArrayError::FromArrow(format!("invalid json: {s}")))
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid json: {s}")))
                 })
                 .transpose()
             })
@@ -516,8 +548,10 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
-impl From<&ListArray> for arrow_array::ListArray {
-    fn from(array: &ListArray) -> Self {
+impl TryFrom<&ListArray> for arrow_array::ListArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &ListArray) -> Result<Self, Self::Error> {
         use arrow_array::builder::*;
         fn build<A, B, F>(
             array: &ListArray,
@@ -539,7 +573,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             }
             builder.finish()
         }
-        match &*array.value {
+        Ok(match &*array.value {
             ArrayImpl::Int16(a) => build(array, a, Int16Builder::with_capacity(a.len()), |b, v| {
                 b.append_option(v)
             }),
@@ -579,20 +613,12 @@ impl From<&ListArray> for arrow_array::ListArray {
                     b.append_option(v)
                 })
             }
-            ArrayImpl::Decimal(a) => {
-                let max_scale = a
-                    .iter()
-                    .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
-                    .max()
-                    .unwrap_or(0) as u32;
-                build(
-                    array,
-                    a,
-                    Decimal128Builder::with_capacity(a.len())
-                        .with_data_type(arrow_schema::DataType::Decimal128(38, max_scale as i8)),
-                    |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
-                )
-            }
+            ArrayImpl::Decimal(a) => build(
+                array,
+                a,
+                LargeBinaryBuilder::with_capacity(a.len(), a.len() * 8),
+                |b, v| b.append_option(v.map(|d| d.to_string())),
+            ),
             ArrayImpl::Interval(a) => build(
                 array,
                 a,
@@ -627,7 +653,21 @@ impl From<&ListArray> for arrow_array::ListArray {
                 |b, v| b.append_option(v.map(|j| j.to_string())),
             ),
             ArrayImpl::Serial(_) => todo!("list of serial"),
-            ArrayImpl::Struct(_) => todo!("list of struct"),
+            ArrayImpl::Struct(a) => {
+                let values = Arc::new(arrow_array::StructArray::try_from(a)?);
+                arrow_array::ListArray::new(
+                    Arc::new(Field::new("item", a.data_type().try_into()?, true)),
+                    arrow_buffer::OffsetBuffer::new(arrow_buffer::ScalarBuffer::from(
+                        array
+                            .offsets()
+                            .iter()
+                            .map(|o| *o as i32)
+                            .collect::<Vec<i32>>(),
+                    )),
+                    values,
+                    Some(array.null_bitmap().into()),
+                )
+            }
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
                 array,
@@ -635,7 +675,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 BinaryBuilder::with_capacity(a.len(), a.data().len()),
                 |b, v| b.append_option(v),
             ),
-        }
+        })
     }
 }
 
@@ -643,11 +683,14 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     type Error = ArrayError;
 
     fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
-        let iter: Vec<_> = array
-            .iter()
-            .map(|o| o.map(|a| ArrayImpl::try_from(&a)).transpose())
-            .try_collect()?;
-        Ok(ListArray::from_iter(iter, (&array.value_type()).into()))
+        Ok(ListArray {
+            value: Box::new(ArrayImpl::try_from(array.values())?),
+            bitmap: match array.nulls() {
+                Some(nulls) => nulls.iter().collect(),
+                None => Bitmap::ones(array.len()),
+            },
+            offsets: array.offsets().iter().map(|o| *o as u32).collect(),
+        })
     }
 }
 
@@ -655,17 +698,14 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
-        let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
-            .fields()
-            .zip_eq_debug(array.data_type().as_struct().iter())
-            .map(|(arr, (name, ty))| {
-                Ok((
-                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
-                    arr.as_ref().try_into()?,
-                ))
-            })
-            .try_collect::<_, _, ArrayError>()?;
-        Ok(arrow_array::StructArray::from(struct_data_vector))
+        Ok(arrow_array::StructArray::new(
+            array.data_type().as_struct().try_into()?,
+            array
+                .fields()
+                .map(|arr| arr.as_ref().try_into())
+                .try_collect::<_, _, ArrayError>()?,
+            Some(array.null_bitmap().into()),
+        ))
     }
 }
 
@@ -776,8 +816,8 @@ mod tests {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let arrow = arrow_array::Decimal128Array::from(&array);
-        assert_eq!(DecimalArray::from(&arrow), array);
+        let arrow = arrow_array::LargeBinaryArray::from(&array);
+        assert_eq!(DecimalArray::try_from(&arrow).unwrap(), array);
     }
 
     #[test]
@@ -873,16 +913,8 @@ mod tests {
 
     #[test]
     fn list() {
-        let array = ListArray::from_iter(
-            [
-                Some(I32Array::from_iter([None, Some(-7), Some(25)]).into()),
-                None,
-                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
-                Some(I32Array::from_iter([0; 0]).into()),
-            ],
-            DataType::Int32,
-        );
-        let arrow = arrow_array::ListArray::from(&array);
+        let array = ListArray::from_iter([None, Some(vec![0, -127, 127, 50]), Some(vec![0; 0])]);
+        let arrow = arrow_array::ListArray::try_from(&array).unwrap();
         assert_eq!(ListArray::try_from(&arrow).unwrap(), array);
     }
 }

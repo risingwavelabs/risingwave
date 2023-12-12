@@ -31,8 +31,7 @@ use rust_decimal::prelude::Decimal;
 
 use super::to_binary::ToBinary;
 use super::*;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 
 /// Every interval can be represented by a `Interval`.
 ///
@@ -43,12 +42,14 @@ use crate::estimate_size::EstimateSize;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default, EstimateSize)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
 }
+
+impl ZeroHeapSize for Interval {}
 
 const USECS_PER_SEC: i64 = 1_000_000;
 const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
@@ -1001,6 +1002,24 @@ impl ToText for crate::types::Interval {
     }
 }
 
+/// Error type for parsing an [`Interval`].
+#[derive(thiserror::Error, Debug, thiserror_ext::Construct)]
+pub enum IntervalParseError {
+    #[error("Invalid interval: {0}")]
+    Invalid(String),
+
+    #[error("Invalid interval: {0}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S")]
+    InvalidIso8601(String),
+
+    #[error("Invalid unit: {0}")]
+    InvalidUnit(String),
+
+    #[error("{0}")]
+    Uncategorized(String),
+}
+
+type ParseResult<T> = std::result::Result<T, IntervalParseError>;
+
 impl Interval {
     pub fn as_iso_8601(&self) -> String {
         // ISO pattern - PnYnMnDTnHnMnS
@@ -1029,7 +1048,7 @@ impl Interval {
     ///
     /// Example
     /// - P1Y2M3DT4H5M6.78S
-    pub fn from_iso_8601(s: &str) -> Result<Self> {
+    pub fn from_iso_8601(s: &str) -> ParseResult<Self> {
         // ISO pattern - PnYnMnDTnHnMnS
         static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
@@ -1061,7 +1080,7 @@ impl Interval {
                 .checked_add(usecs)?,
             ))
         };
-        f().ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
+        f().ok_or_else(|| IntervalParseError::invalid_iso8601(s))
     }
 }
 
@@ -1161,7 +1180,7 @@ impl<'a> FromSql<'a> for Interval {
 }
 
 impl ToBinary for Interval {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Interval => {
                 let mut output = BytesMut::new();
@@ -1184,9 +1203,9 @@ pub enum DateTimeField {
 }
 
 impl FromStr for DateTimeField {
-    type Err = RwError;
+    type Err = IntervalParseError;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> ParseResult<Self> {
         match s.to_lowercase().as_str() {
             "years" | "year" | "yrs" | "yr" | "y" => Ok(Self::Year),
             "days" | "day" | "d" => Ok(Self::Day),
@@ -1194,7 +1213,7 @@ impl FromStr for DateTimeField {
             "minutes" | "minute" | "mins" | "min" | "m" => Ok(Self::Minute),
             "months" | "month" | "mons" | "mon" => Ok(Self::Month),
             "seconds" | "second" | "secs" | "sec" | "s" => Ok(Self::Second),
-            _ => Err(ErrorCode::InvalidInputSyntax(format!("unknown unit {}", s)).into()),
+            _ => Err(IntervalParseError::invalid_unit(s)),
         }
     }
 }
@@ -1206,7 +1225,7 @@ enum TimeStrToken {
     TimeUnit(DateTimeField),
 }
 
-fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
+fn parse_interval(s: &str) -> ParseResult<Vec<TimeStrToken>> {
     let s = s.trim();
     let mut tokens = Vec::new();
     let mut num_buf = "".to_string();
@@ -1235,21 +1254,16 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
             ':' => {
                 // there must be a digit before the ':'
                 if num_buf.is_empty() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "invalid interval format: {}",
-                        s
-                    ))
-                    .into());
+                    return Err(IntervalParseError::invalid(s));
                 }
                 hour_min_sec.push(num_buf.clone());
                 num_buf.clear();
             }
             _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
+                return Err(IntervalParseError::uncategorized(format!(
                     "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
                     i,s, c
-                ))
-                .into());
+                )));
             }
         };
     }
@@ -1262,23 +1276,20 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
         convert_digit(&mut num_buf, &mut tokens)?;
     }
     convert_unit(&mut char_buf, &mut tokens)?;
-    convert_hms(&hour_min_sec, &mut tokens).ok_or_else(|| {
-        ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", hour_min_sec))
-    })?;
+    convert_hms(&hour_min_sec, &mut tokens)
+        .ok_or_else(|| IntervalParseError::invalid(format!("{hour_min_sec:?}")))?;
 
     Ok(tokens)
 }
 
-fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> ParseResult<()> {
     if !c.is_empty() {
         match c.parse::<i64>() {
             Ok(num) => {
                 t.push(TimeStrToken::Num(num));
             }
             Err(_) => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
-                );
+                return Err(IntervalParseError::invalid(c.clone()));
             }
         }
         c.clear();
@@ -1286,7 +1297,7 @@ fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
     Ok(())
 }
 
-fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> ParseResult<()> {
     if !c.is_empty() {
         t.push(TimeStrToken::TimeUnit(c.parse()?));
         c.clear();
@@ -1305,7 +1316,7 @@ fn convert_hms(c: &Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
         return None;
     }
     let mut is_neg = false;
-    if let Some(s) = c.get(0) {
+    if let Some(s) = c.first() {
         let v = s.parse().ok()?;
         is_neg = s.starts_with('-');
         t.push(TimeStrToken::Num(v));
@@ -1338,25 +1349,17 @@ fn convert_hms(c: &Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
 }
 
 impl Interval {
-    fn parse_sql_standard(s: &str, leading_field: DateTimeField) -> Result<Self> {
+    fn parse_sql_standard(s: &str, leading_field: DateTimeField) -> ParseResult<Self> {
         use DateTimeField::*;
         let tokens = parse_interval(s)?;
         // Todo: support more syntax
         if tokens.len() > 1 {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "(standard sql format) Can't support syntax of interval {}.",
-                &s
-            ))
-            .into());
+            return Err(IntervalParseError::invalid(s));
         }
-        let num = match tokens.get(0) {
+        let num = match tokens.first() {
             Some(TimeStrToken::Num(num)) => *num,
             _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "(standard sql format)Invalid interval {}.",
-                    &s
-                ))
-                .into());
+                return Err(IntervalParseError::invalid(s));
             }
         };
 
@@ -1380,21 +1383,25 @@ impl Interval {
                 Some(Interval::from_month_day_usec(0, 0, usecs))
             }
         })()
-        .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
+        .ok_or_else(|| IntervalParseError::invalid(s))
     }
 
-    fn parse_postgres(s: &str) -> Result<Self> {
+    fn parse_postgres(s: &str) -> ParseResult<Self> {
         use DateTimeField::*;
         let mut tokens = parse_interval(s)?;
-        if tokens.len() % 2 != 0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+        if tokens.len() % 2 != 0
+            && let Some(TimeStrToken::Num(_)) = tokens.last()
+        {
             tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
         }
         if tokens.len() % 2 != 0 {
-            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+            return Err(IntervalParseError::invalid(s));
         }
         let mut token_iter = tokens.into_iter();
         let mut result = Interval::from_month_day_usec(0, 0, 0);
-        while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
+        while let Some(num) = token_iter.next()
+            && let Some(interval_unit) = token_iter.next()
+        {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = (|| match interval_unit {
@@ -1418,9 +1425,7 @@ impl Interval {
                         }
                     })()
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
-                    })?;
+                    .ok_or_else(|| IntervalParseError::invalid(s))?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = match interval_unit {
@@ -1434,21 +1439,17 @@ impl Interval {
                         _ => None,
                     }
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
-                    })?;
+                    .ok_or_else(|| IntervalParseError::invalid(s))?;
                 }
                 _ => {
-                    return Err(
-                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
-                    );
+                    return Err(IntervalParseError::invalid(s));
                 }
             }
         }
         Ok(result)
     }
 
-    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> Result<Self> {
+    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> ParseResult<Self> {
         if let Some(leading_field) = leading_field {
             Self::parse_sql_standard(s, leading_field)
         } else {
@@ -1458,9 +1459,9 @@ impl Interval {
 }
 
 impl FromStr for Interval {
-    type Err = RwError;
+    type Err = IntervalParseError;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> ParseResult<Self> {
         Self::parse_with_fields(s, None)
     }
 }

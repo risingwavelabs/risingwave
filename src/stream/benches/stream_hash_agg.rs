@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
@@ -28,6 +28,8 @@ use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_ex
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
+
+risingwave_expr_impl::enable!();
 
 fn bench_hash_agg(c: &mut Criterion) {
     let mut group = c.benchmark_group("Q17");

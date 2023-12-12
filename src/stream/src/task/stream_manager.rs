@@ -30,14 +30,15 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -105,11 +106,26 @@ pub struct LocalStreamManager {
     total_mem_val: Arc<TrAdder<i64>>,
 }
 
+/// Report expression evaluation errors to the actor context.
+///
+/// The struct can be cheaply cloned.
+#[derive(Clone)]
+pub struct ActorEvalErrorReport {
+    pub actor_context: ActorContextRef,
+    pub identity: Arc<str>,
+}
+
+impl risingwave_expr::expr::EvalErrorReport for ActorEvalErrorReport {
+    fn report(&self, err: risingwave_expr::ExprError) {
+        self.actor_context.on_compute_error(err, &self.identity);
+    }
+}
+
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
 
-    /// Indices of primary keys
-    pub pk_indices: PkIndices,
+    /// Basic information about the executor.
+    pub info: ExecutorInfo,
 
     /// Executor id, unique across all actors.
     pub executor_id: u64,
@@ -117,11 +133,9 @@ pub struct ExecutorParams {
     /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
 
-    /// Information of the operator from plan node.
+    /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
+    // TODO: use it for `identity`
     pub op_info: String,
-
-    /// The output schema of the executor.
-    pub schema: Schema,
 
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
@@ -137,16 +151,18 @@ pub struct ExecutorParams {
 
     /// Vnodes owned by this executor. Represented in bitmap.
     pub vnode_bitmap: Option<Bitmap>,
+
+    /// Used for reporting expression evaluation errors.
+    pub eval_error_report: ActorEvalErrorReport,
 }
 
 impl Debug for ExecutorParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutorParams")
-            .field("pk_indices", &self.pk_indices)
+            .field("info", &self.info)
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
-            .field("schema", &self.schema)
             .field("input", &self.input.len())
             .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
@@ -270,7 +286,7 @@ impl LocalStreamManager {
         Ok(result)
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<SyncResult> {
         let timer = self
             .core
             .lock()
@@ -279,15 +295,14 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
-            match store.sync(epoch).await {
-                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        epoch, e);
-                    Err(e.into())
-                }
-            }
+            store.sync(epoch).await.map_err(|e| {
+                tracing::error!(
+                    epoch,
+                    error = %e.as_report(),
+                    "Failed to sync state store",
+                );
+                e.into()
+            })
         });
         timer.observe_duration();
         res
@@ -479,7 +494,6 @@ impl LocalStreamManagerCore {
         &mut self,
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
-        input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
@@ -496,7 +510,8 @@ impl LocalStreamManagerCore {
                     | NodeBody::HashJoin(_)
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
-                    | NodeBody::Chain(_)
+                    | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)
@@ -506,12 +521,11 @@ impl LocalStreamManagerCore {
 
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
-        for (input_pos, input_stream_node) in node.input.iter().enumerate() {
+        for input_stream_node in &node.input {
             input.push(
                 self.create_nodes_inner(
                     fragment_id,
                     input_stream_node,
-                    input_pos,
                     env.clone(),
                     store.clone(),
                     actor_context,
@@ -534,32 +548,53 @@ impl LocalStreamManagerCore {
         // same.
         let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
-        let schema = node.fields.iter().map(Field::from).collect();
+        let schema: Schema = node.fields.iter().map(Field::from).collect();
+
+        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: actor_context.clone(),
+            identity: identity.clone().into(),
+        };
 
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices,
+
+            info: ExecutorInfo {
+                schema: schema.clone(),
+                pk_indices: pk_indices.clone(),
+                identity: identity.clone(),
+            },
+
             executor_id,
             operator_id,
             op_info,
-            schema,
             input,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
             vnode_bitmap,
+            eval_error_report,
         };
 
         let executor = create_executor(executor_params, self, node, store).await?;
+        assert_eq!(
+            executor.pk_indices(),
+            &pk_indices,
+            "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
+        assert_eq!(
+            executor.schema(),
+            &schema,
+            "`schema` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
 
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
             executor,
-            input_pos,
-            actor_context.id,
-            executor_id,
-            self.streaming_metrics.clone(),
+            actor_context.clone(),
             self.config.developer.enable_executor_row_count,
         )
         .boxed();
@@ -595,7 +630,6 @@ impl LocalStreamManagerCore {
             self.create_nodes_inner(
                 fragment_id,
                 node,
-                0,
                 env,
                 store,
                 actor_context,
@@ -633,6 +667,7 @@ impl LocalStreamManagerCore {
                 .map(|b| b.try_into())
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
+            let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
                 .create_nodes(
@@ -654,6 +689,7 @@ impl LocalStreamManagerCore {
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
+                expr_context,
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -663,7 +699,8 @@ impl LocalStreamManagerCore {
                 let actor = async move {
                     if let Err(err) = actor.run().await {
                         // TODO: check error type and panic if it's unexpected.
-                        tracing::error!(actor=%actor_id, error=%err, "actor exit");
+                        // Intentionally use `?` on the report to also include the backtrace.
+                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };
@@ -682,13 +719,14 @@ impl LocalStreamManagerCore {
                 {
                     let metrics = self.streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
+                    let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
                         instrumented,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
                                 .actor_memory_usage
-                                .with_label_values(&[&actor_id_str])
+                                .with_label_values(&[&actor_id_str, &fragment_id_str])
                                 .set(bytes as i64);
 
                             actor_context.store_mem_usage(bytes);
@@ -787,7 +825,9 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor {
+            if let Some(prev_actor) = ret
+                && actor != &prev_actor
+            {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

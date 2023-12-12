@@ -25,11 +25,8 @@ message RowSeqScanNode {
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
 
-  message ChunkSize {
-    uint32 chunk_size = 1;
-  }
-  // If along with `batch_limit`, `chunk_size` will be set.
-  ChunkSize chunk_size = 6;
+  // The pushed down `batch_limit`. Max rows needed to return.
+  optional uint64 limit = 6;
 }
 
 message SysRowSeqScanNode {
@@ -280,6 +277,7 @@ message UnionNode {}
 message SortOverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3;
 }
 
 message PlanNode {

@@ -41,8 +41,8 @@ use crate::storage::MetaStoreRef;
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
-    pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
+    pub prometheus_selector: String,
     pub cluster_manager: ClusterManagerRef,
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
@@ -57,10 +57,10 @@ pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
     use risingwave_common::bail;
-    use risingwave_common::heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{Sink, Source, Table};
-    use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::catalog::{Sink, Source, Table, View};
+    use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
@@ -101,15 +101,12 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        use risingwave_pb::common::WorkerType;
+        let worker_type = WorkerType::try_from(ty)
+            .map_err(|_| anyhow!("invalid worker type"))
+            .map_err(err)?;
         let mut result = srv
             .cluster_manager
-            .list_worker_node(
-                WorkerType::from_i32(ty)
-                    .ok_or_else(|| anyhow!("invalid worker type"))
-                    .map_err(err)?,
-                None,
-            )
+            .list_worker_node(Some(worker_type), None)
             .await;
         result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
@@ -165,6 +162,13 @@ pub(super) mod handlers {
         Ok(Json(sinks))
     }
 
+    pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = View::list(&srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
+    }
+
     pub async fn list_actors(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
@@ -198,6 +202,39 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    async fn dump_await_tree_inner(
+        worker_nodes: impl IntoIterator<Item = &WorkerNode>,
+        compute_clients: &ComputeClientPool,
+    ) -> Result<Json<StackTraceResponse>> {
+        let mut all = Default::default();
+
+        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
+            a.actor_traces.extend(b.actor_traces);
+            a.rpc_traces.extend(b.rpc_traces);
+            a.compaction_task_traces.extend(b.compaction_task_traces);
+        }
+
+        for worker_node in worker_nodes {
+            let client = compute_clients.get(worker_node).await.map_err(err)?;
+            let result = client.stack_trace().await.map_err(err)?;
+
+            merge(&mut all, result);
+        }
+
+        Ok(all.into())
+    }
+
+    pub async fn dump_await_tree_all(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<StackTraceResponse>> {
+        let worker_nodes = srv
+            .cluster_manager
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
+            .await;
+
+        dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
+    }
+
     pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
@@ -210,11 +247,7 @@ pub(super) mod handlers {
             .map_err(err)?
             .worker_node;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
-
-        let result = client.stack_trace().await.map_err(err)?;
-
-        Ok(result.into())
+        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
     }
 
     pub async fn heap_profile(
@@ -313,6 +346,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
+            .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))
@@ -325,6 +359,7 @@ impl DashboardService {
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
             .route(
                 "/monitor/list_heap_profile/:worker_id",

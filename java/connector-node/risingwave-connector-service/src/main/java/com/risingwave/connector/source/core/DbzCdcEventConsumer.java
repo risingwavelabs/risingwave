@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -50,12 +51,15 @@ public class DbzCdcEventConsumer
         this.outputChannel = store;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
 
-        var jsonConverter = new JsonConverter();
+        // The default JSON converter will output the schema field in the JSON which is unnecessary
+        // to source parser, we use a customized JSON converter to avoid outputting the `schema`
+        // field.
+        var jsonConverter = new DbzJsonConverter();
         final HashMap<String, Object> configs = new HashMap<>(2);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
-        // include record schema
-        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, false);
+        // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
+        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
         jsonConverter.configure(configs);
         this.converter = jsonConverter;
     }
@@ -72,25 +76,15 @@ public class DbzCdcEventConsumer
             List<ChangeEvent<SourceRecord, SourceRecord>> events,
             DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
             throws InterruptedException {
-        var builder = GetEventStreamResponse.newBuilder();
+        var respBuilder = GetEventStreamResponse.newBuilder();
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            if (isHeartbeatEvent(record)) {
-                // skip heartbeat events
-                continue;
-            }
-            // ignore null record
-            if (record.value() == null) {
-                committer.markProcessed(event);
-                continue;
-            }
-            byte[] payload =
-                    converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
-
-            // serialize the offset to a JSON, so that kernel doesn't need to
-            // aware the layout of it
+            boolean isHeartbeat = isHeartbeatEvent(record);
             DebeziumOffset offset =
-                    new DebeziumOffset(record.sourcePartition(), record.sourceOffset());
+                    new DebeziumOffset(
+                            record.sourcePartition(), record.sourceOffset(), isHeartbeat);
+            // serialize the offset to a JSON, so that kernel doesn't need to
+            // aware its layout
             String offsetStr = "";
             try {
                 byte[] serialized = DebeziumOffsetSerializer.INSTANCE.serialize(offset);
@@ -98,19 +92,58 @@ public class DbzCdcEventConsumer
             } catch (IOException e) {
                 LOG.warn("failed to serialize debezium offset", e);
             }
-            var message =
+
+            var msgBuilder =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId))
-                            .setPayload(new String(payload, StandardCharsets.UTF_8))
-                            .build();
-            LOG.debug("record => {}", message.getPayload());
-            builder.addEvents(message);
-            committer.markProcessed(event);
+                            .setPartition(String.valueOf(sourceId));
+
+            if (isHeartbeat) {
+                var message = msgBuilder.build();
+                LOG.debug("heartbeat => {}", message.getOffset());
+                respBuilder.addEvents(message);
+            } else {
+
+                // Topic naming conventions
+                // - PG: serverName.schemaName.tableName
+                // - MySQL: serverName.databaseName.tableName
+                // We can extract the full table name from the topic
+                var fullTableName = record.topic().substring(record.topic().indexOf('.') + 1);
+
+                // ignore null record
+                if (record.value() == null) {
+                    committer.markProcessed(event);
+                    continue;
+                }
+                // get upstream event time from the "source" field
+                var sourceStruct = ((Struct) record.value()).getStruct("source");
+                long sourceTsMs =
+                        sourceStruct == null
+                                ? System.currentTimeMillis()
+                                : sourceStruct.getInt64("ts_ms");
+                byte[] payload =
+                        converter.fromConnectData(
+                                record.topic(), record.valueSchema(), record.value());
+                msgBuilder
+                        .setFullTableName(fullTableName)
+                        .setPayload(new String(payload, StandardCharsets.UTF_8))
+                        .setSourceTsMs(sourceTsMs)
+                        .build();
+                var message = msgBuilder.build();
+                LOG.debug("record => {}", message.getPayload());
+
+                respBuilder.addEvents(message);
+                committer.markProcessed(event);
+            }
         }
-        builder.setSourceId(sourceId);
-        var response = builder.build();
-        outputChannel.put(response);
+
+        // skip empty batch
+        if (respBuilder.getEventsCount() > 0) {
+            respBuilder.setSourceId(sourceId);
+            var response = respBuilder.build();
+            outputChannel.put(response);
+        }
+
         committer.markBatchFinished();
     }
 

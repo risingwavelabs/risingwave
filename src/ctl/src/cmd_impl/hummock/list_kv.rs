@@ -14,9 +14,11 @@
 
 use core::ops::Bound::Unbounded;
 
+use futures::StreamExt;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_storage::hummock::CachePolicy;
-use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
+use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreRead};
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;
@@ -30,26 +32,26 @@ pub async fn list_kv(
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
-    if epoch == u64::MAX {
-        tracing::info!("using u64::MAX as epoch");
+    if is_max_epoch(epoch) {
+        tracing::info!("using MAX EPOCH as epoch");
     }
-    let scan_result = {
-        let range = (Unbounded, Unbounded);
+    let range = (Unbounded, Unbounded);
+    let mut scan_result = Box::pin(
         hummock
-            .scan(
+            .iter(
                 range,
                 epoch,
-                None,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
                     cache_policy: CachePolicy::NotFill,
                     ..Default::default()
                 },
             )
-            .await?
-    };
-    for (k, v) in scan_result {
+            .await?,
+    );
+    while let Some(item) = scan_result.next().await {
+        let (k, v) = item?;
         let print_string = format!("[t{}]", k.user_key.table_id.table_id());
         println!("{} {:?} => {:?}", print_string, k, v)
     }

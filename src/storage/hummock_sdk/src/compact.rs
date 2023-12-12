@@ -41,6 +41,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         compact_task.task_status()
     )
     .unwrap();
+    writeln!(
+        s,
+        "Compaction task table_ids: {:?} ",
+        compact_task.existing_table_ids,
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
@@ -72,33 +78,20 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         hex::encode(key_range.right.as_slice())
     };
 
-    if sstable_info.stale_key_count > 0 {
-        let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-            ratio,
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-        )
-        .unwrap();
-    }
+    let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
+    writeln!(
+        s,
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, delete_ratio={}%, range_tombstone_count={}",
+        sstable_info.get_object_id(),
+        sstable_info.get_sst_id(),
+        left_str,
+        right_str,
+        sstable_info.table_ids,
+        sstable_info.file_size / 1024,
+        ratio,
+        sstable_info.range_tombstone_count,
+    )
+    .unwrap();
 }
 
 pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
@@ -147,21 +140,25 @@ pub fn estimate_memory_for_compact_task(
     // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters). Even
     // though SstableMeta is used for a shorter period of time, it is safe to use 3m for the
     // calculation.
-    // TODO: Note that this algorithm may fail when SstableMeta is occupied by a large number of
-    // range tombstones
     const ESTIMATED_META_SIZE: u64 = 3 * 1048576;
 
     // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
     // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
     // and tcp recv_buffer_size.
-    let max_input_stream_estimated_memory = ESTIMATED_META_SIZE + block_size + recv_buffer_size;
+    let max_input_stream_estimated_memory = block_size + recv_buffer_size;
 
     // input
     for level in &task.input_ssts {
         if level.level_type() == LevelType::Nonoverlapping {
-            result += max_input_stream_estimated_memory;
+            let mut meta_size = 0;
+            for sst in &level.table_infos {
+                meta_size = std::cmp::max(meta_size, sst.file_size - sst.meta_offset);
+            }
+            result += max_input_stream_estimated_memory + meta_size;
         } else {
-            result += max_input_stream_estimated_memory * level.table_infos.len() as u64;
+            for sst in &level.table_infos {
+                result += max_input_stream_estimated_memory + sst.file_size - sst.meta_offset;
+            }
         }
     }
 

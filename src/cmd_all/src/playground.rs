@@ -21,8 +21,6 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use clap::Parser;
 use tempfile::TempPath;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::signal;
 
 use crate::common::{osstrs as common_osstrs, RisingWaveService};
@@ -59,12 +57,9 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock_001",
                 "--advertise-addr",
                 "127.0.0.1:5690",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
-            RisingWaveService::Compute(osstrs(["--connector-rpc-endpoint", "127.0.0.1:50051"])),
+            RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
-            RisingWaveService::ConnectorNode(osstrs([])),
         ],
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([
@@ -76,32 +71,24 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock+memory-shared",
                 "--data-directory",
                 "hummock_001",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
@@ -117,16 +104,12 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock+memory",
                 "--data-directory",
                 "hummock_001",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 "127.0.0.1:5688",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([
                 "--listen-addr",
@@ -134,7 +117,6 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "--advertise-addr",
                 "127.0.0.1:4566",
             ])),
-            RisingWaveService::ConnectorNode(osstrs([])),
         ],
         _ => {
             tracing::warn!("Unknown playground profile. All components will be started using the default command line options.");
@@ -173,9 +155,9 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                let opts = risingwave_meta_node::MetaNodeOpts::parse_from(opts);
                 let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
+                    risingwave_meta_node::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
                     if idle_exit {
@@ -209,44 +191,6 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
                 let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
                 let _compactor_handle =
                     tokio::spawn(async move { risingwave_compactor::start(opts).await });
-            }
-            // connector node only supports in docker-playground profile
-            RisingWaveService::ConnectorNode(_) => {
-                let prefix_bin = match profile.as_str() {
-                    "docker-playground" | "online-docker-playground" => {
-                        "/risingwave/bin".to_string()
-                    }
-                    "playground" => std::env::var("PREFIX_BIN").unwrap_or_default(),
-                    _ => "".to_string(),
-                };
-                let cmd_path = Path::new(&prefix_bin)
-                    .join("connector-node")
-                    .join("start-service.sh");
-                if cmd_path.exists() {
-                    tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut child = Command::new(cmd_path)
-                        .arg("-p")
-                        .arg("50051")
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()?;
-                    let stderr = child.stderr.take().unwrap();
-
-                    let _child_handle = tokio::spawn(async move {
-                        signal::ctrl_c().await.unwrap();
-                        let _ = child.start_kill();
-                    });
-                    let _stderr_handle = tokio::spawn(async move {
-                        let mut reader = BufReader::new(stderr).lines();
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::info!(target: "risingwave_connector_node", "{}", line);
-                        }
-                    });
-                } else {
-                    tracing::warn!(
-                        "Will not start connector node since `{}` does not exist.",
-                        cmd_path.display()
-                    );
-                }
             }
         }
     }

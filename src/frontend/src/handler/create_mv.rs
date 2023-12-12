@@ -12,26 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::PbTable;
-use risingwave_pb::ddl_service::StreamJobExecutionMode;
+use risingwave_common::acl::AclMode;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::Action;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::{check_valid_column_name, CatalogError};
+use crate::catalog::check_valid_column_name;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(super) fn get_column_names(
@@ -66,7 +69,7 @@ pub(super) fn get_column_names(
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
             session.check_privileges(&check_items)?;
         }
     }
@@ -116,7 +119,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().get_create_compaction_group_for_mv() {
+    if session.config().create_compaction_group_for_mv() {
         table.properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -154,18 +157,23 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    match session.check_relation_name_duplicated(name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
-    let (table, graph) = {
+    let (mut table, graph, can_run_in_background) = {
         let context = OptimizerContext::from_handler_args(handler_args);
+        if !context.with_options().is_empty() {
+            // get other useful fields by `remove`, the logic here is to reject unknown options.
+            return Err(RwError::from(ProtocolError(format!(
+                "unexpected options in WITH clause: {:?}",
+                context.with_options().keys()
+            ))));
+        }
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
@@ -176,17 +184,35 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
-        let context = plan.plan_base().ctx.clone();
+        // All leaf nodes must be stream table scan, no other scan operators support recovery.
+        fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+            if plan.inputs().is_empty() {
+                if let Some(scan) = plan.as_stream_table_scan() {
+                    scan.stream_scan_type() == StreamScanType::Backfill
+                        || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                } else {
+                    false
+                }
+            } else {
+                assert!(!plan.inputs().is_empty());
+                plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+            }
+        }
+        let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
+        let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
-        // Set the timezone for the stream environment
-        let env = graph.env.as_mut().unwrap();
-        env.timezone = context.get_session_timezone();
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
+        // Set the timezone for the stream context
+        let ctx = graph.ctx.as_mut().unwrap();
+        ctx.timezone = context.get_session_timezone();
 
-        (table, graph)
+        (table, graph, can_run_in_background)
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -201,17 +227,18 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let run_in_background = session.config().get_background_ddl();
-    let stream_job_execution_mode = if run_in_background {
-        StreamJobExecutionMode::Background
+    let run_in_background = session.config().background_ddl();
+    let create_type = if run_in_background && can_run_in_background {
+        CreateType::Background
     } else {
-        StreamJobExecutionMode::Foreground
+        CreateType::Foreground
     };
+    table.create_type = create_type.into();
 
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, stream_job_execution_mode)
+        .create_materialized_view(table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(
@@ -238,9 +265,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -287,9 +312,8 @@ pub mod tests {
             vec![DataType::Varchar, DataType::Varchar],
             vec!["address".to_string(), "zipcode".to_string()],
         );
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

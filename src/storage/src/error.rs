@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
-
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
@@ -21,8 +19,9 @@ use thiserror::Error;
 use crate::hummock::HummockError;
 use crate::mem_table::MemTableError;
 
-#[derive(Error)]
-pub enum StorageError {
+#[derive(Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = StorageError, backtrace, report_debug))]
+pub enum ErrorKind {
     #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]
@@ -31,10 +30,18 @@ pub enum StorageError {
     ),
 
     #[error("Deserialize row error {0}.")]
-    DeserializeRow(ValueEncodingError),
+    DeserializeRow(
+        #[from]
+        #[backtrace]
+        ValueEncodingError,
+    ),
 
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(memcomparable::Error),
+    SerdeError(
+        #[from]
+        #[backtrace]
+        memcomparable::Error,
+    ),
 
     #[error("Sled error: {0}")]
     Sled(
@@ -53,36 +60,8 @@ pub enum StorageError {
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
 
-impl From<ValueEncodingError> for StorageError {
-    fn from(error: ValueEncodingError) -> Self {
-        StorageError::DeserializeRow(error)
-    }
-}
-
-impl From<memcomparable::Error> for StorageError {
-    fn from(m: memcomparable::Error) -> Self {
-        StorageError::SerdeError(m)
-    }
-}
-
 impl From<StorageError> for RwError {
     fn from(s: StorageError) -> Self {
         ErrorCode::StorageError(Box::new(s)).into()
-    }
-}
-
-impl std::fmt::Debug for StorageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self)?;
-        writeln!(f)?;
-        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self as &dyn Error) {
-            // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
-            // inner error.
-            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
-        }
-
-        Ok(())
     }
 }

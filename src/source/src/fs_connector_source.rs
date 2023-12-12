@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// *** NOTICE: TO BE DEPRECATED *** //
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::stream::pending;
 use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::{
@@ -66,10 +69,7 @@ impl FsConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        internal_error(format!(
-                            "Failed to find column id: {} in source: {:?}",
-                            id, self
-                        ))
+                        anyhow!("Failed to find column id: {} in source: {:?}", id, self).into()
                     })
                     .map(|col| col.clone())
             })

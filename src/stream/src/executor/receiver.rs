@@ -25,19 +25,18 @@ use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
 };
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    /// Input from upstream.
-    input: BoxedInput,
-
     /// Logical Operator Info
     info: ExecutorInfo,
+
+    /// Input from upstream.
+    input: BoxedInput,
 
     /// The context of the actor.
     actor_context: ActorContextRef,
@@ -67,9 +66,8 @@ impl std::fmt::Debug for ReceiverExecutor {
 impl ReceiverExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         input: BoxedInput,
@@ -79,11 +77,7 @@ impl ReceiverExecutor {
     ) -> Self {
         Self {
             input,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "ReceiverExecutor".to_string(),
-            },
+            info,
             actor_context: ctx,
             upstream_fragment_id,
             metrics,
@@ -99,9 +93,12 @@ impl ReceiverExecutor {
         use crate::executor::ActorContext;
 
         Self::new(
-            Schema::default(),
-            vec![],
             ActorContext::create(114),
+            ExecutorInfo {
+                schema: Schema::default(),
+                pk_indices: vec![],
+                identity: "ReceiverExecutor".to_string(),
+            },
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
@@ -140,11 +137,11 @@ impl Executor for ReceiverExecutor {
                     Message::Chunk(chunk) => {
                         self.metrics
                             .actor_in_record_cnt
-                            .with_label_values(&[&actor_id_str])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str])
                             .inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
-                        tracing::trace!(
+                        tracing::debug!(
                             target: "events::stream::barrier::path",
                             actor_id = actor_id,
                             "receiver receives barrier from path: {:?}",
@@ -236,7 +233,7 @@ mod tests {
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
-    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::executor::{ActorContext, Barrier, Executor, Mutation, UpdateMutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
@@ -272,10 +269,15 @@ mod tests {
         )
         .unwrap();
 
-        let receiver = ReceiverExecutor::new(
+        let info = ExecutorInfo {
             schema,
-            vec![],
+            pk_indices: vec![],
+            identity: "ReceiverExecutor".to_string(),
+        };
+
+        let receiver = ReceiverExecutor::new(
             ActorContext::create(actor_id),
+            info,
             fragment_id,
             upstream_fragment_id,
             input,
@@ -334,14 +336,14 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         send!([new], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, as new is not the upstream.
 

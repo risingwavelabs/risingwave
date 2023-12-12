@@ -33,7 +33,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::bail;
 use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -101,7 +100,7 @@ impl LocalBarrierManager {
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        tracing::trace!(
+        tracing::debug!(
             target: "events::stream::barrier::manager",
             actor_id = actor_id,
             "register sender"
@@ -132,7 +131,7 @@ impl LocalBarrierManager {
             }
         };
         let to_collect: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
-        trace!(
+        debug!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
@@ -158,21 +157,29 @@ impl LocalBarrierManager {
             match self.senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
-                        if let Err(err) = sender.send(barrier.clone()) {
+                        if let Err(_err) = sender.send(barrier.clone()) {
                             // return err to trigger recovery.
-                            bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                            return Err(StreamError::barrier_send(
+                                barrier.clone(),
+                                actor_id,
+                                "channel closed",
+                            ));
                         }
                     }
                 }
                 None => {
-                    bail!("sender for actor {} does not exist", actor_id)
+                    return Err(StreamError::barrier_send(
+                        barrier.clone(),
+                        actor_id,
+                        "sender not found",
+                    ));
                 }
             }
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            trace!(
+            debug!(
                 target: "events::stream::barrier::manager",
                 "remove actors {:?} from senders",
                 actors

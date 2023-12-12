@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
+use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 use uuid::Uuid;
@@ -32,10 +37,12 @@ use uuid::Uuid;
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
+use crate::barrier::notifier::Notifier;
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan};
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{build_actor_connector_splits, RescheduleOptions};
 use crate::MetaResult;
 
 impl GlobalBarrierManager {
@@ -60,43 +67,139 @@ impl GlobalBarrierManager {
         .await
     }
 
+    /// Please look at `CatalogManager::clean_dirty_tables` for more details.
+    /// This should only be called for bootstrap recovery.
+    async fn clean_dirty_tables(&self) -> MetaResult<()> {
+        let fragment_manager = self.fragment_manager.clone();
+        self.catalog_manager
+            .clean_dirty_tables(fragment_manager)
+            .await?;
+        Ok(())
+    }
+
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let to_drop_table_fragments = self
             .fragment_manager
-            .list_dirty_table_fragments(|tf| {
-                !stream_job_ids.contains(&tf.table_id().table_id) || !tf.is_created()
-            })
+            .list_dirty_table_fragments(|tf| !stream_job_ids.contains(&tf.table_id().table_id))
             .await;
-
         let to_drop_streaming_ids = to_drop_table_fragments
             .iter()
             .map(|t| t.table_id())
             .collect();
 
         debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
+
         self.fragment_manager
             .drop_table_fragments_vec(&to_drop_streaming_ids)
             .await?;
 
         // unregister compaction group for dirty table fragments.
-        let _ = self.hummock_manager
-            .unregister_table_fragments_vec(
-                &to_drop_table_fragments
-            )
-            .await.inspect_err(|e|
-            tracing::warn!(
-            "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
-            to_drop_table_fragments,
-            e)
-        );
+        self.hummock_manager
+            .unregister_table_fragments_vec(&to_drop_table_fragments)
+            .await;
 
         // clean up source connector dirty changes.
         self.source_manager
             .drop_source_change(&to_drop_table_fragments)
             .await;
 
+        Ok(())
+    }
+
+    async fn recover_background_mv_progress(&self) -> MetaResult<()> {
+        let creating_tables = self.catalog_manager.list_creating_background_mvs().await;
+        let creating_table_ids = creating_tables
+            .iter()
+            .map(|t| TableId { table_id: t.id })
+            .collect_vec();
+
+        let mut senders = HashMap::new();
+        let mut receivers = Vec::new();
+        for table_id in creating_table_ids.iter().copied() {
+            let (finished_tx, finished_rx) = oneshot::channel();
+            senders.insert(
+                table_id,
+                Notifier {
+                    finished: Some(finished_tx),
+                    ..Default::default()
+                },
+            );
+
+            let fragments = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await?;
+            let internal_table_ids = fragments.internal_table_ids();
+            let internal_tables = self.catalog_manager.get_tables(&internal_table_ids).await;
+            let table = self.catalog_manager.get_tables(&[table_id.table_id]).await;
+            assert_eq!(table.len(), 1, "should only have 1 materialized table");
+            let table = table.into_iter().next().unwrap();
+            receivers.push((table, internal_tables, finished_rx));
+        }
+
+        let table_map = self
+            .fragment_manager
+            .get_table_id_stream_scan_actor_mapping(&creating_table_ids)
+            .await;
+        let table_fragment_map = self
+            .fragment_manager
+            .get_table_id_table_fragment_map(&creating_table_ids)
+            .await?;
+        let upstream_mv_counts = self
+            .fragment_manager
+            .get_upstream_relation_counts(&creating_table_ids)
+            .await;
+        let definitions: HashMap<_, _> = creating_tables
+            .into_iter()
+            .map(|t| (TableId { table_id: t.id }, t.definition))
+            .collect();
+        let version_stats = self.hummock_manager.get_version_stats().await;
+        // If failed, enter recovery mode.
+        {
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
+                table_map.into(),
+                upstream_mv_counts.into(),
+                definitions.into(),
+                version_stats,
+                senders.into(),
+                table_fragment_map.into(),
+                self.fragment_manager.clone(),
+            );
+        }
+        for (table, internal_tables, finished) in receivers {
+            let catalog_manager = self.catalog_manager.clone();
+            tokio::spawn(async move {
+                let res: MetaResult<()> = try {
+                    tracing::debug!("recovering stream job {}", table.id);
+                    finished
+                        .await
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+
+                    tracing::debug!("finished stream job {}", table.id);
+                    // Once notified that job is finished we need to notify frontend.
+                    // and mark catalog as created and commit to meta.
+                    // both of these are done by catalog manager.
+                    catalog_manager
+                        .finish_create_table_procedure(internal_tables, table.clone())
+                        .await?;
+                    tracing::debug!("notified frontend for stream job {}", table.id);
+                };
+                if let Err(e) = res.as_ref() {
+                    tracing::error!(
+                        "stream job {} interrupted, will retry after recovery: {e:?}",
+                        table.id
+                    );
+                    // NOTE(kwannoel): We should not cleanup stream jobs,
+                    // we don't know if it's just due to CN killed,
+                    // or the job has actually failed.
+                    // Users have to manually cancel the stream jobs,
+                    // if they want to clean it.
+                }
+            });
+        }
         Ok(())
     }
 
@@ -107,7 +210,7 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub(crate) async fn recovery(
+    pub async fn recovery(
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
@@ -118,11 +221,22 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
+        self.clean_dirty_tables()
+            .await
+            .expect("clean dirty tables should not fail");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
+
         self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
+
+        // Mview progress needs to be recovered.
+        tracing::info!("recovering mview progress");
+        self.recover_background_mv_progress()
+            .await
+            .expect("recover mview progress should not fail");
+        tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
@@ -131,16 +245,33 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    // This is a quick path to accelerate the process of dropping streaming jobs. Not that
+                    // some table fragments might have been cleaned as dirty, but it's fine since the drop
+                    // interface is idempotent.
+                    let to_drop_tables = self.scheduled_barriers.pre_apply_drop_scheduled().await;
+                    self.fragment_manager
+                        .drop_table_fragments_vec(&to_drop_tables)
+                        .await?;
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
-                    // Migrate actors in expired CN to newly joined one.
-                    let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "migrate actors failed");
-                    })?;
-                    if migrated {
-                        info = self.resolve_actor_info_for_recovery().await;
+                    if self.env.opts.enable_scale_in_when_recovery {
+                        let scaled = self.scale_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "scale actors failed");
+                        })?;
+                        if scaled {
+                            info = self.resolve_actor_info_for_recovery().await;
+                        }
+                    } else {
+                        // Migrate actors in expired CN to newly joined one.
+                        let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "migrate actors failed");
+                        })?;
+                        if migrated {
+                            info = self.resolve_actor_info_for_recovery().await;
+                        }
                     }
 
                     // Reset all compute nodes, stop and drop existing actors.
@@ -172,6 +303,8 @@ impl GlobalBarrierManager {
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
+                        self.catalog_manager.clone(),
+                        self.hummock_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
                         prev_epoch.clone(),
@@ -180,6 +313,7 @@ impl GlobalBarrierManager {
                         command,
                         BarrierKind::Initial,
                         self.source_manager.clone(),
+                        self.scale_controller.clone(),
                         tracing::Span::current(), // recovery span
                     ));
 
@@ -204,7 +338,7 @@ impl GlobalBarrierManager {
                                 warn!(err = ?err, "post_collect failed");
                                 Err(err)
                             } else {
-                                Ok((new_epoch, response))
+                                Ok((new_epoch.clone(), response))
                             }
                         }
                         Err(err) => {
@@ -262,6 +396,86 @@ impl GlobalBarrierManager {
         migration_plan.delete(self.env.meta_store()).await?;
 
         debug!("migrate actors succeed.");
+        Ok(true)
+    }
+
+    async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        debug!("start scaling-in offline actors.");
+
+        let expired_workers: HashSet<WorkerId> = info
+            .actor_map
+            .iter()
+            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
+            .map(|(&worker, _)| worker)
+            .collect();
+
+        if expired_workers.is_empty() {
+            debug!("no expired workers, skipping.");
+            return Ok(false);
+        }
+
+        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+
+        let expired_worker_parallel_units: HashMap<_, _> = all_worker_parallel_units
+            .into_iter()
+            .filter(|(worker, _)| expired_workers.contains(worker))
+            .collect();
+
+        let fragment_worker_changes = {
+            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let mut policy = HashMap::new();
+            for table_fragments in guard.table_fragments().values() {
+                for fragment_id in table_fragments.fragment_ids() {
+                    policy.insert(
+                        fragment_id,
+                        PbWorkerChanges {
+                            exclude_worker_ids: expired_workers.iter().cloned().collect(),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+            policy
+        };
+
+        let plan = self
+            .scale_controller
+            .generate_stable_resize_plan(
+                StableResizePolicy {
+                    fragment_worker_changes,
+                },
+                Some(expired_worker_parallel_units),
+            )
+            .await?;
+
+        let (reschedule_fragment, applied_reschedules) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+            )
+            .await?;
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment)
+            .await
+        {
+            tracing::error!(
+                "failed to apply reschedule for offline scaling in recovery: {}",
+                e.to_string()
+            );
+
+            self.fragment_manager
+                .cancel_apply_reschedules(applied_reschedules)
+                .await;
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
         Ok(true)
     }
 

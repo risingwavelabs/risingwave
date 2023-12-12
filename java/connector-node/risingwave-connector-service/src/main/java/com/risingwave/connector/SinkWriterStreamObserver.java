@@ -21,7 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
-import com.risingwave.metrics.MonitoredRowIterator;
+import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 import java.util.Optional;
@@ -38,8 +38,10 @@ public class SinkWriterStreamObserver
 
     private TableSchema tableSchema;
 
+    private boolean finished = false;
+
     private boolean epochStarted;
-    private long currentEpoch;
+    private Long currentEpoch;
     private Long currentBatchId;
 
     private Deserializer deserializer;
@@ -47,8 +49,38 @@ public class SinkWriterStreamObserver
 
     private static final Logger LOG = LoggerFactory.getLogger(SinkWriterStreamObserver.class);
 
-    public boolean isInitialized() {
+    private boolean isInitialized() {
         return sink != null;
+    }
+
+    private void receiveEpoch(long epoch, String context) {
+        if (!isInitialized()) {
+            throw FAILED_PRECONDITION
+                    .withDescription("Sink is not initialized. Invoke `CreateSink` first.")
+                    .asRuntimeException();
+        }
+        if (!epochStarted) {
+            if (currentEpoch != null && epoch <= currentEpoch) {
+                throw FAILED_PRECONDITION
+                        .withDescription(
+                                String.format(
+                                        "in [%s], expect a new epoch higher than current epoch %s but got %s",
+                                        context, currentEpoch, epoch))
+                        .asRuntimeException();
+            }
+            sink.beginEpoch(epoch);
+            epochStarted = true;
+            currentEpoch = epoch;
+        } else {
+            if (epoch != currentEpoch) {
+                throw INVALID_ARGUMENT
+                        .withDescription(
+                                String.format(
+                                        "in [%s] invalid epoch: expected write to epoch %s, got %s",
+                                        context, currentEpoch, epoch))
+                        .asRuntimeException();
+            }
+        }
     }
 
     public SinkWriterStreamObserver(
@@ -58,6 +90,9 @@ public class SinkWriterStreamObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkWriterStreamRequest sinkTask) {
+        if (finished) {
+            throw new RuntimeException("unexpected onNext call on a finished writer stream");
+        }
         try {
             if (sinkTask.hasStart()) {
                 if (isInitialized()) {
@@ -67,49 +102,19 @@ public class SinkWriterStreamObserver
                 }
                 sinkId = sinkTask.getStart().getSinkParam().getSinkId();
                 bindSink(sinkTask.getStart().getSinkParam(), sinkTask.getStart().getFormat());
+                currentEpoch = null;
+                currentBatchId = null;
+                epochStarted = false;
                 responseObserver.onNext(
                         ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                 .setStart(
                                         ConnectorServiceProto.SinkWriterStreamResponse.StartResponse
                                                 .newBuilder())
                                 .build());
-            } else if (sinkTask.hasBeginEpoch()) {
-                if (!isInitialized()) {
-                    throw FAILED_PRECONDITION
-                            .withDescription("sink is not initialized, please call start first")
-                            .asRuntimeException();
-                }
-                if (epochStarted && sinkTask.getBeginEpoch().getEpoch() <= currentEpoch) {
-                    throw INVALID_ARGUMENT
-                            .withDescription(
-                                    "invalid epoch: new epoch ID should be larger than current epoch")
-                            .asRuntimeException();
-                }
-                epochStarted = true;
-                currentEpoch = sinkTask.getBeginEpoch().getEpoch();
-                LOG.debug("Epoch {} started", currentEpoch);
             } else if (sinkTask.hasWriteBatch()) {
-                if (!isInitialized()) {
-                    throw FAILED_PRECONDITION
-                            .withDescription("Sink is not initialized. Invoke `CreateSink` first.")
-                            .asRuntimeException();
-                }
-                if (!epochStarted) {
-                    throw FAILED_PRECONDITION
-                            .withDescription("Epoch is not started. Invoke `StartEpoch` first.")
-                            .asRuntimeException();
-                }
                 ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch batch =
                         sinkTask.getWriteBatch();
-                if (batch.getEpoch() != currentEpoch) {
-                    throw INVALID_ARGUMENT
-                            .withDescription(
-                                    "invalid epoch: expected write to epoch "
-                                            + currentEpoch
-                                            + ", got "
-                                            + sinkTask.getWriteBatch().getEpoch())
-                            .asRuntimeException();
-                }
+                receiveEpoch(batch.getEpoch(), "WriteBatch");
                 if (currentBatchId != null && batch.getBatchId() <= currentBatchId) {
                     throw INVALID_ARGUMENT
                             .withDescription(
@@ -120,75 +125,75 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
 
-                try (CloseableIterator<SinkRow> rowIter = deserializer.deserialize(batch)) {
-                    sink.write(
-                            new MonitoredRowIterator(
-                                    rowIter, connectorName, String.valueOf(sinkId)));
+                boolean batchWritten;
+
+                try (CloseableIterable<SinkRow> rowIter = deserializer.deserialize(batch)) {
+                    batchWritten =
+                            sink.write(
+                                    new MonitoredRowIterable(
+                                            rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = batch.getBatchId();
+
+                if (batchWritten) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
+                                    .setBatch(
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .BatchWrittenResponse.newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .setBatchId(currentBatchId)
+                                                    .build())
+                                    .build());
+                }
+
                 LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
             } else if (sinkTask.hasBarrier()) {
-                if (!isInitialized()) {
-                    throw FAILED_PRECONDITION
-                            .withDescription("Sink is not initialized. Invoke `Start` first.")
-                            .asRuntimeException();
-                }
-                if (!epochStarted) {
-                    throw FAILED_PRECONDITION
-                            .withDescription("Epoch is not started. Invoke `StartEpoch` first.")
-                            .asRuntimeException();
-                }
-                if (sinkTask.getBarrier().getEpoch() != currentEpoch) {
-                    throw INVALID_ARGUMENT
-                            .withDescription(
-                                    "invalid epoch: expected sync to epoch "
-                                            + currentEpoch
-                                            + ", got "
-                                            + sinkTask.getBarrier().getEpoch())
-                            .asRuntimeException();
-                }
-                boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
+                ConnectorServiceProto.SinkWriterStreamRequest.Barrier barrier =
+                        sinkTask.getBarrier();
+                receiveEpoch(barrier.getEpoch(), "Barrier");
+                boolean isCheckpoint = barrier.getIsCheckpoint();
                 Optional<ConnectorServiceProto.SinkMetadata> metadata = sink.barrier(isCheckpoint);
-                currentEpoch = sinkTask.getBarrier().getEpoch();
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
                     ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse.Builder builder =
                             ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse
                                     .newBuilder()
                                     .setEpoch(currentEpoch);
-                    if (metadata.isPresent()) {
-                        builder.setMetadata(metadata.get());
-                    }
+                    metadata.ifPresent(builder::setMetadata);
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                     .setCommit(builder)
                                     .build());
                 }
+                currentBatchId = null;
+                epochStarted = false;
             } else {
                 throw INVALID_ARGUMENT.withDescription("invalid sink task").asRuntimeException();
             }
-        } catch (Exception e) {
-            LOG.error("sink task error: ", e);
+        } catch (Throwable e) {
+            LOG.error("sink writer error: ", e);
+            cleanup();
             responseObserver.onError(e);
         }
     }
 
     @Override
     public void onError(Throwable throwable) {
-        LOG.error("sink task error: ", throwable);
+        LOG.error("sink writer finishes with error: ", throwable);
         cleanup();
-        responseObserver.onError(throwable);
     }
 
     @Override
     public void onCompleted() {
-        LOG.debug("sink task completed");
+        LOG.info("sink writer completed");
         cleanup();
         responseObserver.onCompleted();
     }
 
     private void cleanup() {
+        finished = true;
         if (sink != null) {
             sink.drop();
         }

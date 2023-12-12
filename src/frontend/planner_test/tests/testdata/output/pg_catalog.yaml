@@ -2,16 +2,16 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |-
-    LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    LogicalProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
     └─LogicalShare { id: 3 }
-      └─LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+      └─LogicalProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
         └─LogicalJoin { type: Inner, on: (rw_schemas.name = 'pg_catalog':Varchar), output: all }
-          ├─LogicalScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid] }
-          └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+          ├─LogicalSysScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid, rw_types.typelem, rw_types.typarray] }
+          └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
   batch_plan: |-
-    BatchProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    BatchProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
     └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid], distribution: Single }
+      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid, rw_types.typelem, rw_types.typarray], distribution: Single }
       └─BatchProject { exprs: [rw_schemas.id] }
         └─BatchFilter { predicate: (rw_schemas.name = 'pg_catalog':Varchar) }
           └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
@@ -21,7 +21,7 @@
     LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
     └─LogicalShare { id: 2 }
       └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-        └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+        └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
   batch_plan: 'BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_cast
@@ -211,7 +211,7 @@
         └─LogicalFilter { predicate: (1:Int32 = rw_users.id) }
           └─LogicalShare { id: 2 }
             └─LogicalProject { exprs: [rw_users.id, rw_users.name, rw_users.create_db, rw_users.is_super, '********':Varchar] }
-              └─LogicalScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
+              └─LogicalSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login] }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchValues { rows: [[]] }
@@ -221,9 +221,19 @@
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |-
-    LogicalProject { exprs: [2:Int32] }
+    LogicalProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: 'BatchValues { rows: [[2:Int32]] }'
+  batch_plan: |-
+    BatchProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
+    └─BatchValues { rows: [[]] }
+- sql: |
+    select ('pg' || '_namespace')::regclass
+  logical_plan: |-
+    LogicalProject { exprs: [CastRegclass(ConcatOp('pg':Varchar, '_namespace':Varchar)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |-
+    BatchProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select 'boolin'::regproc
   logical_plan: |-

@@ -20,8 +20,8 @@ import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -29,8 +29,6 @@ import org.openjdk.jmh.annotations.*;
 public class ArrayListBenchmark {
     @Param({"100", "1000", "10000"})
     static int loopTime;
-
-    ArrayList<ArrayList<Object>> data = new ArrayList<>();
 
     public ArrayList<Object> getRow(int index) {
         short v1 = (short) index;
@@ -61,17 +59,10 @@ public class ArrayListBenchmark {
         Integer mayNull = (Integer) rowData.get(6);
     }
 
-    @Setup
-    public void setup() {
-        for (int i = 0; i < loopTime; i++) {
-            data.add(getRow(i));
-        }
-    }
-
     @Benchmark
     public void arrayListTest() {
         for (int i = 0; i < loopTime; i++) {
-            getValue(data.get(i));
+            getValue(getRow(i));
         }
     }
 }

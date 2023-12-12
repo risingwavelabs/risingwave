@@ -10,7 +10,7 @@
 - id: create_source_without_schema_in_json
   sql: |
     create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
-  planner_error: 'Invalid input syntax: schema definition is required for ENCODE JSON'
+  planner_error: 'Protocol error: Schema definition is required, either from SQL or schema registry.'
 - id: csv_delimiter_tab
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
@@ -21,10 +21,13 @@
     ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
   explain_output: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 2 }
-        └─StreamDml { columns: [v1, v2, _row_id] }
-          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamDml { columns: [v1, v2, _row_id] }
+            └─StreamSource
 - id: csv_delimiter_tab
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
@@ -35,7 +38,52 @@
     ) FORMAT PLAIN ENCODE CSV (delimiter = E'\t', without_header = true);
   explain_output: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 2 }
-        └─StreamDml { columns: [v1, v2, _row_id] }
-          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamDml { columns: [v1, v2, _row_id] }
+            └─StreamSource
+- id: create_source_with_cdc_backfill
+  sql: |
+    create source mysql_mydb with (
+      connector = 'mysql-cdc',
+      hostname = '127.0.0.1',
+      port = '8306',
+      username = 'root',
+      password = '123456',
+      database.name = 'mydb',
+      server.id = 5888
+    );
+    explain (logical) create table t1_rw (
+      v1 int,
+      v2 int,
+      primary key(v1)
+    ) from mysql_mydb table 'mydb.t1';
+  explain_output: |
+    LogicalCdcScan { table: mydb.t1, columns: [v1, v2] }
+- id: create_source_with_cdc_backfill
+  sql: |
+    create source mysql_mydb with (
+      connector = 'mysql-cdc',
+      hostname = '127.0.0.1',
+      port = '8306',
+      username = 'root',
+      password = '123456',
+      database.name = 'mydb',
+      server.id = 5888
+    );
+    explain create table t1_rw (
+      v1 int,
+      v2 int,
+      primary key(v1)
+    ) from mysql_mydb table 'mydb.t1';
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2], stream_key: [v1], pk_columns: [v1], pk_conflict: Overwrite }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(mydb.t1.v1) }
+      │ └─StreamCdcTableScan { table: mydb.t1, columns: [v1, v2] }
+      └─StreamExchange { dist: HashShard(v1) }
+        └─StreamDml { columns: [v1, v2] }
+          └─StreamSource

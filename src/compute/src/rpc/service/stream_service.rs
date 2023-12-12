@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use risingwave_common::error::tonic_err;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -28,6 +28,7 @@ use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 use tracing::Instrument;
 
@@ -45,7 +46,7 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn update_actors(
         &self,
         request: Request<UpdateActorsRequest>,
@@ -54,14 +55,14 @@ impl StreamService for StreamServiceImpl {
         let res = self.mgr.update_actors(&req.actors).await;
         match res {
             Err(e) => {
-                error!("failed to update stream actor {}", e);
+                error!(error = %e.as_report(), "failed to update stream actor");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(UpdateActorsResponse { status: None })),
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn build_actors(
         &self,
         request: Request<BuildActorsRequest>,
@@ -75,7 +76,7 @@ impl StreamService for StreamServiceImpl {
             .await;
         match res {
             Err(e) => {
-                error!("failed to build actors {}", e);
+                error!(error = %e.as_report(), "failed to build actors");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(BuildActorsResponse {
@@ -85,7 +86,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn broadcast_actor_info_table(
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
@@ -95,7 +96,7 @@ impl StreamService for StreamServiceImpl {
         let res = self.mgr.update_actor_info(&req.info).await;
         match res {
             Err(e) => {
-                error!("failed to update actor info table actor {}", e);
+                error!(error = %e.as_report(), "failed to update actor info table actor");
                 Err(e.into())
             }
             Ok(()) => Ok(Response::new(BroadcastActorInfoTableResponse {
@@ -104,7 +105,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn drop_actors(
         &self,
         request: Request<DropActorsRequest>,
@@ -118,7 +119,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn force_stop_actors(
         &self,
         request: Request<ForceStopActorsRequest>,
@@ -132,7 +133,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn inject_barrier(
         &self,
         request: Request<InjectBarrierRequest>,
@@ -173,7 +174,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn barrier_complete(
         &self,
         request: Request<BarrierCompleteRequest>,
@@ -187,9 +188,11 @@ impl StreamService for StreamServiceImpl {
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
-            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
+            .inspect_err(
+                |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
+            )?;
 
-        let synced_sstables = match kind {
+        let (synced_sstables, table_watermarks) = match kind {
             BarrierKind::Unspecified => unreachable!(),
             BarrierKind::Initial => {
                 if let Some(hummock) = self.env.state_store().as_hummock() {
@@ -203,9 +206,9 @@ impl StreamService for StreamServiceImpl {
                     epoch = req.prev_epoch,
                     "ignored syncing data for the first barrier"
                 );
-                Vec::new()
+                (Vec::new(), HashMap::new())
             }
-            BarrierKind::Barrier => Vec::new(),
+            BarrierKind::Barrier => (Vec::new(), HashMap::new()),
             BarrierKind::Checkpoint => {
                 let span = TracingContext::from_protobuf(&req.tracing_context).attach(
                     tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
@@ -213,11 +216,13 @@ impl StreamService for StreamServiceImpl {
 
                 // Must finish syncing data written in the epoch before respond back to ensure
                 // persistence of the state.
-                self.mgr
+                let sync_result = self
+                    .mgr
                     .sync_epoch(req.prev_epoch)
                     .instrument(span)
                     .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
-                    .await?
+                    .await?;
+                (sync_result.uncommitted_ssts, sync_result.table_watermarks)
             }
         };
 
@@ -240,10 +245,14 @@ impl StreamService for StreamServiceImpl {
                 )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
+            table_watermarks: table_watermarks
+                .into_iter()
+                .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                .collect(),
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,
@@ -258,7 +267,7 @@ impl StreamService for StreamServiceImpl {
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
                 .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
-                .map_err(tonic_err)?;
+                .map_err(StreamError::from)?;
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))

@@ -25,7 +25,9 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::metrics::LabelGuardedIntGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
@@ -37,7 +39,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
-use crate::rpc::server::ElectionClientRef;
+use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
@@ -157,7 +159,7 @@ pub struct MetaMetrics {
 
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: IntGaugeVec,
+    pub source_is_up: LabelGuardedIntGaugeVec<2>,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
@@ -501,7 +503,7 @@ impl MetaMetrics {
         );
         let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let source_is_up = register_int_gauge_vec_with_registry!(
+        let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
             "source is up or not",
             &["source_id", "source_name"],
@@ -524,7 +526,7 @@ impl MetaMetrics {
             &[
                 "materialized_view_id",
                 "table_id",
-                "actor_id",
+                "fragment_id",
                 "table_name",
                 "table_type",
                 "compaction_group_id"
@@ -536,7 +538,7 @@ impl MetaMetrics {
         let sink_info = register_int_gauge_vec_with_registry!(
             "sink_info",
             "Mapping from actor id to (actor id, sink name)",
-            &["actor_id", "sink_name",],
+            &["actor_id", "sink_id", "sink_name",],
             registry
         )
         .unwrap();
@@ -690,7 +692,7 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_info_monitor(
+pub fn start_worker_info_monitor(
     cluster_manager: ClusterManagerRef,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
@@ -738,7 +740,7 @@ pub async fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn start_fragment_info_monitor(
+pub fn start_fragment_info_monitor(
     cluster_manager: ClusterManagerRef,
     catalog_manager: CatalogManagerRef,
     fragment_manager: FragmentManagerRef,
@@ -768,7 +770,7 @@ pub async fn start_fragment_info_monitor(
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {
@@ -810,43 +812,43 @@ pub async fn start_fragment_info_monitor(
 
                         if let Some(stream_node) = &actor.nodes {
                             if let Some(Sink(sink_node)) = &stream_node.node_body {
-                                let sink_name = match &sink_node.sink_desc {
-                                    Some(sink_desc) => &sink_desc.name,
-                                    _ => "unknown",
+                                let (sink_id, sink_name) = match &sink_node.sink_desc {
+                                    Some(sink_desc) => (sink_desc.id, sink_desc.name.as_str()),
+                                    _ => (0, "unknown"), // unreachable
                                 };
+                                let sink_id_str = sink_id.to_string();
                                 meta_metrics
                                     .sink_info
-                                    .with_label_values(&[&actor_id_str, sink_name])
+                                    .with_label_values(&[&actor_id_str, &sink_id_str, sink_name])
                                     .set(1);
                             }
                         }
+                    }
+                    // Report a dummy gauge metrics with (materialized_view_id, table id, fragment_id, compaction_group_id,  table
+                    // name) as its label
 
-                        // Report a dummy gauge metrics with (table id, actor id, table
-                        // name) as its label
+                    for table_id in &fragment.state_table_ids {
+                        let table_id_str = table_id.to_string();
+                        let (table_name, table_type) = table_name_and_type_mapping
+                            .get(table_id)
+                            .cloned()
+                            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                        let compaction_group_id = table_compaction_group_id_mapping
+                            .get(table_id)
+                            .map(|cg_id| cg_id.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
 
-                        for table_id in &fragment.state_table_ids {
-                            let table_id_str = table_id.to_string();
-                            let (table_name, table_type) = table_name_and_type_mapping
-                                .get(table_id)
-                                .cloned()
-                                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
-                            let compaction_group_id = table_compaction_group_id_mapping
-                                .get(table_id)
-                                .map(|cg_id| cg_id.to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            meta_metrics
-                                .table_info
-                                .with_label_values(&[
-                                    &mv_id_str,
-                                    &table_id_str,
-                                    &actor_id_str,
-                                    &table_name,
-                                    &table_type,
-                                    &compaction_group_id,
-                                ])
-                                .set(1);
-                        }
+                        meta_metrics
+                            .table_info
+                            .with_label_values(&[
+                                &mv_id_str,
+                                &table_id_str,
+                                &fragment_id_str,
+                                &table_name,
+                                &table_type,
+                                &compaction_group_id,
+                            ])
+                            .set(1);
                     }
                 }
             }

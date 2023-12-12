@@ -3,17 +3,13 @@
 set -euo pipefail
 
 export DOCKER_BUILDKIT=1
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 
-######################################################
-# !!! CHANGE THIS WHEN YOU WANT TO BUMP CI IMAGE !!! #
-#          AND ALSO docker-compose.yml               #
-######################################################
-export BUILD_ENV_VERSION=v20230914
+export BUILD_ENV_VERSION=v20231109
 
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 

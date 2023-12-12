@@ -8,6 +8,12 @@ import "common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+enum BloomFilterType {
+  BLOOM_FILTER_UNSPECIFIED = 0;
+  SSTABLE = 1;
+  BLOCKED = 2;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -21,12 +27,13 @@ message SstableInfo {
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
+  BloomFilterType bloom_filter_kind = 13;
 }
 
 enum LevelType {
-  UNSPECIFIED = 0;
-  NONOVERLAPPING = 1;
-  OVERLAPPING = 2;
+  LEVEL_TYPE_UNSPECIFIED = 0;
+  LEVEL_TYPE_NONOVERLAPPING = 1;
+  LEVEL_TYPE_OVERLAPPING = 2;
 }
 
 message OverlappingLevel {
@@ -102,6 +109,32 @@ message UncommittedEpoch {
   repeated SstableInfo tables = 2;
 }
 
+message VnodeWatermark {
+  // The watermark shared by multiple vnodes
+  bytes watermark = 1;
+  // The set of vnodes that share the same watermark
+  common.Buffer vnode_bitmap = 2;
+}
+
+// Table watermark is a lighter weight range delete introduced in
+// https://github.com/risingwavelabs/risingwave/issues/13148
+// It means the lowest (or highest when `is_ascending` is false) visible
+// keys in the table within a vnode. Keys lower (or higher) than the
+// table watermark is invisible and will be cleaned in later compaction.
+message TableWatermarks {
+  message EpochNewWatermarks {
+    repeated VnodeWatermark watermarks = 1;
+    uint64 epoch = 2;
+  }
+
+  // Table watermarks of a state table from all vnodes written in multiple epochs.
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated EpochNewWatermarks epoch_watermarks = 1;
+
+  // The direction of the table watermark.
+  bool is_ascending = 2;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -117,6 +150,7 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
+  map<uint32, TableWatermarks> table_watermarks = 5;
 }
 
 message HummockVersionDelta {
@@ -133,6 +167,7 @@ message HummockVersionDelta {
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
+  map<uint32, TableWatermarks> new_table_watermarks = 8;
 }
 
 message HummockVersionDeltas {
@@ -300,9 +335,16 @@ message CompactTask {
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
-  bool split_by_state_table = 21;
+
+  // Deprecated. use table_vnode_partition instead;
+  bool split_by_state_table = 21 [deprecated = true];
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
-  uint32 split_weight_by_vnode = 22;
+  // Deprecated. use table_vnode_partition instead;
+  uint32 split_weight_by_vnode = 22 [deprecated = true];
+  map<uint32, uint32> table_vnode_partition = 23;
+  // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
+  // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
+  map<uint32, TableWatermarks> table_watermarks = 24;
 }
 
 message LevelHandler {
@@ -373,6 +415,7 @@ message CompactTaskProgress {
   uint64 num_progress_key = 4;
   uint64 num_pending_read_io = 5;
   uint64 num_pending_write_io = 6;
+  optional uint64 compaction_group_id = 7;
 }
 
 message SubscribeCompactionEventRequest {
@@ -388,8 +431,13 @@ message SubscribeCompactionEventRequest {
 
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
-    CompactTask compact_task = 2;
+    reserved 2;
+    reserved "compact_task";
     map<uint32, TableStats> table_stats_change = 3;
+
+    uint64 task_id = 4;
+    CompactTask.TaskStatus task_status = 5;
+    repeated SstableInfo sorted_output_ssts = 6;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -430,6 +478,26 @@ message SubscribeCompactionEventResponse {
   }
 
   uint64 create_at = 7;
+}
+
+message ReportCompactionTaskRequest {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+  oneof event {
+    ReportTask report_task = 1;
+    HeartBeat heart_beat = 2;
+  }
+}
+
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
 }
 
 message ValidationTask {
@@ -580,6 +648,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
+      uint32 tombstone_reclaim_ratio = 16;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -648,6 +717,37 @@ message ListHummockMetaConfigResponse {
   map<string, string> configs = 1;
 }
 
+message RiseCtlRebuildTableStatsRequest {}
+
+message RiseCtlRebuildTableStatsResponse {}
+
+message GetCompactionScoreRequest {
+  uint64 compaction_group_id = 1;
+}
+
+message GetCompactionScoreResponse {
+  message PickerInfo {
+    uint64 score = 1;
+    uint64 select_level = 2;
+    uint64 target_level = 3;
+    string picker_type = 4;
+  }
+  uint64 compaction_group_id = 1;
+  repeated PickerInfo scores = 2;
+}
+
+message ListCompactTaskAssignmentRequest {}
+
+message ListCompactTaskAssignmentResponse {
+  repeated CompactTaskAssignment task_assignment = 1;
+}
+
+message ListCompactTaskProgressRequest {}
+
+message ListCompactTaskProgressResponse {
+  repeated CompactTaskProgress task_progress = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -673,14 +773,19 @@ service HummockManagerService {
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
   rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
   rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
+  rpc RiseCtlRebuildTableStats(RiseCtlRebuildTableStatsRequest) returns (RiseCtlRebuildTableStatsResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
+  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
+  rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
+  rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
+  rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
 }
 
 message CompactionConfig {

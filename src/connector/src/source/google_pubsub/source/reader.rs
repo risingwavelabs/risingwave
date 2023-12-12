@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::bail;
-use tonic::Code;
+use tonic_0_9::Code;
 
 use super::TaggedReceivedMessage;
 use crate::parser::ParserConfig;
@@ -96,7 +96,9 @@ impl CommonSplitReader for PubsubSplitReader {
             yield chunk;
 
             // Stop if we've approached the stop_offset
-            if let Some(stop_offset) = self.stop_offset && latest_offset >= stop_offset {
+            if let Some(stop_offset) = self.stop_offset
+                && latest_offset >= stop_offset
+            {
                 return Ok(());
             }
         }

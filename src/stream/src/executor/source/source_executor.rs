@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
@@ -27,6 +28,7 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -41,12 +43,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-
-    identity: String,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
+    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -71,21 +68,17 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        schema: Schema,
-        pk_indices: PkIndices,
+        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
-            identity: format!("SourceExecutor {:X}", executor_id),
-            schema,
-            pk_indices,
+            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -244,16 +237,13 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             core.source_id,
         );
-        self.metrics
-            .user_source_reader_error_count
-            .with_label_values(&[
-                "SourceReaderError",
-                &e.to_string(),
-                "SourceExecutor",
-                &self.actor_ctx.id.to_string(),
-                &core.source_id.to_string(),
-            ])
-            .inc_by(1);
+        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+            "SourceReaderError".to_owned(),
+            e.to_report_string(),
+            "SourceExecutor".to_owned(),
+            self.actor_ctx.id.to_string(),
+            core.source_id.to_string(),
+        ]);
         // fetch the newest offset, either it's in cache (before barrier)
         // or in state table (just after barrier)
         let target_state = if core.state_cache.is_empty() {
@@ -349,6 +339,13 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        core.split_state_store.state_store.try_flush().await?;
+
+        Ok(())
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -379,11 +376,11 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
+                Mutation::Add(AddMutation { splits, .. })
+                | Mutation::Update(UpdateMutation {
                     actor_splits: splits,
                     ..
-                } => {
+                }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         tracing::info!(
                             "source exector: actor {:?} boot with splits: {:?}",
@@ -496,7 +493,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                             should_trim_state = true;
                                         }
 
-                                        Mutation::Update { actor_splits, .. } => {
+                                        Mutation::Update(UpdateMutation {
+                                            actor_splits, ..
+                                        }) => {
                                             target_state = self
                                                 .apply_split_change(
                                                     &source_desc,
@@ -555,7 +554,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 self_paused = true;
                                 tracing::warn!(
                                     "source {} paused, wait barrier for {:?}",
-                                    self.identity,
+                                    self.info.identity,
                                     last_barrier_time.elapsed()
                                 );
                                 stream.pause_stream();
@@ -608,6 +607,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 )
                                 .inc_by(chunk.cardinality() as u64);
                             yield Message::Chunk(chunk);
+                            self.try_flush_data().await?;
                         }
                     }
                 }
@@ -654,15 +654,15 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -672,7 +672,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.pk_indices)
+                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
@@ -748,19 +748,21 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
         let mut executor = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -773,7 +775,7 @@ mod tests {
                 ],
             },
             pause: false,
-        });
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -840,19 +842,21 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
         let mut handler = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -865,7 +869,7 @@ mod tests {
                 ],
             },
             pause: false,
-        });
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.

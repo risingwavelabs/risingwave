@@ -16,269 +16,183 @@ use core::option::Option::Some;
 use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
+use anyhow::{anyhow, bail, Context};
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
-use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use thiserror_ext::AsReport;
+use tracing::error;
 
-pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
-    let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
-        libs_path
-    } else {
-        return Err(ErrorCode::InternalError(
-            "environment variable CONNECTOR_LIBS_PATH is not specified".to_string(),
-        )
-        .into());
-    };
+use crate::call_method;
 
-    let dir = Path::new(&libs_path);
+/// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
-    if !dir.is_dir() {
-        return Err(ErrorCode::InternalError(format!(
-            "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
-            libs_path
-        ))
-        .into());
+pub static JVM: JavaVmWrapper = JavaVmWrapper;
+static JVM_RESULT: OnceLock<anyhow::Result<JavaVM>> = OnceLock::new();
+
+pub struct JavaVmWrapper;
+
+impl JavaVmWrapper {
+    pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
+        match JVM_RESULT.get_or_init(|| {
+            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e.as_report()))
+        }) {
+            Ok(jvm) => Ok(jvm),
+            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+        }
     }
 
-    let mut class_vec = vec![];
+    fn inner_new() -> anyhow::Result<JavaVM> {
+        let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
+            libs_path
+        } else {
+            tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
+            let path = std::env::current_exe()
+                .context("unable to get path of current_exe")?
+                .parent()
+                .expect("not root")
+                .join("./libs");
+            path.to_str().expect("should be able to cast").into()
+        };
 
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if entry_path.file_name().is_some() {
-                let path = std::fs::canonicalize(entry_path)?;
-                class_vec.push(path.to_str().unwrap().to_string());
+        tracing::info!("libs_path = {}", libs_path);
+
+        let dir = Path::new(&libs_path);
+
+        if !dir.is_dir() {
+            bail!("CONNECTOR_LIBS_PATH \"{}\" is not a directory", libs_path);
+        }
+
+        let mut class_vec = vec![];
+
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.file_name().is_some() {
+                    let path = std::fs::canonicalize(entry_path)
+                        .expect("valid entry_path obtained from fs::read_dir");
+                    class_vec.push(path.to_str().unwrap().to_string());
+                }
             }
+        } else {
+            bail!("failed to read CONNECTOR_LIBS_PATH \"{}\"", libs_path);
         }
-    } else {
-        return Err(ErrorCode::InternalError(format!(
-            "failed to read CONNECTOR_LIBS_PATH \"{}\"",
-            libs_path
-        ))
-        .into());
+
+        let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
+            heap_size
+        } else {
+            format!(
+                "{}",
+                (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
+            )
+        };
+
+        // Build the VM properties
+        let args_builder = InitArgsBuilder::new()
+            // Pass the JNI API version (default is 8)
+            .version(JNIVersion::V8)
+            .option("-Dis_embedded_connector=true")
+            .option(format!("-Djava.class.path={}", class_vec.join(":")))
+            .option("-Xms16m")
+            .option(format!("-Xmx{}", jvm_heap_size))
+            // Quoted from the debezium document:
+            // > Your application should always properly stop the engine to ensure graceful and complete
+            // > shutdown and that each source record is sent to the application exactly one time.
+            // In RisingWave we assume the upstream changelog may contain duplicate events and
+            // handle conflicts in the mview operator, thus we don't need to obey the above
+            // instructions. So we decrease the wait time here to reclaim jvm thread faster.
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
+
+        tracing::info!("JVM args: {:?}", args_builder);
+        let jvm_args = args_builder.build().context("invalid jvm args")?;
+
+        // Create a new VM
+        let jvm = match JavaVM::new(jvm_args) {
+            Err(err) => {
+                tracing::error!(error = ?err.as_report(), "fail to new JVM");
+                bail!("fail to new JVM");
+            }
+            Ok(jvm) => jvm,
+        };
+
+        tracing::info!("initialize JVM successfully");
+
+        register_native_method_for_jvm(&jvm).context("failed to register native method")?;
+
+        Ok(jvm)
     }
+}
 
-    let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
-        heap_size
-    } else {
-        // Use 10% of total memory by default
-        format!("{}", total_memory_available_bytes() / 10)
-    };
-
-    // Build the VM properties
-    let args_builder = InitArgsBuilder::new()
-        // Pass the JNI API version (default is 8)
-        .version(JNIVersion::V8)
-        .option("-ea")
-        .option("-Dis_embedded_connector=true")
-        .option(format!("-Djava.class.path={}", class_vec.join(":")))
-        .option(format!("-Xmx{}", jvm_heap_size));
-
-    tracing::info!("JVM args: {:?}", args_builder);
-    let jvm_args = args_builder.build().unwrap();
-
-    // Create a new VM
-    let jvm = match JavaVM::new(jvm_args) {
-        Err(err) => {
-            tracing::error!("fail to new JVM {:?}", err);
-            return Err(ErrorCode::InternalError("fail to new JVM".to_string()).into());
-        }
-        Ok(jvm) => jvm,
-    };
-
-    tracing::info!("initialize JVM successfully");
-
-    register_native_method_for_jvm(&jvm);
-
-    Ok(jvm)
-});
-
-fn register_native_method_for_jvm(jvm: &JavaVM) {
+pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
     let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))
-        .unwrap();
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))?;
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
-        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))
-        .unwrap();
-    env.register_native_methods(
-        binding_class,
-        &[
-            NativeMethod {
-                name: JNIString::from("vnodeCount"),
-                sig: JNIString::from("()I"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_vnodeCount as *mut c_void,
-            },
-            #[cfg(not(madsim))]
-            NativeMethod {
-                name: JNIString::from("hummockIteratorNew"),
-                sig: JNIString::from("([B)J"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_hummockIteratorNew
-                    as *mut c_void,
-            },
-            #[cfg(not(madsim))]
-            NativeMethod {
-                name: JNIString::from("hummockIteratorNext"),
-                sig: JNIString::from("(J)J"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_hummockIteratorNext
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("hummockIteratorClose"),
-                sig: JNIString::from("(J)V"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_hummockIteratorClose
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetKey"),
-                sig: JNIString::from("(J)[B"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetKey as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetOp"),
-                sig: JNIString::from("(J)I"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetOp as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowIsNull"),
-                sig: JNIString::from("(JI)Z"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowIsNull as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetInt16Value"),
-                sig: JNIString::from("(JI)S"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetInt16Value
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetInt32Value"),
-                sig: JNIString::from("(JI)I"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetInt32Value
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetInt64Value"),
-                sig: JNIString::from("(JI)J"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetInt64Value
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetFloatValue"),
-                sig: JNIString::from("(JI)F"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetFloatValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetDoubleValue"),
-                sig: JNIString::from("(JI)D"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetDoubleValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetBooleanValue"),
-                sig: JNIString::from("(JI)Z"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetBooleanValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetStringValue"),
-                sig: JNIString::from("(JI)Ljava/lang/String;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetStringValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetTimestampValue"),
-                sig: JNIString::from("(JI)Ljava/sql/Timestamp;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetTimestampValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetDecimalValue"),
-                sig: JNIString::from("(JI)Ljava/math/BigDecimal;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetDecimalValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetTimeValue"),
-                sig: JNIString::from("(JI)Ljava/sql/Time;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetTimeValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetDateValue"),
-                sig: JNIString::from("(JI)Ljava/sql/Date;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetDateValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetIntervalValue"),
-                sig: JNIString::from("(JI)Ljava/lang/String;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetIntervalValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetJsonbValue"),
-                sig: JNIString::from("(JI)Ljava/lang/String;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetJsonbValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetByteaValue"),
-                sig: JNIString::from("(JI)[B"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetByteaValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowGetArrayValue"),
-                sig: JNIString::from("(JILjava/lang/Class;)Ljava/lang/Object;"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowGetArrayValue
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("rowClose"),
-                sig: JNIString::from("(J)V"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_rowClose as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("streamChunkIteratorNew"),
-                sig: JNIString::from("([B)J"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("streamChunkIteratorNext"),
-                sig: JNIString::from("(J)J"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("streamChunkIteratorClose"),
-                sig: JNIString::from("(J)V"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose
-                    as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("streamChunkIteratorFromPretty"),
-                sig: JNIString::from("(Ljava/lang/String;)J"),
-                fn_ptr:
-                    crate::Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty
-                        as *mut c_void,
-            },
-            NativeMethod {
-                name: JNIString::from("sendCdcSourceMsgToChannel"),
-                sig: JNIString::from("(J[B)Z"),
-                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
-                    as *mut c_void,
-            },
-        ],
-    )
-    .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))
-    .unwrap();
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm find class error"))?;
+    use crate::*;
+    macro_rules! gen_native_method_array {
+        () => {{
+            $crate::for_all_native_methods! {gen_native_method_array}
+        }};
+        ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {
+            [
+                $(
+                    {
+                        let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
+                        let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
+                        NativeMethod {
+                            name: JNIString::from(stringify! {$func_name}),
+                            sig: JNIString::from(sig),
+                            fn_ptr,
+                        }
+                    },
+                )*
+            ]
+        }
+    }
+    env.register_native_methods(binding_class, &gen_native_method_array!())
+        .inspect_err(
+            |e| tracing::error!(error = ?e.as_report(), "jvm register native methods error"),
+        )?;
 
     tracing::info!("register native methods for jvm successfully");
+    Ok(())
+}
+
+/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize,
+/// return zero.
+pub fn load_jvm_memory_stats() -> (usize, usize) {
+    match JVM_RESULT.get() {
+        Some(Ok(jvm)) => {
+            let result: Result<(usize, usize), jni::errors::Error> = try {
+                let mut env = jvm.attach_current_thread()?;
+
+                let runtime_instance = crate::call_static_method!(
+                    env,
+                    {Runtime},
+                    {Runtime getRuntime()}
+                )?;
+
+                let total_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
+                let free_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
+
+                (total_memory as usize, (total_memory - free_memory) as usize)
+            };
+            match result {
+                Ok(ret) => ret,
+                Err(e) => {
+                    error!(error = ?e.as_report(), "failed to collect jvm stats");
+                    (0, 0)
+                }
+            }
+        }
+        _ => (0, 0),
+    }
 }

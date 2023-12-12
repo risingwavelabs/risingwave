@@ -16,11 +16,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::ColIndexMappingRewriteExt;
@@ -29,46 +31,43 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// input rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
-    pub base: PlanBase,
-    logical: generic::HopWindow<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
 }
 
 impl BatchHopWindow {
     pub fn new(
-        logical: generic::HopWindow<PlanRef>,
+        core: generic::HopWindow<PlanRef>,
         window_start_exprs: Vec<ExprImpl>,
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
-        let distribution = logical
+        let distribution = core
             .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input.distribution());
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
-            distribution,
-            logical.get_out_column_index_order(),
-        );
+            .rewrite_provided_distribution(core.input.distribution());
+        let base =
+            PlanBase::new_batch_with_core(&core, distribution, core.get_out_column_index_order());
         BatchHopWindow {
             base,
-            logical,
+            core,
             window_start_exprs,
             window_end_exprs,
         }
     }
 }
-impl_distill_by_unit!(BatchHopWindow, logical, "BatchHopWindow");
+impl_distill_by_unit!(BatchHopWindow, core, "BatchHopWindow");
 
 impl PlanTreeNodeUnary for BatchHopWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
+        let mut core = self.core.clone();
+        core.input = input;
         Self::new(
-            logical,
+            core,
             self.window_start_exprs.clone(),
             self.window_end_exprs.clone(),
         )
@@ -92,13 +91,13 @@ impl ToDistributedBatch for BatchHopWindow {
         // communication.
         // We pass the required dist to its input.
         let input_required = self
-            .logical
+            .core
             .o2i_col_mapping()
             .rewrite_required_distribution(required_dist);
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required)?;
-        let mut new_logical = self.logical.clone();
+        let mut new_logical = self.core.clone();
         new_logical.input = new_input;
         let batch_plan = BatchHopWindow::new(
             new_logical,
@@ -113,15 +112,10 @@ impl ToDistributedBatch for BatchHopWindow {
 impl ToBatchPb for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
-            time_col: self.logical.time_col.index() as _,
-            window_slide: Some(self.logical.window_slide.into()),
-            window_size: Some(self.logical.window_size.into()),
-            output_indices: self
-                .logical
-                .output_indices
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
+            time_col: self.core.time_col.index() as _,
+            window_slide: Some(self.core.window_slide.into()),
+            window_size: Some(self.core.window_size.into()),
+            output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             window_start_exprs: self
                 .window_start_exprs
                 .clone()
@@ -152,7 +146,7 @@ impl ExprRewritable for BatchHopWindow {
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         Self::new(
-            self.logical.clone(),
+            self.core.clone(),
             self.window_start_exprs
                 .clone()
                 .into_iter()
@@ -165,5 +159,12 @@ impl ExprRewritable for BatchHopWindow {
                 .collect(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchHopWindow {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.window_start_exprs.iter().for_each(|e| v.visit_expr(e));
+        self.window_end_exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

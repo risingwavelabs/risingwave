@@ -912,6 +912,12 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+  - stream_dist_plan # check the state table schema
+- sql: |
+    create table t (x int, y int);
+    select first_value(distinct x order by x asc) from t;
+  expected_outputs:
+  - stream_dist_plan # check the state table schema
 - sql: |
     create table t (x int, y int);
     select last_value(x order by y desc nulls last) from t;
@@ -926,6 +932,35 @@
 - sql: |
     CREATE TABLE t(id int primary key, a int, b int);
     SELECT count(*) FROM t group by a, id, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, row_number() OVER (PARTITION BY a ORDER BY a DESC) FROM t GROUP BY a;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int, c int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a ORDER BY b)
+    FROM t
+    GROUP BY a, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int, c int, d int, e int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a, avg(d) ORDER BY max(e), b)
+    FROM t
+    GROUP BY a, b;
   expected_outputs:
     - batch_plan
     - stream_plan

@@ -19,6 +19,9 @@
 
 use std::str::FromStr;
 
+use risingwave_error::tonic::ToTonicStatus;
+use thiserror::Error;
+
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
@@ -149,12 +152,13 @@ pub mod backup_service_serde;
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Error)]
+#[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
-        tonic::Status::new(tonic::Code::Internal, e.0)
+        e.to_status_unnamed(tonic::Code::Internal)
     }
 }
 

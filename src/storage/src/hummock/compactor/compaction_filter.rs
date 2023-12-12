@@ -71,7 +71,7 @@ impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let table_id = key.user_key.table_id.table_id();
-        let epoch = key.epoch;
+        let epoch = key.epoch_with_gap.pure_epoch();
         if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
             if *last_table_id == table_id {
                 let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);

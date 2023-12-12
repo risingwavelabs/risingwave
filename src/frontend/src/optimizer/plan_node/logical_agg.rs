@@ -17,20 +17,23 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    OrderBy, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -48,7 +51,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: Agg<PlanRef>,
 }
 
@@ -57,9 +60,9 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let mut logical = self.core.clone();
-        logical.input = stream_input;
-        let local_agg = StreamStatelessSimpleAgg::new(logical);
+        let mut core = self.core.clone();
+        core.input = stream_input;
+        let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(
@@ -165,23 +168,25 @@ impl LogicalAgg {
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let mut logical = self.core.clone();
+        let mut core = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        logical.input = input;
-        Ok(new_stream_simple_agg(logical).into())
+        core.input = input;
+        Ok(new_stream_simple_agg(core).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Ok(new_stream_hash_agg(logical, None).into())
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(new_stream_hash_agg(core, None).into())
     }
 
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution();
         debug_assert!(*input_dist != Distribution::Broadcast);
 
@@ -222,8 +227,11 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?
+                RequiredDist::shard_by_key(
+                    stream_input.schema().len(),
+                    stream_input.expect_stream_key(),
+                )
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
             };
@@ -291,12 +299,7 @@ impl LogicalAggBuilder {
                         set.into_iter()
                             .map(|expr| input_proj_builder.add_expr(&expr))
                             .try_collect()
-                            .map_err(|err| {
-                                ErrorCode::NotImplemented(
-                                    format!("{err} inside GROUP BY"),
-                                    None.into(),
-                                )
-                            })
+                            .map_err(|err| not_implemented!("{err} inside GROUP BY"))
                     })
                     .try_collect()?;
 
@@ -316,9 +319,7 @@ impl LogicalAggBuilder {
                     .into_iter()
                     .map(|expr| input_proj_builder.add_expr(&expr))
                     .try_collect()
-                    .map_err(|err| {
-                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                    })?;
+                    .map_err(|err| not_implemented!("{err} inside GROUP BY"))?;
                 (group_key, vec![])
             }
             GroupBy::GroupingSets(grouping_sets) => gen_group_key_and_grouping_sets(grouping_sets)?,
@@ -471,9 +472,7 @@ impl LogicalAggBuilder {
                 Ok(InputRef::new(index, expr.return_type()))
             })
             .try_collect()
-            .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
-            })?;
+            .map_err(|err: &'static str| not_implemented!("{err} inside aggregation calls"))?;
 
         let order_by: Vec<_> = order_by
             .sort_exprs
@@ -484,10 +483,7 @@ impl LogicalAggBuilder {
             })
             .try_collect()
             .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(
-                    format!("{err} inside aggregation calls order by"),
-                    None.into(),
-                )
+                not_implemented!("{err} inside aggregation calls order by")
             })?;
 
         match agg_kind {
@@ -495,8 +491,9 @@ impl LogicalAggBuilder {
             AggKind::Avg => {
                 assert_eq!(inputs.len(), 1);
 
-                let left_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                let left_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[inputs[0].return_type()])
+                    .unwrap();
                 let left_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: left_return_type,
@@ -508,8 +505,9 @@ impl LogicalAggBuilder {
                 });
                 let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
-                let right_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[inputs[0].return_type()]).unwrap();
+                let right_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[inputs[0].return_type()])
+                    .unwrap();
                 let right_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,
                     return_type: right_return_type,
@@ -551,9 +549,9 @@ impl LogicalAggBuilder {
                     .add_expr(&squared_input_expr)
                     .unwrap();
 
-                let sum_of_squares_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
-                        .unwrap();
+                let sum_of_squares_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
+                    .unwrap();
 
                 let sum_of_squares_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -571,8 +569,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // after that, we compute sum
-                let sum_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[input.return_type()]).unwrap();
+                let sum_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[input.return_type()])
+                    .unwrap();
 
                 let sum_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -587,8 +586,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // then, we compute count
-                let count_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[input.return_type()]).unwrap();
+                let count_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[input.return_type()])
+                    .unwrap();
 
                 let count_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,
@@ -731,6 +731,33 @@ impl ExprRewriter for LogicalAggBuilder {
         }
     }
 
+    /// When there is an `WindowFunction` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
+    fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
+        let WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..
+        } = window_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let partition_by = partition_by
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let order_by = order_by.rewrite_expr(self);
+        WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..window_func
+        }
+        .into()
+    }
+
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
@@ -753,10 +780,13 @@ impl ExprRewriter for LogicalAggBuilder {
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
         if subquery.is_correlated(0) {
-            self.error = Some(ErrorCode::NotImplemented(
-                "correlated subquery in HAVING or SELECT with agg".into(),
-                2275.into(),
-            ));
+            self.error = Some(
+                not_implemented!(
+                    issue = 2275,
+                    "correlated subquery in HAVING or SELECT with agg",
+                )
+                .into(),
+            );
         }
         subquery.into()
     }
@@ -928,6 +958,12 @@ impl ExprRewritable for LogicalAgg {
     }
 }
 
+impl ExprVisitable for LogicalAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let group_key_required_cols = self.group_key().to_bitset();
@@ -1062,11 +1098,7 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_batch_enable_sort_agg()
+        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()
@@ -1095,25 +1127,23 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_simple_agg(core: Agg<PlanRef>) -> StreamSimpleAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         for agg_call in self.agg_calls() {
             if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
-                return Err(ErrorCode::NotImplemented(
-                    format!("{} aggregation in materialized view", agg_call.agg_kind),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_kind);
             }
         }
         let eowc = ctx.emit_on_window_close();
@@ -1180,7 +1210,7 @@ impl ToStream for LogicalAgg {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
+        let out_col_change = ColIndexMapping::new(map, agg.schema().len());
         Ok((agg.into(), out_col_change))
     }
 }

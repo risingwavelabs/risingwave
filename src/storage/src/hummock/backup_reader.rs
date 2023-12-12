@@ -22,14 +22,13 @@ use arc_swap::ArcSwap;
 use futures::future::Shared;
 use futures::FutureExt;
 use risingwave_backup::error::BackupError;
-use risingwave_backup::meta_snapshot::MetaSnapshot;
-use risingwave_backup::storage::{
-    BoxedMetaSnapshotStorage, DummyMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage,
-};
-use risingwave_backup::MetaSnapshotId;
+use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
+use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
+use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
@@ -42,17 +41,19 @@ type VersionHolder = (
     tokio::sync::mpsc::UnboundedReceiver<PinVersionAction>,
 );
 
-async fn create_snapshot_store(config: &StoreConfig) -> StorageResult<BoxedMetaSnapshotStorage> {
+async fn create_snapshot_store(
+    config: &StoreConfig,
+) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
+            ObjectStoreConfig::default(),
         )
         .await,
     );
-    let store =
-        Box::new(ObjectStoreMetaSnapshotStorage::new(&config.1, backup_object_store).await?);
+    let store = ObjectStoreMetaSnapshotStorage::new(&config.1, backup_object_store).await?;
     Ok(store)
 }
 
@@ -64,7 +65,7 @@ type StoreConfig = (String, String);
 pub struct BackupReader {
     versions: parking_lot::RwLock<HashMap<MetaSnapshotId, VersionHolder>>,
     inflight_request: parking_lot::Mutex<HashMap<MetaSnapshotId, InflightRequest>>,
-    store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
+    store: ArcSwap<(ObjectStoreMetaSnapshotStorage, StoreConfig)>,
     refresh_tx: tokio::sync::mpsc::UnboundedSender<u64>,
 }
 
@@ -80,7 +81,7 @@ impl BackupReader {
         Ok(Self::with_store((store, config)))
     }
 
-    fn with_store(store: (BoxedMetaSnapshotStorage, StoreConfig)) -> BackupReaderRef {
+    fn with_store(store: (ObjectStoreMetaSnapshotStorage, StoreConfig)) -> BackupReaderRef {
         let (refresh_tx, refresh_rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = Arc::new(Self {
             store: ArcSwap::from_pointee(store),
@@ -92,9 +93,9 @@ impl BackupReader {
         instance
     }
 
-    pub fn unused() -> BackupReaderRef {
+    pub async fn unused() -> BackupReaderRef {
         Self::with_store((
-            Box::<DummyMetaSnapshotStorage>::default(),
+            risingwave_backup::storage::unused().await,
             StoreConfig::default(),
         ))
     }
@@ -193,9 +194,11 @@ impl BackupReader {
             } else {
                 let this = self.clone();
                 let f = async move {
-                    let snapshot = current_store.0.get(snapshot_id).await.map_err(|e| {
-                        format!("failed to get meta snapshot {}. {}", snapshot_id, e)
-                    })?;
+                    // TODO: change to v2
+                    let snapshot: meta_snapshot_v1::MetaSnapshotV1 =
+                        current_store.0.get(snapshot_id).await.map_err(|e| {
+                            format!("failed to get meta snapshot {}. {}", snapshot_id, e)
+                        })?;
                     let version_holder = build_version_holder(snapshot);
                     let version_clone = version_holder.0.clone();
                     this.versions.write().insert(snapshot_id, version_holder);
@@ -244,9 +247,9 @@ impl BackupReader {
     }
 }
 
-fn build_version_holder(s: MetaSnapshot) -> VersionHolder {
+fn build_version_holder<S: Metadata>(s: MetaSnapshot<S>) -> VersionHolder {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    (PinnedVersion::new(s.metadata.hummock_version, tx), rx)
+    (PinnedVersion::new(s.metadata.hummock_version(), tx), rx)
 }
 
 impl From<BackupError> for StorageError {

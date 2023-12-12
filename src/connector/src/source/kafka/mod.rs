@@ -25,6 +25,7 @@ pub use enumerator::*;
 pub use private_link::*;
 pub use source::*;
 pub use split::*;
+use with_options::WithOptions;
 
 use crate::common::KafkaCommon;
 use crate::source::SourceProperties;
@@ -39,7 +40,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 ///
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default, WithOptions)]
 pub struct RdKafkaPropertiesConsumer {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
@@ -62,10 +63,9 @@ pub struct RdKafkaPropertiesConsumer {
     /// exceeded. This property may need to be decreased if the queue thresholds are set low
     /// and the application is experiencing long (~1s) delays between messages. Low values may
     /// increase CPU utilization.
-    // FIXME: need to upgrade rdkafka to v2.2.0 to use this property
-    // #[serde(rename = "properties.fetch.queue.backoff.ms")]
-    // #[serde_as(as = "Option<DisplayFromStr>")]
-    // pub fetch_queue_backoff_ms: Option<usize>,
+    #[serde(rename = "properties.fetch.queue.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
     /// batches by the consumer and if the first message batch in the first non-empty partition of
@@ -87,7 +87,7 @@ pub struct RdKafkaPropertiesConsumer {
     pub enable_auto_commit: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source
@@ -106,11 +106,12 @@ pub struct KafkaProperties {
     #[serde(rename = "scan.startup.mode", alias = "kafka.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis", alias = "kafka.time.offset")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "kafka.time.offset",
+        alias = "scan.startup.timestamp_millis" // keep for compatibility
+    )]
     pub time_offset: Option<String>,
-
-    #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
-    pub consumer_group: Option<String>,
 
     /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
@@ -155,9 +156,9 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.fetch_wait_max_ms {
             c.set("fetch.wait.max.ms", v.to_string());
         }
-        // if let Some(v) = &self.fetch_queue_backoff_ms {
-        //     c.set("fetch.queue.backoff.ms", v.to_string());
-        // }
+        if let Some(v) = &self.fetch_queue_backoff_ms {
+            c.set("fetch.queue.backoff.ms", v.to_string());
+        }
         if let Some(v) = &self.fetch_max_bytes {
             c.set("fetch.max.bytes", v.to_string());
         }
@@ -192,6 +193,7 @@ mod test {
             "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
             "properties.enable.auto.commit".to_string() => "true".to_string(),
+            "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
         };
 
         let props: KafkaProperties =
@@ -214,5 +216,9 @@ mod test {
         assert_eq!(props.rdkafka_properties.fetch_wait_max_ms, Some(114514));
         assert_eq!(props.rdkafka_properties.fetch_max_bytes, Some(114514));
         assert_eq!(props.rdkafka_properties.enable_auto_commit, Some(true));
+        assert_eq!(
+            props.rdkafka_properties.fetch_queue_backoff_ms,
+            Some(114514)
+        );
     }
 }

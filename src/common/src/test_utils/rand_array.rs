@@ -135,7 +135,7 @@ impl RandValue for Int256 {
 
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        JsonbVal::dummy()
+        JsonbVal::null()
     }
 }
 
@@ -146,8 +146,8 @@ impl RandValue for StructValue {
 }
 
 impl RandValue for ListValue {
-    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        ListValue::new(vec![])
+    fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
+        ListValue::from_iter([rand.gen::<i16>()])
     }
 }
 

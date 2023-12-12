@@ -36,14 +36,17 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
     PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
@@ -312,8 +315,10 @@ impl StageRunner {
     async fn run(mut self, shutdown_rx: ShutdownToken) {
         if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
-                "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
-                self.stage.query_id, self.stage.id, e
+                error = %e.as_report(),
+                query_id = ?self.stage.query_id,
+                stage_id = ?self.stage.id,
+                "Failed to schedule tasks"
             );
             self.send_event(QueryMessage::Stage(Failed {
                 id: self.stage.id,
@@ -332,7 +337,11 @@ impl StageRunner {
 
     /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
     /// task is created, it should tell `QueryRunner` to schedule next.
-    async fn schedule_tasks(&mut self, mut shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
+    async fn schedule_tasks(
+        &mut self,
+        mut shutdown_rx: ShutdownToken,
+        expr_context: ExprContext,
+    ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
         if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
@@ -344,7 +353,10 @@ impl StageRunner {
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            let workers = self
+                .worker_node_manager
+                .manager
+                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
@@ -358,7 +370,7 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
+                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), expr_context.clone()));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -371,7 +383,7 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -382,7 +394,7 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
             }
         }
 
@@ -406,7 +418,7 @@ impl StageRunner {
             match status_res_inner {
                 Ok(status) => {
                     use risingwave_pb::task_service::task_info_response::TaskStatus as TaskStatusPb;
-                    match TaskStatusPb::from_i32(status.task_status).unwrap() {
+                    match TaskStatusPb::try_from(status.task_status).unwrap() {
                         TaskStatusPb::Running => {
                             running_task_cnt += 1;
                             // The task running count should always less or equal than the
@@ -545,6 +557,7 @@ impl StageRunner {
     async fn schedule_tasks_for_root(
         &mut self,
         mut shutdown_rx: ShutdownToken,
+        expr_context: ExprContext,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
@@ -571,32 +584,35 @@ impl StageRunner {
         );
 
         let shutdown_rx0 = shutdown_rx.clone();
-        let executor = executor.build().await?;
-        let chunk_stream = executor.execute();
-        let cancelled = pin!(shutdown_rx.cancelled());
-        #[for_await]
-        for chunk in chunk_stream.take_until(cancelled) {
-            if let Err(ref e) = chunk {
-                if shutdown_rx0.is_cancelled() {
-                    break;
-                }
-                let err_str = e.to_string();
 
-                // This is possible if The Query Runner drop early before schedule the root
-                // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
-                // The error format is just channel closed so no care.
-                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                    warn!("Root executor has been dropped before receive any events so the send is failed");
-                }
-                // Different from below, return this function and report error.
-                return Err(TaskExecutionError(err_str));
-            } else {
-                // Same for below.
-                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                    warn!("Root executor has been dropped before receive any events so the send is failed");
+        expr_context_scope(expr_context, async {
+            let executor = executor.build().await?;
+            let chunk_stream = executor.execute();
+            let cancelled = pin!(shutdown_rx.cancelled());
+            #[for_await]
+            for chunk in chunk_stream.take_until(cancelled) {
+                if let Err(ref e) = chunk {
+                    if shutdown_rx0.is_cancelled() {
+                        break;
+                    }
+                    let err_str = e.to_report_string();
+                    // This is possible if The Query Runner drop early before schedule the root
+                    // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
+                    // The error format is just channel closed so no care.
+                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                        warn!("Root executor has been dropped before receive any events so the send is failed");
+                    }
+                    // Different from below, return this function and report error.
+                    return Err(TaskExecutionError(err_str));
+                } else {
+                    // Same for below.
+                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                        warn!("Root executor has been dropped before receive any events so the send is failed");
+                    }
                 }
             }
-        }
+            Ok(())
+        }).await?;
 
         // Terminated by other tasks execution error, so no need to return error here.
         match shutdown_rx0.message() {
@@ -619,11 +635,15 @@ impl StageRunner {
     }
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
+        let expr_context = ExprContext {
+            time_zone: self.ctx.session().config().timezone().to_owned(),
+        };
         // If root, we execute it locally.
         if !self.is_root_stage() {
-            self.schedule_tasks(shutdown_rx).await?;
+            self.schedule_tasks(shutdown_rx, expr_context).await?;
         } else {
-            self.schedule_tasks_for_root(shutdown_rx).await?;
+            self.schedule_tasks_for_root(shutdown_rx, expr_context)
+                .await?;
         }
         Ok(())
     }
@@ -807,8 +827,11 @@ impl StageRunner {
                     .await
                 {
                     error!(
-                        "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
-                        task_id, stage_id, query_id, e
+                        error = %e.as_report(),
+                        ?task_id,
+                        ?query_id,
+                        ?stage_id,
+                        "Abort task failed",
                     );
                 };
             });
@@ -821,6 +844,7 @@ impl StageRunner {
         task_id: TaskIdPb,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
+        expr_context: ExprContext,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
         let worker_node_addr = worker.host.take().unwrap();
@@ -832,8 +856,9 @@ impl StageRunner {
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
-        let stream_status = compute_client
-            .create_task(task_id, plan_fragment, self.epoch.clone())
+
+        let stream_status: Fuse<Streaming<TaskInfoResponse>> = compute_client
+            .create_task(task_id, plan_fragment, self.epoch.clone(), expr_context)
             .await
             .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?

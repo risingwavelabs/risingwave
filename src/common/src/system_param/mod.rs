@@ -51,8 +51,8 @@ macro_rules! for_all_params {
             { bloom_false_positive, f64, Some(0.001_f64), false },
             { state_store, String, None, false },
             { data_directory, String, None, false },
-            { backup_storage_url, String, Some("memory".to_string()), false },
-            { backup_storage_directory, String, Some("backup".to_string()), false },
+            { backup_storage_url, String, Some("memory".to_string()), true },
+            { backup_storage_directory, String, Some("backup".to_string()), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
         }
@@ -129,7 +129,7 @@ macro_rules! impl_system_params_to_kv {
 
 macro_rules! impl_derive_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        fn derive_missing_fields(params: &mut PbSystemParams) {
+        pub fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
                     params.$field = Some(v);
@@ -246,7 +246,8 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<()> {
+        /// Set a system parameter with the given value or default one, returns the new value.
+        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
              match key {
                 $(
                     key_of!($field) => {
@@ -256,7 +257,8 @@ macro_rules! impl_set_system_param {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
-                        params.$field = Some(v);
+                        params.$field = Some(v.clone());
+                        return Ok(v.to_string())
                     },
                 )*
                 _ => {
@@ -266,7 +268,6 @@ macro_rules! impl_set_system_param {
                     ));
                 }
             };
-            Ok(())
         }
     };
 }

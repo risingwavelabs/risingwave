@@ -16,21 +16,22 @@ use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use anyhow::Context;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
-use risingwave_common::error::ErrorCode::{self, TaskNotFound};
-use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
+use crate::error::Result;
 use crate::monitor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
@@ -58,11 +59,11 @@ pub struct BatchManager {
     mem_context: MemoryContext,
 
     /// Metrics for batch manager.
-    metrics: BatchManagerMetrics,
+    metrics: Arc<BatchManagerMetrics>,
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig, metrics: BatchManagerMetrics) -> Self {
+    pub fn new(config: BatchConfig, metrics: Arc<BatchManagerMetrics>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -86,6 +87,10 @@ impl BatchManager {
         }
     }
 
+    pub(crate) fn metrics(&self) -> Arc<BatchManagerMetrics> {
+        self.metrics.clone()
+    }
+
     pub fn memory_context_ref(&self) -> MemoryContext {
         self.mem_context.clone()
     }
@@ -98,6 +103,7 @@ impl BatchManager {
         context: ComputeNodeContext,
         state_reporter: StateReporter,
         tracing_context: TracingContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -108,7 +114,6 @@ impl BatchManager {
         // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
-            self.metrics.task_num.inc();
 
             let this = self.clone();
             let task_id = task_id.clone();
@@ -120,13 +125,12 @@ impl BatchManager {
 
             Ok(())
         } else {
-            Err(ErrorCode::InternalError(format!(
+            bail!(
                 "can not create duplicate task with the same id: {:?}",
                 task_id,
-            ))
-            .into())
+            );
         };
-        task.async_execute(Some(state_reporter), tracing_context)
+        task.async_execute(Some(state_reporter), tracing_context, expr_context)
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());
@@ -149,6 +153,9 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
+            ExprContext {
+                time_zone: "UTC".to_string(),
+            },
         )
         .await
     }
@@ -194,7 +201,7 @@ impl BatchManager {
         pb_task_output_id: &PbTaskOutputId,
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
         let mut task_output = self.take_output(pb_task_output_id)?;
         self.runtime.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
@@ -218,7 +225,7 @@ impl BatchManager {
         self.tasks
             .lock()
             .get(&task_id)
-            .ok_or(TaskNotFound)?
+            .with_context(|| format!("task {:?} not found", task_id))?
             .get_task_output(output_id)
     }
 
@@ -230,7 +237,6 @@ impl BatchManager {
                 // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
-                self.metrics.task_num.dec();
                 if let Some(heartbeat_join_handle) = task.heartbeat_join_handle() {
                     heartbeat_join_handle.abort();
                 }
@@ -245,14 +251,14 @@ impl BatchManager {
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_running(),
-            None => Err(TaskNotFound.into()),
+            None => bail!("task {:?} not found", task_id),
         }
     }
 
     pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<bool> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_aborted(),
-            None => Err(TaskNotFound.into()),
+            None => bail!("task {:?} not found", task_id),
         }
     }
 
@@ -269,7 +275,7 @@ impl BatchManager {
                         Err(err) => return Err(err),
                     }
                 }
-                None => return Err(TaskNotFound.into()),
+                None => bail!("task {:?} not found", task_id),
             }
             tokio::time::sleep(Duration::from_millis(100)).await
         }
@@ -333,14 +339,12 @@ mod tests {
     use risingwave_pb::batch_plan::{
         ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, ValuesNode,
     };
-    use tonic::Code;
 
     use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
-        use tonic::Status;
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
@@ -351,10 +355,8 @@ mod tests {
             query_id: "abc".to_string(),
         };
 
-        assert_eq!(
-            Status::from(manager.check_if_task_running(&task_id).unwrap_err()).code(),
-            Code::Internal
-        );
+        let error = manager.check_if_task_running(&task_id).unwrap_err();
+        assert!(error.to_string().contains("not found"), "{:?}", error);
 
         let output_id = PbTaskOutputId {
             task_id: Some(risingwave_pb::batch_plan::TaskId {
@@ -364,10 +366,8 @@ mod tests {
             }),
             output_id: 0,
         };
-        match manager.take_output(&output_id) {
-            Err(e) => assert_eq!(Status::from(e).code(), Code::Internal),
-            Ok(_) => unreachable!(),
-        };
+        let error = manager.take_output(&output_id).unwrap_err();
+        assert!(error.to_string().contains("not found"), "{:?}", error);
     }
 
     #[tokio::test]

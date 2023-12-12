@@ -22,6 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
@@ -30,7 +31,8 @@ use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator,
+    UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -39,7 +41,7 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
+    CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions,
     SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -54,8 +56,10 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         64 << 20,
         128 << 20,
         0,
+        64 << 20,
         FileCache::none(),
         FileCache::none(),
+        None,
     ))
 }
 
@@ -112,11 +116,7 @@ async fn build_table(
         let end = start + 8;
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
-            .add_for_test(
-                full_key.to_ref(),
-                HummockValue::put(&value[start..end]),
-                true,
-            )
+            .add_for_test(full_key.to_ref(), HummockValue::put(&value[start..end]))
             .await
             .unwrap();
     }
@@ -193,14 +193,12 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        is_target_l0_or_lbase: false,
-        split_by_table: false,
-        split_weight_by_vnode: 0,
         use_block_based_filter: true,
+        ..Default::default()
     };
     compact_and_build_sst(
         &mut builder,
-        Arc::new(CompactionDeleteRanges::default()),
+        CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(HummockEpoch::MAX)),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,
@@ -230,7 +228,9 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
+        max_preload_retry_times: 0,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {

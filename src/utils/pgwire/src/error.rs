@@ -22,42 +22,43 @@ pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
-    #[error("Startup Error when connect to session: {0}")]
-    StartupError(BoxedError),
+    #[error("Failed to start a new session: {0}")]
+    StartupError(#[source] BoxedError),
 
-    #[error("PasswordError: {0}")]
-    PasswordError(IoError),
+    #[error("Invalid password")]
+    PasswordError,
 
-    #[error("QueryError: {0}")]
-    QueryError(BoxedError),
+    #[error("Failed to run the query: {0}")]
+    SimpleQueryError(#[source] BoxedError),
 
-    #[error("ParseError: {0}")]
-    ParseError(BoxedError),
+    #[error("Failed to prepare the statement: {0}")]
+    ExtendedPrepareError(#[source] BoxedError),
 
-    #[error("ExecuteError: {0}")]
-    ExecuteError(BoxedError),
+    #[error("Failed to execute the statement: {0}")]
+    ExtendedExecuteError(#[source] BoxedError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IoError(#[from] IoError),
 
-    #[error("{0}")]
-    /// Include error for describe, bind.
-    Internal(BoxedError),
+    /// Uncategorized error for describe, bind.
+    #[error(transparent)]
+    Uncategorized(BoxedError),
 
-    #[error("Panicked when processing: {0}.
-This is a bug. We would appreciate a bug report at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
+    #[error("Panicked when handling the request: {0}
+This is a bug. We would appreciate a bug report at:
+  https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
     Panic(String),
 
-    #[error("{0}")]
-    SslError(String),
+    #[error("Unable to setup an SSL connection")]
+    SslError(#[from] openssl::ssl::Error),
 }
 
 impl PsqlError {
     pub fn no_statement() -> Self {
-        PsqlError::Internal("No statement found".into())
+        PsqlError::Uncategorized("No statement found".into())
     }
 
     pub fn no_portal() -> Self {
-        PsqlError::Internal("No portal found".into())
+        PsqlError::Uncategorized("No portal found".into())
     }
 }

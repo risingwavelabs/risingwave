@@ -31,6 +31,9 @@ use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
 
+pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
+pub const CONNECTION_NAME_KEY: &str = "connection.name";
+
 #[derive(Debug)]
 enum PrivateLinkContextRole {
     Consumer,
@@ -117,7 +120,9 @@ impl PrivateLinkConsumerContext {
 impl ClientContext for PrivateLinkConsumerContext {
     /// this func serves as a callback when `poll` is completed.
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+        if let Some(metrics) = &self.metrics
+            && let Some(id) = &self.identifier
+        {
             metrics.report(id.as_str(), &statistics);
         }
     }
@@ -157,7 +162,9 @@ impl PrivateLinkProducerContext {
 
 impl ClientContext for PrivateLinkProducerContext {
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+        if let Some(metrics) = &self.metrics
+            && let Some(id) = &self.identifier
+        {
             metrics.report(id.as_str(), &statistics);
         }
     }
@@ -204,16 +211,17 @@ fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
-    svc: &PrivateLinkService,
     properties: &mut BTreeMap<String, String>,
+    svc: Option<&PrivateLinkService>,
+    privatelink_endpoint: Option<String>,
 ) -> anyhow::Result<()> {
     let mut broker_rewrite_map = HashMap::new();
-
-    let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
     let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
     let broker_addrs = servers.split(',').collect_vec();
+    let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
     let link_targets: Vec<AwsPrivateLinkItem> =
         serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
+
     if broker_addrs.len() != link_targets.len() {
         return Err(anyhow!(
             "The number of broker addrs {} does not match the number of private link targets {}",
@@ -222,19 +230,30 @@ pub fn insert_privatelink_broker_rewrite_map(
         ));
     }
 
-    for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
-        if svc.dns_entries.is_empty() {
-            return Err(anyhow!(
-                "No available private link endpoints for Kafka broker {}",
-                broker
-            ));
+    if let Some(endpoint) = privatelink_endpoint {
+        for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
+            // rewrite the broker address to endpoint:port
+            broker_rewrite_map.insert(broker.to_string(), format!("{}:{}", &endpoint, link.port));
         }
-        // rewrite the broker address to the dns name w/o az
-        // requires the NLB has enabled the cross-zone load balancing
-        broker_rewrite_map.insert(
-            broker.to_string(),
-            format!("{}:{}", &svc.endpoint_dns_name, link.port),
-        );
+    } else {
+        if svc.is_none() {
+            return Err(anyhow!("Privatelink endpoint not found.",));
+        }
+        let svc = svc.unwrap();
+        for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
+            if svc.dns_entries.is_empty() {
+                return Err(anyhow!(
+                    "No available private link endpoints for Kafka broker {}",
+                    broker
+                ));
+            }
+            // rewrite the broker address to the dns name w/o az
+            // requires the NLB has enabled the cross-zone load balancing
+            broker_rewrite_map.insert(
+                broker.to_string(),
+                format!("{}:{}", &svc.endpoint_dns_name, link.port),
+            );
+        }
     }
 
     // save private link dns names into source properties, which

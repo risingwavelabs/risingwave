@@ -13,20 +13,19 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(lazy_cell)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
 extern crate tracing;
 
-pub mod memory_management;
+pub mod memory;
 pub mod observer;
 pub mod rpc;
 pub mod server;
@@ -38,8 +37,12 @@ use std::pin::Pin;
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
-use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
+
+/// If `total_memory_bytes` is not specified, the default memory limit will be set to
+/// the system memory limit multiplied by this proportion
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.7;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -89,6 +92,10 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
+    /// Spill threshold for mem table.
+    #[clap(long, env = "RW_MEM_TABLE_SPILL_THRESHOLD", default_value_t = default_mem_table_spill_threshold())]
+    pub mem_table_spill_threshold: usize,
+
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
@@ -126,19 +133,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
-
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -168,9 +162,9 @@ impl Role {
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
-    let total_memory_available_bytes = total_memory_available_bytes();
-    if opts.total_memory_bytes > total_memory_available_bytes {
-        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+    let system_memory_available_bytes = system_memory_available_bytes();
+    if opts.total_memory_bytes > system_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, system_memory_available_bytes);
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
@@ -200,7 +194,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_addr);
 
         let advertise_addr = opts
             .advertise_addr
@@ -216,6 +209,8 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;
 
+        tracing::info!("Server listening at {}", listen_addr);
+
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
         }
@@ -223,7 +218,11 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 fn default_total_memory_bytes() -> usize {
-    total_memory_available_bytes()
+    (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
+}
+
+fn default_mem_table_spill_threshold() -> usize {
+    (4 << 20) as usize
 }
 
 fn default_parallelism() -> usize {

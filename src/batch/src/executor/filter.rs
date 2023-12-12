@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -50,7 +48,7 @@ impl Executor for FilterExecutor {
 }
 
 impl FilterExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.child.schema().data_types(), self.chunk_size);
@@ -68,9 +66,7 @@ impl FilterExecutor {
                     yield data_chunk;
                 }
             } else {
-                return Err(
-                    BatchError::Internal(anyhow!("Filter can only receive bool array")).into(),
-                );
+                bail!("Filter can only receive bool array");
             }
         }
 
@@ -137,17 +133,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
+        use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListValue};
         use risingwave_common::types::Scalar;
 
         let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
 
         // Add 4 ListValues to ArrayBuilder
-        (1..=4).for_each(|i| {
-            builder.append(Some(ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(i.to_scalar_value())]),
-            }));
-        });
+        for i in 1..=4 {
+            builder.append(Some(ListValue::from_iter([i]).as_scalar_ref()));
+        }
 
         // Use builder to obtain a single (List) column DataChunk
         let chunk = DataChunk::new(vec![builder.finish().into_ref()], 4);
@@ -185,15 +179,11 @@ mod tests {
             // Assert that values 3 and 4 are bigger than 2
             assert_eq!(
                 col1.value_at(0),
-                Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(3.to_scalar_value())]),
-                })
+                Some(ListValue::from_iter([3]).as_scalar_ref())
             );
             assert_eq!(
                 col1.value_at(1),
-                Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(4.to_scalar_value())]),
-                })
+                Some(ListValue::from_iter([4]).as_scalar_ref())
             );
         }
         let res = stream.next().await;

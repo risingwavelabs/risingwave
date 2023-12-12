@@ -21,7 +21,8 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
 use tracing::warn;
 
-use crate::sink::{Result, SinkError, SinkParam, SinkWriter};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkError, SinkParam};
 
 pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     epoch: u64,

@@ -16,23 +16,19 @@ normal = ["workspace-hack"]
 
 [dependencies]
 await-tree = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
 console = "0.15"
-console-subscriber = "0.1.10"
+console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
 opentelemetry-otlp = { version = "0.13" }
 opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
-pprof = { version = "0.12", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
+pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
+thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

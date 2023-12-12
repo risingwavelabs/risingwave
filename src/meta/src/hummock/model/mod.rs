@@ -15,22 +15,16 @@
 mod compact_task_assignment;
 mod compaction_group_config;
 mod compaction_status;
+pub mod ext;
 mod pinned_snapshot;
 mod pinned_version;
-mod version;
 mod version_delta;
 mod version_stats;
 
 pub use compaction_group_config::CompactionGroup;
-pub use compaction_status::*;
-pub use pinned_snapshot::*;
-pub use pinned_version::*;
-pub use version::*;
-pub use version_delta::*;
 
 /// Column family names for hummock.
 /// Deprecated `cf_name` should be reserved for backward compatibility.
-const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_0";
 const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_1";
 const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_2";
 const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_3";

@@ -17,5 +17,7 @@ header:
     - "**/*.d.ts"
     - "src/sqlparser/**/*.rs"
     - "java/connector-node/risingwave-source-cdc/src/main/java/com/risingwave/connector/cdc/debezium/internal/*.java"
+    - "src/meta/model_v2/migration/**/*.rs"
+    - "lints/ui/**"
 
   comment: on-failure

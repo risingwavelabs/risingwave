@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -120,7 +121,7 @@ impl ActorBuilder {
     /// During this process, the following things will be done:
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
     /// compute nodes.
-    /// 2. Fill the upstream mview info of the `Merge` node under the `Chain` node.
+    /// 2. Fill the upstream mview info of the `Merge` node under the `StreamScan` node.
     fn rewrite(&self) -> MetaResult<StreamNode> {
         self.rewrite_inner(&self.nodes, 0)
     }
@@ -157,8 +158,8 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `Chain`.
-            NodeBody::Chain(chain_node) => {
+            // "Leaf" node `StreamScan`.
+            NodeBody::StreamScan(stream_scan) => {
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
 
@@ -169,16 +170,17 @@ impl ActorBuilder {
 
                 // Index the upstreams by the an external edge ID.
                 let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
-                    upstream_table_id: chain_node.table_id.into(),
+                    upstream_table_id: stream_scan.table_id.into(),
                     downstream_fragment_id: self.fragment_id,
                 }];
 
+                // FIXME(kwannoel): This may not hold for Arrangement Backfill.
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                let chain_input = vec![
+                let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(MergeNode {
@@ -193,7 +195,51 @@ impl ActorBuilder {
                 ];
 
                 Ok(StreamNode {
-                    input: chain_input,
+                    input,
+                    ..stream_node.clone()
+                })
+            }
+
+            // "Leaf" node `CdcFilter` used in multi-table cdc backfill plan:
+            // cdc_filter -> backfill -> mview
+            NodeBody::CdcFilter(node) => {
+                let input = stream_node.get_input();
+                assert_eq!(input.len(), 1);
+
+                let merge_node = &input[0];
+                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+
+                let upstream_source_id = node.upstream_source_id;
+                tracing::debug!(
+                    "rewrite leaf cdc filter node: upstream source id {}",
+                    upstream_source_id,
+                );
+
+                // Index the upstreams by the an external edge ID.
+                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
+                    upstream_table_id: upstream_source_id.into(),
+                    downstream_fragment_id: self.fragment_id,
+                }];
+
+                // Upstream Cdc Source should be singleton.
+                let upstream_actor_id = upstreams.actors.as_global_ids();
+                assert_eq!(upstream_actor_id.len(), 1);
+
+                // rewrite the input of `CdcFilter`
+                let input = vec![
+                    // Fill the merge node body with correct upstream info.
+                    StreamNode {
+                        node_body: Some(NodeBody::Merge(MergeNode {
+                            upstream_actor_id,
+                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            fields: merge_node.fields.clone(),
+                        })),
+                        ..merge_node.clone()
+                    },
+                ];
+                Ok(StreamNode {
+                    input,
                     ..stream_node.clone()
                 })
             }
@@ -214,7 +260,7 @@ impl ActorBuilder {
     }
 
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
         let rewritten_nodes = self.rewrite()?;
 
         // TODO: store each upstream separately
@@ -237,6 +283,7 @@ impl ActorBuilder {
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition,
+            expr_context: Some(expr_context),
         })
     }
 }
@@ -659,6 +706,7 @@ impl ActorGraphBuilder {
         self,
         id_gen_manager: IdGeneratorManagerRef,
         job: &StreamingJob,
+        expr_context: ExprContext,
     ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
@@ -697,7 +745,7 @@ impl ActorGraphBuilder {
             // and `Chain` are rewritten.
             for builder in actor_builders.into_values() {
                 let fragment_id = builder.fragment_id();
-                let actor = builder.build(job)?;
+                let actor = builder.build(job, expr_context.clone())?;
                 actors.entry(fragment_id).or_default().push(actor);
             }
 

@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
@@ -66,16 +67,15 @@ impl HummockServiceOpts {
             }
             Err(_) => {
                 const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
+                    For `./risedev d` use cases, please do the following.
+                    * start the cluster with shared storage:
+                    - consider adding `use: minio` in the risedev config,
+                    - or directly use `./risedev d for-ctl` to start the cluster.
+                    * use `./risedev ctl` to use risectl.
 
-For `./risedev d` use cases, please do the following.
-* start the cluster with shared storage:
-  - consider adding `use: minio` in the risedev config,
-  - or directly use `./risedev d for-ctl` to start the cluster.
-* use `./risedev ctl` to use risectl.
-
-For `./risedev apply-compose-deploy` users,
-* `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
-";
+                    For `./risedev apply-compose-deploy` users,
+                    * `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+                ";
                 bail!(MESSAGE);
             }
         };
@@ -152,10 +152,11 @@ For `./risedev apply-compose-deploy` users,
     }
 
     pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
-        let object_store = parse_remote_object_store(
+        let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
+            ObjectStoreConfig::default(),
         )
         .await;
 
@@ -167,8 +168,10 @@ For `./risedev apply-compose-deploy` users,
             opts.block_cache_capacity_mb * (1 << 20),
             opts.meta_cache_capacity_mb * (1 << 20),
             0,
+            opts.block_cache_capacity_mb * (1 << 20),
             FileCache::none(),
             FileCache::none(),
+            None,
         )))
     }
 }

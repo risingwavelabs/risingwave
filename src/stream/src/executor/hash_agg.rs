@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -22,12 +22,14 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use risingwave_common::estimate_size::collections::hashmap::EstimatedHashMap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
@@ -45,14 +47,21 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
+use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
-type AggGroupCache<K, S> = ManagedLruCache<K, AggGroup<S>, PrecomputedBuildHasher>;
+type BoxedAggGroup<S> = Box<AggGroup<S>>;
+
+impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_size()
+    }
+}
+
+type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -72,10 +81,13 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 struct ExecutorInner<K: HashKey, S: StateStore> {
     _phantom: PhantomData<K>,
 
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
     input_pk_indices: Vec<usize>,
 
     /// Schema from input.
@@ -120,10 +132,11 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 
+    /// The maximum heap size of dirty groups. If exceeds, the executor should flush dirty groups.
+    max_dirty_groups_heap_size: usize,
+
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
-
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
@@ -140,11 +153,8 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
     agg_group_cache: AggGroupCache<K, S>,
 
-    /// Changed group keys in the current epoch (before next flush).
-    group_change_set: HashSet<K>,
-
-    /// Heap size of `group_change_set` and dirty [`AggGroup`]s in `agg_group_cache`.
-    dirty_groups_heap_size: KvSize,
+    /// Changed [`AggGroup`]s in the current epoch (before next flush).
+    dirty_groups: EstimatedHashMap<K, BoxedAggGroup<S>>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
@@ -204,11 +214,6 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(
-            args.input.as_ref(),
-            &args.agg_calls,
-            Some(&args.extra.group_key_indices),
-        );
 
         let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
@@ -224,12 +229,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input: args.input,
             inner: ExecutorInner {
                 _phantom: PhantomData,
+                version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("HashAggExecutor {:X}", args.executor_id),
-                },
+                info: args.info,
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
@@ -243,8 +245,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
+                max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                metrics: args.metrics,
             },
         })
     }
@@ -274,53 +276,71 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .collect()
     }
 
-    async fn ensure_keys_in_cache(
+    /// Touch the [`AggGroup`]s for the given keys, which means move them from cache to the `dirty_groups` map.
+    /// If the [`AggGroup`] doesn't exist in the cache before, it will be created or recovered from state table.
+    async fn touch_agg_groups(
         this: &ExecutorInner<K, S>,
-        cache: &mut AggGroupCache<K, S>,
+        vars: &mut ExecutionVars<K, S>,
         keys: impl IntoIterator<Item = &K>,
-        stats: &mut ExecutionStats,
     ) -> StreamExecutorResult<()> {
         let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
         let futs = keys
             .into_iter()
             .filter_map(|key| {
-                stats.total_lookup_count += 1;
-                if cache.contains(key) {
-                    None
-                } else {
-                    stats.lookup_miss_count += 1;
-                    Some(async {
-                        // Create `AggGroup` for the current group if not exists. This will
-                        // restore agg states from the intermediate state table.
-                        let agg_group = AggGroup::create(
-                            Some(GroupKey::new(
-                                key.deserialize(group_key_types)?,
-                                Some(this.group_key_table_pk_projection.clone()),
-                            )),
-                            &this.agg_calls,
-                            &this.agg_funcs,
-                            &this.storages,
-                            &this.intermediate_state_table,
-                            &this.input_pk_indices,
-                            this.row_count_index,
-                            this.extreme_cache_size,
-                            &this.input_schema,
-                        )
-                        .await?;
-                        Ok::<_, StreamExecutorError>((key.clone(), agg_group))
-                    })
+                vars.stats.total_lookup_count += 1;
+                if vars.dirty_groups.contains_key(key) {
+                    // already dirty
+                    return None;
+                }
+                match vars.agg_group_cache.get_mut(key) {
+                    Some(mut agg_group) => {
+                        let agg_group: &mut Option<_> = &mut agg_group;
+                        assert!(
+                            agg_group.is_some(),
+                            "invalid state: AggGroup is None in cache but not dirty"
+                        );
+                        // move from cache to `dirty_groups`
+                        vars.dirty_groups
+                            .insert(key.clone(), agg_group.take().unwrap());
+                        None // no need to create
+                    }
+                    None => {
+                        vars.stats.lookup_miss_count += 1;
+                        Some(async {
+                            // Create `AggGroup` for the current group if not exists. This will
+                            // restore agg states from the intermediate state table.
+                            let agg_group = AggGroup::create(
+                                this.version,
+                                Some(GroupKey::new(
+                                    key.deserialize(group_key_types)?,
+                                    Some(this.group_key_table_pk_projection.clone()),
+                                )),
+                                &this.agg_calls,
+                                &this.agg_funcs,
+                                &this.storages,
+                                &this.intermediate_state_table,
+                                &this.input_pk_indices,
+                                this.row_count_index,
+                                this.extreme_cache_size,
+                                &this.input_schema,
+                            )
+                            .await?;
+                            Ok::<_, StreamExecutorError>((key.clone(), Box::new(agg_group)))
+                        })
+                    }
                 }
             })
             .collect_vec(); // collect is necessary to avoid lifetime issue of `agg_group_cache`
 
-        stats.chunk_total_lookup_count += 1;
+        vars.stats.chunk_total_lookup_count += 1;
         if !futs.is_empty() {
             // If not all the required states/keys are in the cache, it's a chunk-level cache miss.
-            stats.chunk_lookup_miss_count += 1;
+            vars.stats.chunk_lookup_miss_count += 1;
             let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, agg_group) = result?;
-                cache.put(key, agg_group);
+                let none = vars.dirty_groups.insert(key, agg_group);
+                debug_assert!(none.is_none());
             }
         }
         Ok(())
@@ -335,20 +355,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
         let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
 
-        // Create `AggGroup` for each group if not exists.
-        Self::ensure_keys_in_cache(
-            this,
-            &mut vars.agg_group_cache,
-            group_visibilities.iter().map(|(k, _)| k),
-            &mut vars.stats,
-        )
-        .await?;
+        // Ensure all `AggGroup`s are in `dirty_groups`.
+        Self::touch_agg_groups(this, vars, group_visibilities.iter().map(|(k, _)| k)).await?;
 
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let agg_call_filter_res = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
@@ -358,7 +371,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq_fast(&mut this.storages)
             .zip_eq_fast(call_visibilities.iter())
         {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
+                && !call.distinct
+            {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
@@ -366,15 +381,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
-
-            // Mark the group as changed.
-            let key_size = key.estimated_size();
-            let old_group_size = if vars.group_change_set.insert(key) {
-                None
-            } else {
-                Some(agg_group.estimated_size())
-            };
+            let agg_group: &mut BoxedAggGroup<_> = &mut vars.dirty_groups.get_mut(&key).unwrap();
 
             let visibilities = call_visibilities
                 .iter()
@@ -388,99 +395,49 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
-                    this.actor_ctx.clone(),
                 )
                 .await?;
             for ((call, storage), visibility) in (this.agg_calls.iter())
                 .zip_eq_fast(&mut this.storages)
                 .zip_eq_fast(visibilities.iter())
             {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage && call.distinct {
-                    let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
+                if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
+                    && call.distinct
+                {
+                    let chunk =
+                        chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                     table.write_chunk(chunk);
                 }
             }
             agg_group
                 .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
                 .await?;
-
-            // Update the metrics.
-            let actor_id_str = this.actor_ctx.id.to_string();
-            let table_id_str = this.intermediate_state_table.table_id().to_string();
-            let metric_dirty_count = this
-                .metrics
-                .agg_dirty_group_count
-                .with_label_values(&[&table_id_str, &actor_id_str]);
-            let metric_dirty_heap_size = this
-                .metrics
-                .agg_dirty_group_heap_size
-                .with_label_values(&[&table_id_str, &actor_id_str]);
-            let new_group_size = agg_group.estimated_size();
-            if let Some(old_group_size) = old_group_size {
-                match new_group_size.cmp(&old_group_size) {
-                    std::cmp::Ordering::Greater => {
-                        let inc_size = new_group_size - old_group_size;
-                        vars.dirty_groups_heap_size.add_size(inc_size);
-                        metric_dirty_heap_size.add(inc_size as i64);
-                    }
-                    std::cmp::Ordering::Less => {
-                        let dec_size = old_group_size - new_group_size;
-                        vars.dirty_groups_heap_size.sub_size(dec_size);
-                        metric_dirty_heap_size.sub(dec_size as i64);
-                    }
-                    std::cmp::Ordering::Equal => {}
-                }
-            } else {
-                let inc_size = key_size * 2 + new_group_size;
-                vars.dirty_groups_heap_size.add_size(inc_size);
-                metric_dirty_heap_size.add(inc_size as i64);
-                metric_dirty_count.set(vars.group_change_set.len() as i64);
-            }
         }
+
+        // Update the metrics.
+        let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
+        let table_id_str = this.intermediate_state_table.table_id().to_string();
+        this.actor_ctx
+            .streaming_metrics
+            .agg_dirty_groups_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(vars.dirty_groups.len() as i64);
+        this.actor_ctx
+            .streaming_metrics
+            .agg_dirty_groups_heap_size
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(vars.dirty_groups.estimated_heap_size() as i64);
 
         Ok(())
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn flush_data<'a>(
-        this: &'a mut ExecutorInner<K, S>,
-        vars: &'a mut ExecutionVars<K, S>,
-        epoch: EpochPair,
-    ) {
-        // Update metrics.
-        let actor_id_str = this.actor_ctx.id.to_string();
-        let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.metrics
-            .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.lookup_miss_count);
-        vars.stats.lookup_miss_count = 0;
-        this.metrics
-            .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.total_lookup_count);
-        vars.stats.total_lookup_count = 0;
-        this.metrics
-            .agg_cached_keys
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(vars.agg_group_cache.len() as i64);
-        this.metrics
-            .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.chunk_lookup_miss_count);
-        vars.stats.chunk_lookup_miss_count = 0;
-        this.metrics
-            .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.chunk_total_lookup_count);
-        vars.stats.chunk_total_lookup_count = 0;
-
+    async fn flush_data<'a>(this: &'a mut ExecutorInner<K, S>, vars: &'a mut ExecutionVars<K, S>) {
         let window_watermark = vars.window_watermark.take();
-        let n_dirty_group = vars.group_change_set.len();
 
         // flush changed states into intermediate state table
-        for key in &vars.group_change_set {
-            let agg_group = vars.agg_group_cache.get_mut(key).unwrap();
+        for agg_group in vars.dirty_groups.values() {
             let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
             if this.emit_on_window_close {
                 vars.buffer
@@ -508,6 +465,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
                     let mut agg_group = AggGroup::create_eowc(
+                        this.version,
                         Some(GroupKey::new(
                             group_key,
                             Some(this.group_key_table_pk_projection.clone()),
@@ -535,8 +493,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // emit on update
             // TODO(wrj,rc): we may need to parallelize it and set a reasonable concurrency limit.
-            for group_key in &vars.group_change_set {
-                let mut agg_group = vars.agg_group_cache.get_mut(group_key).unwrap();
+            for mut agg_group in vars.dirty_groups.values_mut() {
+                let agg_group = agg_group.as_mut();
                 let change = agg_group
                     .build_change(&this.storages, &this.agg_funcs)
                     .await?;
@@ -548,48 +506,79 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
         }
 
-        // clear the change set
-        vars.group_change_set.clear();
-        vars.dirty_groups_heap_size.set(0);
-        this.metrics
-            .agg_dirty_group_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(0);
-        this.metrics
-            .agg_dirty_group_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(0);
+        // move dirty groups back to cache
+        for (key, agg_group) in vars.dirty_groups.drain() {
+            vars.agg_group_cache.put(key, Some(agg_group));
+        }
 
         // Yield the remaining rows in chunk builder.
         if let Some(chunk) = vars.chunk_builder.take() {
             yield chunk;
         }
 
-        if n_dirty_group == 0 && window_watermark.is_none() {
-            // Nothing is expected to be changed.
-            this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
-            });
-        } else {
-            if let Some(watermark) = window_watermark {
-                // Update watermark of state tables, for state cleaning.
-                this.all_state_tables_mut()
-                    .for_each(|table| table.update_watermark(watermark.clone(), false));
-            }
-            // Commit all state tables.
-            futures::future::try_join_all(
-                this.all_state_tables_mut()
-                    .map(|table| async { table.commit(epoch).await }),
-            )
-            .await?;
+        if let Some(watermark) = window_watermark {
+            // Update watermark of state tables, for state cleaning.
+            this.all_state_tables_mut()
+                .for_each(|table| table.update_watermark(watermark.clone(), false));
         }
 
         // Flush distinct dedup state.
-        vars.distinct_dedup
-            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
+        vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
+    }
+
+    fn update_metrics(this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
+        let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
+        let table_id_str = this.intermediate_state_table.table_id().to_string();
+        this.actor_ctx
+            .streaming_metrics
+            .agg_lookup_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
+        this.actor_ctx
+            .streaming_metrics
+            .agg_total_lookup_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
+        this.actor_ctx
+            .streaming_metrics
+            .agg_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(vars.agg_group_cache.len() as i64);
+        this.actor_ctx
+            .streaming_metrics
+            .agg_chunk_lookup_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
+        this.actor_ctx
+            .streaming_metrics
+            .agg_chunk_total_lookup_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
+    }
+
+    async fn commit_state_tables(
+        this: &mut ExecutorInner<K, S>,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| async { table.commit(epoch).await }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn try_flush_data(this: &mut ExecutorInner<K, S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| async { table.try_flush().await }),
+        )
+        .await?;
+        Ok(())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -603,7 +592,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
 
         let agg_group_cache_metrics_info = MetricsInfo::new(
-            this.metrics.clone(),
+            this.actor_ctx.streaming_metrics.clone(),
             this.intermediate_state_table.table_id(),
             this.actor_ctx.id,
             "agg intermediate state table",
@@ -616,14 +605,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_group_cache_metrics_info,
                 PrecomputedBuildHasher,
             ),
-            group_change_set: HashSet::new(),
-            dirty_groups_heap_size: KvSize::default(),
+            dirty_groups: Default::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
-                &this.watermark_epoch,
+                this.watermark_epoch.clone(),
                 &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
+                this.actor_ctx.clone(),
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
@@ -656,7 +643,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
-            vars.agg_group_cache.evict_except_cur_epoch();
+            vars.agg_group_cache.evict();
             match msg {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
@@ -670,12 +657,25 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+
+                    if vars.dirty_groups.estimated_heap_size() >= this.max_dirty_groups_heap_size {
+                        // flush dirty groups if heap size is too large, to better prevent from OOM
+                        #[for_await]
+                        for chunk in Self::flush_data(&mut this, &mut vars) {
+                            yield Message::Chunk(chunk?);
+                        }
+                    }
+
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
+                    Self::update_metrics(&this, &mut vars);
+
                     #[for_await]
-                    for chunk in Self::flush_data(&mut this, &mut vars, barrier.epoch) {
+                    for chunk in Self::flush_data(&mut this, &mut vars) {
                         yield Message::Chunk(chunk?);
                     }
+                    Self::commit_state_tables(&mut this, barrier.epoch).await?;
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns

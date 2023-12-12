@@ -15,10 +15,14 @@
 #![feature(lint_reasons)]
 #![feature(let_chains)]
 
+use std::vec;
+
+use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::{Error, Result};
+use syn::{Error, ItemFn, Result};
 
+mod context;
 mod gen;
 mod parse;
 mod types;
@@ -154,7 +158,7 @@ mod utils;
 ///
 /// ```ignore
 /// #[function(
-///     "unnest(list) -> setof any",
+///     "unnest(anyarray) -> setof any",
 ///     type_infer = "|args| Ok(args[0].unnest_list())"
 /// )]
 /// ```
@@ -172,7 +176,7 @@ mod utils;
 /// For instance:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: ListRef<'_>, n: i32) -> ListValue {...}
 /// ```
 ///
@@ -182,7 +186,7 @@ mod utils;
 /// to be considered, the `Option` type can be used:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
@@ -368,12 +372,12 @@ mod utils;
 /// | name        | SQL type           | owned type    | reference type     | primitive? |
 /// | ----------- | ------------------ | ------------- | ------------------ | ---------- |
 /// | boolean     | `boolean`          | `bool`        | `bool`             | yes        |
-/// | int16       | `smallint`         | `i16`         | `i16`              | yes        |
-/// | int32       | `integer`          | `i32`         | `i32`              | yes        |
-/// | int64       | `bigint`           | `i64`         | `i64`              | yes        |
+/// | int2        | `smallint`         | `i16`         | `i16`              | yes        |
+/// | int4        | `integer`          | `i32`         | `i32`              | yes        |
+/// | int8        | `bigint`           | `i64`         | `i64`              | yes        |
 /// | int256      | `rw_int256`        | `Int256`      | `Int256Ref<'_>`    | no         |
-/// | float32     | `real`             | `F32`         | `F32`              | yes        |
-/// | float64     | `double precision` | `F64`         | `F64`              | yes        |
+/// | float4      | `real`             | `F32`         | `F32`              | yes        |
+/// | float8      | `double precision` | `F64`         | `F64`              | yes        |
 /// | decimal     | `numeric`          | `Decimal`     | `Decimal`          | yes        |
 /// | serial      | `serial`           | `Serial`      | `Serial`           | yes        |
 /// | date        | `date`             | `Date`        | `Date`             | yes        |
@@ -390,7 +394,7 @@ mod utils;
 ///
 /// | name                   | SQL type             | owned type    | reference type     |
 /// | ---------------------- | -------------------- | ------------- | ------------------ |
-/// | list                   | `any[]`              | `ListValue`   | `ListRef<'_>`      |
+/// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
 /// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
@@ -495,10 +499,14 @@ struct FunctionAttr {
     prebuild: Option<String>,
     /// Type inference function.
     type_infer: Option<String>,
+    /// Generic type.
+    generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
-    /// Whether the function is deprecated.
+    /// If true, the function is unavailable on the frontend.
     deprecated: bool,
+    /// If true, the function is not implemented on the backend, but its signature is defined.
+    rewritten: bool,
 }
 
 /// Attributes from function signature `fn(..)`
@@ -510,12 +518,14 @@ struct UserFunctionAttr {
     async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
-    /// The last argument type is `&mut dyn Write`.
+    /// Whether contains argument `&mut impl Write`.
     write: bool,
-    /// The last argument type is `retract: bool`.
+    /// Whether the last argument type is `retract: bool`.
     retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
+    /// If the first argument type is `&mut T`, then `Some(T)`.
+    first_mut_ref_arg: Option<String>,
     /// The return type kind.
     return_type_kind: ReturnTypeKind,
     /// The kind of inner type `T` in `impl Iterator<Item = T>`
@@ -536,6 +546,7 @@ struct AggregateImpl {
     #[allow(dead_code)] // TODO(wrj): add merge to trait
     merge: Option<UserFunctionAttr>,
     finalize: Option<UserFunctionAttr>,
+    create_state: Option<UserFunctionAttr>,
     #[allow(dead_code)] // TODO(wrj): support encode
     encode_state: Option<UserFunctionAttr>,
     #[allow(dead_code)] // TODO(wrj): support decode
@@ -586,7 +597,7 @@ impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
-            .replace("[]", "list")
+            .replace("[]", "array")
             .replace("...", "variadic")
             .replace(['<', '>', ' ', ','], "_")
             .replace("__", "_")
@@ -601,5 +612,36 @@ impl UserFunctionAttr {
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T
+    }
+}
+
+/// Define the context variables which can be used by risingwave expressions.
+#[proc_macro]
+pub fn define_context(def: TokenStream) -> TokenStream {
+    fn inner(def: TokenStream) -> Result<TokenStream2> {
+        let attr: DefineContextAttr = syn::parse(def)?;
+        attr.gen()
+    }
+
+    match inner(def) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Capture the context from the local context to the function impl.
+/// TODO: The macro will be merged to [`#[function(.., capture_context(..))]`](macro@function) later.
+///
+/// Currently, we should use the macro separately with a simple wrapper.
+#[proc_macro_attribute]
+pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let attr: CaptureContextAttr = syn::parse(attr)?;
+        let user_fn: ItemFn = syn::parse(item)?;
+        generate_captured_function(attr, user_fn)
+    }
+    match inner(attr, item) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
     }
 }

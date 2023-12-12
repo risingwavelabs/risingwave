@@ -54,12 +54,15 @@
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
+        <module>connector-node/risingwave-sink-mock-flink</module>
     </modules>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <release.version>1.0.0</release.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <protobuf.version>3.21.1</protobuf.version>
         <grpc.version>1.53.0</grpc.version>
         <gson.version>2.10</gson.version>
@@ -73,8 +76,9 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
-        <elasticsearch.version>7.17.10</elasticsearch.version>
+        <elasticsearch.version>7.17.14</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
+        <flink.version>1.18.0</flink.version>
     </properties>
 
     <dependencyManagement>
@@ -258,6 +262,21 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-cassandra</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-sink-mock-flink-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

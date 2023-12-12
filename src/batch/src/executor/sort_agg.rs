@@ -18,12 +18,12 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -106,7 +106,7 @@ impl Executor for SortAggExecutor {
 }
 
 impl SortAggExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
         let mut agg_states = self.aggs.iter().map(|agg| agg.create_state()).collect_vec();

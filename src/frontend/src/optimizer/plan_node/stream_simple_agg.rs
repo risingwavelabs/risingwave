@@ -18,26 +18,28 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSimpleAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Agg<PlanRef>,
 
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
 }
 
 impl StreamSimpleAgg {
-    pub fn new(logical: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
-        assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
+    pub fn new(core: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
+        assert_eq!(core.agg_calls[row_count_idx], PlanAggCall::count_star());
 
-        let input = logical.input.clone();
+        let input = core.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::Single => Distribution::Single,
@@ -45,20 +47,19 @@ impl StreamSimpleAgg {
         };
 
         // Empty because watermark column(s) must be in group key and simple agg have no group key.
-        let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
+        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base =
-            PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
         StreamSimpleAgg {
             base,
-            logical,
+            core,
             row_count_idx,
         }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 }
 
@@ -67,19 +68,19 @@ impl Distill for StreamSimpleAgg {
         let name = plan_node_name!("StreamSimpleAgg",
             { "append_only", self.input().append_only() },
         );
-        childless_record(name, self.logical.fields_pretty())
+        childless_record(name, self.core.fields_pretty())
     }
 }
 
 impl PlanTreeNodeUnary for StreamSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let logical = generic::Agg {
             input,
-            ..self.logical.clone()
+            ..self.core.clone()
         };
         Self::new(logical, self.row_count_idx)
     }
@@ -90,7 +91,7 @@ impl StreamNode for StreamSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
-            self.logical.infer_tables(&self.base, None, None);
+            self.core.infer_tables(&self.base, None, None);
 
         PbNodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: self
@@ -100,7 +101,7 @@ impl StreamNode for StreamSimpleAgg {
                 .collect(),
             distribution_key: self
                 .base
-                .dist
+                .distribution()
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)
@@ -128,6 +129,7 @@ impl StreamNode for StreamSimpleAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
+            version: PbAggNodeVersion::Issue13465 as _,
         })
     }
 }
@@ -138,8 +140,14 @@ impl ExprRewritable for StreamSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.row_count_idx).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.row_count_idx).into()
+    }
+}
+
+impl ExprVisitable for StreamSimpleAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

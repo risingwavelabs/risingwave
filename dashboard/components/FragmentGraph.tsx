@@ -117,7 +117,7 @@ export default function FragmentGraph({
         extraInfo: string
       }
     >()
-    const includedActorIds = new Set<string>()
+    const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
         dx: nodeMarginX,
@@ -137,7 +137,7 @@ export default function FragmentGraph({
         height,
         extraInfo: `Actor ${fragmentRoot.data.actor_ids?.join(", ")}` || "",
       })
-      fragmentRoot.data.actor_ids?.forEach((id) => includedActorIds.add(id))
+      includedFragmentIds.add(fragmentId)
     }
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
@@ -169,7 +169,7 @@ export default function FragmentGraph({
       svgWidth,
       svgHeight,
       links,
-      includedActorIds,
+      includedFragmentIds,
     }
   }, [planNodeDependencies, fragmentDependency])
 
@@ -189,7 +189,7 @@ export default function FragmentGraph({
     links,
     fragmentLayout: fragmentDependencyDag,
     layoutResult: planNodeDependencyDag,
-    includedActorIds,
+    includedFragmentIds,
   } = planNodeDependencyDagCallback()
 
   useEffect(() => {
@@ -257,7 +257,7 @@ export default function FragmentGraph({
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
-            isSelected(id) ? theme.colors.teal[500] : theme.colors.gray[500]
+            isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
           )
 
         // Actor links
@@ -315,7 +315,7 @@ export default function FragmentGraph({
           }
 
           circle
-            .attr("fill", theme.colors.teal[500])
+            .attr("fill", theme.colors.blue[500])
             .attr("r", nodeRadius)
             .style("cursor", "pointer")
             .on("click", (_d: any, i: any) => openPlanNodeDetail(i))
@@ -388,7 +388,7 @@ export default function FragmentGraph({
           )
           .attr("stroke", (d: any) =>
             isSelected(d.source) || isSelected(d.target)
-              ? theme.colors.teal["500"]
+              ? theme.colors.blue["500"]
               : theme.colors.gray["300"]
           )
       const createEdge = (sel: any) =>
@@ -434,7 +434,7 @@ export default function FragmentGraph({
         <g className="actor-links" />
         <g className="actors" />
       </svg>
-      <BackPressureTable selectedActorIds={includedActorIds} />
+      <BackPressureTable selectedFragmentIds={includedFragmentIds} />
     </Fragment>
   )
 }

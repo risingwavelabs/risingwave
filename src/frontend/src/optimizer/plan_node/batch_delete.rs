@@ -16,46 +16,46 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
-    pub base: PlanBase,
-    pub logical: generic::Delete<PlanRef>,
+    pub base: PlanBase<Batch>,
+    pub core: generic::Delete<PlanRef>,
 }
 
 impl BatchDelete {
-    pub fn new(logical: generic::Delete<PlanRef>) -> Self {
-        assert_eq!(logical.input.distribution(), &Distribution::Single);
-        let base: PlanBase = PlanBase::new_batch_from_logical(
-            &logical,
-            logical.input.distribution().clone(),
-            Order::any(),
-        );
-        Self { base, logical }
+    pub fn new(core: generic::Delete<PlanRef>) -> Self {
+        assert_eq!(core.input.distribution(), &Distribution::Single);
+        let base =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
+        Self { base, core }
     }
 }
 
 impl PlanTreeNodeUnary for BatchDelete {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut core = self.logical.clone();
+        let mut core = self.core.clone();
         core.input = input;
         Self::new(core)
     }
 }
 
 impl_plan_tree_node_for_unary! { BatchDelete }
-impl_distill_by_unit!(BatchDelete, logical, "BatchDelete");
+impl_distill_by_unit!(BatchDelete, core, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -68,9 +68,9 @@ impl ToDistributedBatch for BatchDelete {
 impl ToBatchPb for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
-            table_id: self.logical.table_id.table_id(),
-            table_version_id: self.logical.table_version_id,
-            returning: self.logical.returning,
+            table_id: self.core.table_id.table_id(),
+            table_version_id: self.core.table_version_id,
+            returning: self.core.returning,
         })
     }
 }
@@ -84,3 +84,5 @@ impl ToLocalBatch for BatchDelete {
 }
 
 impl ExprRewritable for BatchDelete {}
+
+impl ExprVisitable for BatchDelete {}

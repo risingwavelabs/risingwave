@@ -16,15 +16,17 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-byteorder = "1.4"
+auto_enums = { version = "0.8", features = ["tokio1"] }
+byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.11"
-openssl = "0.10.57"
+itertools = "0.12"
+openssl = "0.10.60"
 panic-message = "0.3"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
@@ -33,6 +35,7 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio-postgres = "0.7"
 
 [lints]

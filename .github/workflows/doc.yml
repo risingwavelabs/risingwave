@@ -14,6 +14,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+          root-reserve-mb: 10240
+          temp-reserve-mb: 10240
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: rustup show
@@ -30,6 +40,8 @@ jobs:
 
           mkdir artifact
           cp -R target/doc/* artifact
+      - name: Show available storage
+        run: df -h
       - name: Install cargo-docset
         uses: taiki-e/install-action@v2
         with:
@@ -49,7 +61,8 @@ jobs:
         uses: actions/upload-pages-artifact@v1
         with:
           path: artifact
-
+      - name: Show available storage
+        run: df -h
   deploy:
     needs: build
     permissions:

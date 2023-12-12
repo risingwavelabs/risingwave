@@ -19,10 +19,11 @@ use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -33,7 +34,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substi
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Project<PlanRef>,
 }
 
@@ -180,6 +181,12 @@ impl ExprRewritable for LogicalProject {
     }
 }
 
+impl ExprVisitable for LogicalProject {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalProject {
     fn predicate_pushdown(
         &self,
@@ -264,7 +271,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.logical_pk();
+        let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
@@ -284,7 +291,7 @@ impl ToStream for LogicalProject {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
+        let out_col_change = ColIndexMapping::new(map, proj.base.schema().len());
         Ok((proj.into(), out_col_change))
     }
 }

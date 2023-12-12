@@ -18,25 +18,14 @@ public class StreamChunkIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public StreamChunkIterator(byte[] streamChunkPayload) {
-        this.pointer = Binding.streamChunkIteratorNew(streamChunkPayload);
-        this.isClosed = false;
-    }
-
-    /**
-     * This method generate the StreamChunkIterator
-     *
-     * @param str A string that represent table format, content and operation. Example:"I I\n + 199
-     *     40"
-     */
-    public StreamChunkIterator(String str) {
-        this.pointer = Binding.streamChunkIteratorFromPretty(str);
+    public StreamChunkIterator(StreamChunk chunk) {
+        this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
         this.isClosed = false;
     }
 
     public StreamChunkRow next() {
-        long pointer = Binding.streamChunkIteratorNext(this.pointer);
-        if (pointer == 0) {
+        boolean hasNext = Binding.iteratorNext(this.pointer);
+        if (!hasNext) {
             return null;
         }
         return new StreamChunkRow(pointer);
@@ -46,7 +35,7 @@ public class StreamChunkIterator implements AutoCloseable {
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.streamChunkIteratorClose(pointer);
+            Binding.iteratorClose(pointer);
         }
     }
 }

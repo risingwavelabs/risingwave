@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
+use std::ops::Bound::{self, *};
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
@@ -282,8 +282,9 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let iter = state_table
-        .iter_row_with_pk_prefix(&pk_prefix, Default::default())
+        .iter_with_prefix(&pk_prefix, sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -414,7 +415,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -439,7 +440,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -576,9 +577,12 @@ async fn test_state_table_iter_with_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -633,7 +637,10 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -737,9 +744,12 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -815,7 +825,10 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1000,9 +1013,9 @@ async fn test_state_table_write_chunk() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1114,9 +1127,9 @@ async fn test_state_table_write_chunk_visibility() {
         StreamChunk::with_visibility(ops, columns, Bitmap::from_iter([true, true, true, false]));
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1226,9 +1239,9 @@ async fn test_state_table_write_chunk_value_indices() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1508,9 +1521,9 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let chunk = StreamChunk::from_rows(&rows, &data_types);
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1795,9 +1808,9 @@ async fn test_state_table_watermark_cache_refill() {
     for row in &rows {
         state_table.insert(row);
     }
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1895,7 +1908,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     );
 
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range1, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range1, Default::default())
         .await
         .unwrap();
 
@@ -1933,7 +1946,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range2, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range2, Default::default())
         .await
         .unwrap();
 
@@ -1971,7 +1984,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range3, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range3, Default::default())
         .await
         .unwrap();
 

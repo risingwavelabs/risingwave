@@ -13,8 +13,8 @@
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     values(must_be_unimplemented_func(1));
-  binder_error: |-
-    Bind error: failed to bind expression: must_be_unimplemented_func(1)
+  binder_error: |
+    Failed to bind expression: must_be_unimplemented_func(1)
 
     Caused by:
       Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
@@ -73,8 +73,8 @@
 - name: in-list with misaligned types
   sql: |
     SELECT true in (3, 1.0, 2);
-  binder_error: |-
-    Bind error: failed to bind expression: true IN (3, 1.0, 2)
+  binder_error: |
+    Failed to bind expression: true IN (3, 1.0, 2)
 
     Caused by:
       Bind error: types Boolean and Int32 cannot be matched
@@ -139,12 +139,11 @@
   batch_plan: 'BatchValues { rows: [[42:Decimal]] }'
 - sql: |
     values(round(true));
-  binder_error: |-
-    Bind error: failed to bind expression: round(true)
+  binder_error: |
+    Failed to bind expression: round(true)
 
     Caused by:
-      Feature is not yet implemented: Round[Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function round(boolean) does not exist
 - sql: |
     -- Single quoted literal can be treated as number without error.
     values(round('123'));
@@ -160,12 +159,11 @@
   batch_plan: 'BatchValues { rows: [[false:Boolean]] }'
 - sql: |
     values(1 not like 1.23);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 NOT LIKE 1.23
+  binder_error: |
+    Failed to bind expression: 1 NOT LIKE 1.23
 
     Caused by:
-      Feature is not yet implemented: Like[Int32, Decimal]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function like(integer, numeric) does not exist
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: 'BatchValues { rows: [[4:Int32]] }'
@@ -204,8 +202,8 @@
   sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (CASE WHEN v1 = 1 THEN 1 WHEN v1 = 2 THEN 2 ELSE true END)
+  binder_error: |
+    Failed to bind expression: (CASE WHEN v1 = 1 THEN 1 WHEN v1 = 2 THEN 2 ELSE true END)
 
     Caused by:
       Bind error: types Int32 and Boolean cannot be matched
@@ -213,12 +211,11 @@
   sql: |
     create table t (v1 int);
     select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END)
+  binder_error: |
+    Failed to bind expression: (CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END)
 
     Caused by:
-      Feature is not yet implemented: Equal[Int32, Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function equal(integer, boolean) does not exist
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1) as expr from t;
@@ -233,20 +230,19 @@
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: nullif(v1, 1, 2)
+  binder_error: |
+    Failed to bind expression: nullif(v1, 1, 2)
 
     Caused by:
       Bind error: Function `nullif` must contain 2 arguments
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: nullif(v1, true)
+  binder_error: |
+    Failed to bind expression: nullif(v1, true)
 
     Caused by:
-      Feature is not yet implemented: Equal[Int32, Boolean]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function equal(integer, boolean) does not exist
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1) as expr from t;
@@ -268,16 +264,16 @@
 - sql: |
     create table t (v1 int);
     select coalesce() from t;
-  binder_error: |-
-    Bind error: failed to bind expression: coalesce()
+  binder_error: |
+    Failed to bind expression: coalesce()
 
     Caused by:
       Bind error: Function `coalesce` takes at least 1 arguments (0 given)
 - sql: |
     create table t (v1 int);
     select coalesce(1,true) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: coalesce(1, true)
+  binder_error: |
+    Failed to bind expression: coalesce(1, true)
 
     Caused by:
       Bind error: types Int32 and Boolean cannot be matched
@@ -302,16 +298,16 @@
 - sql: |
     create table t (v1 int);
     select concat_ws(v1, 1.2) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: concat_ws(v1, 1.2)
+  binder_error: |
+    Failed to bind expression: concat_ws(v1, 1.2)
 
     Caused by:
-      Bind error: cannot cast type "integer" to "varchar" in Implicit context
+      Bind error: cannot cast type "integer" to "character varying" in Implicit context
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
-  binder_error: |-
-    Bind error: failed to bind expression: concat_ws()
+  binder_error: |
+    Failed to bind expression: concat_ws()
 
     Caused by:
       Bind error: Function `concat_ws` takes at least 2 arguments (0 given)
@@ -336,8 +332,8 @@
 - sql: |
     create table t (v1 int);
     select concat() from t;
-  binder_error: |-
-    Bind error: failed to bind expression: concat()
+  binder_error: |
+    Failed to bind expression: concat()
 
     Caused by:
       Bind error: Function `concat` takes at least 1 arguments (0 given)
@@ -370,8 +366,8 @@
   batch_plan: 'BatchValues { rows: [[''integer[][]'':Varchar]] }'
 - sql: |
     select 1 = SOME(1);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 = SOME(1)
+  binder_error: |
+    Failed to bind expression: 1 = SOME(1)
 
     Caused by:
       Bind error: op SOME/ANY/ALL (array) requires array on right side
@@ -393,7 +389,7 @@
 - sql: |
     select 1 < ALL('{2,3}');
   logical_plan: |-
-    LogicalProject { exprs: [All((1:Int32 < '{2,3}':Varchar::List(Int32))) as $expr1] }
+    LogicalProject { exprs: [All((1:Int32 < ARRAY[2, 3]:List(Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(null::integer[]);
@@ -402,32 +398,31 @@
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(null::varchar[]);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 < SOME(CAST(NULL AS CHARACTER VARYING[]))
+  binder_error: |
+    Failed to bind expression: 1 < SOME(CAST(NULL AS CHARACTER VARYING[]))
 
     Caused by:
-      Feature is not yet implemented: LessThan[Int32, Varchar]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function less_than(integer, character varying) does not exist
 - sql: |
     select 1 < SOME(null::date);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 < SOME(CAST(NULL AS DATE))
+  binder_error: |
+    Failed to bind expression: 1 < SOME(CAST(NULL AS DATE))
 
     Caused by:
       Bind error: op SOME/ANY/ALL (array) requires array on right side
 - name: array/struct on left not supported yet 5808
   sql: |
     select array[1] < SOME(null);
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[1] < SOME(NULL)
+  binder_error: |
+    Failed to bind expression: ARRAY[1] < SOME(NULL)
 
     Caused by:
       Bind error: array/struct on left are not supported yet
 - name: array of array/struct on right not supported yet 5808
   sql: |
     select null < SOME(array[array[1]]);
-  binder_error: |-
-    Bind error: failed to bind expression: NULL < SOME(ARRAY[ARRAY[1]])
+  binder_error: |
+    Failed to bind expression: NULL < SOME(ARRAY[ARRAY[1]])
 
     Caused by:
       Bind error: array of array/struct on right are not supported yet
@@ -450,7 +445,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -473,7 +468,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -523,7 +518,7 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
+  stream_error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.
 - name: now inside HAVING clause
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -542,8 +537,8 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) as sum_v2 from t group by v1 >= now();
-  stream_error: |-
-    Bind error: failed to bind expression: v1 >= now()
+  stream_error: |
+    Failed to bind expression: v1 >= now()
 
     Caused by:
       Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
@@ -551,8 +546,8 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select now() as n, * from t where v1 >= now();
-  stream_error: |-
-    Bind error: failed to bind expression: now()
+  stream_error: |
+    Failed to bind expression: now()
 
     Caused by:
       Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
@@ -560,16 +555,16 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
-  stream_error: |-
-    Bind error: failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
+  stream_error: |
+    Failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
 
     Caused by:
       Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: typo pg_teminate_backend
   sql: |
     select pg_teminate_backend(1);
-  binder_error: |-
-    Bind error: failed to bind expression: pg_teminate_backend(1)
+  binder_error: |
+    Failed to bind expression: pg_teminate_backend(1)
 
     Caused by:
       Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
@@ -594,13 +589,17 @@
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: const_eval of division by 0 error
   sql: select 1 / 0 t1;
-  batch_error: 'Expr error: Division by zero'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Division by zero
 - sql: |
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
   stream_plan: |-
     StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
+    └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     select * from range(1,2);
   batch_plan: |-

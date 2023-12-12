@@ -24,7 +24,7 @@ use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
-use crate::WithOptions;
+use crate::utils::{OverwriteOptions, WithOptions};
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -33,7 +33,7 @@ pub struct OptimizerContext {
     /// Store plan node id
     next_plan_node_id: RefCell<i32>,
     /// The original SQL string, used for debugging.
-    sql: String,
+    sql: Arc<str>,
     /// Normalized SQL string. See [`HandlerArgs::normalize_sql`].
     normalized_sql: String,
     /// Explain options
@@ -50,15 +50,11 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
-}
-
-// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
-impl Drop for OptimizerContext {
-    fn drop(&mut self) {
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            self.warn_to_user(warning);
-        };
-    }
+    /// Total number of optimization rules have been applied.
+    total_rule_applied: RefCell<usize>,
+    /// Store the configs can be overwritten in with clause
+    /// if not specified, use the value from session variable.
+    overwrite_options: OverwriteOptions,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -71,10 +67,11 @@ impl OptimizerContext {
     }
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
-    pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+    pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
-            handler_args.session.config().get_timezone().to_owned(),
+            handler_args.session.config().timezone().to_owned(),
         ));
+        let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {
             session_ctx: handler_args.session,
             next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
@@ -87,6 +84,8 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+            total_rule_applied: RefCell::new(0),
+            overwrite_options,
         }
     }
 
@@ -97,7 +96,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_plan_node_id: RefCell::new(0),
-            sql: "".to_owned(),
+            sql: Arc::from(""),
             normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
@@ -106,6 +105,8 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
+            total_rule_applied: RefCell::new(0),
+            overwrite_options: OverwriteOptions::default(),
         }
         .into()
     }
@@ -139,6 +140,14 @@ impl OptimizerContext {
     pub fn next_correlated_id(&self) -> CorrelatedId {
         *self.next_correlated_id.borrow_mut() += 1;
         *self.next_correlated_id.borrow()
+    }
+
+    pub fn add_rule_applied(&self, num: usize) {
+        *self.total_rule_applied.borrow_mut() += num;
+    }
+
+    pub fn total_rule_applied(&self) -> usize {
+        *self.total_rule_applied.borrow()
     }
 
     pub fn is_explain_verbose(&self) -> bool {
@@ -187,6 +196,10 @@ impl OptimizerContext {
 
     pub fn with_options(&self) -> &WithOptions {
         &self.with_options
+    }
+
+    pub fn overwrite_options(&self) -> &OverwriteOptions {
+        &self.overwrite_options
     }
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {

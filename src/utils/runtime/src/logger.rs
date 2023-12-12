@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
+use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -27,29 +28,6 @@ use tracing_subscriber::{filter, EnvFilter};
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
-
-/// Configure log targets for some `RisingWave` crates.
-///
-/// Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
-/// the `debug_assertions` and `is_ci` flag).
-fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
-    targets
-        // force a lower level for important logs
-        .with_target("risingwave_stream", Level::DEBUG)
-        .with_target("risingwave_storage", Level::DEBUG)
-        // force a higher level for noisy logs
-        .with_target("risingwave_sqlparser", Level::INFO)
-        .with_target("pgwire", Level::INFO)
-        .with_target(PGWIRE_QUERY_LOG, Level::OFF)
-        // force a higher level for foyer logs
-        .with_target("foyer", Level::WARN)
-        .with_target("foyer_common", Level::WARN)
-        .with_target("foyer_intrusive", Level::WARN)
-        .with_target("foyer_memory", Level::WARN)
-        .with_target("foyer_storage", Level::WARN)
-        // disable events that are too verbose
-        .with_target("events", Level::ERROR)
-}
 
 pub struct LoggerSettings {
     /// The name of the service.
@@ -122,9 +100,12 @@ impl LoggerSettings {
 /// Overrides default level and tracing targets of the fmt layer (formatting and
 /// logging to `stdout` or `stderr`).
 ///
+/// Note that only verbosity levels below or equal to `DEBUG` are effective in
+/// release builds.
+///
 /// e.g.,
 /// ```bash
-/// RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"
+/// RUST_LOG="info,risingwave_stream=debug,events=debug"
 /// ```
 ///
 /// ### `RW_QUERY_LOG_PATH`
@@ -150,7 +131,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
-        println!("failed to get local time offset: {e}, falling back to UTC");
+        println!(
+            "failed to get local time offset, falling back to UTC: {}",
+            e.as_report()
+        );
         OffsetTime::new(
             time::UtcOffset::UTC,
             time::format_description::well_known::Rfc3339,
@@ -159,7 +143,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Default filter for logging to stdout and tracing.
     let default_filter = {
-        let mut filter = filter::Targets::new()
+        let mut filter = filter::Targets::new();
+
+        // Configure levels for some RisingWave crates.
+        // Other RisingWave crates like `stream` and `storage` will follow the default level.
+        filter = filter
+            .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("pgwire", Level::INFO)
+            .with_target(PGWIRE_QUERY_LOG, Level::OFF)
+            // debug-purposed events are disabled unless `RUST_LOG` overrides
+            .with_target("events", Level::OFF);
+
+        // Configure levels for external crates.
+        filter = filter
+            .with_target("foyer", Level::WARN)
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
@@ -175,10 +172,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("reqwest", Level::WARN)
             .with_target("sled", Level::INFO);
 
-        filter = configure_risingwave_targets_fmt(filter);
-
-        // For all other crates
-        filter = filter.with_default(match Deployment::current() {
+        // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
+        let default_level = match deployment {
             Deployment::Ci => Level::INFO,
             _ => {
                 if cfg!(debug_assertions) {
@@ -187,22 +182,25 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     Level::INFO
                 }
             }
-        });
+        };
+        filter = filter.with_default(default_level);
 
-        // Overrides from settings
+        // Overrides from settings.
         filter = filter.with_targets(settings.targets);
         if let Some(default_level) = settings.default_level {
             filter = filter.with_default(default_level);
         }
 
-        // Overrides from env var
-        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
-          let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
-          if let Some(default_level) = rust_log_targets.default_level() {
-              filter = filter.with_default(default_level);
-          }
-          filter = filter.with_targets(rust_log_targets)
-      };
+        // Overrides from env var.
+        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV)
+            && !rust_log.is_empty()
+        {
+            let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
+            if let Some(default_level) = rust_log_targets.default_level() {
+                filter = filter.with_default(default_level);
+            }
+            filter = filter.with_targets(rust_log_targets)
+        };
 
         filter
     };
@@ -244,8 +242,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let query_log_path = PathBuf::from(query_log_path);
         std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
-                "failed to create directory '{}' for query log: {e}",
-                query_log_path.display()
+                "failed to create directory '{}' for query log: {}",
+                query_log_path.display(),
+                e.as_report(),
             )
         });
         let file = std::fs::OpenOptions::new()
@@ -255,8 +254,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .open(query_log_path.join("query.log"))
             .unwrap_or_else(|e| {
                 panic!(
-                    "failed to create '{}/query.log': {e}",
-                    query_log_path.display()
+                    "failed to create '{}/query.log': {}",
+                    query_log_path.display(),
+                    e.as_report(),
                 )
             });
         let layer = tracing_subscriber::fmt::layer()
@@ -278,8 +278,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .open(query_log_path.join("slow_query.log"))
             .unwrap_or_else(|e| {
                 panic!(
-                    "failed to create '{}/slow_query.log': {e}",
-                    query_log_path.display()
+                    "failed to create '{}/slow_query.log': {}",
+                    query_log_path.display(),
+                    e.as_report(),
                 )
             });
         let layer = tracing_subscriber::fmt::layer()

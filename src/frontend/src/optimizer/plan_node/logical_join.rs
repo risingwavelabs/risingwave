@@ -19,19 +19,19 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
@@ -50,13 +50,13 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 
 impl Distill for LogicalJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.join_type())));
 
@@ -184,58 +184,8 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
-    pub fn output_indices_is_trivial(&self) -> bool {
+    pub fn output_indices_are_trivial(&self) -> bool {
         self.output_indices() == &(0..self.internal_column_num()).collect_vec()
-    }
-
-    /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
-    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
-    ///
-    /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    pub fn push_down(
-        predicate: &mut Condition,
-        left_col_num: usize,
-        right_col_num: usize,
-        push_left: bool,
-        push_right: bool,
-        push_on: bool,
-    ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
-
-        let (mut left, right, mut others) =
-            Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        if !push_left {
-            others.conjunctions.extend(left);
-            left = Condition::true_cond();
-        };
-
-        let right = if push_right {
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            );
-            right.rewrite_expr(&mut mapping)
-        } else {
-            others.conjunctions.extend(right);
-            Condition::true_cond()
-        };
-
-        let on = if push_on {
-            // Do not push now on to the on, it will be pulled up into a filter instead.
-            Condition {
-                conjunctions: others
-                    .conjunctions
-                    .extract_if(|expr| expr.count_nows() == 0)
-                    .collect(),
-            }
-        } else {
-            Condition::true_cond()
-        };
-
-        predicate.conjunctions = others.conjunctions;
-
-        (left, right, on)
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join
@@ -519,8 +469,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -643,6 +592,12 @@ impl ExprRewritable for LogicalJoin {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 
@@ -788,12 +743,24 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+        let push_down_temporal_predicate = !self.should_be_temporal_join();
+
+        let (left_from_filter, right_from_filter, on) = push_down_into_join(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+        let (left_from_on, right_from_on) = push_down_join_condition(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            join_type,
+            push_down_temporal_predicate,
+        );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
@@ -867,6 +834,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -977,7 +946,10 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
             return result_plan;
         }
         let indexes = logical_scan.indexes();
@@ -1010,6 +982,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
 
         let right = self.right();
@@ -1158,7 +1132,7 @@ impl LogicalJoin {
             .collect_vec();
         // Use UpstreamOnly chain type
         let new_stream_table_scan =
-            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
@@ -1180,6 +1154,8 @@ impl LogicalJoin {
         predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
+        use super::stream::prelude::*;
+
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -1297,7 +1273,8 @@ impl ToBatch for LogicalJoin {
         logical_join.left = logical_join.left.to_batch()?;
         logical_join.right = logical_join.right.to_batch()?;
 
-        let config = self.base.ctx.session_ctx().config();
+        let ctx = self.base.ctx();
+        let config = ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
@@ -1306,7 +1283,7 @@ impl ToBatch for LogicalJoin {
                 ))
                 .into());
             }
-            if config.get_batch_enable_lookup_join() {
+            if config.batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),
@@ -1395,14 +1372,14 @@ impl ToStream for LogicalJoin {
 
         // Add missing pk indices to the logical join
         let mut left_to_add = left
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
             .collect_vec();
 
         let mut right_to_add = right
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)
@@ -1464,13 +1441,13 @@ impl ToStream for LogicalJoin {
                 .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
-                .logical_pk()
+                .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
                 .chain(
                     join_with_pk
                         .right()
-                        .logical_pk()
+                        .expect_stream_key()
                         .iter()
                         .map(|i| r2o.map(*i)),
                 )
@@ -2001,7 +1978,7 @@ mod tests {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -2015,7 +1992,7 @@ mod tests {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };

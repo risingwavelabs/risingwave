@@ -14,7 +14,7 @@
 
 use std::io::{Cursor, Read};
 
-use anyhow::anyhow;
+use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
 use risingwave_pb::data::{PbArray, PbArrayType};
@@ -52,9 +52,7 @@ impl ArrayImpl {
             PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
             PbArrayType::Timestamptz => read_timestamptz_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
-            PbArrayType::Jsonb => {
-                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
-            }
+            PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
             PbArrayType::Unspecified => unreachable!(),
@@ -114,32 +112,35 @@ fn read_bool_array(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl
 }
 
 fn read_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
-    match cursor.read_i32::<BigEndian>() {
-        Ok(days) => Date::with_days(days).map_err(|e| anyhow!(e).into()),
-        Err(e) => bail!("Failed to read i32 from Date buffer: {}", e),
-    }
+    let days = cursor
+        .read_i32::<BigEndian>()
+        .context("failed to read i32 from Date buffer")?;
+
+    Ok(Date::with_days(days)?)
 }
 
 fn read_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
-    match cursor.read_u64::<BigEndian>() {
-        Ok(t) => Time::with_nano(t).map_err(|e| anyhow!(e).into()),
-        Err(e) => bail!("Failed to read i64 from Time buffer: {}", e),
-    }
+    let nano = cursor
+        .read_u64::<BigEndian>()
+        .context("failed to read u64 from Time buffer")?;
+
+    Ok(Time::with_nano(nano)?)
 }
 
 fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-    cursor
+    let micros = cursor
         .read_i64::<BigEndian>()
-        .map_err(|e| anyhow!("Failed to read i64 from Timestamp buffer: {}", e))
-        .and_then(|t| Timestamp::with_micros(t).map_err(|e| anyhow!("{}", e)))
-        .map_err(Into::into)
+        .context("failed to read i64 from Timestamp buffer")?;
+
+    Ok(Timestamp::with_micros(micros)?)
 }
 
 fn read_timestamptz(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamptz> {
-    match cursor.read_i64::<BigEndian>() {
-        Ok(t) => Timestamptz::from_protobuf(t),
-        Err(e) => bail!("Failed to read i64 from Timestamptz buffer: {}", e),
-    }
+    let micros = cursor
+        .read_i64::<BigEndian>()
+        .context("failed to read i64 from Timestamptz buffer")?;
+
+    Timestamptz::from_protobuf(micros)
 }
 
 fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
@@ -151,10 +152,7 @@ fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
         Ok::<_, std::io::Error>(Interval::from_month_day_usec(months, days, usecs))
     };
 
-    match read() {
-        Ok(iu) => Ok(iu),
-        Err(e) => bail!("Failed to read Interval from buffer: {}", e),
-    }
+    Ok(read().context("failed to read Interval from buffer")?)
 }
 
 macro_rules! read_one_value_array {
@@ -198,10 +196,11 @@ read_one_value_array! {
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
-    match offset_cursor.read_i64::<BigEndian>() {
-        Ok(offset) => Ok(offset),
-        Err(e) => bail!("failed to read i64 from offset buffer: {}", e),
-    }
+    let offset = offset_cursor
+        .read_i64::<BigEndian>()
+        .context("failed to read i64 from offset buffer")?;
+
+    Ok(offset)
 }
 
 fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
@@ -231,14 +230,14 @@ fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
             let length = (offset - prev_offset) as usize;
             prev_offset = offset;
             buf.resize(length, Default::default());
-            data_cursor.read_exact(buf.as_mut_slice()).map_err(|e| {
-                anyhow!(
-                    "failed to read str from data buffer: {} [length={}, offset={}]",
-                    e,
-                    length,
-                    offset
-                )
-            })?;
+            data_cursor
+                .read_exact(buf.as_mut_slice())
+                .with_context(|| {
+                    format!(
+                        "failed to read str from data buffer [length={}, offset={}]",
+                        length, offset
+                    )
+                })?;
             R::read(buf.as_slice(), &mut builder)?;
         } else {
             builder.append(None);
@@ -258,13 +257,12 @@ mod tests {
         DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
         TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
     };
-    use crate::error::Result;
     use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
     #[test]
-    fn test_column_protobuf_conversion() -> Result<()> {
+    fn test_column_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -285,11 +283,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_bool_column_protobuf_conversion() -> Result<()> {
+    fn test_bool_column_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -308,11 +305,10 @@ mod tests {
             1 => assert_eq!(Some(true), x),
             _ => assert_eq!(None, x),
         });
-        Ok(())
     }
 
     #[test]
-    fn test_utf8_column_conversion() -> Result<()> {
+    fn test_utf8_column_conversion() {
         let cardinality = 2048;
         let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -332,11 +328,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_decimal_protobuf_conversion() -> Result<()> {
+    fn test_decimal_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -357,11 +352,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_date_protobuf_conversion() -> Result<()> {
+    fn test_date_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -382,11 +376,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_time_protobuf_conversion() -> Result<()> {
+    fn test_time_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = TimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -412,11 +405,10 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 
     #[test]
-    fn test_timestamp_protobuf_conversion() -> Result<()> {
+    fn test_timestamp_protobuf_conversion() {
         let cardinality = 2048;
         let mut builder = TimestampArrayBuilder::new(cardinality);
         for i in 0..cardinality {
@@ -442,6 +434,5 @@ mod tests {
                 assert!(x.is_none());
             }
         });
-        Ok(())
     }
 }

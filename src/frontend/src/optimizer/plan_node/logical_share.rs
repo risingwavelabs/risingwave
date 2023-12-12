@@ -15,14 +15,15 @@
 use std::cell::RefCell;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::ErrorCode::NotImplemented;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
@@ -49,7 +50,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Share<PlanRef>,
 }
 
@@ -68,8 +69,8 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> XmlNode<'a> {
-        childless_record(name, vec![("id", Pretty::debug(&base.id.0))])
+    pub(super) fn pretty_fields(base: impl GenericPlanRef, name: &str) -> XmlNode<'_> {
+        childless_record(name, vec![("id", Pretty::debug(&base.id().0))])
     }
 }
 
@@ -114,6 +115,8 @@ impl ColPrunable for LogicalShare {
 
 impl ExprRewritable for LogicalShare {}
 
+impl ExprVisitable for LogicalShare {}
+
 impl PredicatePushdown for LogicalShare {
     fn predicate_pushdown(
         &self,
@@ -128,11 +131,7 @@ impl PredicatePushdown for LogicalShare {
 
 impl ToBatch for LogicalShare {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(NotImplemented(
-            "batch query doesn't support share operator for now".into(),
-            None.into(),
-        )
-        .into())
+        bail_not_implemented!("batch query doesn't support share operator for now");
     }
 }
 

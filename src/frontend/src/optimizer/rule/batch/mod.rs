@@ -13,3 +13,4 @@
 // limitations under the License.
 
 pub(crate) mod batch_project_merge_rule;
+pub mod batch_push_limit_to_scan_rule;

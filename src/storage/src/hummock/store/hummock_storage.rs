@@ -23,6 +23,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -34,7 +35,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::log::error;
 
-use super::local_hummock_storage::{HummockStorageIterator, LocalHummockStorage};
+use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader};
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
@@ -49,8 +50,8 @@ use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager,
-    SstableObjectIdManagerRef, SstableStoreRef,
+    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
+    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
@@ -81,6 +82,8 @@ pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
     context: CompactorContext,
+
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 
     sstable_object_id_manager: SstableObjectIdManagerRef,
 
@@ -153,15 +156,15 @@ impl HummockStorage {
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
+            options.max_version_pinning_duration_sec,
         ));
-
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager.clone(),
+        );
         let compactor_context = CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             compactor_metrics.clone(),
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                filter_key_extractor_manager.clone(),
-            ),
         );
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -171,6 +174,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            filter_key_extractor_manager.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
             CacheRefillConfig {
@@ -181,11 +185,14 @@ impl HummockStorage {
                     .copied()
                     .collect(),
                 concurrency: options.cache_refill_concurrency,
+                unit: options.cache_refill_unit,
+                threshold: options.cache_refill_threshold,
             },
         );
 
         let instance = Self {
             context: compactor_context,
+            filter_key_extractor_manager: filter_key_extractor_manager.clone(),
             sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
@@ -195,6 +202,7 @@ impl HummockStorage {
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
                 state_store_metrics.clone(),
+                options.max_preload_io_retry_times,
             ),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
@@ -336,6 +344,7 @@ impl HummockStorage {
             self.write_limiter.clone(),
             option,
             version_update_notifier_tx,
+            self.context.storage_opts.mem_table_spill_threshold,
         )
     }
 
@@ -348,7 +357,7 @@ impl HummockStorage {
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
-        &self.context.filter_key_extractor_manager
+        &self.filter_key_extractor_manager
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
@@ -395,7 +404,7 @@ impl StateStore for HummockStorage {
         self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
-                assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
+                assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
                 epoch
             }
             _ => return Ok(()),
@@ -458,10 +467,9 @@ impl StateStore for HummockStorage {
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
         if let HummockReadEpoch::Current(read_current_epoch) = epoch {
-            assert_ne!(
-                read_current_epoch,
-                HummockEpoch::MAX,
-                "epoch should not be u64::MAX"
+            assert!(
+                !is_max_epoch(read_current_epoch),
+                "epoch should not be MAX EPOCH"
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {

@@ -12,107 +12,85 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
-
 use risingwave_common::array::ArrayError;
 use risingwave_connector::error::ConnectorError;
+use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
-use crate::executor::StreamExecutorError;
+use crate::executor::{Barrier, StreamExecutorError};
+use crate::task::ActorId;
 
 /// A specialized Result type for streaming tasks.
 pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// The error type for streaming tasks.
-#[derive(thiserror::Error)]
-#[error("{inner}")]
-pub struct StreamError {
-    inner: Box<Inner>,
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{kind}")]
-struct Inner {
-    #[from]
-    kind: ErrorKind,
-    backtrace: Backtrace,
-}
-
-#[derive(thiserror::Error, Debug)]
-enum ErrorKind {
+#[derive(
+    thiserror::Error,
+    Debug,
+    thiserror_ext::Arc,
+    thiserror_ext::ContextInto,
+    thiserror_ext::Construct,
+)]
+#[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
+pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
     #[error("Expression error: {0}")]
-    Expression(#[source] ExprError),
+    Expression(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     #[error("Array/Chunk error: {0}")]
-    Array(#[source] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
-    #[error("Executor error: {0:?}")]
-    Executor(#[source] StreamExecutorError),
+    #[error("Executor error: {0}")]
+    Executor(
+        #[from]
+        #[backtrace]
+        StreamExecutorError,
+    ),
+
+    #[error("Sink error: {0}")]
+    Sink(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
+
+    #[error("Actor {actor_id} exited unexpectedly: {source}")]
+    UnexpectedExit {
+        actor_id: ActorId,
+        #[backtrace]
+        source: StreamError,
+    },
+
+    #[error("Failed to send barrier with epoch {epoch} to actor {actor_id}: {reason}", epoch = .barrier.epoch.curr)]
+    BarrierSend {
+        barrier: Barrier,
+        actor_id: ActorId,
+        reason: &'static str,
+    },
 
     #[error(transparent)]
-    Internal(anyhow::Error),
-}
-
-impl std::fmt::Debug for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
-        write!(f, "{}", self.inner.kind)?;
-        writeln!(f)?;
-        if let Some(backtrace) =
-            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
-        {
-            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
-        } else {
-            write!(f, "  backtrace of `StreamError`:\n{}", self.inner.backtrace)?;
-        }
-        Ok(())
-    }
-}
-
-impl From<ErrorKind> for StreamError {
-    fn from(kind: ErrorKind) -> Self {
-        Self {
-            inner: Box::new(kind.into()),
-        }
-    }
-}
-
-// Storage transaction error; ...
-impl From<StorageError> for StreamError {
-    fn from(s: StorageError) -> Self {
-        ErrorKind::Storage(s).into()
-    }
-}
-
-// Build expression error; ...
-impl From<ExprError> for StreamError {
-    fn from(error: ExprError) -> Self {
-        ErrorKind::Expression(error).into()
-    }
-}
-
-// Chunk compaction error; ProtoBuf ser/de error; ...
-impl From<ArrayError> for StreamError {
-    fn from(error: ArrayError) -> Self {
-        ErrorKind::Array(error).into()
-    }
-}
-
-// Executor runtime error; ...
-impl From<StreamExecutorError> for StreamError {
-    fn from(error: StreamExecutorError) -> Self {
-        ErrorKind::Executor(error).into()
-    }
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<PbFieldNotFound> for StreamError {
@@ -130,17 +108,9 @@ impl From<ConnectorError> for StreamError {
     }
 }
 
-// Internal error.
-impl From<anyhow::Error> for StreamError {
-    fn from(a: anyhow::Error) -> Self {
-        ErrorKind::Internal(a).into()
-    }
-}
-
 impl From<StreamError> for tonic::Status {
     fn from(error: StreamError) -> Self {
-        // Only encode the error message without the backtrace.
-        tonic::Status::internal(error.inner.to_string())
+        error.to_status(tonic::Code::Internal, "stream")
     }
 }
 

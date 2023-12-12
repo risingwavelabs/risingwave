@@ -20,7 +20,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::ColumnCatalog;
 
-pub(crate) fn gen_prost_table(
+pub fn gen_prost_table(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -38,13 +38,53 @@ pub(crate) fn gen_prost_table(
     )
 }
 
-pub(crate) fn gen_prost_table_with_value_indices(
+pub fn gen_prost_table_with_dist_key(
+    table_id: TableId,
+    column_descs: Vec<ColumnDesc>,
+    order_types: Vec<OrderType>,
+    pk_index: Vec<usize>,
+    read_prefix_len_hint: u32,
+    distribution_key: Vec<usize>,
+) -> PbTable {
+    let col_len = column_descs.len() as i32;
+    gen_prost_table_inner(
+        table_id,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+        (0..col_len).collect_vec(),
+        distribution_key,
+    )
+}
+
+pub fn gen_prost_table_with_value_indices(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
     pk_index: Vec<usize>,
     read_prefix_len_hint: u32,
     value_indices: Vec<i32>,
+) -> PbTable {
+    gen_prost_table_inner(
+        table_id,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+        value_indices,
+        Vec::default(),
+    )
+}
+
+pub fn gen_prost_table_inner(
+    table_id: TableId,
+    column_descs: Vec<ColumnDesc>,
+    order_types: Vec<OrderType>,
+    pk_index: Vec<usize>,
+    read_prefix_len_hint: u32,
+    value_indices: Vec<i32>,
+    distribution_key: Vec<usize>,
 ) -> PbTable {
     let prost_pk = pk_index
         .iter()
@@ -62,12 +102,15 @@ pub(crate) fn gen_prost_table_with_value_indices(
         })
         .collect();
 
+    let distribution_key = distribution_key.into_iter().map(|i| i as i32).collect_vec();
+
     PbTable {
         id: table_id.table_id(),
         columns: prost_columns,
         pk: prost_pk,
         read_prefix_len_hint,
         value_indices,
+        distribution_key,
         ..Default::default()
     }
 }

@@ -19,11 +19,12 @@ use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprRewriter, TableFunction};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -35,7 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the function returns a struct, it will be flattened into multiple columns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub table_function: TableFunction,
     pub with_ordinality: bool,
 }
@@ -64,7 +65,7 @@ impl LogicalTableFunction {
                 .push(Field::with_name(DataType::Int64, "ordinality"));
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
         Self {
             base,
             table_function,
@@ -108,6 +109,15 @@ impl ExprRewritable for LogicalTableFunction {
             .collect();
         new.base = self.base.clone_with_new_plan_id();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalTableFunction {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.table_function
+            .args
+            .iter()
+            .for_each(|e| v.visit_expr(e));
     }
 }
 

@@ -21,12 +21,11 @@ use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor, PkIndices};
+use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor};
 use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder<const APPEND_ONLY: bool>;
 
-#[async_trait::async_trait]
 impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEND_ONLY> {
     type Node = GroupTopNNode;
 
@@ -60,27 +59,17 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        if node.limit == 1 && !node.with_ties {
-            // When there is at most one record for each value of the group key, `params.pk_indices`
-            // is the group key instead of the input's stream key.
-            assert_eq!(
-                &params.pk_indices,
-                &node.group_key.iter().map(|idx| *idx as usize).collect_vec()
-            );
-        }
-
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
+            info: params.info,
             storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
             order_by,
-            executor_id: params.executor_id,
             group_by,
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
             group_key_types,
-            pk_indices: params.pk_indices,
 
             with_ties: node.with_ties,
             append_only: APPEND_ONLY,
@@ -92,15 +81,14 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
 struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     ctx: ActorContextRef,
+    info: ExecutorInfo,
     storage_key: Vec<ColumnOrder>,
     offset_and_limit: (usize, usize),
     order_by: Vec<ColumnOrder>,
-    executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
     group_key_types: Vec<DataType>,
-    pk_indices: PkIndices,
 
     with_ties: bool,
     append_only: bool,
@@ -115,14 +103,13 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 Ok($excutor::<K, S, $with_ties>::new(
                     self.input,
                     self.ctx,
+                    self.info,
                     self.storage_key,
                     self.offset_and_limit,
                     self.order_by,
-                    self.executor_id,
                     self.group_by,
                     self.state_table,
                     self.watermark_epoch,
-                    self.pk_indices,
                 )?
                 .boxed())
             };

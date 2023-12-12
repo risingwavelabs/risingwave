@@ -14,23 +14,27 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-#![feature(async_fn_in_trait)]
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(iter_from_generator)]
+#![feature(iter_from_coroutine)]
+#![feature(if_let_guard)]
+#![feature(iterator_try_collect)]
+#![feature(try_blocks)]
+#![feature(error_generic_member_access)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
 
 use std::time::Duration;
 
@@ -39,18 +43,21 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
-pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;
 
 pub mod parser;
+pub mod schema;
 pub mod sink;
 pub mod source;
 
 pub mod common;
 
 pub use paste::paste;
+
+#[cfg(test)]
+mod with_options_test;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
@@ -110,4 +117,23 @@ where
         de::Unexpected::Str(&s),
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect_file;
+
+    use crate::with_options_test::{
+        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+    };
+
+    /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-with-options` to update it if this
+    /// test fails.
+    #[test]
+    fn test_with_options_yaml_up_to_date() {
+        expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
+
+        expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+    }
 }

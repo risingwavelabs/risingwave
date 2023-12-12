@@ -15,11 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -36,7 +38,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Expand<PlanRef>,
 }
 
@@ -93,21 +95,34 @@ impl PlanTreeNodeUnary for LogicalExpand {
                     .collect_vec()
             })
             .collect_vec();
-        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
-        mapping.extend({
-            mapping
-                .iter()
-                .map(|p| p.map(|i| i + new_input_col_num))
-                .collect_vec()
-        });
-        mapping.push(Some(2 * new_input_col_num));
+
+        let old_out_len = self.schema().len();
+        let old_in_len = self.input().schema().len();
+        let new_in_len = input.schema().len();
+        assert_eq!(
+            old_out_len,
+            old_in_len * 2 + 1 // expanded input cols + real input cols + flag
+        );
+
+        let mut mapping = Vec::with_capacity(old_out_len);
+        // map the expanded input columns
+        for i in 0..old_in_len {
+            mapping.push(input_col_change.try_map(i));
+        }
+        // map the real input columns
+        for i in 0..old_in_len {
+            mapping.push(
+                input_col_change
+                    .try_map(i)
+                    .map(|x| x + new_in_len /* # of new expanded input cols */),
+            );
+        }
+        // map the flag column
+        mapping.push(Some(2 * new_in_len));
 
         let expand = Self::new(input, column_subsets);
         let output_col_num = expand.schema().len();
-        (
-            expand,
-            ColIndexMapping::with_target_size(mapping, output_col_num),
-        )
+        (expand, ColIndexMapping::new(mapping, output_col_num))
     }
 }
 
@@ -128,6 +143,8 @@ impl ColPrunable for LogicalExpand {
 }
 
 impl ExprRewritable for LogicalExpand {}
+
+impl ExprVisitable for LogicalExpand {}
 
 impl PredicatePushdown for LogicalExpand {
     fn predicate_pushdown(
@@ -192,7 +209,7 @@ mod tests {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
 
         let column_subsets = vec![vec![0, 1], vec![2]];
