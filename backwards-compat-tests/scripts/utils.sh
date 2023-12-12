@@ -135,7 +135,7 @@ get_old_version() {
    # in case some old cluster did not upgrade.
    if [[ -z $VERSION_OFFSET ]]
    then
-       local VERSION_OFFSET=4
+       local VERSION_OFFSET=1
    fi
 
    # First we obtain a list of versions from git branch names.
