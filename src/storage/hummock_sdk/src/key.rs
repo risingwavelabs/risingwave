@@ -510,6 +510,8 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     /// Encode in to a buffer.
+    ///
+    /// length prefixed requires 4B more than its `encoded_len()`
     pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
         buf.put_u32(self.table_id.table_id());
         buf.put_u32(self.table_key.as_ref().len() as u32);
