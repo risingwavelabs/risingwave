@@ -17,6 +17,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
+use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
@@ -74,7 +75,7 @@ impl Binder {
     ) -> Result<Literal> {
         let interval =
             Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))
-                .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+                .map_err(|e| ErrorCode::BindError(e.to_report_string()))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 

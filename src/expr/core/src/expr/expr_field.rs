@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -90,7 +90,7 @@ impl Build for FieldExpression {
             bail!("Expected Constant as 1st argument");
         };
         let index = Datum::from_protobuf(value, &DataType::Int32)
-            .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?
+            .context("Failed to deserialize i32")?
             .unwrap()
             .as_int32()
             .to_owned();

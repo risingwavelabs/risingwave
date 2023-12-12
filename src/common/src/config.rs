@@ -527,7 +527,7 @@ pub struct StorageConfig {
 
     /// max memory usage for large query
     #[serde(default)]
-    pub large_query_memory_usage_mb: Option<usize>,
+    pub prefetch_buffer_capacity_mb: Option<usize>,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
@@ -1491,7 +1491,7 @@ pub struct StorageMemoryConfig {
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
-    pub large_query_memory_usage_mb: usize,
+    pub prefetch_buffer_capacity_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
 
@@ -1518,7 +1518,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .high_priority_ratio_in_percent
         .unwrap_or(default::storage::high_priority_ratio_in_percent());
-    let large_query_memory_usage_mb = s
+    let prefetch_buffer_capacity_mb = s
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
@@ -1530,7 +1530,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
-        large_query_memory_usage_mb,
+        prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
     }
 }
