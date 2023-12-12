@@ -55,7 +55,7 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
-    pub actor_in_record_cnt: LabelGuardedIntCounterVec<2>,
+    pub actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
 
     // Source
@@ -352,7 +352,7 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
-            &["actor_id", "fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
