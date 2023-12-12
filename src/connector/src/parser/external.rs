@@ -19,7 +19,7 @@ use risingwave_common::types::{
     DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
-use tokio_postgres::types::{to_sql_checked, ToSql};
+
 
 use crate::source::cdc::external::ConnectorResult;
 

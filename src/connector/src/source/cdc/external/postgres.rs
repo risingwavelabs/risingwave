@@ -23,7 +23,7 @@ use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
 use serde_derive::{Deserialize, Serialize};
-use tokio_postgres::types::{BorrowToSql, PgLsn, ToSql};
+use tokio_postgres::types::{PgLsn};
 use tokio_postgres::NoTls;
 
 use crate::error::ConnectorError;
@@ -196,45 +196,26 @@ impl PostgresExternalTableReader {
             )
         };
 
-        println!("snapshot read sql: {}", sql);
-
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
-        match start_pk_row {
-            None => {
-                let params: Vec<String> = Vec::new();
-                let stream = client.query_raw(&sql, &params).await?;
-                let row_stream = stream.map(|row| {
-                    let row = row?;
-                    let datums = postgres_row_to_datums(row, &self.rw_schema)?;
-                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
-                });
+        let params: Vec<DatumRef<'_>> = match start_pk_row {
+            Some(ref pk_row) => pk_row.iter().map(|datum| datum).collect_vec(),
+            None => Vec::new(),
+        };
 
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let row = row?;
-                    yield row;
-                }
-            }
-            Some(pk_row) => {
-                let params = pk_row.iter().map(|datum| datum).collect_vec();
+        let stream = client.query_raw(&sql, &params).await?;
+        let row_stream = stream.map(|row| {
+            let row = row?;
+            let datums = postgres_row_to_datums(row, &self.rw_schema)?;
+            Ok::<_, ConnectorError>(OwnedRow::new(datums))
+        });
 
-                let stream = client.query_raw(&sql, &params).await?;
-                let row_stream = stream.map(|row| {
-                    let row = row?;
-                    let datums = postgres_row_to_datums(row, &self.rw_schema)?;
-                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
-                });
-
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let row = row?;
-                    yield row;
-                }
-            }
+        pin_mut!(row_stream);
+        #[for_await]
+        for row in row_stream {
+            let row = row?;
+            yield row;
         }
     }
 
@@ -273,6 +254,8 @@ mod tests {
         assert_eq!(expr, "(v1, v2, v3) > ($1, $2, $3)");
     }
 
+    // manual test
+    #[ignore]
     #[tokio::test]
     async fn test_pg_table_reader() {
         let columns = vec![

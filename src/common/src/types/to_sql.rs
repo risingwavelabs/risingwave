@@ -15,7 +15,7 @@
 use std::error::Error;
 
 use bytes::BytesMut;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{to_sql_checked, IsNull, ToSql, Type};
 
 use crate::types::ScalarRefImpl;
 
