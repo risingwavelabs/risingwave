@@ -96,21 +96,20 @@ restart_cn() {
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
   cargo make ci-start ci-backfill
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
 
   # Provide updates ...
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
 
   # ... and concurrently create mv.
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
 
-  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
 
   cargo make kill
   cargo make wait-processes-exit
@@ -146,7 +145,29 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
+  cargo make wait-processes-exit
   wait
+}
+
+test_replication_with_column_pruning() {
+  echo "--- e2e, test_replication_with_column_pruning"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
+
+  # Provide upstream updates
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
+
+  wait
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+  echo "--- Kill cluster"
+  cargo make kill
+  cargo make wait-processes-exit
 }
 
 # Test sink backfill recovery
@@ -184,6 +205,7 @@ main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
+  test_replication_with_column_pruning
   test_sink_backfill_recovery
 }
 
