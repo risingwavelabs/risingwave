@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -166,37 +166,7 @@ where
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
 
-        // If the snapshot is empty, we don't need to backfill.
-        // We cannot complete progress now, as we want to persist
-        // finished state to state store first.
-        // As such we will wait for next barrier.
-        let is_snapshot_empty: bool = {
-            if is_completely_finished {
-                // It is finished, so just assign a value to avoid accessing storage table again.
-                false
-            } else {
-                let snapshot_is_empty = {
-                    let snapshot = Self::snapshot_read_per_vnode(
-                        &upstream_table,
-                        backfill_state.clone(), // FIXME(kwannoel): use mutable reference instead.
-                        &mut builders,
-                    );
-                    pin_mut!(snapshot);
-                    let next = snapshot.try_next().await?;
-                    next.is_none()
-                };
-                let builder_is_empty = builders.iter().all(|b| b.is_empty());
-                builders.iter_mut().for_each(|b| b.clear());
-                snapshot_is_empty && builder_is_empty
-            }
-        };
-
-        // | backfill_is_finished | snapshot_empty | -> | need_to_backfill |
-        // | -------------------- | -------------- | -- | ---------------- |
-        // | t                    | t/f            | -> | f                |
-        // | f                    | t              | -> | f                |
-        // | f                    | f              | -> | t                |
-        let to_backfill = !is_completely_finished && !is_snapshot_empty;
+        let to_backfill = !is_completely_finished;
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
