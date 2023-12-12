@@ -518,7 +518,7 @@ steps:
 
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
-    command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
+    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
     if: |
       build.pull_request.labels includes "breaking-change" ||
         build.pull_request.labels includes "ci/run-backwards-compat-tests" ||
@@ -531,6 +531,21 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        # Test the 4 latest versions against the latest main.
+        # e.g.
+        # 1: 2.0.0
+        # 2: 1.1.1
+        # 3: 1.0.1
+        # 4: 1.0.0
+        # It is ordered by the full version number, rather than minor / major version.
+        # We can change to just be on major version in the future.
+        version_offset:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
     timeout_in_minutes: 25
 
   # Sqlsmith differential testing
