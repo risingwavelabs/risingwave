@@ -13,7 +13,7 @@ services:
                     --connector-rpc-endpoint 0.0.0.0:50051 \
                     --backend etcd \
                     --etcd-endpoints etcd-0:2388 \
-                    --state-store hummock+fs://<loacl-path> \
+                    --state-store hummock+fs://<local-path> \
                     --data-directory hummock_001 \
                     --config-path /risingwave.toml\" \
                  --compute-opts=\" \
