@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use anyhow::anyhow;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};

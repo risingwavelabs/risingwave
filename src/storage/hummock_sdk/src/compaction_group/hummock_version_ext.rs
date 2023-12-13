@@ -24,7 +24,7 @@ use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
     GroupTableChange, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
-    PbLevelType, SstableInfo,
+    PbLevelType, PbTableWatermarks, SstableInfo,
 };
 use tracing::warn;
 
@@ -32,6 +32,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
+use crate::table_watermark::PbTableWatermarksExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -187,6 +188,47 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
+    }
+
+    pub fn safe_epoch_table_watermarks(
+        &self,
+        existing_table_ids: &[u32],
+    ) -> BTreeMap<u32, PbTableWatermarks> {
+        fn extract_single_table_watermark(
+            table_watermarks: &PbTableWatermarks,
+            safe_epoch: u64,
+        ) -> Option<PbTableWatermarks> {
+            if let Some(first_epoch_watermark) = table_watermarks.epoch_watermarks.first() {
+                assert!(
+                    first_epoch_watermark.epoch >= safe_epoch,
+                    "smallest epoch {} in table watermark should be at least safe epoch {}",
+                    first_epoch_watermark.epoch,
+                    safe_epoch
+                );
+                if first_epoch_watermark.epoch == safe_epoch {
+                    Some(PbTableWatermarks {
+                        epoch_watermarks: vec![first_epoch_watermark.clone()],
+                        is_ascending: table_watermarks.is_ascending,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        self.table_watermarks
+            .iter()
+            .filter_map(|(table_id, table_watermarks)| {
+                let u32_table_id = *table_id as _;
+                if !existing_table_ids.contains(&u32_table_id) {
+                    None
+                } else {
+                    extract_single_table_watermark(table_watermarks, self.safe_epoch)
+                        .map(|table_watermarks| (*table_id, table_watermarks))
+                }
+            })
+            .collect()
     }
 }
 
@@ -530,7 +572,25 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.safe_epoch = version_delta.safe_epoch;
+        for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
+            match self.table_watermarks.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().apply_new_table_watermarks(table_watermarks);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(table_watermarks.clone());
+                }
+            }
+        }
+        if version_delta.safe_epoch != self.safe_epoch {
+            assert!(version_delta.safe_epoch > self.safe_epoch);
+            self.table_watermarks
+                .values_mut()
+                .for_each(|table_watermarks| {
+                    table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch)
+                });
+            self.safe_epoch = version_delta.safe_epoch;
+        }
         sst_split_info
     }
 
@@ -949,6 +1009,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
         gc_object_ids: vec![],
+        new_table_watermarks: HashMap::new(),
     }
 }
 
@@ -1197,6 +1258,7 @@ mod tests {
             )]),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1259,6 +1321,7 @@ mod tests {
             ]),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1341,6 +1404,7 @@ mod tests {
                 ]),
                 max_committed_epoch: 0,
                 safe_epoch: 0,
+                table_watermarks: HashMap::new(),
             }
         );
     }

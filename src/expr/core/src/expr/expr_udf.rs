@@ -25,6 +25,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
+use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -144,8 +145,7 @@ impl UdfExpression {
             );
         }
 
-        let data_chunk =
-            DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
+        let data_chunk = DataChunk::try_from(&output)?;
         let output = data_chunk.uncompact(vis.clone());
 
         let Some(array) = output.columns().first() else {
@@ -182,7 +182,7 @@ impl Build for UdfExpression {
                     Ok(Field::new(
                         "",
                         DataType::from(t).try_into().map_err(|e: ArrayError| {
-                            risingwave_udf::Error::unsupported(e.to_string())
+                            risingwave_udf::Error::unsupported(e.to_report_string())
                         })?,
                         true,
                     ))

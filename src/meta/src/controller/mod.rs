@@ -135,6 +135,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: None,
+            // TODO: fix it for model v2.
+            incoming_sinks: vec![],
         }
     }
 }
@@ -198,6 +200,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::from(value.0.job_status) as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
+            // todo: fix this for model v2
+            target_table: None,
         }
     }
 }

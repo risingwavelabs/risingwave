@@ -80,6 +80,8 @@ message AlterSourceResponse {
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
+  optional ReplaceTablePlan affected_table_change = 3;
 }
 
 message CreateSinkResponse {
@@ -91,6 +93,7 @@ message CreateSinkResponse {
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
+  optional ReplaceTablePlan affected_table_change = 3;
 }
 
 message DropSinkResponse {
@@ -280,7 +283,7 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
-message ReplaceTablePlanRequest {
+message ReplaceTablePlan {
   // The new table catalog, with the correct table ID and a new version.
   // If the new version does not match the subsequent version in the meta service's
   // catalog, this request will be rejected.
@@ -288,9 +291,14 @@ message ReplaceTablePlanRequest {
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
+  // If no column modifications occur (such as for sinking into table), this will be None.
   catalog.ColIndexMapping table_col_index_mapping = 3;
   // Source catalog of table's associated source
   catalog.Source source = 4;
+}
+
+message ReplaceTablePlanRequest {
+  ReplaceTablePlan plan = 1;
 }
 
 message ReplaceTablePlanResponse {

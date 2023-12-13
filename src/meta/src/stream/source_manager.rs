@@ -47,6 +47,8 @@ pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 
+/// `SourceManager` keeps fetching the latest split metadata from the external source services ([`ConnectorSourceWorker::tick`]),
+/// and sends a split assignment command if split changes detected ([`Self::tick`]).
 pub struct SourceManager {
     pub paused: Mutex<()>,
     env: MetaSrvEnv,
@@ -63,6 +65,8 @@ struct SharedSplitMap {
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
+/// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
+/// and maintains it in `current_splits`.
 struct ConnectorSourceWorker<P: SourceProperties> {
     source_id: SourceId,
     source_name: String,
@@ -84,6 +88,7 @@ fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> 
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
+    /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
     async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
@@ -163,6 +168,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         }
     }
 
+    /// Uses [`SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
             self.metrics
@@ -189,6 +195,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     }
 }
 
+/// Handle for a running [`ConnectorSourceWorker`].
 struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
@@ -691,6 +698,7 @@ impl SourceManager {
         Ok(())
     }
 
+    /// Used on startup. Failed sources will not block meta startup.
     fn create_source_worker_async(
         connector_client: Option<ConnectorClient>,
         source: Source,
@@ -699,14 +707,13 @@ impl SourceManager {
     ) -> MetaResult<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let current_splits_ref = splits.clone();
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_source(&source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
+        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -720,7 +727,7 @@ impl SourceManager {
                         &source,
                         prop.deref().clone(),
                         DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                        splits.clone(),
+                        current_splits_ref.clone(),
                         metrics.clone(),
                     )
                     .await
@@ -743,13 +750,14 @@ impl SourceManager {
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
-                splits: current_splits_ref,
+                splits,
                 enable_scale_in,
             },
         );
         Ok(())
     }
 
+    /// Used when registering new sources.
     async fn create_source_worker(
         connector_client: Option<ConnectorClient>,
         source: &Source,
@@ -757,7 +765,12 @@ impl SourceManager {
         force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
-        let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        tracing::info!("spawning new watcher for source {}", source.id);
+
+        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        let current_splits_ref = splits.clone();
+        let source_id = source.id;
+
         let connector_properties = extract_prop_from_source(source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -771,8 +784,6 @@ impl SourceManager {
                 metrics,
             )
             .await?;
-
-            tracing::info!("spawning new watcher for source {}", source.id);
 
             // don't force tick in process of recovery. One source down should not lead to meta
             // recovery failure.
@@ -796,11 +807,11 @@ impl SourceManager {
         });
 
         managed_sources.insert(
-            source.id,
+            source_id,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
-                splits: current_splits_ref,
+                splits,
                 enable_scale_in,
             },
         );
@@ -823,6 +834,8 @@ impl SourceManager {
         core.actor_splits.clone()
     }
 
+    /// Checks whether the external source metadata has changed, and sends a split assignment command
+    /// if it has.
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let core_guard = self.core.lock().await;

@@ -40,3 +40,19 @@
     WITH (connector = 'blackhole');
   expected_outputs:
     - explain_output
+- sql: |
+    CREATE table s1 (id int, value int, ts TIMESTAMP, WATERMARK FOR ts AS ts - INTERVAL '20' SECOND ) append only;
+    CREATE table s2 (id int, value int, ts TIMESTAMP, WATERMARK FOR ts AS ts - INTERVAL '20' SECOND) append only;
+    select *, count(*) over (partition by value2 order by ts2) from (
+      SELECT s1.id AS id1,
+      s1.value AS value1,
+      s2.id AS id2,
+      s2.value AS value2,
+      s1.ts as ts1,
+      s2.ts as ts2
+      FROM s1 JOIN s2
+      ON s1.id = s2.id and s1.ts >= s2.ts   and s1.ts - INTERVAL '1' MINUTE <= s2.ts
+    );
+  expected_outputs:
+    - eowc_stream_plan
+    - stream_plan

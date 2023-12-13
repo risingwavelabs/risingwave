@@ -17,6 +17,7 @@ use auto_impl::auto_impl;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use thiserror_ext::AsReport;
 
 use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
@@ -48,7 +49,7 @@ pub struct LogReport;
 
 impl EvalErrorReport for LogReport {
     fn report(&self, error: ExprError) {
-        tracing::error!(%error, "failed to evaluate expression");
+        tracing::error!(error=%error.as_report(), "failed to evaluate expression");
     }
 }
 
@@ -139,5 +140,9 @@ where
 
     fn eval_const(&self) -> Result<Datum> {
         self.inner.eval_const() // do not handle error
+    }
+
+    fn input_ref_index(&self) -> Option<usize> {
+        self.inner.input_ref_index()
     }
 }

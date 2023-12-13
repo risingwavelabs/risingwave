@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
@@ -27,6 +27,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn, Instrument};
@@ -165,7 +166,7 @@ impl QueryExecution {
 
                 let root_stage = root_stage_receiver
                     .await
-                    .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
+                    .context("Starting query execution failed")??;
 
                 tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -322,8 +323,10 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Failed { id, reason }) => {
                     error!(
-                        "Query stage {:?}-{:?} failed: {:?}.",
-                        self.query.query_id, id, reason
+                        error = %reason.as_report(),
+                        query_id = ?self.query.query_id,
+                        stage_id = ?id,
+                        "query stage failed"
                     );
 
                     self.clean_all_stages(Some(reason)).await;
@@ -400,7 +403,8 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
-        let error_msg = error.as_ref().map(|e| e.to_string());
+        // TODO(error-handling): should prefer use error types than strings.
+        let error_msg = error.as_ref().map(|e| e.to_report_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
             let root_stage_sender = mem::take(&mut self.root_stage_sender);
@@ -433,11 +437,13 @@ impl QueryRunner {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::collections::HashMap;
-    use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::{ColumnDesc, TableDesc};
+    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
+    };
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
@@ -448,6 +454,7 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
+    use crate::catalog::table_catalog::{CreateType, TableType};
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
@@ -464,6 +471,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
+    use crate::{TableCatalog, WithOptions};
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -510,25 +518,60 @@ pub(crate) mod tests {
         //
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
+        let table_catalog: TableCatalog = TableCatalog {
+            id: table_id,
+            associated_source_id: None,
+            name: "test".to_string(),
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    is_hidden: false,
+                },
+            ],
+            pk: vec![],
+            stream_key: vec![],
+            table_type: TableType::Table,
+            distribution_key: vec![],
+            append_only: false,
+            owner: DEFAULT_SUPER_USER_ID,
+            properties: WithOptions::new(
+                [(
+                    PROPERTIES_RETENTION_SECOND_KEY.into(),
+                    TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            fragment_id: 0,        // FIXME
+            dml_fragment_id: None, // FIXME
+            vnode_col_index: None,
+            row_id_index: None,
+            value_indices: vec![0, 1, 2],
+            definition: "".to_string(),
+            conflict_behavior: ConflictBehavior::NoCheck,
+            read_prefix_len_hint: 0,
+            version: None,
+            watermark_columns: FixedBitSet::with_capacity(3),
+            dist_key_in_pk: vec![],
+            cardinality: Cardinality::unknown(),
+            cleaned_by_watermark: false,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            create_type: CreateType::Foreground,
+            description: None,
+            incoming_sinks: vec![],
+        };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            Rc::new(TableDesc {
-                table_id,
-                stream_key: vec![],
-                pk: vec![],
-                columns: vec![
-                    ColumnDesc::new_atomic(DataType::Int32, "a", 0),
-                    ColumnDesc::new_atomic(DataType::Float64, "b", 1),
-                    ColumnDesc::new_atomic(DataType::Int64, "c", 2),
-                ],
-                distribution_key: vec![],
-                append_only: false,
-                retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1, 2],
-                read_prefix_len_hint: 0,
-                watermark_columns: FixedBitSet::with_capacity(3),
-                versioned: false,
-            }),
+            table_catalog.into(),
             vec![],
             ctx,
             false,

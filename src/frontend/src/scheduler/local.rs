@@ -164,7 +164,7 @@ impl LocalQueryExecution {
             }
         };
 
-        use risingwave_expr::captured_execution_context::TIME_ZONE;
+        use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
             AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH,

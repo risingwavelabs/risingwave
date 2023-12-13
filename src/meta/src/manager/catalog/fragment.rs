@@ -128,9 +128,11 @@ impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let table_fragments = TableFragments::list(env.meta_store()).await?;
 
+        // `expr_context` of `StreamActor` is introduced in 1.6.0.
+        // To ensure compatibility, we fill it for table fragments that were created with older versions.
         let table_fragments = table_fragments
             .into_iter()
-            .map(|tf| (tf.table_id(), tf))
+            .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
         let table_revision = TableRevision::get(env.meta_store()).await?;
@@ -182,6 +184,7 @@ impl FragmentManager {
             let is_backfill = if let Some(node) = &stream_node.node_body
             && let Some(node) = node.as_stream_scan() {
                 node.stream_scan_type == StreamScanType::Backfill as i32
+                || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
             } else {
                 false
             };
@@ -784,9 +787,9 @@ impl FragmentManager {
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (node_id, actor_ids) in fragments.worker_actors(include_inactive) {
-                let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actor_ids.extend(actor_ids);
+            for (node_id, actors) in fragments.worker_actors(include_inactive) {
+                let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                node_actors.extend(actors);
             }
         }
 

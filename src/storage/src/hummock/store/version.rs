@@ -757,7 +757,7 @@ impl HummockVersionReader {
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
-        if read_options.prefetch_options.preload {
+        if read_options.prefetch_options.prefetch {
             sst_read_options.must_iterated_end_user_key =
                 Some(user_key_range.1.map(|key| key.cloned()));
             sst_read_options.max_preload_retry_times = self.preload_retry_times;

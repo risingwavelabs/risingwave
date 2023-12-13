@@ -343,6 +343,7 @@ where
                     return Err(err.into());
                 }
             }
+            FeMessage::HealthCheck => self.process_health_check(),
         }
         self.stream.flush().await?;
         Ok(())
@@ -581,6 +582,11 @@ where
     }
 
     fn process_terminate(&mut self) {
+        self.is_terminate = true;
+    }
+
+    fn process_health_check(&mut self) {
+        tracing::debug!("health check");
         self.is_terminate = true;
     }
 
