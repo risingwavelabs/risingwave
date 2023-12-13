@@ -296,6 +296,7 @@ pub fn try_drop_invalid_columns(
     valid_column_ids: &[i32],
 ) -> Option<Vec<u8>> {
     let valid_column_ids: HashSet<i32> = valid_column_ids.iter().copied().collect();
+    let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
     let datum_num = encoded_bytes.get_u32_le() as usize;
     let mut is_column_dropped = false;
     let mut encoded_bytes_copy = encoded_bytes;
@@ -311,7 +312,6 @@ pub fn try_drop_invalid_columns(
     }
 
     // Slow path that drops columns. Should be rare.
-    let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
     let offset_bytes = match flag - Flag::EMPTY {
         Flag::OFFSET8 => 1,
         Flag::OFFSET16 => 2,
