@@ -1412,11 +1412,17 @@ impl Parser {
                 Keyword::OR => Some(BinaryOperator::Or),
                 Keyword::LIKE => Some(BinaryOperator::Like),
                 Keyword::ILIKE => Some(BinaryOperator::ILike),
+                Keyword::SIMILAR if self.parse_keyword(Keyword::TO) => {
+                    Some(BinaryOperator::SimilarTo)
+                }
                 Keyword::NOT => {
                     if self.parse_keyword(Keyword::LIKE) {
                         Some(BinaryOperator::NotLike)
                     } else if self.parse_keyword(Keyword::ILIKE) {
                         Some(BinaryOperator::NotILike)
+                    } else if self.parse_keyword(Keyword::SIMILAR) & self.parse_keyword(Keyword::TO)
+                    {
+                        Some(BinaryOperator::NotSimilarTo)
                     } else {
                         None
                     }
