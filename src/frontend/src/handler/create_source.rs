@@ -565,11 +565,7 @@ pub fn handle_addition_columns(
     // refer the logic from `parse_source_schema_with_connector`
     const EXEMPTED_CONNECTORS: [&str; 2] = ["nexmark", "datagen"];
     let is_connector_exempted_from_additional_column = |connector_name: &str| -> bool {
-        if connector_name.contains("-cdc") || EXEMPTED_CONNECTORS.contains(&connector_name) {
-            true
-        } else {
-            false
-        }
+        connector_name.contains("-cdc") || EXEMPTED_CONNECTORS.contains(&connector_name)
     };
 
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
