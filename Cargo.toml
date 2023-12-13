@@ -136,7 +136,7 @@ arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
 arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "258d074", features = ["s3-no-concurrent-write"] }
+deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = ["s3-no-concurrent-write"] }
 parquet = "49"
 thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
