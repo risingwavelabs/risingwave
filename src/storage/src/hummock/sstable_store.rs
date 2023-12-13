@@ -328,7 +328,9 @@ impl SstableStore {
                 None,
             )));
         }
-        let _guard = self.prefetch_lock_table.lock_for(object_id).await;
+        let _guard = self.prefetch_lock_table.lock_for(object_id)
+            .verbose_instrument_await("wait lock table")
+            .await;
         if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
