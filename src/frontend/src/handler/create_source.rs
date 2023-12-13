@@ -562,7 +562,30 @@ pub fn handle_addition_columns(
     mut include_columns_options: Vec<(Ident, Option<Ident>)>,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
+    // refer the logic from `parse_source_schema_with_connector`
+    const EXEMPTED_CONNECTORS: [&str; 2] = ["nexmark", "datagen"];
+    let is_connector_exempted_from_additional_column = |connector_name: &str| -> bool {
+        if connector_name.contains("-cdc") || EXEMPTED_CONNECTORS.contains(&connector_name) {
+            true
+        } else {
+            false
+        }
+    };
+
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
+
+    let is_exempted = is_connector_exempted_from_additional_column(connector_name.as_str());
+    match (is_exempted, include_columns_options.is_empty()) {
+        (true, true) => return Ok(()),
+        (true, false) => {
+            return Err(RwError::from(ProtocolError(format!(
+                "connector {} does not work with additional columns, but got {:?}",
+                connector_name, include_columns_options
+            ))))
+        }
+        (false, _) => {}
+    }
+
     let addition_col_list = CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS
         .get(connector_name.as_str())
         .ok_or_else(|| {
