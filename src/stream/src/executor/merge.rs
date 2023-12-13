@@ -113,6 +113,12 @@ impl MergeExecutor {
         let fragment_id_str = self.fragment_id.to_string();
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
+        let actor_in_record_cnt = self.metrics.actor_in_record_cnt.with_label_values(&[
+            &actor_id_str,
+            &fragment_id_str,
+            &upstream_fragment_id_str,
+        ]);
+
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
         pin_mut!(select_all);
@@ -128,14 +134,7 @@ impl MergeExecutor {
                     // Do nothing.
                 }
                 Message::Chunk(chunk) => {
-                    self.metrics
-                        .actor_in_record_cnt
-                        .with_label_values(&[
-                            &actor_id_str,
-                            &fragment_id_str,
-                            &upstream_fragment_id_str,
-                        ])
-                        .inc_by(chunk.cardinality() as _);
+                    actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
                     tracing::debug!(

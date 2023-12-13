@@ -115,6 +115,11 @@ impl Executor for ReceiverExecutor {
         let actor_id_str = actor_id.to_string();
         let fragment_id_str = self.fragment_id.to_string();
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+        let actor_in_record_cnt = self.metrics.actor_in_record_cnt.with_label_values(&[
+            &actor_id_str,
+            &fragment_id_str,
+            &upstream_fragment_id_str,
+        ]);
 
         let stream = #[try_stream]
         async move {
@@ -135,14 +140,7 @@ impl Executor for ReceiverExecutor {
                         // Do nothing.
                     }
                     Message::Chunk(chunk) => {
-                        self.metrics
-                            .actor_in_record_cnt
-                            .with_label_values(&[
-                                &actor_id_str,
-                                &fragment_id_str,
-                                &upstream_fragment_id_str,
-                            ])
-                            .inc_by(chunk.cardinality() as _);
+                        actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
                         tracing::debug!(

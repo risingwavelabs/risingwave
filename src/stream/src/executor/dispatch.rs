@@ -60,6 +60,11 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
         let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
 
+        let actor_out_record_cnt = self
+            .metrics
+            .actor_out_record_cnt
+            .with_label_values(&[&self.actor_id_str, &self.fragment_id_str]);
+
         match msg {
             Message::Watermark(watermark) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
@@ -97,10 +102,7 @@ impl DispatchExecutorInner {
                     })
                     .await?;
 
-                self.metrics
-                    .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id_str, &self.fragment_id_str])
-                    .inc_by(chunk.cardinality() as _);
+                actor_out_record_cnt.inc_by(chunk.cardinality() as _);
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
