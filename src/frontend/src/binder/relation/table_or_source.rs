@@ -37,7 +37,7 @@ use crate::catalog::{CatalogError, IndexCatalog, TableId};
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub table_id: TableId,
-    pub table_catalog: TableCatalog,
+    pub table_catalog: Arc<TableCatalog>,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
     pub for_system_time_as_of_proctime: bool,
 }
@@ -209,7 +209,7 @@ impl Binder {
 
         let table = BoundBaseTable {
             table_id,
-            table_catalog,
+            table_catalog: table_catalog.into(),
             table_indexes,
             for_system_time_as_of_proctime,
         };
@@ -327,7 +327,7 @@ impl Binder {
 
         Ok(BoundBaseTable {
             table_id,
-            table_catalog,
+            table_catalog: table_catalog.into(),
             table_indexes,
             for_system_time_as_of_proctime: false,
         })
