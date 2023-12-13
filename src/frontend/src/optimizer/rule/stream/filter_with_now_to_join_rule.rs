@@ -62,13 +62,8 @@ impl Rule for FilterWithNowToJoinRule {
         // increasing)
         now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
 
-        // Ignore no now filter & forbid now filters that do not create a watermark
-        if now_filters.is_empty()
-            || !matches!(
-                now_filters[0].func_type(),
-                Type::GreaterThan | Type::GreaterThanOrEqual
-            )
-        {
+        // Ignore no now filter
+        if now_filters.is_empty() {
             return None;
         }
         let mut new_plan = plan.inputs()[0].clone();
