@@ -44,8 +44,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait,
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -823,17 +823,54 @@ impl CatalogController {
     pub async fn migrate_actors(&self, plan: HashMap<i32, i32>) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
-        for (from_pu_id, to_pu_id) in plan {
+        for (from_pu_id, to_pu_id) in &plan {
             Actor::update_many()
                 .col_expr(
                     actor::Column::ParallelUnitId,
-                    Expr::value(Value::Int(Some(to_pu_id))),
+                    Expr::value(Value::Int(Some(*to_pu_id))),
                 )
-                .filter(actor::Column::ParallelUnitId.eq(from_pu_id))
+                .filter(actor::Column::ParallelUnitId.eq(*from_pu_id))
                 .exec(&txn)
                 .await?;
         }
+
+        let mut fragment_mapping: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+            .filter(actor::Column::ParallelUnitId.is_in(plan.values().cloned().collect::<Vec<_>>()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        // TODO: we'd better not store vnode mapping in fragment table and derive it from actors.
+        for (fragment_id, vnode_mapping) in &mut fragment_mapping {
+            vnode_mapping.0.data.iter_mut().for_each(|id| {
+                if let Some(new_id) = plan.get(&(*id as i32)) {
+                    *id = *new_id as u32;
+                }
+            });
+            fragment::ActiveModel {
+                fragment_id: Set(*fragment_id),
+                vnode_mapping: Set(vnode_mapping.clone()),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+
         txn.commit().await?;
+
+        self.notify_fragment_mapping(
+            NotificationOperation::Update,
+            fragment_mapping
+                .into_iter()
+                .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+                    fragment_id: fragment_id as _,
+                    mapping: Some(mapping.into_inner()),
+                })
+                .collect(),
+        )
+        .await;
 
         Ok(())
     }
