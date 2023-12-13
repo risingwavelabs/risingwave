@@ -304,3 +304,25 @@ pub trait ConfigReporter {
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(SessionConfig)]
+    struct TestConfig {
+        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        test_param: i32,
+    }
+
+    #[test]
+    fn test_session_config_alias() {
+        let mut config = TestConfig::default();
+        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "2");
+        config
+            .set("alias_param_test", "3".to_string(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "3");
+    }
+}
