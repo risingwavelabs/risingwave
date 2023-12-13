@@ -23,7 +23,7 @@ use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
 use serde_derive::{Deserialize, Serialize};
-use tokio_postgres::types::{PgLsn};
+use tokio_postgres::types::PgLsn;
 use tokio_postgres::NoTls;
 
 use crate::error::ConnectorError;
@@ -79,7 +79,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
-        // start a transaciton to read current lsn and txid
+        // start a transaction to read current lsn and txid
         let trxn = client.transaction().await?;
         let row = {
             let rs = trxn.query("SELECT pg_current_wal_lsn()", &[]).await?;
@@ -200,7 +200,7 @@ impl PostgresExternalTableReader {
         client.execute("set time zone '+00:00'", &[]).await?;
 
         let params: Vec<DatumRef<'_>> = match start_pk_row {
-            Some(ref pk_row) => pk_row.iter().map(|datum| datum).collect_vec(),
+            Some(ref pk_row) => pk_row.iter().collect_vec(),
             None => Vec::new(),
         };
 

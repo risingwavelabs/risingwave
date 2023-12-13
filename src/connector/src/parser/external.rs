@@ -20,7 +20,6 @@ use risingwave_common::types::{
 };
 use rust_decimal::Decimal as RustDecimal;
 
-
 use crate::source::cdc::external::ConnectorResult;
 
 pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {

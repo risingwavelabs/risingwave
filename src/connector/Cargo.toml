@@ -76,7 +76,6 @@ mysql_async = { version = "0.33", default-features = false, features = [
 mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
-tokio-postgres = "0.7"
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 parking_lot = "0.12"
@@ -127,6 +126,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-postgres = "0.7"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }

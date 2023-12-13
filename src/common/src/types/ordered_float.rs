@@ -50,7 +50,7 @@ use core::ops::{
 };
 use core::str::FromStr;
 use std::error::Error;
-use std::fmt::{Debug};
+use std::fmt::Debug;
 
 use bytes::BytesMut;
 pub use num_traits::Float;

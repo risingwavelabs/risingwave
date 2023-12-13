@@ -44,8 +44,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private static final String AWS_RDS_HOST = "rds.amazonaws.com";
     private final boolean isAwsRds;
+    private final boolean isMultiTableShared;
 
-    public PostgresValidator(Map<String, String> userProps, TableSchema tableSchema)
+    public PostgresValidator(
+            Map<String, String> userProps, TableSchema tableSchema, boolean isMultiTableShared)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -69,6 +71,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         this.pubAutoCreate =
                 userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+        this.isMultiTableShared = isMultiTableShared;
     }
 
     @Override
@@ -123,6 +126,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     @Override
     public void validateTable() {
+        if (isMultiTableShared) {
+            return;
+        }
+
         try {
             validateTableSchema();
         } catch (SQLException e) {
@@ -275,21 +282,23 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             return;
         }
 
-        try (var stmt =
-                jdbcConnection.prepareStatement(
-                        ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
-            stmt.setString(1, this.schemaName);
-            stmt.setString(2, this.tableName);
-            stmt.setString(3, this.user);
-            var res = stmt.executeQuery();
-            while (res.next()) {
-                if (!res.getBoolean(1)) {
-                    throw ValidatorUtils.invalidArgument(
-                            "Postgres user must have select privilege on table '"
-                                    + schemaName
-                                    + "."
-                                    + tableName
-                                    + "'");
+        if (!isMultiTableShared) {
+            try (var stmt =
+                    jdbcConnection.prepareStatement(
+                            ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
+                stmt.setString(1, this.schemaName);
+                stmt.setString(2, this.tableName);
+                stmt.setString(3, this.user);
+                var res = stmt.executeQuery();
+                while (res.next()) {
+                    if (!res.getBoolean(1)) {
+                        throw ValidatorUtils.invalidArgument(
+                                "Postgres user must have select privilege on table '"
+                                        + schemaName
+                                        + "."
+                                        + tableName
+                                        + "'");
+                    }
                 }
             }
         }

@@ -56,6 +56,6 @@ impl ToSql for ScalarRefImpl<'_> {
     where
         Self: Sized,
     {
-        return true;
+        true
     }
 }
