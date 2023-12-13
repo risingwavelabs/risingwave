@@ -128,6 +128,7 @@ pub struct TaskConfig {
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
     pub table_schemas: HashMap<u32, TableSchema>,
+    pub disable_drop_column_optimization: bool,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

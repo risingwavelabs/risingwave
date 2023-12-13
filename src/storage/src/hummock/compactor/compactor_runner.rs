@@ -112,6 +112,7 @@ impl CompactorRunner {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                disable_drop_column_optimization: false,
             },
             object_id_getter,
         );
@@ -713,6 +714,11 @@ where
     let mut compaction_statistics = CompactionStatistics::default();
     let mut progress_key_num: u64 = 0;
     let mut skip_schema_check: HashSet<(HummockSstableObjectId, u32)> = HashSet::default();
+    let schemas: HashMap<u32, HashSet<i32>> = task_config
+        .table_schemas
+        .iter()
+        .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
+        .collect();
     const PROGRESS_KEY_INTERVAL: u64 = 100;
     while iter.is_valid() {
         progress_key_num += 1;
@@ -856,14 +862,15 @@ where
         if let HummockValue::Put(v) = value
             && let Some(object_id) = value_meta
             && !skip_schema_check.contains(&(object_id, check_table_id))
-            && let Some(schema) = task_config
-            .table_schemas
+            && let Some(schema) = schemas
             .get(&check_table_id) {
-            match try_drop_invalid_columns(v, &schema.column_ids) {
+            match try_drop_invalid_columns(v, &schema) {
                 None => {
-                    // Under the assumption that all values in the same (table, SSTable) group should share the same schema,
-                    // if one value drops no columns during a compaction, no need to check other values in the same group.
-                    skip_schema_check.insert((object_id, check_table_id));
+                    if !task_config.disable_drop_column_optimization {
+                        // Under the assumption that all values in the same (table, SSTable) group should share the same schema,
+                        // if one value drops no columns during a compaction, no need to check other values in the same group.
+                        skip_schema_check.insert((object_id, check_table_id));
+                    }
                 }
                 Some(new_value) => {
                     is_value_rewritten = true;

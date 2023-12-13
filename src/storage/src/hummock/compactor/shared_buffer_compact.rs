@@ -507,6 +507,7 @@ impl SharedBufferCompactRunner {
                 table_vnode_partition,
                 use_block_based_filter,
                 table_schemas: Default::default(),
+                disable_drop_column_optimization: false,
             },
             object_id_getter,
         );

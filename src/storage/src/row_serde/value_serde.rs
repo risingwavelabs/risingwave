@@ -142,6 +142,8 @@ impl ValueRowSerde for ColumnAwareSerde {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl::*;
@@ -283,10 +285,13 @@ mod tests {
         let row_bytes = serializer.serialize(row1);
 
         // no columns is dropped
-        assert!(try_drop_invalid_columns(&row_bytes, &[0, 1, 2]).is_none());
+        assert!(
+            try_drop_invalid_columns(&row_bytes, &[0, 1, 2, 3, 4].into_iter().collect()).is_none()
+        );
 
         // column id 1 is dropped
-        let row_bytes_dropped = try_drop_invalid_columns(&row_bytes, &[0, 2]).unwrap();
+        let row_bytes_dropped =
+            try_drop_invalid_columns(&row_bytes, &[0, 2].into_iter().collect()).unwrap();
         let deserializer = column_aware_row_encoding::Deserializer::new(
             &[ColumnId::new(0), ColumnId::new(2)],
             Arc::from(vec![DataType::Int16, DataType::Varchar].into_boxed_slice()),
@@ -298,14 +303,7 @@ mod tests {
             vec![Some(Int16(5)), Some(Utf8("ABC".into()))]
         );
 
-        // all columns are dropped
-        let row_bytes_dropped = try_drop_invalid_columns(&row_bytes, &[]).unwrap();
-        let deserializer = column_aware_row_encoding::Deserializer::new(
-            &[],
-            Arc::from(vec![].into_boxed_slice()),
-            std::iter::empty(),
-        );
-        let decoded = deserializer.deserialize(&row_bytes_dropped[..]);
-        assert_eq!(decoded.unwrap(), vec![]);
+        // drop all columns is now allowed
+        assert!(try_drop_invalid_columns(&row_bytes, &HashSet::new()).is_none());
     }
 }
