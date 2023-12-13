@@ -861,7 +861,8 @@ fn derive_connect_properties(
             POSTGRES_CDC_CONNECTOR => {
                 let schema_name = connect_properties
                     .get(SCHEMA_NAME_KEY)
-                    .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
+                    .cloned()
+                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
 
                 let prefix = format!("{}.", schema_name.as_str());
                 external_table_name

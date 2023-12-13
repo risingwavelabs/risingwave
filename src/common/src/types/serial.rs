@@ -16,7 +16,7 @@ use std::error::Error;
 use std::hash::Hash;
 
 use bytes::BytesMut;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql as _, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use serde::{Serialize, Serializer};
 
 use crate::estimate_size::ZeroHeapSize;

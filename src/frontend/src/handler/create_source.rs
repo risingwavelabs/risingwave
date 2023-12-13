@@ -909,6 +909,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 POSTGRES_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
                 ),
                 CITUS_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],

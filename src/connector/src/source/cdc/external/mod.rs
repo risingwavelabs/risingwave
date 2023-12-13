@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
-use futures_async_stream::{try_stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
@@ -62,7 +62,7 @@ impl CdcTableType {
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql)
+        matches!(self, Self::MySql | Self::Postgres)
     }
 
     pub async fn create_table_reader(

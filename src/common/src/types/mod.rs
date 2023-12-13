@@ -18,7 +18,6 @@
 // src/expr/macro/src/types.rs
 
 use std::convert::TryFrom;
-use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::{FromStr, Utf8Error};
