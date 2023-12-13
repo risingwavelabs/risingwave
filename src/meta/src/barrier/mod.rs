@@ -643,9 +643,9 @@ impl GlobalBarrierManager {
                 .barrier_interval_ms() as u64,
         );
         tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}",
-            interval,
-            self.enable_recovery,
+            interval = ?interval,
+            enable_recovery = self.enable_recovery,
+            "barrier manager started",
         );
 
         if !self.enable_recovery && self.fragment_manager.has_any_table_fragments().await {
