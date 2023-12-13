@@ -427,7 +427,7 @@ FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    "ID" INT PRIMARY KEY,
+    "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
     age INT,
