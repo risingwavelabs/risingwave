@@ -180,7 +180,7 @@ pub struct CatalogWriterImpl {
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_string(),
@@ -197,7 +197,7 @@ impl CatalogWriter for CatalogWriterImpl {
         schema_name: &str,
         owner: UserId,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_schema(PbSchema {
                 id: 0,
@@ -216,7 +216,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
@@ -227,7 +227,7 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
-        let (_, version) = self.meta_client.create_view(view).await?;
+        let version = self.meta_client.create_view(view).await?;
         self.wait_version(version).await
     }
 
@@ -237,7 +237,7 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_index(index, table, graph).await?;
+        let version = self.meta_client.create_index(index, table, graph).await?;
         self.wait_version(version).await
     }
 
@@ -248,7 +248,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_table(source, table, graph, job_type)
             .await?;
@@ -275,7 +275,7 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
-        let (_id, version) = self.meta_client.create_source(source).await?;
+        let version = self.meta_client.create_source(source).await?;
         self.wait_version(version).await
     }
 
@@ -284,7 +284,7 @@ impl CatalogWriter for CatalogWriterImpl {
         source: PbSource,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_id, version) = self
+        let version = self
             .meta_client
             .create_source_with_graph(source, graph)
             .await?;
@@ -292,12 +292,12 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
-        let (_id, version) = self.meta_client.create_sink(sink, graph).await?;
+        let version = self.meta_client.create_sink(sink, graph).await?;
         self.wait_version(version).await
     }
 
     async fn create_function(&self, function: PbFunction) -> Result<()> {
-        let (_, version) = self.meta_client.create_function(function).await?;
+        let version = self.meta_client.create_function(function).await?;
         self.wait_version(version).await
     }
 
@@ -309,7 +309,7 @@ impl CatalogWriter for CatalogWriterImpl {
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_connection(
                 connection_name,

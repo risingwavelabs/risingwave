@@ -20,20 +20,27 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
+    UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::connection::PrivateLinkService;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, PbSource, PbTable, Schema,
+    Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -41,7 +48,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
+    FragmentTypeFlag, PbStreamFragmentGraph, StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -52,9 +59,9 @@ use crate::barrier::BarrierManagerRef;
 use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion,
-    RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId,
-    UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    IdCategory, IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager,
+    NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
+    StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -242,6 +249,11 @@ impl DdlController {
         }
     }
 
+    async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
+        let id = self.env.id_gen_manager().generate::<C>().await? as u32;
+        Ok(id)
+    }
+
     /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
     /// when it's not running.
     async fn check_barrier_manager_status(&self) -> MetaResult<()> {
@@ -314,9 +326,12 @@ impl DdlController {
         self.barrier_manager.get_ddl_progress().await
     }
 
-    async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
+    async fn create_database(&self, mut database: Database) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.create_database(&database).await,
+            MetadataManager::V1(mgr) => {
+                database.id = self.gen_unique_id::<{ IdCategory::Database }>().await?;
+                mgr.catalog_manager.create_database(&database).await
+            }
             MetadataManager::V2(mgr) => mgr.catalog_controller.create_database(database).await,
         }
     }
@@ -387,9 +402,12 @@ impl DdlController {
         }
     }
 
-    async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
+    async fn create_schema(&self, mut schema: Schema) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.create_schema(&schema).await,
+            MetadataManager::V1(mgr) => {
+                schema.id = self.gen_unique_id::<{ IdCategory::Schema }>().await?;
+                mgr.catalog_manager.create_schema(&schema).await
+            }
             MetadataManager::V2(mgr) => mgr.catalog_controller.create_schema(schema).await,
         }
     }
@@ -408,6 +426,7 @@ impl DdlController {
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
+                source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
 
@@ -470,9 +489,12 @@ impl DdlController {
         }
     }
 
-    async fn create_function(&self, function: Function) -> MetaResult<NotificationVersion> {
+    async fn create_function(&self, mut function: Function) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.create_function(&function).await,
+            MetadataManager::V1(mgr) => {
+                function.id = self.gen_unique_id::<{ IdCategory::Function }>().await?;
+                mgr.catalog_manager.create_function(&function).await
+            }
             MetadataManager::V2(mgr) => mgr.catalog_controller.create_function(function).await,
         }
     }
@@ -486,9 +508,12 @@ impl DdlController {
         }
     }
 
-    async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
+    async fn create_view(&self, mut view: View) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.create_view(&view).await,
+            MetadataManager::V1(mgr) => {
+                view.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                mgr.catalog_manager.create_view(&view).await
+            }
             MetadataManager::V2(mgr) => mgr.catalog_controller.create_view(view).await,
         }
     }
@@ -512,9 +537,15 @@ impl DdlController {
         Ok(version)
     }
 
-    async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+    async fn create_connection(
+        &self,
+        mut connection: Connection,
+    ) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.create_connection(connection).await,
+            MetadataManager::V1(mgr) => {
+                connection.id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                mgr.catalog_manager.create_connection(connection).await
+            }
             MetadataManager::V2(mgr) => mgr.catalog_controller.create_connection(connection).await,
         }
     }
@@ -571,9 +602,31 @@ impl DdlController {
     async fn create_streaming_job(
         &self,
         mut stream_job: StreamingJob,
-        fragment_graph: StreamFragmentGraphProto,
+        mut fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        stream_job.set_id(id);
+
+        match &mut stream_job {
+            StreamingJob::Table(Some(src), table, job_type) => {
+                // If we're creating a table with connector, we should additionally fill its ID first.
+                src.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+                fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
+            }
+            StreamingJob::Source(_) => {
+                // set the inner source id of source node.
+                for fragment in fragment_graph.fragments.values_mut() {
+                    visit_fragment(fragment, |node_body| {
+                        if let NodeBody::Source(source_node) = node_body {
+                            source_node.source_inner.as_mut().unwrap().source_id = id;
+                        }
+                    });
+                }
+            }
+            _ => {}
+        }
+
         tracing::debug!(
             id = stream_job.id(),
             definition = stream_job.definition(),
@@ -1435,4 +1488,67 @@ impl DdlController {
             MetadataManager::V2(mgr) => mgr.catalog_controller.comment_on(comment).await,
         }
     }
+}
+
+/// Fill in necessary information for table stream graph.
+pub fn fill_table_stream_graph_info(
+    source: &mut PbSource,
+    table: &mut PbTable,
+    table_job_type: TableJobType,
+    fragment_graph: &mut PbStreamFragmentGraph,
+) {
+    let mut source_count = 0;
+    // Fill in the correct table id for source.
+    source.optional_associated_table_id =
+        Some(OptionalAssociatedTableId::AssociatedTableId(table.id));
+    // Fill in the correct source id for mview.
+    table.optional_associated_source_id =
+        Some(OptionalAssociatedSourceId::AssociatedSourceId(source.id));
+
+    for fragment in fragment_graph.fragments.values_mut() {
+        visit_fragment(fragment, |node_body| {
+            if let NodeBody::Source(source_node) = node_body {
+                if source_node.source_inner.is_none() {
+                    // skip empty source for dml node
+                    return;
+                }
+
+                // If we're creating a table with connector, we should additionally fill its ID first.
+                source_node.source_inner.as_mut().unwrap().source_id = source.id;
+                source_count += 1;
+
+                // Generate a random server id for mysql cdc source if needed
+                // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+                // group (that is, different from any other server id being used by any master or slave)
+                if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY)
+                        && matches!(
+                            CdcSourceType::from(connector.as_str()),
+                            CdcSourceType::Mysql
+                        )
+                    {
+                        let props = &mut source_node.source_inner.as_mut().unwrap().properties;
+                        let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
+                        props
+                            .entry("server.id".to_string())
+                            .or_insert(rand_server_id.to_string());
+
+                        // make these two `Source` consistent
+                        props.clone_into(&mut source.properties);
+                    }
+            }
+
+            // fill table id for cdc backfill
+            if let NodeBody::StreamCdcScan(node) = node_body
+                && table_job_type == TableJobType::SharedCdcSource
+            {
+                if let Some(table_desc) = node.cdc_table_desc.as_mut() {
+                    table_desc.table_id = table.id;
+                }
+            }
+        });
+    }
+    assert_eq!(
+        source_count, 1,
+        "require exactly 1 external stream source when creating table with a connector"
+    );
 }

@@ -118,10 +118,8 @@ impl StreamingJob {
                 index.index_table_id = id;
                 index_table.id = id;
             }
-            StreamingJob::Source(_) => {
-                // The id of source is set in `DdlServiceImpl::create_source`,
-                // so do nothing here.
-                unreachable!()
+            StreamingJob::Source(src) => {
+                src.id = id;
             }
         }
     }
