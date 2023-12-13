@@ -189,6 +189,7 @@ It only indicates the physical clustering of the data, which may improve the per
             if plan.inputs().is_empty() {
                 if let Some(scan) = plan.as_stream_table_scan() {
                     scan.stream_scan_type() == StreamScanType::Backfill
+                        || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
                 } else {
                     false
                 }

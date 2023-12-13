@@ -254,7 +254,6 @@ impl From<KafkaConfig> for KafkaProperties {
             max_num_messages: None,
             scan_startup_mode: None,
             time_offset: None,
-            consumer_group: None,
             upsert: None,
             common: val.common,
             rdkafka_properties: Default::default(),

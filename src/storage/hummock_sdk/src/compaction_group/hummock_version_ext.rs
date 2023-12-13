@@ -24,7 +24,7 @@ use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
     GroupTableChange, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
-    PbLevelType, SstableInfo,
+    PbLevelType, PbTableWatermarks, SstableInfo,
 };
 use tracing::warn;
 
@@ -188,6 +188,47 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
+    }
+
+    pub fn safe_epoch_table_watermarks(
+        &self,
+        existing_table_ids: &[u32],
+    ) -> BTreeMap<u32, PbTableWatermarks> {
+        fn extract_single_table_watermark(
+            table_watermarks: &PbTableWatermarks,
+            safe_epoch: u64,
+        ) -> Option<PbTableWatermarks> {
+            if let Some(first_epoch_watermark) = table_watermarks.epoch_watermarks.first() {
+                assert!(
+                    first_epoch_watermark.epoch >= safe_epoch,
+                    "smallest epoch {} in table watermark should be at least safe epoch {}",
+                    first_epoch_watermark.epoch,
+                    safe_epoch
+                );
+                if first_epoch_watermark.epoch == safe_epoch {
+                    Some(PbTableWatermarks {
+                        epoch_watermarks: vec![first_epoch_watermark.clone()],
+                        is_ascending: table_watermarks.is_ascending,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        self.table_watermarks
+            .iter()
+            .filter_map(|(table_id, table_watermarks)| {
+                let u32_table_id = *table_id as _;
+                if !existing_table_ids.contains(&u32_table_id) {
+                    None
+                } else {
+                    extract_single_table_watermark(table_watermarks, self.safe_epoch)
+                        .map(|table_watermarks| (*table_id, table_watermarks))
+                }
+            })
+            .collect()
     }
 }
 
