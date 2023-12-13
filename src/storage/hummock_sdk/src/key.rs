@@ -339,7 +339,7 @@ pub fn prefix_slice_with_vnode(vnode: VirtualNode, slice: &[u8]) -> Bytes {
 pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     vnode: VirtualNode,
-) -> (Bound<Bytes>, Bound<Bytes>) {
+) -> TableKeyRange {
     let prefixed = |b: &B| -> Bytes { prefix_slice_with_vnode(vnode, b.as_ref()) };
 
     let start: Bound<Bytes> = match range.start_bound() {
@@ -360,7 +360,7 @@ pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
         Unbounded => end_bound_of_vnode(vnode),
     };
 
-    (start, end)
+    map_table_key_range((start, end))
 }
 
 pub trait CopyFromSlice {
@@ -1046,21 +1046,30 @@ mod tests {
                 (Included(Bytes::from("1")), Included(Bytes::from("2"))),
                 VirtualNode::from_index(233),
             ),
-            (Included(concat(233, b"1")), Included(concat(233, b"2")))
+            (
+                Included(TableKey(concat(233, b"1"))),
+                Included(TableKey(concat(233, b"2")))
+            )
         );
         assert_eq!(
             prefixed_range_with_vnode(
                 (Excluded(Bytes::from("1")), Excluded(Bytes::from("2"))),
                 VirtualNode::from_index(233),
             ),
-            (Excluded(concat(233, b"1")), Excluded(concat(233, b"2")))
+            (
+                Excluded(TableKey(concat(233, b"1"))),
+                Excluded(TableKey(concat(233, b"2")))
+            )
         );
         assert_eq!(
             prefixed_range_with_vnode(
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
                 VirtualNode::from_index(233),
             ),
-            (Included(concat(233, b"")), Excluded(concat(234, b"")))
+            (
+                Included(TableKey(concat(233, b""))),
+                Excluded(TableKey(concat(234, b"")))
+            )
         );
         let max_vnode = VirtualNode::COUNT - 1;
         assert_eq!(
@@ -1068,7 +1077,7 @@ mod tests {
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
                 VirtualNode::from_index(max_vnode),
             ),
-            (Included(concat(max_vnode, b"")), Unbounded)
+            (Included(TableKey(concat(max_vnode, b""))), Unbounded)
         );
         let second_max_vnode = max_vnode - 1;
         assert_eq!(
@@ -1077,8 +1086,8 @@ mod tests {
                 VirtualNode::from_index(second_max_vnode),
             ),
             (
-                Included(concat(second_max_vnode, b"")),
-                Excluded(concat(max_vnode, b""))
+                Included(TableKey(concat(second_max_vnode, b""))),
+                Excluded(TableKey(concat(max_vnode, b"")))
             )
         );
     }

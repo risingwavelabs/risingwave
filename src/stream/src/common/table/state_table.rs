@@ -35,8 +35,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, range_of_prefix,
+    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
@@ -1133,7 +1133,7 @@ where
 
     async fn iter_kv(
         &self,
-        key_range: (Bound<Bytes>, Bound<Bytes>),
+        table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
@@ -1146,7 +1146,6 @@ where
             prefetch_options,
             cache_policy: CachePolicy::Fill(CachePriority::High),
         };
-        let table_key_range = map_table_key_range(key_range);
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
@@ -1250,8 +1249,7 @@ where
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
         let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range =
-            map_table_key_range(prefixed_range_with_vnode(encoded_key_range, vnode));
+        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
 
         // Construct prefix hint for prefix bloom filter.
         if self.prefix_hint_len != 0 {
