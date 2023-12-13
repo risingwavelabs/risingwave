@@ -74,6 +74,9 @@ impl CdcTableType {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(properties, schema).await?,
             )),
+            Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
+                PostgresExternalTableReader::new(properties, schema).await?,
+            )),
             _ => bail!(ConnectorError::Config(anyhow!(
                 "invalid external table type: {:?}",
                 *self

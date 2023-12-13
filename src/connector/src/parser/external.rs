@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 
@@ -154,10 +154,22 @@ pub fn postgres_row_to_datums(
                     v.map(|v| ScalarImpl::from(Timestamp::from(v)))
                 }
                 DataType::Timestamptz => {
-                    let v = row.try_get::<_, Option<chrono::NaiveDateTime>>(i)?;
-                    v.map(|v| ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros())))
+                    let v = row.try_get::<_, Option<chrono::DateTime<Utc>>>(i)?;
+                    v.map(|v| ScalarImpl::from(Timestamptz::from(v)))
                 }
-                _ => {
+                DataType::Bytea => {
+                    let v = row.try_get::<_, Option<Vec<u8>>>(i)?;
+                    v.map(|v| ScalarImpl::from(v.into_boxed_slice()))
+                }
+                DataType::Jsonb => {
+                    let v = row.try_get::<_, Option<serde_json::Value>>(i)?;
+                    v.map(|v| ScalarImpl::from(JsonbVal::from(v)))
+                }
+                DataType::Interval => {
+                    let v = row.try_get::<_, Option<Interval>>(i)?;
+                    v.map(|v| ScalarImpl::from(v))
+                }
+                DataType::List(_) | DataType::Struct(_) | DataType::Int256 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
                     tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None

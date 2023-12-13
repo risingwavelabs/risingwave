@@ -859,15 +859,14 @@ fn derive_connect_properties(
                     .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
             }
             POSTGRES_CDC_CONNECTOR => {
-                let schema_name = connect_properties
-                    .get(SCHEMA_NAME_KEY)
-                    .cloned()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+                let (schema_name, table_name) = external_table_name
+                    .split_once(".")
+                    .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?;
 
-                let prefix = format!("{}.", schema_name.as_str());
-                external_table_name
-                    .strip_prefix(prefix.as_str())
-                    .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
+                // insert 'schema.name' into connect properties
+                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+
+                table_name
             }
             _ => {
                 return Err(RwError::from(anyhow!(
