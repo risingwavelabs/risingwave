@@ -651,18 +651,6 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
-        let inner = self.inner.read().await;
-        let sources = Source::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(sources
-            .into_iter()
-            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
-            .collect())
-    }
-
     pub async fn create_function(
         &self,
         mut pb_function: PbFunction,
@@ -1601,6 +1589,55 @@ impl CatalogController {
         Ok(table_objs
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::TableType.eq(table_type))
+            .all(&inner.db)
+            .await?;
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+        let inner = self.inner.read().await;
+        let source_objs = Source::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(source_objs
+            .into_iter()
+            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_views(&self) -> MetaResult<Vec<PbView>> {
+        let inner = self.inner.read().await;
+        let view_objs = View::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        Ok(view_objs
+            .into_iter()
+            .map(|(view, obj)| ObjectModel(view, obj.unwrap()).into())
             .collect())
     }
 

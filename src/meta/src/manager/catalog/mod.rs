@@ -3010,6 +3010,18 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|table| table.table_type == table_type as i32)
+            .cloned()
+            .collect_vec()
+    }
+
     /// Lists table catalogs for mviews, without their internal tables.
     pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.core
@@ -3050,6 +3062,14 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn list_sinks(&self) -> Vec<Sink> {
+        self.core.lock().await.database.list_sinks()
+    }
+
+    pub async fn list_views(&self) -> Vec<View> {
+        self.core.lock().await.database.list_views()
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {

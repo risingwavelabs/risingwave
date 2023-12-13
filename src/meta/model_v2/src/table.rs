@@ -45,6 +45,18 @@ impl From<TableType> for PbTableType {
     }
 }
 
+impl From<PbTableType> for TableType {
+    fn from(table_type: PbTableType) -> Self {
+        match table_type {
+            PbTableType::Table => Self::Table,
+            PbTableType::MaterializedView => Self::MaterializedView,
+            PbTableType::Index => Self::Index,
+            PbTableType::Internal => Self::Internal,
+            PbTableType::Unspecified => unreachable!("Unspecified table type"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum HandleConflictBehavior {

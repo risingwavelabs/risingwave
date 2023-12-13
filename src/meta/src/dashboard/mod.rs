@@ -36,7 +36,6 @@ use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
 use crate::manager::MetadataManager;
-use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
@@ -46,8 +45,6 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    // TODO: replace it with MetadataManager.
-    pub meta_store: MetaStoreRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -69,8 +66,7 @@ pub(super) mod handlers {
 
     use super::*;
     use crate::manager::WorkerId;
-    use crate::model::TableFragments;
-    use crate::storage::MetaStoreRef;
+    use crate::model::MetadataModel;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -114,60 +110,66 @@ pub(super) mod handlers {
     }
 
     async fn list_table_catalogs_inner(
-        meta_store: &MetaStoreRef,
+        metadata_manager: &MetadataManager,
         table_type: TableType,
     ) -> Result<Json<Vec<Table>>> {
-        use crate::model::MetadataModel;
+        let tables = match metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables_by_type(table_type).await,
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_tables_by_type(table_type.into())
+                .await
+                .map_err(err)?,
+        };
 
-        let results = Table::list(meta_store)
-            .await
-            .map_err(err)?
-            .into_iter()
-            .filter(|t| t.table_type() == table_type)
-            .collect();
-
-        Ok(Json(results))
+        Ok(Json(tables))
     }
 
     pub async fn list_materialized_views(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::MaterializedView).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::MaterializedView).await
     }
 
     pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Table).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
     }
 
     pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Index).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
     }
 
     pub async fn list_internal_tables(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.meta_store, TableType::Internal).await
+        list_table_catalogs_inner(&srv.metadata_manager, TableType::Internal).await
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
-        use crate::model::MetadataModel;
+        let sources = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sources().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await.map_err(err)?,
+        };
 
-        let sources = Source::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
     }
 
     pub async fn list_sinks(Extension(srv): Extension<Service>) -> Result<Json<Vec<Sink>>> {
-        use crate::model::MetadataModel;
+        let sinks = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sinks().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sinks().await.map_err(err)?,
+        };
 
-        let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
     }
 
     pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
-        use crate::model::MetadataModel;
+        let views = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_views().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_views().await.map_err(err)?,
+        };
 
-        let sinks = View::list(&srv.meta_store).await.map_err(err)?;
-        Ok(Json(sinks))
+        Ok(Json(views))
     }
 
     pub async fn list_actors(
@@ -197,14 +199,25 @@ pub(super) mod handlers {
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
-        use crate::model::MetadataModel;
+        let table_fragments = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .fragment_manager
+                .get_fragment_read_guard()
+                .await
+                .table_fragments()
+                .values()
+                .map(|tf| tf.to_protobuf())
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .table_fragments()
+                .await
+                .map_err(err)?
+                .values()
+                .cloned()
+                .collect_vec(),
+        };
 
-        let table_fragments = TableFragments::list(&srv.meta_store)
-            .await
-            .map_err(err)?
-            .into_iter()
-            .map(|x| x.to_protobuf())
-            .collect_vec();
         Ok(Json(table_fragments))
     }
 
