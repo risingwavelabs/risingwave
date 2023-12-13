@@ -106,7 +106,7 @@ impl RowEncoding {
         self.set_offsets(&offset_usize, max_offset);
     }
 
-    // TODO: avoid duplicated code
+    // TODO: Avoid duplicated code. `encode_slice` is the same as `encode` except it doesn't require column type.
     fn encode_slice<'a>(&mut self, datum_refs: impl Iterator<Item = Option<&'a [u8]>>) {
         debug_assert!(
             self.buf.is_empty(),
@@ -290,7 +290,7 @@ impl ValueRowDeserializer for ColumnAwareSerde {
 
 /// Deserializes row `encoded_bytes`, drops columns not in `valid_column_ids`, serializes and returns.
 /// If no column is dropped, returns None.
-// TODO: avoid duplicated code
+// TODO: Avoid duplicated code. The current code combines`Serializer` and `Deserializer` with unavailable parameter removed, e.g. `Deserializer::schema`.
 pub fn try_drop_invalid_columns(
     mut encoded_bytes: &[u8],
     valid_column_ids: &[i32],
@@ -350,6 +350,10 @@ pub fn try_drop_invalid_columns(
             };
             datums.push(data);
         }
+    }
+    if column_ids.is_empty() {
+        // According to `RowEncoding::encode`, at least one column is required.
+        return None;
     }
 
     let mut encoding = RowEncoding::new();
