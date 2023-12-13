@@ -126,10 +126,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     @Override
     public void validateTable() {
-        if (isMultiTableShared) {
-            return;
-        }
-
         try {
             validateTableSchema();
         } catch (SQLException e) {
@@ -153,6 +149,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTableSchema() throws SQLException {
+        if (isMultiTableShared) {
+            return;
+        }
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table"))) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
@@ -278,27 +277,25 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
-        if (isSuperUser) {
+        if (isSuperUser || isMultiTableShared) {
             return;
         }
 
-        if (!isMultiTableShared) {
-            try (var stmt =
-                    jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
-                stmt.setString(1, this.schemaName);
-                stmt.setString(2, this.tableName);
-                stmt.setString(3, this.user);
-                var res = stmt.executeQuery();
-                while (res.next()) {
-                    if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.invalidArgument(
-                                "Postgres user must have select privilege on table '"
-                                        + schemaName
-                                        + "."
-                                        + tableName
-                                        + "'");
-                    }
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
+            stmt.setString(1, this.schemaName);
+            stmt.setString(2, this.tableName);
+            stmt.setString(3, this.user);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                if (!res.getBoolean(1)) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Postgres user must have select privilege on table '"
+                                    + schemaName
+                                    + "."
+                                    + tableName
+                                    + "'");
                 }
             }
         }
@@ -324,6 +321,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         if (!pubAutoCreate && !publicationExists) {
             throw ValidatorUtils.invalidArgument(
                     "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+        }
+
+        // If the source properties is shared by multiple tables, skip the following
+        // check of publication
+        if (isMultiTableShared) {
+            return;
         }
 
         // When publication exists, we should check whether it covers the table
@@ -403,6 +406,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validatePublicationPrivileges() throws SQLException {
+        if (isMultiTableShared) {
+            throw ValidatorUtils.invalidArgument(
+                    "The connector properties is shared by multiple tables unexpectedly");
+        }
+
         // check whether the user has the CREATE privilege on database
         try (var stmt =
                 jdbcConnection.prepareStatement(
@@ -470,6 +478,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     protected void alterPublicationIfNeeded() throws SQLException {
+        if (isMultiTableShared) {
+            throw ValidatorUtils.invalidArgument(
+                    "The connector properties is shared by multiple tables unexpectedly");
+        }
+
         String alterPublicationSql =
                 String.format(
                         "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);

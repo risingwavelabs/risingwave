@@ -153,13 +153,36 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mysqlProps);
 
-        } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
+        } else if (source == SourceTypeE.POSTGRES) {
+            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
+
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
+            if (isCdcBackfill) {
+                // skip the initial snapshot for cdc backfill
+                postgresProps.setProperty("snapshot.mode", "never");
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue reading
+                // changes from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty("snapshot.mode", "never");
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            }
+
+            dbzProps.putAll(postgresProps);
+
+        } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
             // citus needs all_tables publication to capture all shards
-            if (source == SourceTypeE.CITUS) {
-                postgresProps.setProperty("publication.autocreate.mode", "all_tables");
-            }
+            postgresProps.setProperty("publication.autocreate.mode", "all_tables");
 
             // disable publication auto creation if needed
             var pubAutoCreate =
