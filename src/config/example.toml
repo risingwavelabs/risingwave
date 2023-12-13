@@ -74,7 +74,6 @@ batch_output_channel_size = 64
 batch_chunk_size = 1024
 
 [streaming]
-in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 
