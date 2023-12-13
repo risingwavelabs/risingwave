@@ -180,9 +180,6 @@ pub struct GlobalBarrierManager {
     /// The queue of scheduled barriers.
     scheduled_barriers: schedule::ScheduledBarriers,
 
-    /// The max barrier nums in flight
-    in_flight_barrier_nums: usize,
-
     cluster_manager: ClusterManagerRef,
 
     pub catalog_manager: CatalogManagerRef,
@@ -441,14 +438,7 @@ impl CheckpointControl {
     }
 
     /// Pause inject barrier until True.
-    fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self
-            .command_ctx_queue
-            .iter()
-            .filter(|x| matches!(x.state, InFlight))
-            .count()
-            < in_flight_barrier_nums;
-
+    fn can_inject_barrier(&self) -> bool {
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
             .command_ctx_queue
@@ -462,7 +452,7 @@ impl CheckpointControl {
             should_pause
         );
 
-        in_flight_not_full && !should_pause
+        !should_pause
     }
 
     /// Check whether the target epoch is managed by `CheckpointControl`.
@@ -570,7 +560,6 @@ impl GlobalBarrierManager {
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let tracker = CreateMviewProgressTracker::new();
         let scale_controller = Arc::new(ScaleController::new(
@@ -583,7 +572,6 @@ impl GlobalBarrierManager {
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
-            in_flight_barrier_nums,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -655,10 +643,9 @@ impl GlobalBarrierManager {
                 .barrier_interval_ms() as u64,
         );
         tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
+            "Starting barrier manager with: interval={:?}, enable_recovery={}",
             interval,
             self.enable_recovery,
-            self.in_flight_barrier_nums,
         );
 
         if !self.enable_recovery && self.fragment_manager.has_any_table_fragments().await {
@@ -740,12 +727,12 @@ impl GlobalBarrierManager {
                 }
 
                 // There's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
+                _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier() => {
                     min_interval.reset(); // Reset the interval as we have a new barrier.
                     self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
                 }
                 // Minimum interval reached.
-                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
+                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier() => {
                     self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
                 }
             }
@@ -760,7 +747,7 @@ impl GlobalBarrierManager {
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl,
     ) {
-        assert!(checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums));
+        assert!(checkpoint_control.can_inject_barrier());
 
         let Scheduled {
             command,

@@ -215,7 +215,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
-        let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
         let privatelink_endpoint_default_tags =
             opts.privatelink_endpoint_default_tags.map(|tags| {
                 tags.split(',')
@@ -246,7 +245,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_automatic_parallelism_control: config
                     .meta
                     .enable_automatic_parallelism_control,
-                in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,

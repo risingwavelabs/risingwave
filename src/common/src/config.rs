@@ -424,10 +424,6 @@ pub struct BatchConfig {
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingConfig {
-    /// The maximum number of barriers in-flight in the compute nodes.
-    #[serde(default = "default::streaming::in_flight_barrier_nums")]
-    pub in_flight_barrier_nums: usize,
-
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -1180,12 +1176,6 @@ pub mod default {
 
     pub mod streaming {
         use crate::config::AsyncStackTraceOption;
-
-        pub fn in_flight_barrier_nums() -> usize {
-            // quick fix
-            // TODO: remove this limitation from code
-            10000
-        }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::default()
