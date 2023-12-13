@@ -113,10 +113,10 @@ export async function getSources() {
     .map((src: Source) =>
       Object.defineProperty(src, "properties", {
         get: function () {
-          return this.with_properties
+          return this.withProperties
         },
         set: function (value) {
-          this.with_properties = value
+          this.withProperties = value
         },
       })
     )

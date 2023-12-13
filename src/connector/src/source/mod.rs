@@ -43,7 +43,7 @@ pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 
-pub fn is_key_belong_to_format_encode_options(key: &str) -> bool {
+pub fn is_key_belong_to_format_encode_options(key: &str, connector: String) -> bool {
     const PREFIXES: &[&str] = &[
         "schema.registry",
         "schema.location",
@@ -51,6 +51,16 @@ pub fn is_key_belong_to_format_encode_options(key: &str) -> bool {
         "key.message",
         "without_header",
         "delimiter",
+        // AwsAuthProps
+        "region",
+        "endpoint_url",
+        "access_key",
+        "secret_key",
+        "session_token",
+        "arn",
+        "external_id",
+        "profile",
     ];
     PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+        || (key == "endpoint" && !connector.eq_ignore_ascii_case(KINESIS_CONNECTOR))
 }

@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_connector::source::is_key_belong_to_format_encode_options;
+use risingwave_connector::source::{is_key_belong_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
@@ -199,8 +199,13 @@ impl CatalogManager {
         .map(|t| t.1.clone())
         .collect_vec();
         for mut source in legacy_sources {
+            let connector = source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .unwrap_or(&String::default())
+                .to_owned();
             source.with_properties.retain(|k, v| {
-                if is_key_belong_to_format_encode_options(k) {
+                if is_key_belong_to_format_encode_options(k, connector.clone()) {
                     source
                         .info
                         .as_mut()
