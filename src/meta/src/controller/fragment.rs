@@ -795,6 +795,7 @@ impl CatalogController {
 
         for (actor_id, status, parallel_unit_id, job_id, type_mask) in actor_info {
             let status = PbActorState::from(status);
+            // FIXME: since worker might have gone, it's not safe to unwrap here.
             let worker_id = parallel_units_map
                 .get(&(parallel_unit_id as _))
                 .unwrap()
@@ -819,16 +820,16 @@ impl CatalogController {
         })
     }
 
-    pub async fn migrate_actors(&self, plan: HashMap<u32, PbParallelUnit>) -> MetaResult<()> {
+    pub async fn migrate_actors(&self, plan: HashMap<i32, i32>) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         for (from_pu_id, to_pu_id) in plan {
             Actor::update_many()
                 .col_expr(
                     actor::Column::ParallelUnitId,
-                    Expr::value(Value::Int(Some(to_pu_id.id as _))),
+                    Expr::value(Value::Int(Some(to_pu_id))),
                 )
-                .filter(actor::Column::ParallelUnitId.eq(from_pu_id as i32))
+                .filter(actor::Column::ParallelUnitId.eq(from_pu_id))
                 .exec(&txn)
                 .await?;
         }
