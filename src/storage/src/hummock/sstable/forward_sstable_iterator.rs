@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
