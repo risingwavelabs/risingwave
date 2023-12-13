@@ -1210,6 +1210,8 @@ impl Binder {
                 ("date", guard_by_len(1, raw(|_binder, inputs| {
                     inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
                 }))),
+
+                ("similar_to_escape", raw_call(ExprType::SimilarToEscape)),
             ]
             .into_iter()
             .collect()
