@@ -23,7 +23,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::log::error;
 
-use super::local_hummock_storage::{HummockStorageIterator, LocalHummockStorage};
+use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader};
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
@@ -50,8 +50,8 @@ use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableObjectIdManager,
-    SstableObjectIdManagerRef, SstableStoreRef,
+    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
+    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
@@ -202,6 +202,7 @@ impl HummockStorage {
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
                 state_store_metrics.clone(),
+                options.max_preload_io_retry_times,
             ),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
@@ -403,7 +404,7 @@ impl StateStore for HummockStorage {
         self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
-                assert_ne!(epoch, MAX_EPOCH, "epoch should not be MAX_EPOCH");
+                assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
                 epoch
             }
             _ => return Ok(()),
@@ -430,7 +431,7 @@ impl StateStore for HummockStorage {
 
         if is_checkpoint {
             let _ = self.min_current_epoch.compare_exchange(
-                MAX_EPOCH,
+                HummockEpoch::MAX,
                 epoch,
                 MemOrdering::SeqCst,
                 MemOrdering::SeqCst,
@@ -453,7 +454,8 @@ impl StateStore for HummockStorage {
         rx.await.expect("should wait success");
 
         let epoch = self.pinned_version.load().max_committed_epoch();
-        self.min_current_epoch.store(MAX_EPOCH, MemOrdering::SeqCst);
+        self.min_current_epoch
+            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
 
         Ok(())
@@ -465,9 +467,9 @@ impl StateStore for HummockStorage {
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
         if let HummockReadEpoch::Current(read_current_epoch) = epoch {
-            assert_ne!(
-                read_current_epoch, MAX_EPOCH,
-                "epoch should not be MAX_EPOCH"
+            assert!(
+                !is_max_epoch(read_current_epoch),
+                "epoch should not be MAX EPOCH"
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {

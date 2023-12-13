@@ -172,7 +172,12 @@ impl Configuration {
 
         Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 2,
+            // NOTE(kwannoel): The cancel test depends on `processlist`,
+            // which will cancel a stream job within the process.
+            // so we cannot have multiple frontend node, since a new session spawned
+            // to cancel the job could be routed to a different frontend node,
+            // in a different process.
+            frontend_nodes: 1,
             compute_nodes: 3,
             meta_nodes: 3,
             compactor_nodes: 2,
@@ -617,6 +622,26 @@ impl Cluster {
             tracing::info!("kill {name}");
             Handle::current().kill(name);
             tokio::time::sleep(Duration::from_secs(restart_delay_secs as u64)).await;
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_kill_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_restart_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
             tracing::info!("restart {name}");
             Handle::current().restart(name);
         }))

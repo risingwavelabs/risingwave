@@ -17,7 +17,6 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
-use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 
@@ -29,7 +28,9 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
+use risingwave_hummock_sdk::{
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
@@ -77,7 +78,6 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
-    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -130,7 +130,7 @@ impl CompactStatus {
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
             splits: vec![KeyRange::inf()],
-            watermark: MAX_EPOCH,
+            watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,
             target_level: target_level_id as u32,
@@ -150,6 +150,7 @@ impl CompactStatus {
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
             split_weight_by_vnode: ret.input.vnode_partition_count,
+            table_vnode_partition: BTreeMap::default(),
         };
         Some(compact_task)
     }
@@ -237,7 +238,6 @@ pub fn create_compaction_task(
         input,
         target_file_size,
         compaction_task_type,
-        enable_split_by_table: false,
     }
 }
 

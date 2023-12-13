@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
-use tokio::io::AsyncRead;
 
 use crate::object::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, StreamingUploader,
+    BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
+    ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -36,6 +37,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    Obs,
     Oss,
     Webhdfs,
     Azblob,
@@ -107,22 +109,18 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        range: Range<usize>,
+    ) -> ObjectResult<ObjectDataStream> {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-        let reader = match start_pos {
-            Some(start_position) => {
-                self.op
-                    .reader_with(path)
-                    .range(start_position as u64..)
-                    .await?
-            }
-            None => self.op.reader(path).await?,
-        };
+        let range: Range<u64> = (range.start as u64)..(range.end as u64);
+        let reader = self.op.reader_with(path).range(range).await?;
+        let stream = reader
+            .into_stream()
+            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpenDalError: {:?}", e))));
 
-        Ok(Box::new(reader))
+        Ok(Box::pin(stream))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -158,7 +156,7 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = self
             .op
             .lister_with(prefix)
-            .delimiter("")
+            .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::ContentType)
             .await?;
 
@@ -192,11 +190,41 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
             EngineType::Gcs => "Gcs",
+            EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
             EngineType::Azblob => "Azblob",
             EngineType::Fs => "Fs",
         }
+    }
+}
+
+impl OpendalObjectStore {
+    // This function is only used in unit test, as list api will spawn the thread to stat Metakey::ContentLength,
+    // which will panic in deterministic test.
+    #[cfg(test)]
+    async fn list_for_test(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let object_lister = self.op.lister_with(prefix).recursive(true).await?;
+
+        let stream = stream::unfold(object_lister, |mut object_lister| async move {
+            match object_lister.next().await {
+                Some(Ok(object)) => {
+                    let key = object.path().to_string();
+                    let last_modified = 0_f64;
+                    let total_size = 0_usize;
+                    let metadata = ObjectMetadata {
+                        key,
+                        last_modified,
+                        total_size,
+                    };
+                    Some((Ok(metadata), object_lister))
+                }
+                Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                None => None,
+            }
+        });
+
+        Ok(stream.boxed())
     }
 }
 
@@ -244,7 +272,7 @@ mod tests {
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
-        let mut iter = store.list(prefix).await.unwrap();
+        let mut iter = store.list_for_test(prefix).await.unwrap();
         let mut result = vec![];
         while let Some(r) = iter.next().await {
             result.push(r.unwrap());
@@ -294,6 +322,7 @@ mod tests {
         let store = OpendalObjectStore::new_memory_engine().unwrap();
         store.upload("abc", Bytes::from("123456")).await.unwrap();
         store.upload("prefix/abc", block1).await.unwrap();
+
         store.upload("prefix/xyz", block2).await.unwrap();
 
         assert_eq!(list_all("", &store).await.len(), 3);

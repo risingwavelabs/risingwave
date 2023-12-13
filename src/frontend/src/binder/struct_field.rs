@@ -67,7 +67,7 @@ impl Binder {
         idents: &[Ident],
         wildcard: bool,
     ) -> Result<Vec<(ExprImpl, String)>> {
-        match idents.get(0) {
+        match idents.first() {
             Some(ident) => {
                 let field_name = ident.real_value();
                 let (field_type, field_index) = find_field(expr.return_type(), ident.real_value())?;

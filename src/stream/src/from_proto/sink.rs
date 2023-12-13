@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, TableId};
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
@@ -47,6 +47,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
+        let target_table = sink_desc.get_target_table().cloned().ok().map(TableId::new);
         let properties = sink_desc.get_properties().clone();
         let downstream_pk = sink_desc
             .downstream_pk
@@ -101,13 +102,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             format_desc,
             db_name,
             sink_from_name,
+            target_table,
         };
 
-        let identity = format!("SinkExecutor {:X?}", params.executor_id);
         let sink_id_str = format!("{}", sink_id.sink_id);
 
         let sink_metrics = stream.streaming_metrics.new_sink_metrics(
-            identity.as_str(),
+            &params.info.identity,
             sink_id_str.as_str(),
             connector,
         );
@@ -120,6 +121,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_metrics,
         };
 
+        let log_store_identity = format!(
+            "sink[{}]-[{}]-executor[{}]",
+            connector, sink_id.sink_id, params.executor_id
+        );
+
         match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
@@ -127,13 +133,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let factory = BoundedInMemLogStoreFactory::new(1);
                 Ok(Box::new(
                     SinkExecutor::new(
+                        params.actor_context,
+                        params.info,
                         input_executor,
                         sink_write_param,
                         sink_param,
                         columns,
-                        params.actor_context,
                         factory,
-                        params.pk_indices,
                     )
                     .await?,
                 ))
@@ -153,17 +159,18 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         params.vnode_bitmap.clone().map(Arc::new),
                         65536,
                         metrics,
+                        log_store_identity,
                     );
 
                     Ok(Box::new(
                         SinkExecutor::new(
+                            params.actor_context,
+                            params.info,
                             input_executor,
                             sink_write_param,
                             sink_param,
                             columns,
-                            params.actor_context,
                             factory,
-                            params.pk_indices,
                         )
                         .await?,
                     ))

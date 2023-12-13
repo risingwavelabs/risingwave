@@ -21,3 +21,4 @@ pub mod meta;
 pub mod profile;
 pub mod scale;
 pub mod table;
+pub mod throttle;

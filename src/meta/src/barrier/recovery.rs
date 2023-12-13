@@ -23,7 +23,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
@@ -95,16 +96,9 @@ impl GlobalBarrierManager {
             .await?;
 
         // unregister compaction group for dirty table fragments.
-        let _ = self.hummock_manager
-            .unregister_table_fragments_vec(
-                &to_drop_table_fragments
-            )
-            .await.inspect_err(|e|
-            warn!(
-            "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
-            to_drop_table_fragments,
-            e)
-        );
+        self.hummock_manager
+            .unregister_table_fragments_vec(&to_drop_table_fragments)
+            .await;
 
         // clean up source connector dirty changes.
         self.source_manager
@@ -147,7 +141,7 @@ impl GlobalBarrierManager {
 
         let table_map = self
             .fragment_manager
-            .get_table_id_actor_mapping(&creating_table_ids)
+            .get_table_id_stream_scan_actor_mapping(&creating_table_ids)
             .await;
         let table_fragment_map = self
             .fragment_manager
@@ -251,6 +245,14 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    // This is a quick path to accelerate the process of dropping streaming jobs. Not that
+                    // some table fragments might have been cleaned as dirty, but it's fine since the drop
+                    // interface is idempotent.
+                    let to_drop_tables = self.scheduled_barriers.pre_apply_drop_scheduled().await;
+                    self.fragment_manager
+                        .drop_table_fragments_vec(&to_drop_tables)
+                        .await?;
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;

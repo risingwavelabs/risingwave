@@ -187,11 +187,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_with_prefix(
-                partition_key,
-                sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
-            )
+            .iter_with_prefix(partition_key, sub_range, PrefetchOptions::default())
             .await?;
 
         #[for_await]
@@ -389,6 +385,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     if let Some(chunk) = output_chunk {
                         yield Message::Chunk(chunk);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;

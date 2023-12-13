@@ -15,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::swap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -73,21 +73,13 @@ impl SplitReader for KafkaSplitReader {
         properties.common.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
-        // rdkafka fetching config
-        properties.rdkafka_properties.set_client(&mut config);
-
-        if config.get("group.id").is_none() {
-            config.set(
-                "group.id",
-                format!(
-                    "consumer-{}",
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros()
-                ),
-            );
-        }
+        config.set(
+            "group.id",
+            format!(
+                "rw-consumer-{}-{}",
+                source_ctx.source_info.fragment_id, source_ctx.source_info.actor_id
+            ),
+        );
 
         let client_ctx = PrivateLinkConsumerContext::new(
             broker_rewrite_map,

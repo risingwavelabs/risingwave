@@ -1,0 +1,20 @@
+sources:
+  demo:
+    type: "demo_logs"
+    format: "json"
+    interval: 0.1
+    lines:
+      - "line1"
+
+sinks:
+  risingwave:
+    type: "risingwave"
+    host: "risingwave-standalone"
+    port: 4566
+    database: "dev"
+    user: "root"
+    table: "event"
+    encoding:
+      codec: "json"
+    inputs:
+      - "demo"

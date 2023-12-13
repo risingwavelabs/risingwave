@@ -17,6 +17,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
@@ -43,7 +44,7 @@ pub enum ExprError {
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
-    #[error("Unsupported cast: {0:?} to {1:?}")]
+    #[error("Unsupported cast: {0} to {1}")]
     UnsupportedCast(DataType, DataType),
 
     #[error("Casting to {0} out of range")]
@@ -62,9 +63,11 @@ pub enum ExprError {
     DivisionByZero,
 
     #[error("Parse error: {0}")]
+    // TODO(error-handling): should prefer use error types than strings.
     Parse(Box<str>),
 
     #[error("Invalid parameter {name}: {reason}")]
+    // TODO(error-handling): should prefer use error types than strings.
     InvalidParam {
         name: &'static str,
         reason: Box<str>,
@@ -120,7 +123,7 @@ impl From<ExprError> for RwError {
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
-        Self::Parse(e.to_string().into())
+        Self::Parse(e.to_report_string().into())
     }
 }
 

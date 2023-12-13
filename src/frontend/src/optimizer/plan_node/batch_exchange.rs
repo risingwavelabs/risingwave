@@ -20,6 +20,7 @@ use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
@@ -100,3 +101,5 @@ impl ToLocalBatch for BatchExchange {
 }
 
 impl ExprRewritable for BatchExchange {}
+
+impl ExprVisitable for BatchExchange {}

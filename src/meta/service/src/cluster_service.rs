@@ -48,9 +48,10 @@ impl ClusterService for ClusterServiceImpl {
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
+        let resource = req.resource.unwrap_or_default();
         let result = self
             .cluster_manager
-            .add_worker_node(worker_type, host, property)
+            .add_worker_node(worker_type, host, property, resource)
             .await;
         match result {
             Ok(worker_node) => Ok(Response::new(AddWorkerNodeResponse {
@@ -116,7 +117,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type()?;
+        let worker_type = req.worker_type.map(|wt| wt.try_into().unwrap());
         let worker_states = if req.include_starting_nodes {
             None
         } else {

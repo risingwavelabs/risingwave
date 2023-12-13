@@ -12,12 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
 
-use crate::{
-    ActorId, ActorStatus, ActorUpstreamActors, ConnectorSplits, Dispatchers, FragmentId,
-    VnodeBitmap,
-};
+use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap};
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum ActorStatus {
+    #[sea_orm(string_value = "INACTIVE")]
+    Inactive,
+    #[sea_orm(string_value = "RUNNING")]
+    Running,
+}
+
+impl From<PbActorState> for ActorStatus {
+    fn from(val: PbActorState) -> Self {
+        match val {
+            PbActorState::Unspecified => unreachable!(),
+            PbActorState::Inactive => ActorStatus::Inactive,
+            PbActorState::Running => ActorStatus::Running,
+        }
+    }
+}
+
+impl From<ActorStatus> for PbActorState {
+    fn from(val: ActorStatus) -> Self {
+        match val {
+            ActorStatus::Inactive => PbActorState::Inactive,
+            ActorStatus::Running => PbActorState::Running,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "actor")]
@@ -29,12 +55,14 @@ pub struct Model {
     pub splits: Option<ConnectorSplits>,
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: ActorUpstreamActors,
-    pub dispatchers: Dispatchers,
     pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::actor_dispatcher::Entity")]
+    ActorDispatcher,
     #[sea_orm(
         belongs_to = "super::fragment::Entity",
         from = "Column::FragmentId",
@@ -43,6 +71,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Fragment,
+}
+
+impl Related<super::actor_dispatcher::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ActorDispatcher.def()
+    }
 }
 
 impl Related<super::fragment::Entity> for Entity {

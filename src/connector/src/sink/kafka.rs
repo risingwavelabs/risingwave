@@ -26,7 +26,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
@@ -65,7 +65,7 @@ const fn _default_max_in_flight_requests_per_connection() -> usize {
     5
 }
 
-#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 enum CompressionCodec {
     None,
@@ -78,7 +78,7 @@ enum CompressionCodec {
 /// See <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 /// for the detailed meaning of these librdkafka producer properties
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesProducer {
     /// Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
     #[serde(rename = "properties.allow.auto.create.topics")]
@@ -254,7 +254,6 @@ impl From<KafkaConfig> for KafkaProperties {
             max_num_messages: None,
             scan_startup_mode: None,
             time_offset: None,
-            consumer_group: None,
             upsert: None,
             common: val.common,
             rdkafka_properties: Default::default(),
@@ -560,7 +559,9 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode};
+    use crate::sink::encoder::{
+        DateHandlingMode, JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    };
     use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
@@ -728,6 +729,7 @@ mod test {
                 JsonEncoder::new(
                     schema,
                     None,
+                    DateHandlingMode::FromCe,
                     TimestampHandlingMode::Milli,
                     TimestamptzHandlingMode::UtcString,
                 ),

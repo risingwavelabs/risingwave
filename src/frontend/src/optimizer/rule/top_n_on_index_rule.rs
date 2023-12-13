@@ -60,12 +60,7 @@ impl TopNOnIndexRule {
     ) -> Option<PlanRef> {
         let order_satisfied_index = logical_scan.indexes_satisfy_order(required_order);
         for index in order_satisfied_index {
-            if let Some(mut index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                index_scan.set_chunk_size(
-                    ((u32::MAX as u64)
-                        .min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
-                        as u32,
-                );
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 return Some(logical_top_n.clone_with_input(index_scan.into()).into());
             }
         }
@@ -76,7 +71,7 @@ impl TopNOnIndexRule {
     fn try_on_pk(
         &self,
         logical_top_n: &LogicalTopN,
-        mut logical_scan: LogicalScan,
+        logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
         let output_col_map = logical_scan
@@ -102,10 +97,6 @@ impl TopNOnIndexRule {
                 .collect::<Vec<_>>(),
         };
         if primary_key_order.satisfies(order) {
-            logical_scan.set_chunk_size(
-                ((u32::MAX as u64).min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
-                    as u32,
-            );
             Some(logical_top_n.clone_with_input(logical_scan.into()).into())
         } else {
             None

@@ -128,7 +128,8 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    exhaust_iter: cache_size_limit == usize::MAX,
+                    prefetch: cache_size_limit == usize::MAX,
+                    for_large_query: false,
                 },
             )
             .await?;
@@ -179,7 +180,8 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    exhaust_iter: topn_cache.limit == usize::MAX,
+                    prefetch: topn_cache.limit == usize::MAX,
+                    for_large_query: false,
                 },
             )
             .await?;
@@ -254,6 +256,11 @@ impl<S: StateStore> ManagedTopNState<S> {
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.commit(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_table.try_flush().await?;
         Ok(())
     }
 }

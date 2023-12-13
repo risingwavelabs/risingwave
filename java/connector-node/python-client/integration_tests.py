@@ -143,13 +143,6 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
         for payload in payload_input:
             request_list.append(
                 connector_service_pb2.SinkWriterStreamRequest(
-                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
-                        epoch=epoch
-                    )
-                )
-            )
-            request_list.append(
-                connector_service_pb2.SinkWriterStreamRequest(
                     write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
                         batch_id=batch_id, epoch=epoch, **payload
                     )
@@ -211,63 +204,12 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
                 exit(1)
 
 
-def validate_jdbc_sink(input_file):
-    conn = psycopg2.connect(
-        "dbname=test user=test password=connector host=localhost port=5432"
-    )
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM test")
-    rows = cur.fetchall()
-    expected = [list(row.values()) for batch in load_input(input_file) for row in batch]
-
-    def convert(b):
-        return [(item[1]["id"], item[1]["name"]) for item in b]
-
-    expected = convert(expected)
-
-    if len(rows) != len(expected):
-        print(
-            "Integration test failed: expected {} rows, but got {}".format(
-                len(expected), len(rows)
-            )
-        )
-        exit(1)
-    for i in range(len(rows)):
-        if len(rows[i]) != len(expected[i]):
-            print(
-                "Integration test failed: expected {} columns, but got {}".format(
-                    len(expected[i]), len(rows[i])
-                )
-            )
-            exit(1)
-        for j in range(len(rows[i])):
-            if rows[i][j] != expected[i][j]:
-                print(
-                    "Integration test failed: expected {} at row {}, column {}, but got {}".format(
-                        expected[i][j], i, j, rows[i][j]
-                    )
-                )
-                exit(1)
-
-
 def test_file_sink(param):
     prop = {
         "connector": "file",
         "output.path": "/tmp/connector",
     }
     test_sink(prop, **param)
-
-
-def test_jdbc_sink(input_file, param):
-    prop = {
-        "connector": "jdbc",
-        "jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-        "table.name": "test",
-        "type": "upsert",
-    }
-    test_sink(prop, **param)
-    # validate results
-    validate_jdbc_sink(input_file)
 
 
 def test_elasticsearch_sink(param):
@@ -333,7 +275,6 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--file_sink", action="store_true", help="run file sink test")
-    parser.add_argument("--jdbc_sink", action="store_true", help="run jdbc sink test")
     parser.add_argument(
         "--stream_chunk_format_test",
         action="store_true",
@@ -390,8 +331,6 @@ if __name__ == "__main__":
 
     if args.file_sink:
         test_file_sink(param)
-    if args.jdbc_sink:
-        test_jdbc_sink(args.input_file, param)
     if args.iceberg_sink:
         test_iceberg_sink(param)
     if args.deltalake_sink:

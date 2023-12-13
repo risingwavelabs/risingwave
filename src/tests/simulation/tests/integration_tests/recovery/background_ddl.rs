@@ -38,7 +38,24 @@ async fn kill_cn_and_wait_recover(cluster: &Cluster) {
     sleep(Duration::from_secs(10)).await;
 }
 
-async fn kill_and_wait_recover(cluster: &Cluster) {
+async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
+    cluster
+        .kill_nodes(
+            [
+                "compute-1",
+                "compute-2",
+                "compute-3",
+                "meta-1",
+                "meta-2",
+                "meta-3",
+            ],
+            0,
+        )
+        .await;
+    sleep(Duration::from_secs(10)).await;
+}
+
+async fn kill_random_and_wait_recover(cluster: &Cluster) {
     // Kill it again
     for _ in 0..3 {
         sleep(Duration::from_secs(2)).await;
@@ -56,7 +73,7 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>().join(",");
     let result = session.run(&format!("cancel jobs {};", ids)).await?;
-    tracing::info!("cancelled streaming jobs, {:#?}", result);
+    tracing::info!("cancelled streaming jobs, {}", result);
     let ids = result
         .split('\n')
         .map(|s| s.parse::<u32>().unwrap())
@@ -102,7 +119,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .await?;
     session.flush().await?;
 
-    kill_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
@@ -130,14 +147,55 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_background_ddl_cancel() -> Result<()> {
+async fn test_background_join_mv_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("CREATE TABLE t1 (v1 int)").await?;
+    session.run("CREATE TABLE t2 (v1 int)").await?;
+    session
+        .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session
+        .run("INSERT INTO t2 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session.flush().await?;
+    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as select t1.v1 from t1 join t2 on t1.v1 = t2.v1;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // Now just wait for it to complete.
+    session.run(WAIT).await?;
+
+    let t_count = session.run("SELECT COUNT(v1) FROM t1").await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+    assert_eq!(t_count, mv1_count);
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
+    session.run("DROP MATERIALIZED VIEW mv1;").await?;
+    session.run("DROP TABLE t1;").await?;
+    session.run("DROP TABLE t2;").await?;
+
+    Ok(())
+}
+
+/// Test cancel for background ddl, foreground ddl.
+#[tokio::test]
+async fn test_ddl_cancel() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE_500).await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_RATE_LIMIT_1).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
@@ -160,14 +218,53 @@ async fn test_background_ddl_cancel() -> Result<()> {
     create_mv(&mut session).await?;
 
     // Test cancel after kill meta
-    kill_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&cluster).await;
 
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
 
-    // Make sure MV can be created after all these cancels
+    // Test cancel by sigkill
+
+    let mut session2 = cluster.start_session();
+    tokio::spawn(async move {
+        session2.run(SET_RATE_LIMIT_1).await.unwrap();
+        let _ = create_mv(&mut session2).await;
+    });
+
+    // Keep searching for the process in process list
+    loop {
+        let processlist = session.run("SHOW PROCESSLIST;").await?;
+        if let Some(line) = processlist
+            .lines()
+            .find(|line| line.to_lowercase().contains("mv1"))
+        {
+            let pid = line.split_whitespace().next().unwrap();
+            let pid = pid.parse::<usize>().unwrap();
+            session.run(format!("kill {};", pid)).await?;
+            break;
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+
     session.run(RESET_RATE_LIMIT).await?;
-    create_mv(&mut session).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+
+    // Make sure MV can be created after all these cancels
+    // Keep retrying since cancel happens async.
+    loop {
+        let result = create_mv(&mut session).await;
+        match result {
+            Ok(_) => break,
+            Err(e) if e.to_string().contains("in creating procedure") => {
+                tracing::info!("create mv failed, retrying: {}", e);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+        sleep(Duration::from_secs(2)).await;
+        tracing::info!("create mv failed, retrying");
+    }
 
     // Wait for job to finish
     session.run(WAIT).await?;
@@ -244,7 +341,7 @@ async fn test_foreground_index_cancel() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_foreground_sink_cancel() -> Result<()> {
+async fn test_sink_create() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -255,26 +352,55 @@ async fn test_foreground_sink_cancel() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = session2
+        session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-            .await;
-        assert!(result.is_err());
+            .await
+            .expect("create sink should succeed");
     });
 
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    // Kill CN should stop the job
-    cancel_stream_jobs(&mut session).await?;
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
 
-    // Create MV should succeed, since the previous foreground job should be cancelled.
-    session.run(SET_RATE_LIMIT_2).await?;
-    session
-        .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-        .await?;
-
+    // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
     session.run(DROP_TABLE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_background_agg_mv_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("CREATE TABLE t1 (v1 int)").await?;
+    session
+        .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session.flush().await?;
+    session.run(SET_RATE_LIMIT_1).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as select v1, count(*) from t1 group by v1;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // Now just wait for it to complete.
+    session.run(WAIT).await?;
+
+    let t_count = session.run("SELECT COUNT(v1) FROM t1").await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+    assert_eq!(t_count, mv1_count);
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
+    session.run("DROP MATERIALIZED VIEW mv1;").await?;
+    session.run("DROP TABLE t1;").await?;
 
     Ok(())
 }

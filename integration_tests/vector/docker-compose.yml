@@ -1,0 +1,45 @@
+---
+version: "3"
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose-distributed.yml
+      service: etcd-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose-distributed.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose-distributed.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose-distributed.yml
+      service: prometheus-0
+
+  vector:
+    image: "ghcr.io/risingwavelabs/vector:0.33.1.custom.7e244e087-debian"
+    volumes:
+      - "./vector.yaml:/etc/vector/vector.yaml:ro"
+    depends_on:
+      - "risingwave-standalone"
+    container_name: vector
+    restart: always
+
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

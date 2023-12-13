@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
@@ -82,11 +83,7 @@ impl Binder {
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
 
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported statement {:?}", stmt),
-                None.into(),
-            )
-            .into()),
+            _ => bail_not_implemented!("unsupported statement {:?}", stmt),
         }
     }
 }

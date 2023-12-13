@@ -32,6 +32,6 @@ impl ExecutorBuilder for NoOpExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        Ok(NoOpExecutor::new(params.actor_context, input, params.executor_id).boxed())
+        Ok(NoOpExecutor::new(params.actor_context, params.info, input).boxed())
     }
 }

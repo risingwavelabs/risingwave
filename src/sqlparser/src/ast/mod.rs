@@ -13,6 +13,7 @@
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
 pub(crate) mod ddl;
+mod legacy_source;
 mod operator;
 mod query;
 mod statement;
@@ -32,8 +33,12 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation,
-    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
+    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint,
+};
+pub use self::legacy_source::{
+    get_delimiter, AvroSchema, CompatibleSourceSchema, DebeziumAvroSchema, ProtobufSchema,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1178,6 +1183,19 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterSourceOperation,
     },
+    /// ALTER FUNCTION
+    AlterFunction {
+        /// Function name
+        name: ObjectName,
+        args: Option<Vec<OperateFunctionArg>>,
+        operation: AlterFunctionOperation,
+    },
+    /// ALTER CONNECTION
+    AlterConnection {
+        /// Connection name
+        name: ObjectName,
+        operation: AlterConnectionOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1197,13 +1215,16 @@ pub enum Statement {
     },
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
+    /// KILL COMMAND
+    /// Kill process in the show processlist.
+    Kill(i32),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
     DropFunction {
         if_exists: bool,
         /// One or more function to drop
-        func_desc: Vec<DropFunctionDesc>,
+        func_desc: Vec<FunctionDesc>,
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
@@ -1215,7 +1236,7 @@ pub enum Statement {
     SetVariable {
         local: bool,
         variable: Ident,
-        value: Vec<SetVariableValue>,
+        value: SetVariableValue,
     },
     /// `SHOW <variable>`
     ///
@@ -1634,6 +1655,16 @@ impl fmt::Display for Statement {
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
             }
+            Statement::AlterFunction { name, args, operation } => {
+                write!(f, "ALTER FUNCTION {}", name)?;
+                if let Some(args) = args {
+                    write!(f, "({})", display_comma_separated(args))?;
+                }
+                write!(f, " {}", operation)
+            }
+            Statement::AlterConnection { name, operation } => {
+                write!(f, "ALTER CONNECTION {} {}", name, operation)
+            }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
                 if_exists,
@@ -1664,7 +1695,6 @@ impl fmt::Display for Statement {
                     f,
                     "{name} = {value}",
                     name = variable,
-                    value = display_comma_separated(value)
                 )
             }
             Statement::ShowVariable { variable } => {
@@ -1834,6 +1864,10 @@ impl fmt::Display for Statement {
             }
             Statement::CancelJobs(jobs) => {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
+                Ok(())
+            }
+            Statement::Kill(process_id) => {
+                write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
         }
@@ -2409,12 +2443,12 @@ impl fmt::Display for DropFunctionOption {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
-pub struct DropFunctionDesc {
+pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,
 }
 
-impl fmt::Display for DropFunctionDesc {
+impl fmt::Display for FunctionDesc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if let Some(args) = &self.args {
@@ -2622,18 +2656,51 @@ impl fmt::Display for CreateFunctionUsing {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
-    Ident(Ident),
-    Literal(Value),
+    Single(SetVariableValueSingle),
+    List(Vec<SetVariableValueSingle>),
     Default,
+}
+
+impl From<SetVariableValueSingle> for SetVariableValue {
+    fn from(value: SetVariableValueSingle) -> Self {
+        SetVariableValue::Single(value)
+    }
 }
 
 impl fmt::Display for SetVariableValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SetVariableValue::*;
         match self {
+            Single(val) => write!(f, "{}", val),
+            List(list) => write!(f, "{}", display_comma_separated(list),),
+            Default => write!(f, "DEFAULT"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetVariableValueSingle {
+    Ident(Ident),
+    Literal(Value),
+}
+
+impl SetVariableValueSingle {
+    pub fn to_string_unquoted(&self) -> String {
+        match self {
+            Self::Literal(Value::SingleQuotedString(s))
+            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            _ => self.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SetVariableValueSingle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SetVariableValueSingle::*;
+        match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
-            Default => write!(f, "DEFAULT"),
         }
     }
 }

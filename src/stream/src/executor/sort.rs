@@ -21,7 +21,7 @@ use risingwave_storage::StateStore;
 use super::sort_buffer::SortBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, Watermark,
+    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
@@ -32,11 +32,10 @@ pub struct SortExecutor<S: StateStore> {
 }
 
 pub struct SortExecutorArgs<S: StateStore> {
-    pub input: BoxedExecutor,
-
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
+
+    pub input: BoxedExecutor,
 
     pub buffer_table: StateTable<S>,
     pub chunk_size: usize,
@@ -77,16 +76,11 @@ impl<S: StateStore> Executor for SortExecutor<S> {
 
 impl<S: StateStore> SortExecutor<S> {
     pub fn new(args: SortExecutorArgs<S>) -> Self {
-        let schema = args.input.schema().clone();
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    identity: format!("SortExecutor {:X}", args.executor_id),
-                    schema,
-                    pk_indices: args.pk_indices,
-                },
+                info: args.info,
                 buffer_table: args.buffer_table,
                 chunk_size: args.chunk_size,
                 sort_column_index: args.sort_column_index,
@@ -148,6 +142,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
                     vars.buffer_changed = true;
+                    this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     if vars.buffer_changed {
@@ -216,12 +211,15 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+        let (tx, source) = MockSource::channel(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
-            input: source.boxed(),
             actor_ctx: ActorContext::create(123),
-            pk_indices: input_pk_indices,
-            executor_id: 1,
+            info: ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "SortExecutor".to_string(),
+            },
+            input: source.boxed(),
             buffer_table,
             chunk_size: 1024,
             sort_column_index,

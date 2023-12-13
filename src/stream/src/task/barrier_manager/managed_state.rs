@@ -15,16 +15,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
 
-use anyhow::anyhow;
-use risingwave_common::bail;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::progress::BackfillState;
 use super::CollectResult;
-use crate::error::{StreamError, StreamResult};
+use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::executor::monitor::GLOBAL_STREAMING_METRICS;
 use crate::executor::Barrier;
 use crate::task::ActorId;
@@ -165,6 +164,9 @@ impl ManagedBarrierState {
 
     /// Notify unexpected actor exit with given `actor_id`.
     pub(crate) fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+        // Attach the actor id to the error.
+        let err = err.into_unexpected_exit(actor_id);
+
         for barrier_state in self.epoch_barrier_state_map.values_mut() {
             #[allow(clippy::single_match)]
             match barrier_state.inner {
@@ -175,14 +177,10 @@ impl ManagedBarrierState {
                     if remaining_actors.contains(&actor_id)
                         && let Some(collect_notifier) = collect_notifier.take()
                         && collect_notifier
-                            .send(Err(anyhow!(format!(
-                                "Actor {actor_id} exit unexpectedly: {:?}",
-                                err
-                            ))
-                            .into()))
+                            .send(Err(err.clone()))
                             .is_err()
                     {
-                        warn!("failed to notify actor {} exit: {:?}", actor_id, err);
+                        warn!(error = %err.as_report(), actor_id, "failed to notify actor exiting");
                     }
                 }
                 _ => {}
@@ -267,7 +265,7 @@ impl ManagedBarrierState {
                     .collect();
                 for (actor_id, err) in &self.failure_actors {
                     if remaining_actors.contains(actor_id) {
-                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
+                        return Err(err.clone());
                     }
                 }
                 assert!(collected_actors.is_empty());
@@ -292,7 +290,7 @@ impl ManagedBarrierState {
                 // recovery.
                 for (actor_id, err) in &self.failure_actors {
                     if remaining_actors.contains(actor_id) {
-                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
+                        return Err(err.clone());
                     }
                 }
                 ManagedBarrierStateInner::Issued {

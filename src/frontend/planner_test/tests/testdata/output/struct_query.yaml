@@ -274,8 +274,7 @@
     Failed to bind expression: (country + country)
 
     Caused by:
-      Feature is not yet implemented: Add[Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] }), Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] })]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function add(struct<address character varying, zipcode character varying>, struct<address character varying, zipcode character varying>) does not exist
   create_source:
     format: plain
     encode: protobuf
@@ -300,7 +299,7 @@
     Failed to bind expression: avg(country)
 
     Caused by:
-      Invalid input syntax: Invalid aggregation: avg(struct<address character varying, zipcode character varying>)
+      function avg(struct<address character varying, zipcode character varying>) does not exist
   create_source:
     format: plain
     encode: protobuf
@@ -396,7 +395,7 @@
   logical_plan: |-
     LogicalProject { exprs: [s.v1, s.v2, s.v3] }
     └─LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
-      └─LogicalScan { table: s, columns: [s.v1, s.v2, s.v3, s._rw_key, s._row_id] }
+      └─LogicalScan { table: s, columns: [s.v1, s.v2, s.v3, s._row_id] }
   create_table_with_connector:
     format: plain
     encode: protobuf

@@ -4,7 +4,7 @@
 CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
     SELECT
         unnest(regexp_matches(tweet.text, '#\w+', 'g')) AS hashtag,
-        tweet.created_at AS created_at
+        tweet.created_at AT TIME ZONE 'UTC' AS created_at
     FROM
         tweet JOIN user
     ON
@@ -30,12 +30,3 @@ FROM
     datatype
 GROUP BY
     c0_boolean;
-
-CREATE SINK hot_hashtags_sink FROM hot_hashtags
-WITH (
-   connector='jdbc',
-   jdbc.url='jdbc:mysql://tidb:4000/test?user=root&password=',
-   table.name='hot_hashtags',
-   type='upsert',
-   primary_key='window_start,hashtag'
-);

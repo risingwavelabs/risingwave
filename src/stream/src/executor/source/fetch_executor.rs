@@ -33,6 +33,7 @@ use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
@@ -97,7 +98,8 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    // This usage is similar with `backfill`. So we only need to fetch a large data rather than establish a connection for a whole object.
+                    PrefetchOptions::prefetch_for_small_range_scan(),
                 )
                 .await?;
             pin_mut!(table_iter);
@@ -202,7 +204,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!("Fetch Error: {:?}", e);
+                    tracing::error!(error = %e.as_report(), "Fetch Error");
                     splits_on_fetch = 0;
                 }
                 Ok(msg) => {
@@ -266,6 +268,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         })
                                         .collect();
                                     state_store_handler.take_snapshot(file_assignment).await?;
+                                    state_store_handler.state_store.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }

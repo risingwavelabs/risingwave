@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "89c2c128de93586465a7ea85b0a1c1a53082bba2", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16ce813a225af04ade35b3b8117b137a29", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -53,7 +53,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.20"
+google-cloud-pubsub = "0.21"
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
@@ -65,7 +65,7 @@ hyper = { version = "0.14", features = [
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
-itertools = "0.11"
+itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
@@ -99,7 +99,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.23.3", features = ["aio","tokio-comp","async-std-comp"] }
+redis = { version = "0.24.0", features = ["aio","tokio-comp","async-std-comp"] }
 regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }

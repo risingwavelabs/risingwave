@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -32,6 +33,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
+    StreamScanType,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -126,9 +128,11 @@ impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let table_fragments = TableFragments::list(env.meta_store()).await?;
 
+        // `expr_context` of `StreamActor` is introduced in 1.6.0.
+        // To ensure compatibility, we fill it for table fragments that were created with older versions.
         let table_fragments = table_fragments
             .into_iter()
-            .map(|tf| (tf.table_id(), tf))
+            .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
         let table_revision = TableRevision::get(env.meta_store()).await?;
@@ -169,18 +173,35 @@ impl FragmentManager {
     /// The `table_ids` here should correspond to stream jobs.
     /// We get their corresponding table fragment, and from there,
     /// we get the actors that are in the table fragment.
-    pub async fn get_table_id_actor_mapping(
+    pub async fn get_table_id_stream_scan_actor_mapping(
         &self,
         table_ids: &[TableId],
-    ) -> HashMap<TableId, Vec<ActorId>> {
+    ) -> HashMap<TableId, HashSet<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         let mut table_map = HashMap::new();
+        // TODO(kwannoel): Can this be unified with `PlanVisitor`?
+        fn has_backfill(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+            && let Some(node) = node.as_stream_scan() {
+                node.stream_scan_type == StreamScanType::Backfill as i32
+                || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill || stream_node.get_input().iter().any(has_backfill)
+        }
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
-                let mut actors = vec![];
+                let mut actors = HashSet::new();
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
-                        actors.push(actor.actor_id)
+                        if let Some(node) = &actor.nodes
+                            && has_backfill(node)
+                        {
+                            actors.insert(actor.actor_id);
+                        } else {
+                            tracing::trace!("ignoring actor: {:?}", actor);
+                        }
                     }
                 }
                 table_map.insert(*table_id, actors);
@@ -766,13 +787,110 @@ impl FragmentManager {
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (node_id, actor_ids) in fragments.worker_actors(include_inactive) {
-                let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actor_ids.extend(actor_ids);
+            for (node_id, actors) in fragments.worker_actors(include_inactive) {
+                let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                node_actors.extend(actors);
             }
         }
 
         actor_maps
+    }
+
+    // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut table_id_to_apply = HashSet::new();
+        for (table_id, table_fragments) in map.iter() {
+            for fragment in table_fragments.fragments.values() {
+                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
+                    table_id_to_apply.insert(*table_id);
+                }
+            }
+        }
+        if table_id_to_apply.is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "source_id {:?} not found in all fragments",
+                source_id
+            )));
+        }
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut to_apply_fragment = HashMap::new();
+        for table_id in table_id_to_apply {
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+            for fragment in table_fragment.fragments.values_mut() {
+                let mut actor_to_apply = Vec::new();
+                for actor in &mut fragment.actors {
+                    if let Some(node) = actor.nodes.as_mut() {
+                        visit_stream_node(node, |node_body| {
+                            if let NodeBody::Source(ref mut node) = node_body {
+                                if let Some(ref mut node_inner) = node.source_inner && node_inner.source_id == source_id as u32 {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                        })
+                    };
+                }
+                to_apply_fragment.insert(fragment.fragment_id, actor_to_apply);
+            }
+        }
+
+        commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update source actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            to_apply_fragment
+        );
+
+        Ok(to_apply_fragment)
+    }
+
+    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_mv_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut fragment = table_fragments
+            .get_mut(table_id)
+            .ok_or_else(|| MetaError::fragment_not_found(table_id))?;
+        let mut fragment_to_apply = HashMap::new();
+
+        for fragment in fragment.fragments.values_mut() {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+                let mut actor_to_apply = Vec::new();
+                for actor in &mut fragment.actors {
+                    if let Some(node) = actor.nodes.as_mut() {
+                        visit_stream_node(node, |node_body| {
+                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                                node.rate_limit = rate_limit;
+                                actor_to_apply.push(actor.actor_id);
+                            }
+                        })
+                    };
+                }
+                fragment_to_apply.insert(fragment.fragment_id, actor_to_apply);
+            }
+        }
+
+        commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update mv actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            fragment_to_apply
+        );
+
+        Ok(fragment_to_apply)
     }
 
     pub async fn update_actor_splits_by_split_assignment(
@@ -1223,7 +1341,6 @@ impl FragmentManager {
                     r#type: d.r#type,
                     dist_key_indices: d.dist_key_indices.clone(),
                     output_indices: d.output_indices.clone(),
-                    downstream_table_name: d.downstream_table_name.clone(),
                 };
                 (fragment_id, strategy)
             })

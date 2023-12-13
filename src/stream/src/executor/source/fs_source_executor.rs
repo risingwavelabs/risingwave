@@ -249,6 +249,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
         Ok(())
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = &mut self.stream_source_core;
+
+        core.split_state_store.state_store.try_flush().await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
@@ -277,11 +285,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {
             match mutation {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
+                Mutation::Add(AddMutation { splits, .. })
+                | Mutation::Update(UpdateMutation {
                     actor_splits: splits,
                     ..
-                } => {
+                }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         boot_state = splits.clone();
                     }
@@ -368,7 +376,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 }
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Update { actor_splits, .. } => {
+                                Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                     self.apply_split_change(
                                         &source_desc,
                                         &mut stream,
@@ -443,6 +451,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
+                    self.try_flush_data().await?;
                 }
             }
         }

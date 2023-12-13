@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::iter;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -20,10 +21,11 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
+use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source, table,
-    user_privilege, view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId,
-    PrivateLinkService, SchemaId, SourceId, TableId, UserId,
+    user_privilege, view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, IndexId,
+    ObjectId, PrivateLinkService, SchemaId, SourceId, TableId, UserId,
 };
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -34,24 +36,27 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
+use sea_orm::sea_query::SimpleExpr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, JoinType,
-    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, JoinType, QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 use tokio::sync::RwLock;
 
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    check_connection_name_duplicate, check_function_signature_duplicate,
-    check_relation_name_duplicate, check_schema_name_duplicate, ensure_object_id,
-    ensure_object_not_refer, ensure_schema_empty, ensure_user_id, get_referring_objects,
-    get_referring_objects_cascade, list_user_info_by_ids, PartialObject,
+    check_connection_name_duplicate, check_database_name_duplicate,
+    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    get_referring_objects, get_referring_objects_cascade, list_user_info_by_ids, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob};
+use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
+
+pub type CatalogControllerRef = Arc<CatalogController>;
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
@@ -61,9 +66,9 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
-    streaming_jobs: Vec<ObjectId>,
-    source_ids: Vec<SourceId>,
-    connections: Vec<PrivateLinkService>,
+    pub(crate) streaming_jobs: Vec<ObjectId>,
+    pub(crate) source_ids: Vec<SourceId>,
+    pub(crate) connections: Vec<PrivateLinkService>,
 }
 
 impl CatalogController {
@@ -137,6 +142,7 @@ impl CatalogController {
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
+        check_database_name_duplicate(&db.name, &txn).await?;
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
@@ -298,8 +304,13 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+        // TODO: support drop schema cascade.
         if drop_mode == DropMode::Restrict {
             ensure_schema_empty(schema_id, &txn).await?;
+        } else {
+            return Err(MetaError::permission_denied(
+                "drop schema cascade is not supported yet".to_string(),
+            ));
         }
 
         // Find affect users with privileges on the schema and the objects in the schema.
@@ -610,6 +621,219 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn alter_owner(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        new_owner: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(new_owner, &txn).await?;
+
+        let obj = Object::find_by_id(object_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
+        if obj.owner_id == new_owner {
+            return Ok(IGNORED_NOTIFICATION_VERSION);
+        }
+        let mut obj = obj.into_active_model();
+        obj.owner_id = Set(new_owner);
+        let obj = obj.update(&txn).await?;
+
+        let mut relations = vec![];
+        match object_type {
+            ObjectType::Database => {
+                let db = Database::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("database", object_id))?;
+
+                txn.commit().await?;
+
+                let version = self
+                    .notify_frontend(
+                        NotificationOperation::Update,
+                        NotificationInfo::Database(ObjectModel(db, obj).into()),
+                    )
+                    .await;
+                return Ok(version);
+            }
+            ObjectType::Schema => {
+                let schema = Schema::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("schema", object_id))?;
+
+                txn.commit().await?;
+
+                let version = self
+                    .notify_frontend(
+                        NotificationOperation::Update,
+                        NotificationInfo::Schema(ObjectModel(schema, obj).into()),
+                    )
+                    .await;
+                return Ok(version);
+            }
+            ObjectType::Table => {
+                let table = Table::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+
+                // associated source.
+                if let Some(associated_source_id) = table.optional_associated_source_id {
+                    let src_obj = object::ActiveModel {
+                        oid: Set(associated_source_id as _),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let source = Source::find_by_id(associated_source_id)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("source", associated_source_id)
+                        })?;
+                    relations.push(PbRelationInfo::Source(ObjectModel(source, src_obj).into()));
+                }
+
+                // indexes.
+                let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) =
+                    if table.table_type == TableType::Table {
+                        Index::find()
+                            .select_only()
+                            .columns([index::Column::IndexId, index::Column::IndexTableId])
+                            .filter(index::Column::PrimaryTableId.eq(object_id))
+                            .into_tuple::<(IndexId, TableId)>()
+                            .all(&txn)
+                            .await?
+                            .into_iter()
+                            .unzip()
+                    } else {
+                        (vec![], vec![])
+                    };
+                relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(
+                        table::Column::BelongsToJobId
+                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                    )
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+                table_ids.extend(internal_tables);
+
+                Object::update_many()
+                    .col_expr(
+                        object::Column::OwnerId,
+                        SimpleExpr::Value(Value::Int(Some(new_owner))),
+                    )
+                    .filter(
+                        object::Column::Oid
+                            .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                    )
+                    .exec(&txn)
+                    .await?;
+
+                let index_objs = Index::find()
+                    .find_also_related(Object)
+                    .filter(index::Column::IndexId.is_in(index_ids))
+                    .all(&txn)
+                    .await?;
+                for (index, index_obj) in index_objs {
+                    relations.push(PbRelationInfo::Index(
+                        ObjectModel(index, index_obj.unwrap()).into(),
+                    ));
+                }
+                let table_objs = Table::find()
+                    .find_also_related(Object)
+                    .filter(table::Column::TableId.is_in(table_ids))
+                    .all(&txn)
+                    .await?;
+                for (table, table_obj) in table_objs {
+                    relations.push(PbRelationInfo::Table(
+                        ObjectModel(table, table_obj.unwrap()).into(),
+                    ));
+                }
+            }
+            ObjectType::Source => {
+                let source = Source::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
+                relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+            }
+            ObjectType::Sink => {
+                let sink = Sink::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
+                relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(table::Column::BelongsToJobId.eq(object_id))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                Object::update_many()
+                    .col_expr(
+                        object::Column::OwnerId,
+                        SimpleExpr::Value(Value::Int(Some(new_owner))),
+                    )
+                    .filter(object::Column::Oid.is_in(internal_tables.clone()))
+                    .exec(&txn)
+                    .await?;
+
+                let table_objs = Table::find()
+                    .find_also_related(Object)
+                    .filter(table::Column::TableId.is_in(internal_tables))
+                    .all(&txn)
+                    .await?;
+                for (table, table_obj) in table_objs {
+                    relations.push(PbRelationInfo::Table(
+                        ObjectModel(table, table_obj.unwrap()).into(),
+                    ));
+                }
+            }
+            ObjectType::View => {
+                let view = View::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
+                relations.push(PbRelationInfo::View(ObjectModel(view, obj).into()));
+            }
+            _ => unreachable!("not supported object type: {:?}", object_type),
+        };
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::RelationGroup(PbRelationGroup {
+                    relations: relations
+                        .into_iter()
+                        .map(|relation| PbRelation {
+                            relation_info: Some(relation),
+                        })
+                        .collect(),
+                }),
+            )
+            .await;
+        Ok(version)
+    }
+
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -732,7 +956,7 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
-        to_drop_objects.extend(to_drop_source_objs.clone());
+        to_drop_objects.extend(to_drop_source_objs);
         if object_type == ObjectType::Source {
             to_drop_source_ids.push(object_id);
         }
@@ -746,12 +970,24 @@ impl CatalogController {
             .all(&txn)
             .await?;
         to_drop_streaming_jobs.extend(index_table_ids);
-        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(to_drop_streaming_jobs.clone()))
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-        to_drop_objects.extend(to_drop_internal_table_objs);
+
+        if !to_drop_streaming_jobs.is_empty() {
+            let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .filter(table::Column::BelongsToJobId.is_in(to_drop_streaming_jobs.clone()))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+
+            to_drop_objects.extend(to_drop_internal_table_objs);
+        }
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -843,12 +1079,80 @@ impl CatalogController {
         ))
     }
 
-    pub async fn alter_relation_name(
+    async fn alter_database_name(
+        &self,
+        database_id: DatabaseId,
+        name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        check_database_name_duplicate(name, &txn).await?;
+
+        let active_model = database::ActiveModel {
+            database_id: Set(database_id),
+            name: Set(name.to_string()),
+        };
+        let database = active_model.update(&txn).await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database, obj).into()),
+            )
+            .await;
+        Ok(version)
+    }
+
+    async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let obj = Object::find_by_id(schema_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+        check_schema_name_duplicate(name, obj.database_id.unwrap(), &txn).await?;
+
+        let active_model = schema::ActiveModel {
+            schema_id: Set(schema_id),
+            name: Set(name.to_string()),
+        };
+        let schema = active_model.update(&txn).await?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Schema(ObjectModel(schema, obj).into()),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn alter_name(
         &self,
         object_type: ObjectType,
         object_id: ObjectId,
         object_name: &str,
     ) -> MetaResult<NotificationVersion> {
+        if object_type == ObjectType::Database {
+            return self.alter_database_name(object_id as _, object_name).await;
+        } else if object_type == ObjectType::Schema {
+            return self.alter_schema_name(object_id as _, object_name).await;
+        }
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
@@ -978,11 +1282,47 @@ impl CatalogController {
 
         Ok(version)
     }
+
+    pub async fn alter_source_column(
+        &self,
+        pb_source: PbSource,
+    ) -> MetaResult<NotificationVersion> {
+        let source_id = pb_source.id as SourceId;
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let original_version: i64 = Source::find_by_id(source_id)
+            .select_only()
+            .column(source::Column::Version)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+        if original_version + 1 != pb_source.version as i64 {
+            return Err(MetaError::permission_denied(
+                "source version is stale".to_string(),
+            ));
+        }
+
+        let source: source::ActiveModel = pb_source.clone().into();
+        source.update(&txn).await?;
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                NotificationOperation::Update,
+                PbRelationInfo::Source(pb_source),
+            )
+            .await;
+        Ok(version)
+    }
 }
 
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
+    use risingwave_meta_model_v2::ViewId;
+
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -990,21 +1330,67 @@ mod tests {
     const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
-    async fn test_create_database() -> MetaResult<()> {
+    async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-        let db = PbDatabase {
-            name: "test".to_string(),
+        let pb_database = PbDatabase {
+            name: "db1".to_string(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
-        mgr.create_database(db).await?;
+        mgr.create_database(pb_database).await?;
 
-        let db = Database::find()
-            .filter(database::Column::Name.eq("test"))
+        let database_id: DatabaseId = Database::find()
+            .select_only()
+            .column(database::Column::DatabaseId)
+            .filter(database::Column::Name.eq("db1"))
+            .into_tuple()
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        mgr.drop_database(db.database_id).await?;
+
+        mgr.alter_name(ObjectType::Database, database_id, "db2")
+            .await?;
+        let database = Database::find_by_id(database_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(database.name, "db2");
+
+        mgr.drop_database(database_id).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_schema_func() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let pb_schema = PbSchema {
+            database_id: TEST_DATABASE_ID as _,
+            name: "schema1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        };
+        mgr.create_schema(pb_schema.clone()).await?;
+        assert!(mgr.create_schema(pb_schema).await.is_err());
+
+        let schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("schema1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        mgr.alter_name(ObjectType::Schema, schema_id, "schema2")
+            .await?;
+        let schema = Schema::find_by_id(schema_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(schema.name, "schema2");
+        mgr.drop_schema(schema_id, DropMode::Restrict).await?;
+
         Ok(())
     }
 
@@ -1072,6 +1458,87 @@ mod tests {
 
         mgr.drop_function(function.function_id).await?;
         assert!(Object::find_by_id(function.function_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_relation_rename() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let pb_source = PbSource {
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
+            name: "s1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            definition: r#"CREATE SOURCE s1 (v1 int) with (
+  connector = 'kafka',
+  topic = 'kafka_alter',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON"#
+                .to_string(),
+            ..Default::default()
+        };
+        mgr.create_source(pb_source).await?;
+        let source_id: SourceId = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::Name.eq("s1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let pb_view = PbView {
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
+            name: "view_1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_string(),
+            dependent_relations: vec![source_id as _],
+            ..Default::default()
+        };
+        mgr.create_view(pb_view).await?;
+        let view_id: ViewId = View::find()
+            .select_only()
+            .column(view::Column::ViewId)
+            .filter(view::Column::Name.eq("view_1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        mgr.alter_name(ObjectType::Source, source_id, "s2").await?;
+        let source = Source::find_by_id(source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(source.name, "s2");
+        assert_eq!(
+            source.definition,
+            "CREATE SOURCE s2 (v1 INT) WITH (\
+  connector = 'kafka', \
+  topic = 'kafka_alter', \
+  properties.bootstrap.server = 'message_queue:29092', \
+  scan.startup.mode = 'earliest'\
+) FORMAT PLAIN ENCODE JSON"
+        );
+
+        let view = View::find_by_id(view_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(
+            view.definition,
+            "CREATE VIEW view_1 AS SELECT v1 FROM s2 AS s1"
+        );
+
+        mgr.drop_relation(ObjectType::Source, source_id, DropMode::Cascade)
+            .await?;
+        assert!(View::find_by_id(view_id)
             .one(&mgr.inner.read().await.db)
             .await?
             .is_none());

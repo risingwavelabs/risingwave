@@ -122,6 +122,10 @@ pub struct StreamingMetrics {
     pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // CDC Backfill
+    pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub cdc_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
     // Over Window
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
@@ -159,7 +163,7 @@ pub struct StreamingMetrics {
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
-    pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
+    pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
@@ -170,7 +174,7 @@ pub struct StreamingMetrics {
     pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
 
     // Memory
-    pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
+    pub stream_memory_usage: LabelGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -684,6 +688,22 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the cdc_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let cdc_backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+            "stream_cdc_backfill_upstream_output_row_count",
+            "Total number of rows that have been output from the cdc_backfill upstream",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -845,7 +865,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_evicted_watermark_time_ms = register_int_gauge_vec_with_registry!(
+        let lru_evicted_watermark_time_ms = register_guarded_int_gauge_vec_with_registry!(
             "lru_evicted_watermark_time_ms",
             "The latest evicted watermark time by actors",
             &["table_id", "actor_id", "desc"],
@@ -897,7 +917,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let stream_memory_usage = register_int_gauge_vec_with_registry!(
+        let stream_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "stream_memory_usage",
             "Memory usage for stream executors",
             &["table_id", "actor_id", "desc"],
@@ -980,6 +1000,8 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             arrangement_backfill_snapshot_read_row_count,
             arrangement_backfill_upstream_output_row_count,
+            cdc_backfill_snapshot_read_row_count,
+            cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,

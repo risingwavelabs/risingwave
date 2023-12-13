@@ -16,6 +16,7 @@
 
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(error_generic_member_access)]
 
 pub mod metrics_manager;
 pub mod observer_manager;

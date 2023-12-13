@@ -1,4 +1,13 @@
-set cdc_backfill='true';
+
+create source mysql_mydb with (
+    connector = 'mysql-cdc',
+    hostname = 'mysql',
+    port = '3306',
+    username = 'root',
+    password = '123456',
+    database.name = 'mydb',
+    server.id = '2'
+);
 
 CREATE TABLE lineitem_rw (
    L_ORDERKEY BIGINT,
@@ -18,13 +27,4 @@ CREATE TABLE lineitem_rw (
    L_SHIPMODE VARCHAR,
    L_COMMENT VARCHAR,
    PRIMARY KEY(L_ORDERKEY, L_LINENUMBER)
-) WITH (
-    connector = 'mysql-cdc',
-    hostname = 'mysql',
-    port = '3306',
-    username = 'root',
-    password = '123456',
-    database.name = 'mydb',
-    table.name = 'lineitem',
-    server.id = '2'
-);
+) FROM mysql_mydb TABLE 'mydb.lineitem';
