@@ -20,8 +20,10 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::generic::{DynamicFilter, GenericPlanRef};
 use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
-use super::{generic, ExprRewritable};
+use super::utils::{
+    childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
+};
+use super::{generic, ExprRewritable, PlanTreeNodeUnary};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -39,12 +41,32 @@ impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
-        // TODO: derive from input
+        // TODO: the condition is wrong, introduce monotonically increasing property of the node
+        let right_monotonically_increasing = {
+            if let Some(e) = core.right().as_stream_exchange() {
+                if let Some(proj) = e.input().as_stream_project() {
+                    proj.input().as_stream_now().is_some()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        let append_only = if right_monotonically_increasing
+            && matches!(
+                core.comparator(),
+                ExprType::LessThan | ExprType::LessThanOrEqual
+            ) {
+            core.left().append_only()
+        } else {
+            false
+        };
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            false, /* we can have a new abstraction for append only and monotonically increasing
-                    * in the future */
+            append_only,
             false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
@@ -95,7 +117,13 @@ impl Distill for StreamDynamicFilter {
                 Pretty::display(&self.cleaned_by_watermark),
             ));
         }
-        childless_record("StreamDynamicFilter", vec)
+        childless_record(
+            plan_node_name!(
+                "StreamDynamicFilter",
+                { "append_only", self.append_only() },
+            ),
+            vec,
+        )
     }
 }
 

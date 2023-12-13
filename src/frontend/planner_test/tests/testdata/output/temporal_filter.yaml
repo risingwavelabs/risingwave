@@ -94,7 +94,7 @@
     select * from t1 where now() - interval '15 minutes' > ts;
   stream_plan: |-
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id] }
+    └─StreamDynamicFilter [append_only] { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id] }
       ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
@@ -103,7 +103,9 @@
     Fragment 0
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id] } { left table: 0, right table: 1 }
+    └── StreamDynamicFilter [append_only] { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id] }
+        ├── left table: 0
+        ├── right table: 1
         ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         │   ├── state table: 2
         │   ├── Upstream
