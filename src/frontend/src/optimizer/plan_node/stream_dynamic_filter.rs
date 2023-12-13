@@ -47,6 +47,8 @@ impl StreamDynamicFilter {
                     * in the future */
             false, // TODO(rc): decide EOWC property
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
         Self {

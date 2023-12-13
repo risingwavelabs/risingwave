@@ -214,6 +214,8 @@ impl LogicalSource {
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+                // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+                vec![],
             ),
             core: logical_source,
         }

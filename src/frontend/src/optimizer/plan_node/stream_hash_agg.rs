@@ -94,6 +94,8 @@ impl StreamHashAgg {
             emit_on_window_close, // in EOWC mode, we produce append only output
             emit_on_window_close,
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamHashAgg {
             base,

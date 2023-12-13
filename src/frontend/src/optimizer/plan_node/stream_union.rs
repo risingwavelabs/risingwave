@@ -63,6 +63,8 @@ impl StreamUnion {
             inputs.iter().all(|x| x.append_only()),
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
 
         StreamUnion { base, core }

@@ -48,6 +48,8 @@ impl StreamValues {
             true,
             false,
             FixedBitSet::with_capacity(logical.schema().len()),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         Self { base, logical }
     }

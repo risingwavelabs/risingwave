@@ -58,6 +58,8 @@ impl StreamEowcOverWindow {
             true,
             true,
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamEowcOverWindow { base, core }
     }

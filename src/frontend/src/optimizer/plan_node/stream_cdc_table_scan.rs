@@ -49,6 +49,8 @@ impl StreamCdcTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         Self { base, core }
     }

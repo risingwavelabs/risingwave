@@ -52,6 +52,8 @@ impl StreamWatermarkFilter {
             input.append_only(),
             false, // TODO(rc): decide EOWC property
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         Self::with_base(base, input, watermark_descs)
     }

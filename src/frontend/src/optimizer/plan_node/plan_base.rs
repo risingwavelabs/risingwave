@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanNode;
 use super::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Monotonicity, Order};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -62,6 +62,9 @@ pub struct StreamExtra {
     /// The watermark column indices of the PlanNode's output. There could be watermark output from
     /// this stream operator.
     watermark_columns: FixedBitSet,
+
+    /// The monotonic columns of the PlanNode's output, Vector of (column index, Monotonicity)
+    monotonic_columns: Vec<(usize, Monotonicity)>,
 }
 
 impl GetPhysicalCommon for StreamExtra {
@@ -171,6 +174,10 @@ impl stream::StreamPlanRef for PlanBase<Stream> {
     fn watermark_columns(&self) -> &FixedBitSet {
         &self.extra.watermark_columns
     }
+
+    fn monotonic_columns(&self) -> &[(usize, Monotonicity)] {
+        &self.extra.monotonic_columns
+    }
 }
 
 impl batch::BatchPlanRef for PlanBase<Batch> {
@@ -225,6 +232,7 @@ impl PlanBase<Stream> {
         append_only: bool,
         emit_on_window_close: bool,
         watermark_columns: FixedBitSet,
+        monotonic_columns: Vec<(usize, Monotonicity)>,
     ) -> Self {
         let id = ctx.next_plan_node_id();
         assert_eq!(watermark_columns.len(), schema.len());
@@ -239,6 +247,7 @@ impl PlanBase<Stream> {
                 append_only,
                 emit_on_window_close,
                 watermark_columns,
+                monotonic_columns,
             },
         }
     }
@@ -249,6 +258,7 @@ impl PlanBase<Stream> {
         append_only: bool,
         emit_on_window_close: bool,
         watermark_columns: FixedBitSet,
+        monotonic_columns: Vec<(usize, Monotonicity)>,
     ) -> Self {
         Self::new_stream(
             core.ctx(),
@@ -259,6 +269,7 @@ impl PlanBase<Stream> {
             append_only,
             emit_on_window_close,
             watermark_columns,
+            monotonic_columns,
         )
     }
 }
@@ -386,6 +397,10 @@ impl<'a> PlanBaseRef<'a> {
         dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
     }
 
+    pub(super) fn monotonic_columns(self) -> &'a [(usize, Monotonicity)] {
+        dispatch_plan_base!(self, [Stream], StreamPlanRef::monotonic_columns)
+    }
+
     pub(super) fn order(self) -> &'a Order {
         dispatch_plan_base!(self, [Batch], BatchPlanRef::order)
     }
@@ -430,6 +445,10 @@ impl StreamPlanRef for PlanBaseRef<'_> {
 
     fn watermark_columns(&self) -> &FixedBitSet {
         (*self).watermark_columns()
+    }
+
+    fn monotonic_columns(&self) -> &[(usize, Monotonicity)] {
+        (*self).monotonic_columns()
     }
 }
 

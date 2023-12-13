@@ -32,3 +32,5 @@ mod func_dep;
 pub use func_dep::*;
 mod cardinality;
 pub use cardinality::*;
+mod monotonicity;
+pub use monotonicity::*;

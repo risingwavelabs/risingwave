@@ -78,6 +78,8 @@ impl StreamGroupTopN {
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamGroupTopN {
             base,

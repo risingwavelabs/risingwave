@@ -44,6 +44,8 @@ impl StreamExchange {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamExchange {
             base,
@@ -64,6 +66,8 @@ impl StreamExchange {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamExchange {
             base,

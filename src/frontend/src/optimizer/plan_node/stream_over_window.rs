@@ -46,6 +46,8 @@ impl StreamOverWindow {
             false, // general over window cannot be append-only
             false,
             watermark_columns,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
         StreamOverWindow { base, core }
     }

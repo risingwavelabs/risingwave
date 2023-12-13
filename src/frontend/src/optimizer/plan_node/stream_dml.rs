@@ -42,6 +42,8 @@ impl StreamDml {
             append_only,
             false,                                            // TODO(rc): decide EOWC property
             FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            vec![],
         );
 
         Self {
