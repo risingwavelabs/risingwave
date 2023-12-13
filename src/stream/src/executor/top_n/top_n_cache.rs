@@ -28,6 +28,7 @@ use super::{CacheKey, GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
+const TOPN_CACHE_MIN_CAPACITY: usize = 10;
 
 /// Cache for [`ManagedTopNState`].
 ///
@@ -171,7 +172,8 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             high_capacity: offset
                 .checked_add(limit)
                 .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
-                .unwrap_or(usize::MAX),
+                .unwrap_or(usize::MAX)
+                .max(TOPN_CACHE_MIN_CAPACITY),
             offset,
             limit,
             table_row_count: None,
