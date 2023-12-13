@@ -21,7 +21,6 @@ publish = false
 ahash = { version = "0.8" }
 allocator-api2 = { version = "0.2", default-features = false, features = ["alloc", "nightly"] }
 anyhow = { version = "1", features = ["backtrace"] }
-arrow-schema = { version = "48", default-features = false, features = ["serde"] }
 async-std = { version = "1", features = ["attributes", "tokio1"] }
 aws-credential-types = { version = "1", default-features = false, features = ["hardcoded-credentials"] }
 aws-runtime = { version = "1", default-features = false, features = ["event-stream", "sigv4a"] }
@@ -105,7 +104,7 @@ redis = { version = "0.24", features = ["async-std-comp", "tokio-comp"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8" }
-reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustls = { version = "0.21" }

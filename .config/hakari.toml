@@ -41,4 +41,5 @@ third-party = [
     { name = "criterion" },
     { name = "console" },
     { name = "similar" },
+    { name = "deltalake", git = "https://github.com/risingwavelabs/delta-rs", rev = "258d074" },
 ]
