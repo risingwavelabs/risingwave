@@ -39,6 +39,8 @@ pub struct DataChunkBuilder {
 
 impl DataChunkBuilder {
     pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
+        assert!(batch_size > 0);
+
         Self {
             data_types,
             batch_size,
@@ -124,7 +126,8 @@ impl DataChunkBuilder {
     pub fn append_chunk(&mut self, data_chunk: DataChunk) -> AppendDataChunk<'_> {
         AppendDataChunk {
             builder: self,
-            remaining: Some(SlicedDataChunk::new_checked(data_chunk)),
+            remaining: (data_chunk.capacity() > 0) // defensive check for empty chunk
+                .then(|| SlicedDataChunk::new_checked(data_chunk)),
         }
     }
 

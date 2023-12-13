@@ -141,7 +141,7 @@ pub fn add_hummock_backend(
             else if opendal.engine == "fs"{
                 println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg("hummock+fs://");
+                .arg(format!("hummock+fs://{}", opendal.bucket));
             }
             else{
                 unimplemented!()

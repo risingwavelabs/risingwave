@@ -15,6 +15,7 @@
 //! Fragment and schedule batch queries.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::Stream;
 use risingwave_common::array::DataChunk;
@@ -46,17 +47,22 @@ pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
 /// Context for mpp query execution.
 pub struct ExecutionContext {
     session: Arc<SessionImpl>,
+    timeout: Option<Duration>,
 }
 
 pub type ExecutionContextRef = Arc<ExecutionContext>;
 
 impl ExecutionContext {
-    pub fn new(session: Arc<SessionImpl>) -> Self {
-        Self { session }
+    pub fn new(session: Arc<SessionImpl>, timeout: Option<Duration>) -> Self {
+        Self { session, timeout }
     }
 
     pub fn session(&self) -> &SessionImpl {
         &self.session
+    }
+
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
     }
 
     pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {

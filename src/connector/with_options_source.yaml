@@ -20,10 +20,6 @@ KafkaProperties:
     field_type: String
     required: false
     alias: scan.startup.timestamp_millis
-  - name: properties.group.id
-    field_type: String
-    required: false
-    alias: kafka.consumer.group
   - name: upsert
     field_type: String
     comments: 'This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
