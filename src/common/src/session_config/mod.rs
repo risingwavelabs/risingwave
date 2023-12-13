@@ -55,7 +55,7 @@ pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[parameter(default = false, rename = "rw_implicit_flush")]
+    #[parameter(default = false, rename = "rw_implicit_flush", alias = "implicit_flush" | "flush")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
@@ -303,4 +303,26 @@ pub trait ConfigReporter {
 // Report nothing.
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(SessionConfig)]
+    struct TestConfig {
+        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        test_param: i32,
+    }
+
+    #[test]
+    fn test_session_config_alias() {
+        let mut config = TestConfig::default();
+        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "2");
+        config
+            .set("alias_param_test", "3".to_string(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "3");
+    }
 }
