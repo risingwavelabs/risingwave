@@ -83,7 +83,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
         if let Some(alias) = alias {
             alias_to_entry_name_branches.push(quote! {
-                #alias => #entry_name.to_string(),
+                #alias => #entry_name,
             })
         }
 
@@ -245,10 +245,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 Default::default()
             }
 
-            fn alias_to_entry_name(key_name: &str) -> String {
+            fn alias_to_entry_name(key_name: &str) -> &str {
                 match key_name {
                     #(#alias_to_entry_name_branches)*
-                    _ => key_name.to_string(),
+                    _ => key_name,
                 }
             }
 
