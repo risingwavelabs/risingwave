@@ -39,7 +39,7 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 crc32fast = "1"
 easy-ext = "1"
-educe = "0.4"
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }

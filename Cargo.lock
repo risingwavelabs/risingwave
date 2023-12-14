@@ -3277,10 +3277,22 @@ version = "0.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
 dependencies = [
- "enum-ordinalize",
+ "enum-ordinalize 3.1.13",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "educe"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f39e09e750431c4f545eb575c1175640d5350282124120c32c295ea9c4f80d28"
+dependencies = [
+ "enum-ordinalize 4.2.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
 ]
 
 [[package]]
@@ -3408,6 +3420,26 @@ checksum = "e4f76552f53cefc9a7f64987c3701b99d982f7690606fd67de1d09712fbf52f1"
 dependencies = [
  "num-bigint",
  "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6926bbe8b379bb3d8e9fb718a0496481531f338866666a848e6a02da99ffab79"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05aa0010e0e391b9a82dc87bfc4dbee3cb8260eec12ad9d83c12788299fa9093"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -8168,7 +8200,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe",
+ "educe 0.5.5",
  "either",
  "enum-as-inner",
  "enumflags2",
@@ -8654,7 +8686,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe",
+ "educe 0.5.5",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -9348,7 +9380,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "educe",
+ "educe 0.5.5",
  "either",
  "enum-as-inner",
  "expect-test",
@@ -10550,7 +10582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67e8d8e7f43fc5d4c35be73549ea22ed1d712dcf39656a243144677297da5ec"
 dependencies = [
  "async-trait",
- "educe",
+ "educe 0.4.23",
  "fs-err",
  "futures",
  "glob",
