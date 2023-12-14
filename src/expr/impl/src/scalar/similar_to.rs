@@ -20,17 +20,47 @@ fn similar_escape_internal(
     pat: &str,
     esc_text: Option<char>,
     writer: &mut impl Write,
-) -> std::result::Result<(), std::fmt::Error> {
-    writer.write_str("^(?:")?;
+) -> std::result::Result<(), ExprError> {
+    macro_rules! write_str {
+        ($s:tt) => {
+            writer
+                .write_str($s)
+                .map_err(|e| ExprError::Internal(e.into()))?
+        };
+    }
+    macro_rules! write_char {
+        ($c:tt) => {
+            writer
+                .write_char($c)
+                .map_err(|e| ExprError::Internal(e.into()))?
+        };
+    }
 
+    write_str!("^(?:");
+
+    let mut nquotes = 0;
     let mut afterescape = false;
     let mut incharclass = false;
 
     for chr in pat.chars() {
         match chr {
             c if afterescape => {
-                writer.write_char('\\')?;
-                writer.write_char(c)?;
+                if c == '"' && !incharclass {
+                    match nquotes {
+                        0 => write_str!("){1,1}?("),
+                        1 => write_str!("){1,1}(?:"),
+                        _ => {
+                            return Err(ExprError::InvalidParam {
+                                name: "pat",
+                                reason: "SQL regular expression may not contain more than two escape-double-quote separators".into()
+                            });
+                        }
+                    }
+                    nquotes += 1;
+                } else {
+                    write_char!('\\');
+                    write_char!(c);
+                }
 
                 afterescape = false;
             }
@@ -39,39 +69,41 @@ fn similar_escape_internal(
             }
             c if incharclass => {
                 if c == '\\' {
-                    writer.write_char('\\')?;
+                    write_char!('\\');
                 }
-                writer.write_char(c)?;
+                write_char!(c);
 
                 if c == ']' {
                     incharclass = false;
                 }
             }
             c @ '[' => {
-                writer.write_char(c)?;
+                write_char!(c);
                 incharclass = true;
             }
             '%' => {
-                writer.write_str(".*")?;
+                write_str!(".*");
             }
             '_' => {
-                writer.write_char('.')?;
+                write_char!('.');
             }
             '(' => {
                 // convert to non-capturing parenthesis
-                writer.write_str("(?:")?;
+                write_str!("(?:");
             }
             c @ ('\\' | '.' | '^' | '$') => {
-                writer.write_char('\\')?;
-                writer.write_char(c)?;
+                write_char!('\\');
+                write_char!(c);
             }
             c => {
-                writer.write_char(c)?;
+                write_char!(c);
             }
         }
     }
 
-    writer.write_str(")$")
+    write_str!(")$");
+
+    Ok(())
 }
 
 #[function(
@@ -79,7 +111,7 @@ fn similar_escape_internal(
     "similar_to_escape(varchar) -> varchar",
 )]
 fn similar_to_escape_default(pat: &str, writer: &mut impl Write) -> Result<()> {
-    similar_escape_internal(pat, Some('\\'), writer).map_err(|e| ExprError::Internal(e.into()))
+    similar_escape_internal(pat, Some('\\'), writer)
 }
 #[function("similar_to_escape(varchar, varchar) -> varchar")]
 fn similar_to_escape_with_escape_text(
@@ -99,7 +131,6 @@ fn similar_to_escape_with_escape_text(
     }
 
     similar_escape_internal(pat, esc_text.chars().next(), writer)
-        .map_err(|e| ExprError::Internal(e.into()))
 }
 
 #[cfg(test)]
