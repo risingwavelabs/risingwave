@@ -4039,19 +4039,19 @@ impl Parser {
                 }
             };
 
-            return Ok(Statement::SetTimeZone {
+            Ok(Statement::SetTimeZone {
                 local: modifier == Some(Keyword::LOCAL),
                 value,
             })
-        } else if self.parse_keyword(Keyword::CHARACTERISTICS) && modifier == Some(Keyword::SESSION){
+        } else if self.parse_keyword(Keyword::CHARACTERISTICS) && modifier == Some(Keyword::SESSION)
+        {
             self.expect_keywords(&[Keyword::AS, Keyword::TRANSACTION])?;
             Ok(Statement::SetTransaction {
                 modes: self.parse_transaction_modes()?,
                 snapshot: None,
                 session: true,
             })
-        }
-        else if self.parse_keyword(Keyword::TRANSACTION) && modifier.is_none(){
+        } else if self.parse_keyword(Keyword::TRANSACTION) && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
                 let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
@@ -4075,10 +4075,8 @@ impl Parser {
                     variable,
                     value,
                 })
-            }
-            else {
+            } else {
                 self.expected("equals sign or TO", self.peek_token())
-    
             }
         }
     }
