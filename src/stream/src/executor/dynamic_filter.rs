@@ -520,7 +520,9 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
@@ -1179,6 +1181,17 @@ mod tests {
         Ok(())
     }
 
+    async fn in_table(table: &StorageTable<MemoryStateStore>, x: i64) -> bool {
+        let row = table
+            .get_row(
+                &OwnedRow::new(vec![Some(x.into())]),
+                HummockReadEpoch::Current(u64::MAX),
+            )
+            .await
+            .unwrap();
+        row.is_some()
+    }
+
     #[tokio::test]
     async fn test_dynamic_filter_always_relax() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
@@ -1205,17 +1218,26 @@ mod tests {
         let mem_state = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
             create_executor_inner(ExprNodeType::LessThanOrEqual, mem_state.clone(), true).await;
+        let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
+        let table = StorageTable::for_test(
+            mem_state.clone(),
+            TableId::new(0),
+            vec![column_descs],
+            vec![OrderType::ascending()],
+            vec![0],
+            vec![0],
+        );
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
         tx_r.push_barrier(1, false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
-        // push the 1st left chunk
-        tx_l.push_chunk(chunk_l1);
-
         // push the 1st right chunk
         tx_r.push_chunk(chunk_r1);
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
 
         // push the init barrier for left and right
         tx_l.push_barrier(2, false);
@@ -1233,6 +1255,10 @@ mod tests {
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
 
+        assert!(!in_table(&table, 2).await);
+        assert!(in_table(&table, 3).await);
+        assert!(in_table(&table, 4).await);
+
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
@@ -1244,13 +1270,23 @@ mod tests {
                 - 2"
             )
         );
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+        // Get the barrier
+        dynamic_filter.next_unwrap_ready_barrier()?;
+
+        assert!(!in_table(&table, 2).await);
+        assert!(!in_table(&table, 2).await);
+        assert!(!in_table(&table, 3).await);
+        assert!(in_table(&table, 4).await);
 
         // push the 2nd right chunk
         tx_r.push_chunk(chunk_r2);
 
         // push the init barrier for left and right
-        tx_l.push_barrier(3, false);
-        tx_r.push_barrier(3, false);
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
 
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
@@ -1263,7 +1299,9 @@ mod tests {
 
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
-        
+
+        assert!(!in_table(&table, 4).await);
+
         Ok(())
     }
 }
