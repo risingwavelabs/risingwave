@@ -156,6 +156,7 @@ mod tests {
             ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
             ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
             ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+            (r#"%\"o_b\"%"#, "^(?:.*){1,1}?(o.b){1,1}(?:.*)$"),
         ];
 
         for (pat, escaped) in cases {
@@ -163,6 +164,12 @@ mod tests {
             similar_to_escape_default(pat, &mut writer).ok();
             assert_eq!(writer, escaped);
         }
+
+        // 3 quotes (>= 2)
+        let pat = r#"one"two"three"four"#;
+        let mut writer = String::new();
+        let res = similar_to_escape_default(pat, &mut writer);
+        assert!(res.is_err());
     }
 
     #[test]
@@ -179,6 +186,7 @@ mod tests {
             ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
             ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
             ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+            (r#"%#"o_b#"%"#, "^(?:.*){1,1}?(o.b){1,1}(?:.*)$"),
         ];
 
         for (pat, escaped) in cases {
