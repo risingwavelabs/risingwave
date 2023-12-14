@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -54,16 +55,12 @@ struct DispatchExecutorInner {
     fragment_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
+    actor_out_record_cnt: LabelGuardedIntCounter<2>,
 }
 
 impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
         let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
-
-        let actor_out_record_cnt = self
-            .metrics
-            .actor_out_record_cnt
-            .with_label_values(&[&self.actor_id_str, &self.fragment_id_str]);
 
         match msg {
             Message::Watermark(watermark) => {
@@ -102,7 +99,7 @@ impl DispatchExecutorInner {
                     })
                     .await?;
 
-                actor_out_record_cnt.inc_by(chunk.cardinality() as _);
+                self.actor_out_record_cnt.inc_by(chunk.cardinality() as _);
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
@@ -315,15 +312,21 @@ impl DispatchExecutor {
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
+        let actor_out_record_cnt = metrics
+            .actor_out_record_cnt
+            .with_label_values(&[&actor_id_str, &fragment_id_str]);
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                actor_id_str: actor_id.to_string(),
-                fragment_id_str: fragment_id.to_string(),
+                actor_id_str,
+                fragment_id_str,
                 context,
                 metrics,
+                actor_out_record_cnt,
             },
         }
     }
