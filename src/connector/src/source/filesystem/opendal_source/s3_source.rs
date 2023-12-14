@@ -21,8 +21,8 @@ use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
-// use crate::source::filesystem::opendal_source::get_prefix;
-use crate::source::filesystem::{s3::enumerator::get_prefix, S3Properties};
+use crate::source::filesystem::s3::enumerator::get_prefix;
+use crate::source::filesystem::S3Properties;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal s3 source.
