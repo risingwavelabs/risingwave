@@ -525,6 +525,7 @@ pub async fn start_service_as_election_leader(
             cluster_manager.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
+            catalog_manager.clone(),
         )
         .unwrap(),
     );

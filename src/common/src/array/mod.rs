@@ -32,6 +32,7 @@ mod num256_array;
 mod primitive_array;
 mod proto_reader;
 pub mod stream_chunk;
+pub mod stream_chunk_builder;
 mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;

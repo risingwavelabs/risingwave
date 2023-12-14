@@ -417,6 +417,10 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
 
+    /// Timeout for a batch query in seconds.
+    #[serde(default = "default::batch::statement_timeout_in_sec")]
+    pub statement_timeout_in_sec: u32,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1357,6 +1361,11 @@ pub mod default {
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
             false
+        }
+
+        pub fn statement_timeout_in_sec() -> u32 {
+            // 1 hour
+            60 * 60
         }
     }
 
