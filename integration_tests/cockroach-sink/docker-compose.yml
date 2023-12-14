@@ -21,19 +21,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
-  datagen:
-    build: ../datagen
-    depends_on: [message_queue]
-    command:
-      - /bin/sh
-      - -c
-      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
-    restart: always
-    container_name: datagen
   cockroachdb:
     image: cockroachdb/cockroach:v23.1.11
     command: start-single-node --insecure
@@ -42,17 +29,11 @@ services:
       - "8080:8080" # CockroachDB Web UI port
     restart: always
     container_name: cockroachdb
-  prepare_postgres:
-    image: postgres
-    depends_on:
-      - cockroachdb
-    command:
-      - /bin/sh
-      - -c
-      - "psql postgresql://root@cockroachdb:26257/defaultdb < postgres_prepare.sql"
+  postgres:
+    image: postgres:latest
+    command: tail -f /dev/null
     volumes:
-      - "./postgres_prepare.sql:/postgres_prepare.sql"
-    container_name: prepare_postgres
+      - "./cockroach_prepare.sql:/cockroach_prepare.sql"
     restart: on-failure
 volumes:
   risingwave-standalone:

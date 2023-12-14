@@ -141,4 +141,8 @@ where
     fn eval_const(&self) -> Result<Datum> {
         self.inner.eval_const() // do not handle error
     }
+
+    fn input_ref_index(&self) -> Option<usize> {
+        self.inner.input_ref_index()
+    }
 }

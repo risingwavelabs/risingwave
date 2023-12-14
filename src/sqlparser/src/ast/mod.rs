@@ -13,6 +13,7 @@
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
 pub(crate) mod ddl;
+mod legacy_source;
 mod operator;
 mod query;
 mod statement;
@@ -35,6 +36,9 @@ pub use self::ddl::{
     AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
     AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
+};
+pub use self::legacy_source::{
+    get_delimiter, AvroSchema, CompatibleSourceSchema, DebeziumAvroSchema, ProtobufSchema,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
