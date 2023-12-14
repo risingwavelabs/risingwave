@@ -130,6 +130,10 @@ pub struct StreamingMetrics {
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
     pub over_window_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_entry_count: GenericGaugeVec<AtomicI64>,
+    pub over_window_range_cache_lookup_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_left_miss_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_right_miss_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -728,6 +732,38 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let over_window_range_cache_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_over_window_range_cache_entry_count",
+            "Over window partition range cache entry count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry,
+        )
+        .unwrap();
+
+        let over_window_range_cache_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_lookup_count",
+            "Over window partition range cache lookup count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_range_cache_left_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_left_miss_count",
+            "Over window partition range cache left miss count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_range_cache_right_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_right_miss_count",
+            "Over window partition range cache right miss count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -1005,6 +1041,10 @@ impl StreamingMetrics {
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
+            over_window_range_cache_entry_count,
+            over_window_range_cache_lookup_count,
+            over_window_range_cache_left_miss_count,
+            over_window_range_cache_right_miss_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
