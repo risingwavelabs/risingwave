@@ -3182,8 +3182,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b6c6bc7a5cfdba3af30c7fdea5841c6e8564369116d3276cf13d742245f8cef"
+source = "git+https://github.com/mrcroxx/foyer?rev=0f25661#0f2566166773cebf1cd72e06b2c6045810678436"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3194,8 +3193,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e441ea6dcf68cc0626535868343f838c803a75fd7686c3895e2c99c9c8f11d60"
+source = "git+https://github.com/mrcroxx/foyer?rev=0f25661#0f2566166773cebf1cd72e06b2c6045810678436"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3210,8 +3208,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f967c3c40435a621fb1b8670d8f6501d67e79cea08b1ce07c150147aabdc588"
+source = "git+https://github.com/mrcroxx/foyer?rev=0f25661#0f2566166773cebf1cd72e06b2c6045810678436"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3228,8 +3225,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e0c1b14504ee66a9c6e9a81982fb62fe8dc1b45d15684bd3e1fcda4bc6c25d"
+source = "git+https://github.com/mrcroxx/foyer?rev=0f25661#0f2566166773cebf1cd72e06b2c6045810678436"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -3259,8 +3255,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72699c6a83a9e76c13d1196518be3c7d85183e62507a3c0e248d556a7e875072"
+source = "git+https://github.com/mrcroxx/foyer?rev=0f25661#0f2566166773cebf1cd72e06b2c6045810678436"
 dependencies = [
  "cc",
  "crossbeam-utils",

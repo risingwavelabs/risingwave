@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
-use foyer::common::code::{CodingResult, Key, Value};
+use foyer::common::code::{CodingResult, Cursor, Key, Value};
 use foyer::intrusive::eviction::lfu::LfuConfig;
 use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
@@ -49,6 +49,12 @@ pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
 pub type FileCacheError = foyer::storage::error::Error;
 pub type FileCacheCompression = foyer::storage::compress::Compression;
+
+fn copy(src: impl AsRef<[u8]>, mut dst: impl BufMut + AsRef<[u8]>) -> usize {
+    let n = std::cmp::min(src.as_ref().len(), dst.as_ref().len());
+    dst.put_slice(&src.as_ref()[..n]);
+    n
+}
 
 #[derive(Debug)]
 pub struct FileCacheConfig<K, V>
@@ -270,7 +276,6 @@ where
                     align: config.device_align,
                     io_size: config.device_io_size,
                 },
-                ring_buffer_capacity: config.ring_buffer_capacity,
                 catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
@@ -348,14 +353,10 @@ pub struct SstableBlockIndex {
 }
 
 impl Key for SstableBlockIndex {
+    type Cursor = SstableBlockIndexCursor;
+
     fn serialized_len(&self) -> usize {
         8 + 8 // sst_id (8B) + block_idx (8B)
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_u64(self.sst_id);
-        buf.put_u64(self.block_idx);
-        Ok(())
     }
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
@@ -363,12 +364,64 @@ impl Key for SstableBlockIndex {
         let block_idx = buf.get_u64();
         Ok(Self { sst_id, block_idx })
     }
+
+    fn into_cursor(self) -> Self::Cursor {
+        SstableBlockIndexCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct SstableBlockIndexCursor {
+    inner: SstableBlockIndex,
+    pos: u8,
+}
+
+impl SstableBlockIndexCursor {
+    pub fn new(inner: SstableBlockIndex) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for SstableBlockIndexCursor {
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        if self.pos < 8 {
+            self.pos += copy(
+                &self.inner.sst_id.to_be_bytes()[self.pos as usize..],
+                &mut buf,
+            ) as u8;
+        }
+        if self.pos < 16 {
+            self.pos += copy(
+                &self.inner.block_idx.to_be_bytes()[self.pos as usize - 8..],
+                &mut buf,
+            ) as u8;
+        }
+        let n = (self.pos - pos) as usize;
+        Ok(n)
+    }
+}
+
+impl Cursor for SstableBlockIndexCursor {
+    type T = SstableBlockIndex;
+
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.serialized_len()
+    }
 }
 
 /// [`CachedBlock`] uses different coding for writing to use/bypass compression.
 ///
 /// But when reading, it will always be `Loaded`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CachedBlock {
     Loaded {
         block: Box<Block>,
@@ -397,29 +450,13 @@ impl CachedBlock {
 }
 
 impl Value for CachedBlock {
+    type Cursor = CachedBlockCursor;
+
     fn serialized_len(&self) -> usize {
         1 /* type */ + match self {
             CachedBlock::Loaded { block } => block.raw_data().len(),
             CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
         }
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        match self {
-            CachedBlock::Loaded { block } => {
-                buf.put_u8(0);
-                buf.put_slice(block.raw_data())
-            }
-            CachedBlock::Fetched {
-                bytes,
-                uncompressed_capacity,
-            } => {
-                buf.put_u8(1);
-                buf.put_u64(*uncompressed_capacity as u64);
-                buf.put_slice(bytes);
-            }
-        }
-        Ok(())
     }
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
@@ -442,16 +479,76 @@ impl Value for CachedBlock {
         };
         Ok(res)
     }
+
+    fn into_cursor(self) -> Self::Cursor {
+        CachedBlockCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct CachedBlockCursor {
+    inner: CachedBlock,
+    pos: usize,
+}
+
+impl CachedBlockCursor {
+    pub fn new(inner: CachedBlock) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for CachedBlockCursor {
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        match &self.inner {
+            CachedBlock::Loaded { block } => {
+                if self.pos < 1 {
+                    self.pos += copy(&[0], &mut buf);
+                }
+                self.pos += copy(&block.raw_data()[self.pos - 1..], &mut buf);
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                if self.pos < 1 {
+                    self.pos += copy(&[1], &mut buf);
+                }
+                if self.pos < 9 {
+                    self.pos += copy(
+                        &uncompressed_capacity.to_be_bytes()[self.pos - 1..],
+                        &mut buf,
+                    );
+                }
+                self.pos += copy(&bytes[self.pos - 9..], &mut buf);
+            }
+        }
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for CachedBlockCursor {
+    type T = CachedBlock;
+
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.serialized_len()
+    }
 }
 
 impl Value for Box<Block> {
+    type Cursor = BoxBlockCursor;
+
     fn serialized_len(&self) -> usize {
         self.raw_data().len()
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_slice(self.raw_data());
-        Ok(())
     }
 
     fn read(buf: &[u8]) -> CodingResult<Self> {
@@ -460,20 +557,54 @@ impl Value for Box<Block> {
         let block = Box::new(block);
         Ok(block)
     }
+
+    fn into_cursor(self) -> Self::Cursor {
+        BoxBlockCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct BoxBlockCursor {
+    inner: Box<Block>,
+    pos: usize,
+}
+
+impl BoxBlockCursor {
+    pub fn new(inner: Box<Block>) -> Self {
+        Self { inner, pos: 0 }
+    }
+}
+
+impl std::io::Read for BoxBlockCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        self.pos += copy(&self.inner.raw_data()[self.pos..], buf);
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for BoxBlockCursor {
+    type T = Box<Block>;
+
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.raw_data().len()
+    }
 }
 
 impl Value for Box<Sstable> {
+    type Cursor = BoxSstableCursor;
+
     fn serialized_len(&self) -> usize {
         8 + self.meta.encoded_size() // id (8B) + meta size
-    }
-
-    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
-        buf.put_u64(self.id);
-        // TODO(MrCroxx): avoid buffer copy
-        let mut buffer = vec![];
-        self.meta.encode_to(&mut buffer);
-        buf.put_slice(&buffer[..]);
-        Ok(())
     }
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
@@ -481,6 +612,55 @@ impl Value for Box<Sstable> {
         let meta = SstableMeta::decode(buf).unwrap();
         let sstable = Box::new(Sstable::new(id, meta));
         Ok(sstable)
+    }
+
+    fn into_cursor(self) -> Self::Cursor {
+        BoxSstableCursor::new(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct BoxSstableCursor {
+    inner: Box<Sstable>,
+    bytes: Vec<u8>,
+    pos: usize,
+}
+
+impl BoxSstableCursor {
+    pub fn new(inner: Box<Sstable>) -> Self {
+        let mut bytes = vec![];
+        bytes.put_u64(inner.id);
+        inner.meta.encode_to(&mut bytes);
+        Self {
+            inner,
+            bytes,
+            pos: 0,
+        }
+    }
+}
+
+impl std::io::Read for BoxSstableCursor {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.pos;
+        self.pos += copy(&self.bytes[self.pos..], buf);
+        let n = self.pos - pos;
+        Ok(n)
+    }
+}
+
+impl Cursor for BoxSstableCursor {
+    type T = Box<Sstable>;
+
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
+    fn into_inner(self) -> Self::T {
+        self.inner
+    }
+
+    fn len(&self) -> usize {
+        8 + self.inner.meta.encoded_size()
     }
 }
 
@@ -515,8 +695,9 @@ mod tests {
             .unwrap(),
         );
 
-        let mut buf = vec![0; block.serialized_len()];
-        block.write(&mut buf[..]).unwrap();
+        let mut buf = vec![];
+        let mut bcursor = block.into_cursor();
+        std::io::copy(&mut bcursor, &mut buf).unwrap();
 
         let block = <Box<Block> as Value>::read(&buf[..]).unwrap();
 
