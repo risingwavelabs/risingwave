@@ -1134,13 +1134,15 @@ impl HummockManager {
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
-                task.table_schemas = self
-                    .catalog_manager
-                    .get_versioned_table_schemas(&task.existing_table_ids)
-                    .await
-                    .into_iter()
-                    .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
-                    .collect();
+                if self.env.opts.enable_dropped_column_reclaim {
+                    task.table_schemas = self
+                        .catalog_manager
+                        .get_versioned_table_schemas(&task.existing_table_ids)
+                        .await
+                        .into_iter()
+                        .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
+                        .collect();
+                }
                 return Ok(Some(task));
             }
             assert!(

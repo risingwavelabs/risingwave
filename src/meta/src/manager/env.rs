@@ -194,6 +194,7 @@ pub struct MetaOpts {
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
+    pub enable_dropped_column_reclaim: bool,
 }
 
 impl MetaOpts {
@@ -241,6 +242,7 @@ impl MetaOpts {
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
+            enable_dropped_column_reclaim: false,
         }
     }
 }

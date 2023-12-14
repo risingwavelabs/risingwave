@@ -305,6 +305,10 @@ pub struct MetaConfig {
     /// Keeps the latest N events per channel.
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
+
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1037,6 +1041,10 @@ pub mod default {
 
         pub fn event_log_channel_max_size() -> u32 {
             10
+        }
+
+        pub fn enable_dropped_column_reclaim() -> bool {
+            true
         }
     }
 
