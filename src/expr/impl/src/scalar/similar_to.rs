@@ -59,7 +59,7 @@ fn similar_escape_internal(
             }
             '(' => {
                 // convert to non-capturing parenthesis
-                writer.write_str("(:?")?;
+                writer.write_str("(?:")?;
             }
             c @ ('\\' | '.' | '^' | '$') => {
                 writer.write_char('\\')?;
@@ -98,6 +98,6 @@ fn similar_to_escape_with_escape_text(
         });
     }
 
-    similar_escape_internal(pat, esc_text.chars().nth(0), writer)
+    similar_escape_internal(pat, esc_text.chars().next(), writer)
         .map_err(|e| ExprError::Internal(e.into()))
 }
