@@ -99,7 +99,7 @@ SELECT order_id,order_date,customer_name,product_id FROM orders_test order by or
 10002 2020-07-30 10:11:09 Sally 105
 10003 2020-07-30 12:00:30 Edward 106
 
-
+statement ok
 create source pg_source with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
@@ -111,6 +111,7 @@ create source pg_source with (
 );
 
 # test postgres backfill data types
+statement ok
 CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_boolean boolean,
  c_smallint smallint,
