@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -288,8 +288,11 @@ impl HummockIterator for SstableIterator {
         stats.add(&self.stats);
     }
 
-    fn value_meta(&self) -> Option<u64> {
-        Some(self.sst.value().id)
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta {
+            object_id: Some(self.sst.value().id),
+            block_id: Some(self.cur_idx as _),
+        }
     }
 }
 

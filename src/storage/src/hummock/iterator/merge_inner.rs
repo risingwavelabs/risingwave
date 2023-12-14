@@ -21,7 +21,9 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
-use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -404,7 +406,7 @@ where
         self.collect_local_statistic_impl(stats);
     }
 
-    fn value_meta(&self) -> Option<u64> {
+    fn value_meta(&self) -> ValueMeta {
         self.heap.peek().expect("no inner iter").iter.value_meta()
     }
 }

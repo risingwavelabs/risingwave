@@ -30,7 +30,7 @@ mod test {
     };
     use crate::hummock::iterator::{
         Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-        UnorderedMergeIteratorInner,
+        UnorderedMergeIteratorInner, ValueMeta,
     };
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
@@ -336,7 +336,7 @@ mod test {
 
         fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 
-        fn value_meta(&self) -> Option<u64> {
+        fn value_meta(&self) -> ValueMeta {
             None
         }
     }

@@ -45,7 +45,7 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::iterator::{
     Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
-    UnorderedMergeIteratorInner,
+    UnorderedMergeIteratorInner, ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
@@ -713,7 +713,7 @@ where
     let mut last_table_id = None;
     let mut compaction_statistics = CompactionStatistics::default();
     let mut progress_key_num: u64 = 0;
-    let mut skip_schema_check: HashSet<(HummockSstableObjectId, u32)> = HashSet::default();
+    let mut skip_schema_check: HashSet<(HummockSstableObjectId, u64)> = HashSet::default();
     let schemas: HashMap<u32, HashSet<i32>> = task_config
         .table_schemas
         .iter()
@@ -740,7 +740,10 @@ where
 
         let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
-        let value_meta = iter.value_meta();
+        let ValueMeta {
+            object_id,
+            block_id,
+        } = iter.value_meta();
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
@@ -860,8 +863,9 @@ where
         let check_table_id = last_key.user_key.table_id.table_id;
         let mut is_value_rewritten = false;
         if let HummockValue::Put(v) = value
-            && let Some(object_id) = value_meta
-            && !skip_schema_check.contains(&(object_id, check_table_id))
+            && let Some(object_id) = object_id
+            && let Some(block_id) = block_id
+            && !skip_schema_check.contains(&(object_id, block_id))
             && let Some(schema) = schemas
             .get(&check_table_id) {
             match try_drop_invalid_columns(v, &schema) {
@@ -869,7 +873,7 @@ where
                     if !task_config.disable_drop_column_optimization {
                         // Under the assumption that all values in the same (table, SSTable) group should share the same schema,
                         // if one value drops no columns during a compaction, no need to check other values in the same group.
-                        skip_schema_check.insert((object_id, check_table_id));
+                        skip_schema_check.insert((object_id, block_id));
                     }
                 }
                 Some(new_value) => {

@@ -18,7 +18,9 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
+};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
@@ -181,7 +183,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         }
     }
 
-    fn value_meta(&self) -> Option<u64> {
+    fn value_meta(&self) -> ValueMeta {
         self.sstable_iter
             .as_ref()
             .expect("no table iter")

@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
@@ -489,14 +489,12 @@ impl HummockIterator for ConcatSstableIterator {
         stats.add(&self.stats)
     }
 
-    fn value_meta(&self) -> Option<u64> {
-        let object_id = self
-            .sstable_iter
-            .as_ref()
-            .expect("no table iter")
-            .sstable_info
-            .object_id;
-        Some(object_id)
+    fn value_meta(&self) -> ValueMeta {
+        let iter = self.sstable_iter.as_ref().expect("no table iter");
+        ValueMeta {
+            object_id: Some(iter.sstable_info.object_id),
+            block_id: Some(iter.seek_block_idx as u64 - 1),
+        }
     }
 }
 

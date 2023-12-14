@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
 
-use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -150,8 +150,11 @@ impl HummockIterator for BackwardSstableIterator {
         stats.add(&self.stats)
     }
 
-    fn value_meta(&self) -> Option<u64> {
-        Some(self.sst.value().id)
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta {
+            object_id: Some(self.sst.value().id),
+            block_id: Some(self.cur_idx as _),
+        }
     }
 }
 
