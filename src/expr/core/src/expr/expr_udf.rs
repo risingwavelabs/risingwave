@@ -15,19 +15,20 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, LazyLock, Weak};
 
+use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::user_defined_function::PbExtra;
-use risingwave_pb::expr::{ExprNode, PbExternalUdfExtra, PbWasmUdfExtra};
-use risingwave_udf::wasm::{InstantiatedComponent, WasmEngine};
+use risingwave_object_store::object::build_remote_object_store;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
-use tracing::Instrument;
 use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
@@ -35,12 +36,13 @@ use crate::expr::Expression;
 use crate::{bail, Result};
 
 #[derive(Debug)]
-pub struct UdfExpression {
+pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
     arg_schema: Arc<Schema>,
     imp: UdfImpl,
+    identifier: String,
     span: await_tree::Span,
     /// Number of remaining successful calls until retry is enabled.
     /// If non-zero, we will not retry on connection errors to prevent blocking the stream.
@@ -52,34 +54,14 @@ pub struct UdfExpression {
 
 const INITIAL_RETRY_COUNT: u8 = 16;
 
+#[derive(Debug)]
 enum UdfImpl {
-    External {
-        client: Arc<ArrowFlightUdfClient>,
-        identifier: String,
-    },
-    Wasm {
-        component: InstantiatedComponent,
-    },
-}
-
-impl std::fmt::Debug for UdfImpl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::External { client, identifier } => f
-                .debug_struct("External")
-                .field("client", client)
-                .field("identifier", identifier)
-                .finish(),
-            Self::Wasm { component: _ } => f
-                .debug_struct("Wasm")
-                // .field("component", component)
-                .finish(),
-        }
-    }
+    External(Arc<ArrowFlightUdfClient>),
+    Wasm(Arc<WasmRuntime>),
 }
 
 #[async_trait::async_trait]
-impl Expression for UdfExpression {
+impl Expression for UserDefinedFunction {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
@@ -110,7 +92,7 @@ impl Expression for UdfExpression {
     }
 }
 
-impl UdfExpression {
+impl UserDefinedFunction {
     async fn eval_inner(
         &self,
         columns: Vec<ArrayRef>,
@@ -137,22 +119,17 @@ impl UdfExpression {
         .expect("failed to build record batch");
 
         let output: arrow_array::RecordBatch = match &self.imp {
-            UdfImpl::Wasm { component } => {
-                component
-                    .eval(input)
-                    .instrument_await(self.span.clone())
-                    .await?
-            }
-            UdfImpl::External { client, identifier } => {
+            UdfImpl::Wasm(runtime) => runtime.lock().await.call(&self.identifier, &input)?,
+            UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
                     client
-                        .call(identifier, input)
+                        .call(&self.identifier, input)
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     client
-                        .call_with_retry(identifier, input)
+                        .call_with_retry(&self.identifier, input)
                         .instrument_await(self.span.clone())
                         .await
                 };
@@ -201,7 +178,7 @@ impl UdfExpression {
 }
 
 #[cfg_or_panic(not(madsim))]
-impl Build for UdfExpression {
+impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
@@ -209,25 +186,9 @@ impl Build for UdfExpression {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
-        let imp = match &udf.extra {
-            None | Some(PbExtra::External(PbExternalUdfExtra {})) => UdfImpl::External {
-                client: get_or_create_flight_client(&udf.link)?,
-                identifier: udf.identifier.clone(),
-            },
-            Some(PbExtra::Wasm(PbWasmUdfExtra { wasm_storage_url })) => {
-                let wasm_engine = WasmEngine::get_or_create();
-                // Use `block_in_place` as an escape hatch to run async code here in sync context.
-                // Calling `block_on` directly will panic.
-                let component = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on({
-                        wasm_engine
-                            .load_component(wasm_storage_url, &udf.identifier)
-                            .instrument(tracing::info_span!("load_component", %udf.identifier))
-                    })
-                })?;
-
-                UdfImpl::Wasm { component }
-            }
+        let imp = match udf.language.as_str() {
+            "wasm" => UdfImpl::Wasm(get_or_create_wasm_runtime(&udf.link)?),
+            _ => UdfImpl::External(get_or_create_flight_client(&udf.link)?),
         };
 
         let arg_schema = Arc::new(Schema::new(
@@ -251,7 +212,8 @@ impl Build for UdfExpression {
             return_type,
             arg_schema,
             imp,
-            span: format!("expr_udf_call ({})", udf.identifier).into(),
+            identifier: udf.identifier.clone(),
+            span: format!("udf_call({})", udf.identifier).into(),
             disable_retry_count: AtomicU8::new(0),
         })
     }
@@ -262,7 +224,7 @@ impl Build for UdfExpression {
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
 pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
-    static CLIENTS: LazyLock<Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
+    static CLIENTS: LazyLock<std::sync::Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
         LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
     if let Some(client) = clients.get(link).and_then(|c| c.upgrade()) {
@@ -274,4 +236,47 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }
+}
+
+type WasmRuntime = tokio::sync::Mutex<arrow_udf_wasm_runtime::Runtime>;
+
+#[cfg(not(madsim))]
+/// Get or create a wasm runtime.
+///
+/// There is a global cache for runtimes, so that we can reuse the same runtime for the same wasm binary.
+pub(crate) fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> {
+    static RUNTIMES: LazyLock<std::sync::Mutex<HashMap<String, Weak<WasmRuntime>>>> =
+        LazyLock::new(Default::default);
+
+    let mut runtimes = RUNTIMES.lock().unwrap();
+    if let Some(runtime) = runtimes.get(link).and_then(|c| c.upgrade()) {
+        // reuse existing runtime
+        return Ok(runtime);
+    }
+    // create new runtime
+    let (wasm_storage_url, object_name) = link
+        .rsplit_once('/')
+        .context("invalid link for wasm function")?;
+    // Use `block_in_place` as an escape hatch to run async code here in sync context.
+    // Calling `block_on` directly will panic.
+    let binary = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            // load wasm binary from object store
+            let object_store = build_remote_object_store(
+                wasm_storage_url,
+                Arc::new(ObjectStoreMetrics::unused()),
+                "Wasm Engine",
+                ObjectStoreConfig::default(),
+            )
+            .await;
+            object_store
+                .read(object_name, ..)
+                .await
+                .context("failed to load wasm binary from object storage")
+        })
+    })?;
+    let runtime = arrow_udf_wasm_runtime::Runtime::new(&binary)?;
+    let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
+    runtimes.insert(link.into(), Arc::downgrade(&runtime));
+    Ok(runtime)
 }

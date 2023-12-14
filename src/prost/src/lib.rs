@@ -170,25 +170,6 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
-// They are the same oneof, but different types
-impl From<catalog::function::Extra> for expr::user_defined_function::Extra {
-    fn from(value: catalog::function::Extra) -> Self {
-        match value {
-            catalog::function::Extra::External(v) => Self::External(v),
-            catalog::function::Extra::Wasm(v) => Self::Wasm(v),
-        }
-    }
-}
-
-impl From<expr::user_defined_function::Extra> for catalog::function::Extra {
-    fn from(value: expr::user_defined_function::Extra) -> Self {
-        match value {
-            expr::user_defined_function::Extra::External(v) => Self::External(v),
-            expr::user_defined_function::Extra::Wasm(v) => Self::Wasm(v),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

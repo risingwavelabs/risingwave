@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
-#![feature(lint_reasons)]
 #![feature(error_generic_member_access)]
 
 mod error;
@@ -21,4 +19,3 @@ mod external;
 
 pub use error::{Error, Result};
 pub use external::ArrowFlightUdfClient;
-pub mod wasm;

@@ -200,7 +200,6 @@ message Function {
   repeated data.DataType arg_types = 5;
   data.DataType return_type = 6;
   string language = 7;
-  // external function service only
   string link = 8;
   string identifier = 10;
 
@@ -212,11 +211,6 @@ message Function {
   message ScalarFunction {}
   message TableFunction {}
   message AggregateFunction {}
-
-  oneof extra {
-    expr.ExternalUdfExtra external = 14;
-    expr.WasmUdfExtra wasm = 15;
-  }
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

@@ -631,6 +631,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-udf-wasm-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow-array 49.0.0",
+ "arrow-ipc 49.0.0",
+ "arrow-schema 49.0.0",
+ "base64 0.21.4",
+ "lazy_static",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8978,6 +8992,7 @@ dependencies = [
  "anyhow",
  "arrow-array 49.0.0",
  "arrow-schema 49.0.0",
+ "arrow-udf-wasm-runtime",
  "async-trait",
  "auto_impl",
  "await-tree",
@@ -8998,6 +9013,7 @@ dependencies = [
  "paste",
  "risingwave_common",
  "risingwave_expr_macro",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_udf",
  "smallvec",
@@ -9105,6 +9121,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_expr_impl",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -9831,23 +9848,16 @@ version = "0.1.0"
 dependencies = [
  "arrow-array 49.0.0",
  "arrow-flight",
- "arrow-ipc 49.0.0",
  "arrow-schema 49.0.0",
  "arrow-select 49.0.0",
- "base64 0.21.4",
- "bytes",
  "cfg-or-panic",
  "futures-util",
- "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
- "risingwave_object_store",
  "static_assertions",
  "thiserror",
  "thiserror-ext",
  "tracing",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

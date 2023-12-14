@@ -1,4 +1,0 @@
-*.sql
-*.wasm
-Cargo.lock
-tinygo/gen

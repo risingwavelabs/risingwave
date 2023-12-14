@@ -56,7 +56,6 @@ impl UserDefinedFunction {
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
             link: udf.get_link().clone(),
-            extra: udf.extra.clone(),
         };
 
         Ok(Self {
@@ -89,8 +88,6 @@ impl Expr for UserDefinedFunction {
                 language: self.catalog.language.clone(),
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
-
-                extra: self.catalog.extra.clone(),
             })),
         }
     }

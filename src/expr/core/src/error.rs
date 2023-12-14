@@ -91,17 +91,10 @@ pub enum ExprError {
     ),
 
     #[error("UDF error: {0}")]
-    ExternalUdf(
+    Udf(
         #[from]
         #[backtrace]
         risingwave_udf::Error,
-    ),
-
-    #[error("UDF error: {0}")]
-    WasmUdf(
-        #[from]
-        #[backtrace]
-        risingwave_udf::wasm::WasmUdfError,
     ),
 
     #[error("not a constant")]

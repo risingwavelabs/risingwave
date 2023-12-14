@@ -466,18 +466,14 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  // external function service only
+  // For external UDF: the link to the external function service.
+  // For WASM UDF: the link to the remote object store.
   string link = 5;
   // An unique identifier for the function. Different kinds of UDF may handle this field differently.
   // - For external UDF, it's the name of the function in the external function service.
   //   It doesn't need to be unique across different external function servers.
   // - For wasm UDF, it's the name of the function stored in remote object store, and needs to be globally unique.
   string identifier = 6;
-
-  oneof extra {
-    ExternalUdfExtra external = 7;
-    WasmUdfExtra wasm = 8;
-  }
 }
 
 // extra information for external functions

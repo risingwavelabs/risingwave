@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::function::{Kind, PbExtra, ScalarFunction, TableFunction};
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
-use risingwave_pb::expr::{PbExternalUdfExtra, PbWasmUdfExtra};
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
-use risingwave_udf::wasm::WasmEngine;
+use risingwave_storage::monitor::ObjectStoreMetrics;
 use risingwave_udf::ArrowFlightUdfClient;
-use tracing::Instrument;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -51,7 +50,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm_v1" => lang,
+                "python" | "java" | "wasm" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -125,11 +124,11 @@ pub async fn handle_create_function(
     let identifier;
 
     // judge the type of the UDF, and do some type-specific checks correspondingly.
-    let extra = match using {
+    match using {
         CreateFunctionUsing::Link(l) => {
             let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
                 return Err(ErrorCode::InvalidParameterValue(
-                    "AS must be specified for USING link".to_string(),
+                    "AS must be specified for USING LINK".to_string(),
                 )
                 .into());
             };
@@ -140,7 +139,7 @@ pub async fn handle_create_function(
             {
                 let client = ArrowFlightUdfClient::connect(&link)
                     .await
-                    .map_err(|e| anyhow!(e))?;
+                    .context("failed to connect UDF server")?;
                 /// A helper function to create a unnamed field from data type.
                 fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
                     arrow_schema::Field::new("", data_type, true)
@@ -162,37 +161,39 @@ pub async fn handle_create_function(
                 client
                     .check(&identifier, &args, &returns)
                     .await
-                    .map_err(|e| anyhow!(e))?;
+                    .context("failed to check UDF signature")?;
             }
-
-            PbExtra::External(PbExternalUdfExtra {})
         }
-        CreateFunctionUsing::Base64(module) => {
-            link = String::new();
-            identifier = format!("{}.{}.{}", database_id, schema_id, function_name);
-            if language != "wasm_v1" {
+        CreateFunctionUsing::Base64(encoded) => {
+            if language != "wasm" {
                 return Err(ErrorCode::InvalidParameterValue(
-                    "LANGUAGE should be wasm_v1 for USING base64".to_string(),
+                    "LANGUAGE should be \"wasm\" for USING BASE64".to_string(),
                 )
                 .into());
             }
 
             use base64::prelude::{Engine, BASE64_STANDARD};
-            let module = BASE64_STANDARD.decode(module).map_err(|e| anyhow!(e))?;
+            let wasm_binary = BASE64_STANDARD
+                .decode(encoded)
+                .context("invalid base64 encoding")?;
 
             let system_params = session.env().meta_client().get_system_params().await?;
-            let wasm_storage_url = system_params.wasm_storage_url();
+            let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
+            link = format!("{}/{}", system_params.wasm_storage_url(), object_name);
+            identifier = wasm_identifier(&function_name, &arg_types, &return_type);
 
-            let wasm_engine = WasmEngine::get_or_create();
-            wasm_engine
-                .compile_and_upload_component(module, wasm_storage_url, &identifier)
-                .instrument(tracing::info_span!("compile_and_upload_component", %identifier))
+            // Note: it will panic if the url is invalid. We did a validation on meta startup.
+            let object_store = build_remote_object_store(
+                system_params.wasm_storage_url(),
+                Arc::new(ObjectStoreMetrics::unused()),
+                "Wasm Engine",
+                ObjectStoreConfig::default(),
+            )
+            .await;
+            object_store
+                .upload(&object_name, wasm_binary.into())
                 .await
-                .map_err(|e| anyhow!(e))?;
-
-            PbExtra::Wasm(PbWasmUdfExtra {
-                wasm_storage_url: wasm_storage_url.to_string(),
-            })
+                .context("failed to upload wasm binary to object store")?;
         }
     };
 
@@ -208,11 +209,48 @@ pub async fn handle_create_function(
         identifier,
         link,
         owner: session.user_id(),
-        extra: Some(extra),
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
+}
+
+fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType) -> String {
+    format!(
+        "{}({})->{}",
+        name,
+        args.iter().map(datatype_name).join(","),
+        datatype_name(ret)
+    )
+}
+
+fn datatype_name(ty: &DataType) -> String {
+    match ty {
+        DataType::Boolean => "boolean".to_string(),
+        DataType::Int16 => "int2".to_string(),
+        DataType::Int32 => "int4".to_string(),
+        DataType::Int64 => "int8".to_string(),
+        DataType::Float32 => "float4".to_string(),
+        DataType::Float64 => "float8".to_string(),
+        DataType::Date => "date".to_string(),
+        DataType::Time => "time".to_string(),
+        DataType::Timestamp => "timestamp".to_string(),
+        DataType::Timestamptz => "timestamptz".to_string(),
+        DataType::Interval => "interval".to_string(),
+        DataType::Decimal => "decimal".to_string(),
+        DataType::Jsonb => "jsonb".to_string(),
+        DataType::Serial => "serial".to_string(),
+        DataType::Int256 => "int256".to_string(),
+        DataType::Bytea => "bytea".to_string(),
+        DataType::Varchar => "varchar".to_string(),
+        DataType::List(inner) => format!("{}[]", datatype_name(inner)),
+        DataType::Struct(s) => format!(
+            "struct<{}>",
+            s.iter()
+                .map(|(name, ty)| format!("{} {}", name, datatype_name(ty)))
+                .join(",")
+        ),
+    }
 }

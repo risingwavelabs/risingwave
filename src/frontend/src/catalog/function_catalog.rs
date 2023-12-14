@@ -17,7 +17,6 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
-use risingwave_pb::expr::user_defined_function::PbExtra;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -32,8 +31,6 @@ pub struct FunctionCatalog {
     pub language: String,
     pub identifier: String,
     pub link: String,
-    // for backward compatibility, newly added fields should be optional
-    pub extra: Option<PbExtra>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]
@@ -67,7 +64,6 @@ impl From<&PbFunction> for FunctionCatalog {
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
             link: prost.link.clone(),
-            extra: prost.extra.clone().map(Into::into),
         }
     }
 }
