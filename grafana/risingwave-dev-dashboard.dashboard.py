@@ -994,13 +994,13 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Input Rows",
+                panels.timeseries_rowsps(
+                    "Actor Input Throughput (rows/s)",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                         panels.target_hidden(
                             f"rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])",
@@ -1008,8 +1008,8 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Output Rows",
+                panels.timeseries_rowsps(
+                    "Actor Output Throughput (rows/s)",
                     "",
                     [
                         panels.target(
