@@ -39,7 +39,6 @@ export interface Relation {
   name: string
   owner: number
   columns: (ColumnCatalog | Field)[]
-  properties: { [key: string]: string }
 }
 
 export interface StreamingJob extends Relation {
@@ -103,23 +102,10 @@ export async function getSinks() {
   return sinkList
 }
 
-type SourceWrap = Source & {
-  properties: { [key: string]: string }
-}
-
 export async function getSources() {
-  let sourceList: SourceWrap[] = (await api.get("/api/sources"))
-    .map(Source.fromJSON)
-    .map((src: Source) =>
-      Object.defineProperty(src, "properties", {
-        get: function () {
-          return this.withProperties
-        },
-        set: function (value) {
-          this.withProperties = value
-        },
-      })
-    )
+  let sourceList: Source[] = (await api.get("/api/sources")).map(
+    Source.fromJSON
+  )
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
