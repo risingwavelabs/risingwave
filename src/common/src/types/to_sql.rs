@@ -42,7 +42,7 @@ impl ToSql for ScalarRefImpl<'_> {
             ScalarRefImpl::Timestamptz(v) => v.to_sql(ty, out),
             ScalarRefImpl::Time(v) => v.to_sql(ty, out),
             ScalarRefImpl::Bytea(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Jsonb(_)
+            ScalarRefImpl::Jsonb(_) // jsonbb::Value doesn't implement ToSql yet
             | ScalarRefImpl::Int256(_)
             | ScalarRefImpl::Struct(_)
             | ScalarRefImpl::List(_) => {
