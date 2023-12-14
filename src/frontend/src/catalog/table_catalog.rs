@@ -119,8 +119,7 @@ pub struct TableCatalog {
     /// `None`.
     pub row_id_index: Option<usize>,
 
-    /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`.
+    /// The column indices which are stored in the state store's value with row-encoding.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.

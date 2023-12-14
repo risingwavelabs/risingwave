@@ -7,10 +7,11 @@ CREATE SOURCE user_behaviors (
     parent_target_type VARCHAR,
     parent_target_id VARCHAR
 ) WITH (
-    connector = 'kafka',
-    topic = 'user_behaviors',
-    properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest'
+    connector = 'datagen',
+    fields.user_id.kind = 'sequence',
+    fields.user_id.start = 1,
+    fields.user_id.end = 100,
+    datagen.rows.per.second = '100'
 ) FORMAT PLAIN ENCODE JSON;
 
 CREATE TABLE data_types (
@@ -31,16 +32,6 @@ CREATE TABLE data_types (
     jsonb_column JSONB,
     bytea_column BYTEA
 );
-
-CREATE SINK data_types_mysql_sink
-FROM
-    data_types WITH (
-        connector = 'jdbc',
-        jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
-        table.name = 'data_types',
-        type = 'upsert',
-        primary_key = 'id'
-    );
 
 INSERT INTO data_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, timestamptz_column, jsonb_column, bytea_column)
 VALUES
