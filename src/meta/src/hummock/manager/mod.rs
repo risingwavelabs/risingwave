@@ -268,14 +268,14 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<u64, TableWatermarks>,
+    pub new_table_watermarks: HashMap<u32, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<u64, TableWatermarks>,
+        new_table_watermarks: HashMap<u32, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {
@@ -976,6 +976,8 @@ impl HummockManager {
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
 
             compact_task.table_vnode_partition = table_to_vnode_partition;
+            compact_task.table_watermarks =
+                current_version.safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
