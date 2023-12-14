@@ -501,7 +501,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
         let tables = match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_tables().await?,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_all_state_tables().await?,
         };
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }

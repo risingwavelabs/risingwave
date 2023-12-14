@@ -30,6 +30,10 @@ impl CatalogController {
         // let version = catalog.create_streaming_job(&mut job, graph, create_type)?;
         // Ok(version)
 
+        // 1. build fragment graph.
+        // 2. build streaming job: CompleteStreamFragmentGraph, ActorGraphBuilder,
+        // 3.
+
         todo!()
     }
 }

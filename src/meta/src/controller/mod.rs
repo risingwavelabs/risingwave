@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code, reason = "WIP")]
-
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, index, object, schema, sink, source, table, view,
+    connection, database, function, index, object, schema, sink, source, table, view,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
-    PbConnection, PbCreateType, PbDatabase, PbHandleConflictBehavior, PbIndex, PbSchema, PbSink,
-    PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView,
+    PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
+    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
@@ -251,6 +249,24 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
             name: value.0.name,
             owner: value.1.owner_id as _,
             info: Some(PbConnectionInfo::PrivateLinkService(value.0.info.0)),
+        }
+    }
+}
+
+impl From<ObjectModel<function::Model>> for PbFunction {
+    fn from(value: ObjectModel<function::Model>) -> Self {
+        Self {
+            id: value.0.function_id as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap() as _,
+            name: value.0.name,
+            owner: value.1.owner_id as _,
+            arg_types: value.0.arg_types.into_inner(),
+            return_type: Some(value.0.return_type.into_inner()),
+            language: value.0.language,
+            link: value.0.link,
+            identifier: value.0.identifier,
+            kind: Some(value.0.kind.into()),
         }
     }
 }

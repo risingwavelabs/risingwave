@@ -687,7 +687,7 @@ mod tests {
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
-        MetaSrvEnv, MetadataManagerV1, RelationIdEnum, StreamingClusterInfo,
+        MetaSrvEnv, RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
@@ -865,7 +865,7 @@ mod tests {
 
             let hummock_manager = HummockManager::new(
                 env.clone(),
-                metadata_manager,
+                metadata_manager.clone(),
                 meta_metrics.clone(),
                 compactor_manager.clone(),
                 tx,
@@ -882,20 +882,13 @@ mod tests {
                 SourceManager::new(
                     env.clone(),
                     barrier_scheduler.clone(),
-                    catalog_manager.clone(),
-                    fragment_manager.clone(),
+                    metadata_manager.clone(),
                     meta_metrics.clone(),
                 )
                 .await?,
             );
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
-
-            let metadata_manager = MetadataManager::V1(MetadataManagerV1 {
-                cluster_manager: cluster_manager.clone(),
-                catalog_manager: catalog_manager.clone(),
-                fragment_manager: fragment_manager.clone(),
-            });
 
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,

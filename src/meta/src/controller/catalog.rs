@@ -39,6 +39,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
+use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -46,7 +47,7 @@ use sea_orm::{
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
     TransactionTrait, Value,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
@@ -54,10 +55,10 @@ use crate::controller::utils::{
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
     get_fragment_mappings, get_referring_objects, get_referring_objects_cascade,
-    list_user_info_by_ids, PartialObject,
+    get_user_privilege, list_user_info_by_ids, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -90,9 +91,15 @@ impl CatalogController {
             }),
         })
     }
+
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
+        self.inner.read().await
+    }
 }
 
-pub(crate) struct CatalogControllerInner {
+pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
 }
 
@@ -121,10 +128,6 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    pub fn snapshot(&self) -> MetaResult<()> {
-        todo!("snapshot")
-    }
-
     async fn create_object(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -1570,26 +1573,17 @@ impl CatalogController {
 
     pub async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
         let inner = self.inner.read().await;
-        let db_objs = Database::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(db_objs
-            .into_iter()
-            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
-            .collect())
+        inner.list_databases().await
     }
 
-    pub async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
+    pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
-        let table_objs = Table::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(table_objs
-            .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
-            .collect())
+        inner.list_all_state_tables().await
+    }
+
+    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        inner.list_all_state_table_ids().await
     }
 
     pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
@@ -1607,38 +1601,17 @@ impl CatalogController {
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         let inner = self.inner.read().await;
-        let source_objs = Source::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(source_objs
-            .into_iter()
-            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
-            .collect())
+        inner.list_sources().await
     }
 
     pub async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
-        let sink_objs = Sink::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(sink_objs
-            .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
-            .collect())
+        inner.list_sinks().await
     }
 
     pub async fn list_views(&self) -> MetaResult<Vec<PbView>> {
         let inner = self.inner.read().await;
-        let view_objs = View::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        Ok(view_objs
-            .into_iter()
-            .map(|(view, obj)| ObjectModel(view, obj.unwrap()).into())
-            .collect())
+        inner.list_views().await
     }
 
     pub async fn get_table_by_name(
@@ -1753,6 +1726,206 @@ impl CatalogController {
         table_ids.extend(internal_table_ids);
 
         Ok(table_ids)
+    }
+}
+
+impl CatalogControllerInner {
+    pub async fn snapshot(&self) -> MetaResult<(Catalog, Vec<PbUserInfo>)> {
+        let databases = self.list_databases().await?;
+        let schemas = self.list_schemas().await?;
+        let tables = self.list_tables().await?;
+        let sources = self.list_sources().await?;
+        let sinks = self.list_sinks().await?;
+        let indexes = self.list_indexes().await?;
+        let views = self.list_views().await?;
+        let functions = self.list_functions().await?;
+        let connections = self.list_connections().await?;
+
+        let users = self.list_users().await?;
+
+        Ok((
+            (
+                databases,
+                schemas,
+                tables,
+                sources,
+                sinks,
+                indexes,
+                views,
+                functions,
+                connections,
+            ),
+            users,
+        ))
+    }
+
+    async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
+        let db_objs = Database::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+        Ok(db_objs
+            .into_iter()
+            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {
+        let schema_objs = Schema::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+
+        Ok(schema_objs
+            .into_iter()
+            .map(|(schema, obj)| ObjectModel(schema, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_users(&self) -> MetaResult<Vec<PbUserInfo>> {
+        let mut user_infos: Vec<PbUserInfo> = User::find()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        for user_info in &mut user_infos {
+            user_info.grant_privileges = get_user_privilege(user_info.id as _, &self.db).await?;
+        }
+        Ok(user_infos)
+    }
+
+    /// `list_all_tables` return all tables and internal tables.
+    pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// `list_all_tables` return all ids of state tables.
+    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        Ok(table_ids)
+    }
+
+    /// `list_tables` return all `CREATED` tables and internal tables that belong to `CREATED` streaming jobs.
+    async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .all(&self.db)
+            .await?;
+        let internal_table_objs = Table::find()
+            .find_also_related(Object)
+            .join(JoinType::LeftJoin, table::Relation::Object2.def())
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Internal)
+                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+            )
+            .all(&self.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .chain(internal_table_objs.into_iter())
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
+    async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+        let source_objs = Source::find()
+            .find_also_related(Object)
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .is_null()
+                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+            )
+            .all(&self.db)
+            .await?;
+
+        Ok(source_objs
+            .into_iter()
+            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// `list_sinks` return all `CREATED` sinks.
+    async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .all(&self.db)
+            .await?;
+
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_views(&self) -> MetaResult<Vec<PbView>> {
+        let view_objs = View::find().find_also_related(Object).all(&self.db).await?;
+
+        Ok(view_objs
+            .into_iter()
+            .map(|(view, obj)| ObjectModel(view, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// `list_indexes` return all `CREATED` indexes.
+    async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
+        let index_objs = Index::find()
+            .find_also_related(Object)
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .all(&self.db)
+            .await?;
+
+        Ok(index_objs
+            .into_iter()
+            .map(|(index, obj)| ObjectModel(index, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_connections(&self) -> MetaResult<Vec<PbConnection>> {
+        let conn_objs = Connection::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+
+        Ok(conn_objs
+            .into_iter()
+            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
+        let func_objs = Function::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+
+        Ok(func_objs
+            .into_iter()
+            .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
+            .collect())
     }
 }
 

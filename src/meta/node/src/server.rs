@@ -25,8 +25,9 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::{MetadataManager, MetadataManagerV1};
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
@@ -421,12 +422,21 @@ pub async fn start_service_as_election_leader(
     );
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    // TODO: init metadata mgr in V2 if sql-backend enabled.
-    let metadata_manager = MetadataManager::V1(MetadataManagerV1 {
-        cluster_manager: cluster_manager.clone(),
-        catalog_manager: catalog_manager.clone(),
-        fragment_manager: fragment_manager.clone(),
-    });
+    let metadata_manager = if meta_store_sql.is_some() {
+        let cluster_controller = Arc::new(
+            ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
+                .await
+                .unwrap(),
+        );
+        let catalog_controller = Arc::new(CatalogController::new(env.clone()).unwrap());
+        MetadataManager::new_v2(cluster_controller, catalog_controller)
+    } else {
+        MetadataManager::new_v1(
+            cluster_manager.clone(),
+            catalog_manager.clone(),
+            fragment_manager.clone(),
+        )
+    };
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
     serving::on_meta_start(
@@ -493,8 +503,7 @@ pub async fn start_service_as_election_leader(
         SourceManager::new(
             env.clone(),
             barrier_scheduler.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
+            metadata_manager.clone(),
             meta_metrics.clone(),
         )
         .await
@@ -532,16 +541,23 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
-    hummock_manager
-        .purge(
-            &catalog_manager
-                .list_tables()
-                .await
-                .into_iter()
-                .map(|t| t.id)
-                .collect_vec(),
-        )
-        .await;
+    let all_state_table_ids = match &metadata_manager {
+        MetadataManager::V1(mgr) => mgr
+            .catalog_manager
+            .list_tables()
+            .await
+            .into_iter()
+            .map(|t| t.id)
+            .collect_vec(),
+        MetadataManager::V2(mgr) => mgr
+            .catalog_controller
+            .list_all_state_table_ids()
+            .await?
+            .into_iter()
+            .map(|id| id as u32)
+            .collect_vec(),
+    };
+    hummock_manager.purge(&all_state_table_ids).await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -574,7 +590,7 @@ pub async fn start_service_as_election_leader(
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        cluster_manager.clone(),
+        cluster_manager,
         fragment_manager.clone(),
         barrier_manager.clone(),
         sink_manager.clone(),
@@ -606,10 +622,8 @@ pub async fn start_service_as_election_leader(
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
-        catalog_manager.clone(),
-        cluster_manager.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
-        fragment_manager.clone(),
         backup_manager.clone(),
         serving_vnode_mapping.clone(),
     );

@@ -119,7 +119,7 @@ impl ClusterController {
 
     /// Used in `NotificationService::subscribe`.
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
-    pub async fn get_inner_guard(&self) -> RwLockReadGuard<'_, ClusterControllerInner> {
+    pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, ClusterControllerInner> {
         self.inner.read().await
     }
 
