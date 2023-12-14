@@ -93,7 +93,7 @@ impl ScheduledQueue {
         // TODO: this is just a workaround to allow dropping streaming jobs when the cluster is under recovery,
         // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
         if let QueueStatus::Blocked(reason) = &self.status &&
-            !matches!(scheduled.command, Command::DropStreamingJobs(_)) {
+            !matches!(scheduled.command, Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)) {
             return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);
@@ -402,10 +402,18 @@ impl ScheduledBarriers {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
-            let Command::DropStreamingJobs(table_ids) = command else {
-                unreachable!("only drop streaming jobs should be buffered");
-            };
-            to_drop_tables.extend(table_ids);
+            match command {
+                Command::DropStreamingJobs(table_ids) => {
+                    to_drop_tables.extend(table_ids);
+                }
+                Command::CancelStreamingJob(table_fragments) => {
+                    let table_id = table_fragments.table_id();
+                    to_drop_tables.insert(table_id);
+                }
+                _ => {
+                    unreachable!("only drop streaming jobs should be buffered");
+                }
+            }
             notifiers.into_iter().for_each(|mut notify| {
                 notify.notify_collected();
                 notify.notify_finished();

@@ -28,6 +28,7 @@ use risingwave_pb::expr::{ExprNode, PbExternalUdfExtra, PbWasmUdfExtra};
 use risingwave_udf::wasm::{InstantiatedComponent, WasmEngine};
 use risingwave_udf::ArrowFlightUdfClient;
 use tracing::Instrument;
+use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -236,7 +237,7 @@ impl Build for UdfExpression {
                     Ok(Field::new(
                         "",
                         DataType::from(t).try_into().map_err(|e: ArrayError| {
-                            risingwave_udf::Error::unsupported(e.to_string())
+                            risingwave_udf::Error::unsupported(e.to_report_string())
                         })?,
                         true,
                     ))

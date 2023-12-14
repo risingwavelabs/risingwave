@@ -318,6 +318,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut chunk_builder =
             StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
 
+        // Prepare things needed by metrics.
+        let actor_id = this.actor_ctx.id.to_string();
+        let fragment_id = this.actor_ctx.fragment_id.to_string();
+        let table_id = this.state_table.table_id().to_string();
+
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
             vars.stats.cache_lookup += 1;
@@ -374,6 +379,26 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 // Apply the change record.
                 partition.write_record(&mut this.state_table, key, record);
             }
+
+            let cache_len = partition.cache_real_len();
+            let stats = partition.summarize();
+            let metrics = this.actor_ctx.streaming_metrics.clone();
+            metrics
+                .over_window_range_cache_entry_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .set(cache_len as i64);
+            metrics
+                .over_window_range_cache_lookup_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.lookup_count);
+            metrics
+                .over_window_range_cache_left_miss_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.left_miss_count);
+            metrics
+                .over_window_range_cache_right_miss_count
+                .with_label_values(&[&table_id, &actor_id, &fragment_id])
+                .inc_by(stats.right_miss_count);
 
             // Update recently accessed range for later shrinking cache.
             if !this.cache_policy.is_full()
@@ -592,6 +617,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     for chunk in Self::apply_chunk(&mut this, &mut vars, chunk) {
                         yield Message::Chunk(chunk?);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;

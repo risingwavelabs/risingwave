@@ -63,9 +63,11 @@ pub enum ExprError {
     DivisionByZero,
 
     #[error("Parse error: {0}")]
+    // TODO(error-handling): should prefer use error types than strings.
     Parse(Box<str>),
 
     #[error("Invalid parameter {name}: {reason}")]
+    // TODO(error-handling): should prefer use error types than strings.
     InvalidParam {
         name: &'static str,
         reason: Box<str>,

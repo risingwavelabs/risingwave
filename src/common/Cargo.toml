@@ -17,9 +17,13 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-array = { workspace = true }
+arrow-array-deltalake = { workspace = true }
 arrow-buffer = { workspace = true }
+arrow-buffer-deltalake = { workspace = true }
 arrow-cast = { workspace = true }
+arrow-cast-deltalake = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-schema-deltalake = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 auto_impl = "1"
@@ -72,6 +76,7 @@ prost = { workspace = true }
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
+risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
