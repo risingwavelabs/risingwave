@@ -101,3 +101,57 @@ fn similar_to_escape_with_escape_text(
     similar_escape_internal(pat, esc_text.chars().next(), writer)
         .map_err(|e| ExprError::Internal(e.into()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{similar_to_escape_default, similar_to_escape_with_escape_text};
+
+    #[test]
+    fn test_default_escape() {
+        let cases = vec![
+            ("", "^(?:)$"),
+            ("_bcd%", r#"^(?:.bcd.*)$"#),
+            ("bcd%", r#"^(?:bcd.*)$"#),
+            (r#"_bcd\%"#, r#"^(?:.bcd\%)$"#),
+            ("bcd[]ee", "^(?:bcd[]ee)$"),
+            (r#"bcd[]"ee""#, r#"^(?:bcd[]"ee")$"#),
+            ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
+            ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
+            ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+        ];
+
+        for (pat, escaped) in cases {
+            let mut writer = String::new();
+            similar_to_escape_default(pat, &mut writer).ok();
+            assert_eq!(writer, escaped);
+        }
+    }
+
+    #[test]
+    fn test_escape_with_escape_text() {
+        let cases = vec![
+            ("", "^(?:)$"),
+            ("_bcd%", "^(?:.bcd.*)$"),
+            ("bcd%", "^(?:bcd.*)$"),
+            (r#"_bcd\%"#, r#"^(?:.bcd\\.*)$"#),
+            ("bcd[]ee", "^(?:bcd[]ee)$"),
+            (r#"bcd[]ee"""#, r#"^(?:bcd[]ee"")$"#),
+            (r#"bcd[]"ee""#, r#"^(?:bcd[]"ee")$"#),
+            ("bcd[pp]ee", "^(?:bcd[pp]ee)$"),
+            ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
+            ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
+            ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+        ];
+
+        for (pat, escaped) in cases {
+            let mut writer = String::new();
+            similar_to_escape_with_escape_text(pat, "#", &mut writer).ok();
+            assert_eq!(writer, escaped);
+        }
+
+        let pat = "xxx";
+        let mut writer = String::new();
+        let res = similar_to_escape_with_escape_text(pat, "##", &mut writer);
+        assert!(res.is_err())
+    }
+}
