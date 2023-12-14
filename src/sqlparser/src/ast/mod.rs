@@ -1213,6 +1213,7 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    ShowTransactionIsolationLevel,
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
     /// KILL COMMAND
@@ -1383,6 +1384,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
+            Statement::ShowTransactionIsolationLevel => {
+                write!(f, "SHOW TRANSACTION ISOLATION LEVEL")?;
                 Ok(())
             }
             Statement::Insert {

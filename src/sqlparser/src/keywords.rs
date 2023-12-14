@@ -121,6 +121,7 @@ define_keywords!(
     CHARACTER,
     CHARACTER_LENGTH,
     CHAR_LENGTH,
+    CHARACTERISTICS,
     CHECK,
     CLOB,
     CLOSE,

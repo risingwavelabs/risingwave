@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::StatementType;
+use pgwire::{pg_response::StatementType, types::Row};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::session::transaction::AccessMode;
+use crate::{session::transaction::AccessMode, utils::infer_stmt_row_desc::infer_show_variable};
 
 macro_rules! not_impl {
     ($body:expr) => {
@@ -114,4 +114,16 @@ pub async fn handle_set(
     Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
         .notice(MESSAGE)
         .into())
+}
+
+pub fn handle_show_isolation_level(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
+    
+    let parameter_name = "transaction_isolation";
+    let row_desc = infer_show_variable(parameter_name);
+    let rows = vec![Row::new(vec![Some(config_reader.get(parameter_name)?.into())])];
+
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+    .values(rows.into(), row_desc)
+    .into())
 }
