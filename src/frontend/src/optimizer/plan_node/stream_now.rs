@@ -52,7 +52,7 @@ impl StreamNow {
             false,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
-            vec![(0,Monotonicity::Increasing)],
+            vec![(0, Monotonicity::Increasing)],
         );
         Self { base }
     }

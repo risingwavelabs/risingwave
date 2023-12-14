@@ -47,7 +47,7 @@ impl StreamProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
-        let mut mono_anlazer = MonotonicityAnalyzer {
+        let mono_anlazer = MonotonicityAnalyzer {
             input_mono_cols: input.monotonic_columns().to_vec(),
         };
         let mut watermark_derivations = vec![];
@@ -67,7 +67,7 @@ impl StreamProjectSet {
                 }
                 WatermarkDerivation::None => {}
             }
-            if mono_anlazer.try_derive_monotonicity(&expr) == Some(Monotonicity::Increasing) {
+            if mono_anlazer.try_derive_monotonicity(expr) == Some(Monotonicity::Increasing) {
                 nondecreasing_exprs.push(expr_idx);
                 watermark_columns.insert(expr_idx);
                 monotonic_columns.push((expr_idx, Monotonicity::Increasing));

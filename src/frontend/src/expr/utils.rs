@@ -15,7 +15,7 @@
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
-use sha2::digest::generic_array::arr::Inc;
+
 
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
@@ -608,7 +608,7 @@ impl MonotonicityAnalyzer {
                 .find_map(|(i, m)| (inner.index == *i).then(|| m.clone())),
             ExprImpl::Literal(_) => Some(Monotonicity::Constant),
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
-            ExprImpl::FunctionCallWithLambda(inner) => None,
+            ExprImpl::FunctionCallWithLambda(_inner) => None,
             ExprImpl::TableFunction(_) => None,
             ExprImpl::Subquery(_)
             | ExprImpl::AggCall(_)
