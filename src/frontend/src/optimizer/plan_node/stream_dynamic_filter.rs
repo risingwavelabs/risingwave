@@ -35,6 +35,7 @@ pub struct StreamDynamicFilter {
     pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
+    condition_always_relax: bool,
 }
 
 impl StreamDynamicFilter {
@@ -53,12 +54,13 @@ impl StreamDynamicFilter {
                 false
             }
         };
-
-        let append_only = if right_monotonically_increasing
+        let condition_always_relax = right_monotonically_increasing
             && matches!(
                 core.comparator(),
                 ExprType::LessThan | ExprType::LessThanOrEqual
-            ) {
+            );
+
+        let append_only = if condition_always_relax {
             core.left().append_only()
         } else {
             false
@@ -75,6 +77,7 @@ impl StreamDynamicFilter {
             base,
             core,
             cleaned_by_watermark,
+            condition_always_relax,
         }
     }
 
@@ -121,6 +124,7 @@ impl Distill for StreamDynamicFilter {
             plan_node_name!(
                 "StreamDynamicFilter",
                 { "append_only", self.append_only() },
+                { "condition_always_relax", self.condition_always_relax },
             ),
             vec,
         )
@@ -164,6 +168,7 @@ impl StreamNode for StreamDynamicFilter {
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
+            condition_always_relax: self.condition_always_relax,
         })
     }
 }
