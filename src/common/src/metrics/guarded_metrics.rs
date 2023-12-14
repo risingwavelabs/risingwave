@@ -209,6 +209,16 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
         }
     }
 
+    /// This is similar to the `with_label_values` of the raw metrics vec.
+    /// We need to pay special attention that, unless for some special purpose,
+    /// we should not drop the returned `LabelGuardedMetric` immediately after
+    /// using it, such as `metrics.with_guarded_label_values(...).inc();`,
+    /// because after dropped the label will be regarded as not used any more,
+    /// and the internal raw metrics will be removed and reset.
+    ///
+    /// Instead, we should store the returned `LabelGuardedMetric` in a scope with longer
+    /// lifetime so that the labels can be regarded as being used in its whole life scope.
+    /// This is also the recommended way to use the raw metrics vec.
     pub fn with_guarded_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
