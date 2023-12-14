@@ -66,6 +66,26 @@ ClickHouseConfig:
   - name: r#type
     field_type: String
     required: true
+DeltaLakeConfig:
+  fields:
+  - name: s3.access.key
+    field_type: String
+    required: false
+  - name: s3.secret.key
+    field_type: String
+    required: false
+  - name: location
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: false
+  - name: s3.endpoint
+    field_type: String
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 DorisConfig:
   fields:
   - name: doris.url

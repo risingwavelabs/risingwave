@@ -130,6 +130,7 @@ def section_overview(panels):
             - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
             - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
             - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
+            - Write Stall: Compaction cannot keep up. Stall foreground write.
             """,
             [
                 panels.target(
@@ -146,8 +147,7 @@ def section_overview(panels):
                     "Lagging Version",
                 ),
                 panels.target(
-                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_min_pinned_epoch')}) >= bool 6553600000 unless + {metric('storage_min_pinned_epoch')} == 0) + "
-                    + f"(({metric('storage_max_committed_epoch')} - {metric('storage_safe_epoch')}) >= bool 6553600000 unless + {metric('storage_safe_epoch')} == 0)",
+                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_min_pinned_epoch')}) >= bool 6553600000 unless + {metric('storage_min_pinned_epoch')} == 0)",
                     "Lagging Epoch",
                 ),
                 panels.target(
@@ -170,6 +170,10 @@ def section_overview(panels):
                 panels.target(
                     f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
                     "Abnormal Uploading Memory Usage",
+                ),
+                panels.target(
+                    f"{metric('storage_write_stop_compaction_groups')} > bool 0",
+                    "Write Stall",
                 ),
             ],
             ["last"],
