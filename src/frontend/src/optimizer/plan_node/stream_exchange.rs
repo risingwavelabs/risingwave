@@ -35,6 +35,13 @@ pub struct StreamExchange {
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         // Dispatch executor won't change the append-only behavior of the stream.
+
+        let monotonic_columns = match dist {
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
+            // think shuffle cases
+            Distribution::Single | Distribution::Broadcast => input.monotonic_columns().to_vec(),
+            _ => vec![],
+        };
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -44,7 +51,7 @@ impl StreamExchange {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
-            input.monotonic_columns().to_vec()
+            monotonic_columns,
         );
         StreamExchange {
             base,
