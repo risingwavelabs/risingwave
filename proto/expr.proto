@@ -476,16 +476,6 @@ message UserDefinedFunction {
   string identifier = 6;
 }
 
-// extra information for external functions
-message ExternalUdfExtra {}
-
-// extra information for wasm functions
-message WasmUdfExtra {
-  // We store the url of the remote object store here, as it's inconvenient to pass it to build expr.
-  // Maybe we can deprecate it in the future.
-  string wasm_storage_url = 1;
-}
-
 // Additional information for user defined table functions.
 message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
