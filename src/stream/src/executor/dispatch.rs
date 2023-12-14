@@ -74,14 +74,34 @@ impl DerefMut for DispatcherWithMetrics {
     }
 }
 
+struct DispatcherMetrics {
+    actor_id_str: String,
+    fragment_id_str: String,
+    metrics: Arc<StreamingMetrics>,
+    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+}
+
+impl DispatcherMetrics {
+    fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
+        DispatcherWithMetrics {
+            actor_output_buffer_blocking_duration_ns: self
+                .metrics
+                .actor_output_buffer_blocking_duration_ns
+                .with_guarded_label_values(&[
+                    &self.actor_id_str,
+                    &self.fragment_id_str,
+                    dispatcher.dispatcher_id_str(),
+                ]),
+            dispatcher,
+        }
+    }
+}
+
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
-    actor_id_str: String,
-    fragment_id_str: String,
     context: Arc<SharedContext>,
-    metrics: Arc<StreamingMetrics>,
-    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+    metrics: DispatcherMetrics,
 }
 
 impl DispatchExecutorInner {
@@ -115,7 +135,9 @@ impl DispatchExecutorInner {
                     })
                     .await?;
 
-                self.actor_out_record_cnt.inc_by(chunk.cardinality() as _);
+                self.metrics
+                    .actor_out_record_cnt
+                    .inc_by(chunk.cardinality() as _);
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
@@ -148,19 +170,8 @@ impl DispatchExecutorInner {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
             .map(|d| {
-                DispatcherImpl::new(&self.context, self.actor_id, d).map(|dispatcher| {
-                    DispatcherWithMetrics {
-                        actor_output_buffer_blocking_duration_ns: self
-                            .metrics
-                            .actor_output_buffer_blocking_duration_ns
-                            .with_guarded_label_values(&[
-                                &self.actor_id_str,
-                                &self.fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ]),
-                        dispatcher,
-                    }
-                })
+                DispatcherImpl::new(&self.context, self.actor_id, d)
+                    .map(|dispatcher| self.metrics.monitor_dispatcher(dispatcher))
             })
             .try_collect()?;
 
@@ -342,29 +353,23 @@ impl DispatchExecutor {
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
             .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let metrics = DispatcherMetrics {
+            actor_id_str,
+            fragment_id_str,
+            metrics,
+            actor_out_record_cnt,
+        };
         let dispatchers = dispatchers
             .into_iter()
-            .map(|dispatcher| DispatcherWithMetrics {
-                actor_output_buffer_blocking_duration_ns: metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_guarded_label_values(&[
-                        &actor_id_str,
-                        &fragment_id_str,
-                        dispatcher.dispatcher_id_str(),
-                    ]),
-                dispatcher,
-            })
+            .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
             .collect();
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                actor_id_str,
-                fragment_id_str,
                 context,
                 metrics,
-                actor_out_record_cnt,
             },
         }
     }
