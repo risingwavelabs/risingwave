@@ -13,23 +13,47 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
+//!
+//! This file acts as a template file for conversion code between
+//! arrays and different version of Apache Arrow.
+//!
+//! The conversion logic will be implemented for the arrow version specified in the outer mod by
+//! `super::arrow_xxx`, such as `super::arrow_array`.
+//!
+//! When we want to implement the conversion logic for an arrow version, we first
+//! create a new mod file, and rename the corresponding arrow package name to `arrow_xxx`
+//! using the `use` clause, and then declare a sub-mod and set its file path with attribute
+//! `#[path = "./arrow_impl.rs"]` so that the code in this template file can be embedded to
+//! the new mod file, and the conversion logic can be implemented for the corresponding arrow
+//! version.
+//!
+//! Example can be seen in `arrow_default.rs`, which is also as followed:
+//! ```ignore
+//! use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+//!
+//! #[allow(clippy::duplicate_mod)]
+//! #[path = "./arrow_impl.rs"]
+//! mod arrow_impl;
+//! ```
 
 use std::fmt::Write;
+use std::sync::Arc;
 
-use arrow_array::Array as ArrowArray;
-use arrow_cast::cast;
-use arrow_schema::{Field, Schema, SchemaRef, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
-use super::*;
-use crate::types::{Int256, StructType};
+// This is important because we want to use the arrow version specified by the outer mod.
+use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+// Other import should always use the absolute path.
+use crate::array::*;
+use crate::buffer::Bitmap;
+use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 
 /// Converts RisingWave array to Arrow array with the schema.
 /// This function will try to convert the array if the type is not same with the schema.
 pub fn to_record_batch_with_schema(
-    schema: SchemaRef,
+    schema: arrow_schema::SchemaRef,
     chunk: &DataChunk,
 ) -> Result<arrow_array::RecordBatch, ArrayError> {
     if !chunk.is_compacted() {
@@ -45,7 +69,7 @@ pub fn to_record_batch_with_schema(
             if column.data_type() == field.data_type() {
                 Ok(column)
             } else {
-                cast(&column, field.data_type()).map_err(ArrayError::from_arrow)
+                arrow_cast::cast(&column, field.data_type()).map_err(ArrayError::from_arrow)
             }
         })
         .try_collect::<_, _, ArrayError>()?;
@@ -72,14 +96,14 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
 
         let fields: Vec<_> = columns
             .iter()
-            .map(|array: &Arc<dyn ArrowArray>| {
+            .map(|array: &Arc<dyn arrow_array::Array>| {
                 let nullable = array.null_count() > 0;
                 let data_type = array.data_type().clone();
-                Field::new("", data_type, nullable)
+                arrow_schema::Field::new("", data_type, nullable)
             })
             .collect();
 
-        let schema = Arc::new(Schema::new(fields));
+        let schema = Arc::new(arrow_schema::Schema::new(fields));
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
         arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
@@ -205,7 +229,7 @@ impl TryFrom<&StructType> for arrow_schema::Fields {
     fn try_from(struct_type: &StructType) -> Result<Self, Self::Error> {
         struct_type
             .iter()
-            .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+            .map(|(name, ty)| Ok(arrow_schema::Field::new(name, ty.try_into()?, true)))
             .try_collect()
     }
 }
@@ -225,7 +249,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Int16 => Ok(Self::Int16),
             DataType::Int32 => Ok(Self::Int32),
             DataType::Int64 => Ok(Self::Int64),
-            DataType::Int256 => Ok(Self::Decimal256(DECIMAL256_MAX_PRECISION, 0)),
+            DataType::Int256 => Ok(Self::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)),
             DataType::Float32 => Ok(Self::Float32),
             DataType::Float64 => Ok(Self::Float64),
             DataType::Date => Ok(Self::Date32),
@@ -243,10 +267,10 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => Ok(Self::Struct(
                 struct_type
                     .iter()
-                    .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+                    .map(|(name, ty)| Ok(arrow_schema::Field::new(name, ty.try_into()?, true)))
                     .try_collect::<_, _, ArrayError>()?,
             )),
-            DataType::List(datatype) => Ok(Self::List(Arc::new(Field::new(
+            DataType::List(datatype) => Ok(Self::List(Arc::new(arrow_schema::Field::new(
                 "item",
                 datatype.as_ref().try_into()?,
                 true,
@@ -528,6 +552,20 @@ impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
     }
 }
 
+impl From<arrow_buffer::i256> for Int256 {
+    fn from(value: arrow_buffer::i256) -> Self {
+        let buffer = value.to_be_bytes();
+        Int256::from_be_bytes(buffer)
+    }
+}
+
+impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
+    fn from(val: Int256Ref<'a>) -> Self {
+        let buffer = val.to_be_bytes();
+        arrow_buffer::i256::from_be_bytes(buffer)
+    }
+}
+
 impl From<&Int256Array> for arrow_array::Decimal256Array {
     fn from(array: &Int256Array) -> Self {
         array
@@ -604,7 +642,7 @@ impl TryFrom<&ListArray> for arrow_array::ListArray {
                 array,
                 a,
                 Decimal256Builder::with_capacity(a.len()).with_data_type(
-                    arrow_schema::DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0),
+                    arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0),
                 ),
                 |b, v| b.append_option(v.map(Into::into)),
             ),
@@ -656,7 +694,11 @@ impl TryFrom<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Struct(a) => {
                 let values = Arc::new(arrow_array::StructArray::try_from(a)?);
                 arrow_array::ListArray::new(
-                    Arc::new(Field::new("item", a.data_type().try_into()?, true)),
+                    Arc::new(arrow_schema::Field::new(
+                        "item",
+                        a.data_type().try_into()?,
+                        true,
+                    )),
                     arrow_buffer::OffsetBuffer::new(arrow_buffer::ScalarBuffer::from(
                         array
                             .offsets()
@@ -683,6 +725,7 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     type Error = ArrayError;
 
     fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
+        use arrow_array::Array;
         Ok(ListArray {
             value: Box::new(ArrayImpl::try_from(array.values())?),
             bitmap: match array.nulls() {
@@ -731,6 +774,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 
 #[cfg(test)]
 mod tests {
+    use super::arrow_array::Array as _;
     use super::*;
 
     #[test]
@@ -860,8 +904,6 @@ mod tests {
 
     #[test]
     fn struct_array() {
-        use arrow_array::Array as _;
-
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         assert_eq!(
