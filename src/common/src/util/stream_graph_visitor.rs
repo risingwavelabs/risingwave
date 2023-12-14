@@ -93,7 +93,7 @@ fn visit_stream_node_tables_inner<F>(
                 } else {
                     always!(node.left_table, "DynamicFilterLeft");
                 }
-                
+
                 always!(node.right_table, "DynamicFilterRight");
             }
 

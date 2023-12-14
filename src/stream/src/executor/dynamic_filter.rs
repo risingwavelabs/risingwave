@@ -60,6 +60,11 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+    /// If the right side's change always make the condition more relaxed.
+    /// In other words, make more record in the left side satisfy the condition.
+    /// In that case, there are only records which does not satisfy the condition in the table.
+    condition_always_relax: bool,
+    cleaned_by_watermark: bool,
 }
 
 impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, USE_WATERMARK_CACHE> {
@@ -75,6 +80,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        condition_always_relax: bool,
+        cleaned_by_watermark: bool,
     ) -> Self {
         Self {
             ctx,
@@ -87,6 +94,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             right_table: state_table_r,
             metrics,
             chunk_size,
+            condition_always_relax,
+            cleaned_by_watermark,
         }
     }
 
@@ -108,7 +117,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         for (idx, (op, row)) in chunk.rows().enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
 
-            let res = if let Some(array) = &eval_results {
+            let satisfy = if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
                     results.value_at(idx).unwrap_or(false)
                 } else {
@@ -122,16 +131,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             match op {
                 Op::Insert | Op::Delete => {
                     new_ops.push(op);
-                    if res {
+                    if satisfy {
                         new_visibility.append(true);
                     } else {
                         new_visibility.append(false);
                     }
                 }
                 Op::UpdateDelete => {
-                    last_res = res;
+                    last_res = satisfy;
                 }
-                Op::UpdateInsert => match (last_res, res) {
+                Op::UpdateInsert => match (last_res, satisfy) {
                     (true, false) => {
                         new_ops.push(Op::Delete);
                         new_ops.push(Op::UpdateInsert);
@@ -159,6 +168,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 },
             }
 
+            // Do not need to maintain the emitted records in the left table when the condition is always relaxed
+            // Also, if the delete value satisfy the condition, there could not be in the state table.
+            if self.condition_always_relax && satisfy {
+                continue;
+            }
             // Store the rows without a null left key
             // null key in left side of predicate should never be stored
             // (it will never satisfy the filter condition)
@@ -384,6 +398,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
+                        if !is_insert && self.condition_always_relax {
+                            bail!("The optimizer inferred that the right side's change always make the condition more relaxed.\
+                                But the right changes make the conditions stricter.");
+                        }
+
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
@@ -400,9 +419,14 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         .into_iter()
                         .map(Box::pin);
 
+                        let mut to_delete_rows: Vec<OwnedRow> = vec![];
+
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
+                            if self.condition_always_relax && !self.cleaned_by_watermark {
+                                to_delete_rows.push(row.clone());
+                            }
                             if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
@@ -414,6 +438,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 
                         if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
+                        }
+
+                        for r in to_delete_rows {
+                            self.left_table.delete(r);
                         }
                     }
 
@@ -558,6 +586,8 @@ mod tests {
             mem_state_r,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            false,
+            false,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }
