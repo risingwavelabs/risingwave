@@ -293,7 +293,6 @@ pub mod agg_executor {
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
-    use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
         ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
         PkIndices, SimpleAggExecutor,
@@ -498,7 +497,6 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
@@ -569,7 +567,6 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()

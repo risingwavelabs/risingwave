@@ -2471,17 +2471,12 @@ impl Parser {
 
         let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
             let source_name = self.parse_object_name()?;
-            if self.parse_keyword(Keyword::TABLE) {
-                let external_table_name = self.parse_literal_string()?;
-                Some(CdcTableInfo {
-                    source_name,
-                    external_table_name,
-                })
-            } else {
-                return Err(ParserError::ParserError(
-                    "Expect a TABLE clause on table created by CREATE TABLE FROM".to_string(),
-                ));
-            }
+            self.expect_keyword(Keyword::TABLE)?;
+            let external_table_name = self.parse_literal_string()?;
+            Some(CdcTableInfo {
+                source_name,
+                external_table_name,
+            })
         } else {
             None
         };
