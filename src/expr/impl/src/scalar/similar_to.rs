@@ -16,6 +16,9 @@ use std::fmt::Write;
 
 use risingwave_expr::{function, ExprError, Result};
 
+// escape `similar-to` pattern to POSIX regex pattern
+// Adapted from:
+// https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/regexp.c#L768
 fn similar_escape_internal(
     pat: &str,
     esc_text: Option<char>,
@@ -113,7 +116,11 @@ fn similar_escape_internal(
 fn similar_to_escape_default(pat: &str, writer: &mut impl Write) -> Result<()> {
     similar_escape_internal(pat, Some('\\'), writer)
 }
-#[function("similar_to_escape(varchar, varchar) -> varchar")]
+
+#[function(
+    // x SIMILAR TO y ESCAPE z -> x ~ similar_to_escape(y, z)
+    "similar_to_escape(varchar, varchar) -> varchar"
+)]
 fn similar_to_escape_with_escape_text(
     pat: &str,
     esc_text: &str,
