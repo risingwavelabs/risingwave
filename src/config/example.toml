@@ -67,6 +67,7 @@ enable_emergency_picker = true
 
 [batch]
 enable_barrier_read = false
+statement_timeout_in_sec = 3600
 
 [batch.developer]
 batch_connector_message_buffer_size = 16

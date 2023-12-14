@@ -53,6 +53,8 @@ mod validator;
 pub mod value;
 pub mod write_limiter;
 
+pub mod block_stream;
+
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;

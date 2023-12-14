@@ -45,6 +45,9 @@
 #![feature(bound_map)]
 #![feature(array_methods)]
 
+#[cfg_attr(not(test), expect(unused_extern_crates))]
+extern crate self as risingwave_common;
+
 #[macro_use]
 pub mod jemalloc;
 #[macro_use]

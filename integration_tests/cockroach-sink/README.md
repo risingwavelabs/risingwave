@@ -5,9 +5,8 @@ This demo showcases how to sink RisingWave's data to an external CockroachDB. A 
 During CI, the integration test will:
 
 1. Run `docker compose up -d` and start the cluster.
-2. After 20-30s, run `create_source.sql`.
-3. After 10s, run `create_mv.sql`.
-4. After another 10s, the tester will check if the ingestion is successful by creating a materialized view upon the source. It also checks if the MV created in the 3rd step has persisted the data.
+2. After 20-30s, run `create_source.sql`, `create_mv.sql`, `create_sink.sql`
+3. After another 30s, the tester will check if the ingestion is successful by `SELECT COUNT(*) FROM target_count;` in CockroachDB.
 
 To connect to the Postgres outside the container via psql:
 

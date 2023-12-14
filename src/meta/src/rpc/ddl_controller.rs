@@ -21,9 +21,10 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -36,9 +37,11 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
+use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto,
+    Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
+    StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -52,7 +55,7 @@ use crate::manager::{
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{StreamEnvironment, TableFragments};
+use crate::model::{FragmentId, StreamContext, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -96,6 +99,13 @@ impl StreamingJobId {
     }
 }
 
+// It’s used to describe the information of the table that needs to be replaced and it will be used during replacing table and creating sink into table operations.
+pub struct ReplaceTableInfo {
+    pub streaming_job: StreamingJob,
+    pub fragment_graph: StreamFragmentGraphProto,
+    pub col_index_mapping: Option<ColIndexMapping>,
+}
+
 pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
@@ -107,10 +117,15 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
-    DropStreamingJob(StreamingJobId, DropMode),
-    ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    CreateStreamingJob(
+        StreamingJob,
+        StreamFragmentGraphProto,
+        CreateType,
+        Option<ReplaceTableInfo>,
+    ),
+    DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceTableInfo>),
     AlterName(alter_name_request::Object, String),
+    ReplaceTable(ReplaceTableInfo),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
@@ -127,7 +142,7 @@ impl DdlCommand {
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
-            | DdlCommand::DropStreamingJob(_, _)
+            | DdlCommand::DropStreamingJob(_, _, _)
             | DdlCommand::DropConnection(_) => true,
             // Simply ban all other commands in recovery.
             _ => false,
@@ -235,24 +250,13 @@ impl DdlController {
         }
     }
 
-    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
-    /// when it's not running.
-    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
-        if !self.barrier_manager.is_running().await {
-            return Err(MetaError::unavailable(
-                "The cluster is starting or recovering",
-            ));
-        }
-        Ok(())
-    }
-
     /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.check_barrier_manager_status().await?;
+            self.barrier_manager.check_status_running().await?;
         }
         let ctrl = self.clone();
         let fut = async move {
@@ -271,15 +275,30 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, create_type) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph, create_type)
+                DdlCommand::CreateStreamingJob(
+                    stream_job,
+                    fragment_graph,
+                    create_type,
+                    affected_table_replace_info,
+                ) => {
+                    ctrl.create_streaming_job(
+                        stream_job,
+                        fragment_graph,
+                        create_type,
+                        affected_table_replace_info,
+                    )
+                    .await
+                }
+                DdlCommand::DropStreamingJob(job_id, drop_mode, target_replace_info) => {
+                    ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
                         .await
                 }
-                DdlCommand::DropStreamingJob(job_id, drop_mode) => {
-                    ctrl.drop_streaming_job(job_id, drop_mode).await
-                }
-                DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
-                    ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
+                DdlCommand::ReplaceTable(ReplaceTableInfo {
+                    streaming_job,
+                    fragment_graph,
+                    col_index_mapping,
+                }) => {
+                    ctrl.replace_table(streaming_job, fragment_graph, col_index_mapping)
                         .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
@@ -456,6 +475,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!(
             id = stream_job.id(),
@@ -470,9 +490,8 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
-        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -485,11 +504,17 @@ impl DdlController {
         let result = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
-                .build_stream_job(env, &stream_job, fragment_graph)
+                .build_stream_job(
+                    stream_ctx,
+                    &stream_job,
+                    fragment_graph,
+                    affected_table_replace_info,
+                )
                 .await?;
 
             internal_tables = ctx.internal_tables();
 
+            // Do some type-specific work for each type of stream job.
             match stream_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
                     Self::validate_cdc_table(table, &table_fragments).await?;
@@ -498,7 +523,16 @@ impl DdlController {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(ref sink) => {
+                StreamingJob::Sink(ref sink, ref mut target_table) => {
+                    // When sinking into table occurs, some variables of the target table may be modified,
+                    // such as `fragment_id` being altered by `prepare_replace_table`.
+                    // At this point, it’s necessary to update the table info carried with the sink.
+                    if let Some((StreamingJob::Table(source, table, _), ..)) =
+                        &ctx.replace_table_job_info
+                    {
+                        *target_table = Some((table.clone(), source.clone()));
+                    }
+
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
                 }
@@ -552,7 +586,7 @@ impl DdlController {
         }
     }
 
-    // validate the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     async fn validate_cdc_table(table: &Table, table_fragments: &TableFragments) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
@@ -587,7 +621,148 @@ impl DdlController {
         Ok(())
     }
 
-    // We persist table fragments at this step.
+    // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.
+    // The merge in the union has already been set up in the frontend and will be filled with specific upstream actors in this function.
+    // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
+    async fn inject_replace_table_job(
+        &self,
+        stream_ctx: StreamContext,
+        sink_table_fragments: &TableFragments,
+        ReplaceTableInfo {
+            mut streaming_job,
+            fragment_graph,
+            ..
+        }: ReplaceTableInfo,
+    ) -> MetaResult<(StreamingJob, ReplaceTableContext, TableFragments)> {
+        let fragment_graph = self
+            .prepare_replace_table(&mut streaming_job, fragment_graph)
+            .await?;
+
+        let (mut replace_table_ctx, mut table_fragments) = self
+            .build_replace_table(stream_ctx, &streaming_job, fragment_graph, None)
+            .await?;
+
+        let mut union_fragment_id = None;
+
+        for (fragment_id, fragment) in &mut table_fragments.fragments {
+            for actor in &mut fragment.actors {
+                if let Some(node) = &mut actor.nodes {
+                    visit_stream_node(node, |body| {
+                        if let NodeBody::Merge(m) = body && m.upstream_actor_id.is_empty() {
+                                if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                    // The union fragment should be unique.
+                                    assert_eq!(*union_fragment_id, *fragment_id);
+                                } else {
+                                    union_fragment_id = Some(*fragment_id);
+                                }
+                            };
+                    })
+                };
+            }
+        }
+
+        let table = streaming_job.table().unwrap();
+
+        let target_fragment_id =
+            union_fragment_id.expect("fragment of placeholder merger not found");
+
+        let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+
+        Self::inject_replace_table_plan_for_sink(
+            &sink_fragment,
+            table,
+            &mut replace_table_ctx,
+            &mut table_fragments,
+            target_fragment_id,
+        );
+
+        Ok((streaming_job, replace_table_ctx, table_fragments))
+    }
+
+    fn inject_replace_table_plan_for_sink(
+        sink_fragment: &PbFragment,
+        table: &Table,
+        replace_table_ctx: &mut ReplaceTableContext,
+        table_fragments: &mut TableFragments,
+        target_fragment_id: FragmentId,
+    ) {
+        let sink_actor_ids = sink_fragment
+            .actors
+            .iter()
+            .map(|a| a.actor_id)
+            .collect_vec();
+
+        let union_fragment = table_fragments
+            .fragments
+            .get_mut(&target_fragment_id)
+            .unwrap();
+
+        let downstream_actor_ids = union_fragment
+            .actors
+            .iter()
+            .map(|actor| actor.actor_id)
+            .collect_vec();
+
+        let output_indices = table
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| idx as _)
+            .collect_vec();
+
+        let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
+
+        let mapping = downstream_actor_ids
+            .iter()
+            .map(|id| {
+                let actor_status = table_fragments.actor_status.get(id).unwrap();
+                let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
+
+                (parallel_unit_id, *id)
+            })
+            .collect();
+
+        let actor_mapping =
+            ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
+                .to_actor(&mapping);
+
+        let upstream_actors = sink_fragment.get_actors();
+
+        for actor in upstream_actors {
+            replace_table_ctx.dispatchers.insert(
+                actor.actor_id,
+                vec![Dispatcher {
+                    r#type: DispatcherType::Hash as _,
+                    dist_key_indices: dist_key_indices.clone(),
+                    output_indices: output_indices.clone(),
+                    hash_mapping: Some(actor_mapping.to_protobuf()),
+                    dispatcher_id: union_fragment.fragment_id as _,
+                    downstream_actor_id: downstream_actor_ids.clone(),
+                }],
+            );
+        }
+
+        let upstream_fragment_id = sink_fragment.fragment_id;
+
+        for actor in &mut union_fragment.actors {
+            if let Some(node) = &mut actor.nodes {
+                let fields = node.fields.clone();
+
+                visit_stream_node(node, |node| {
+                    if let NodeBody::Merge(merge_node) = node && merge_node.upstream_actor_id.is_empty() {
+                            *merge_node = MergeNode {
+                                upstream_actor_id: sink_actor_ids.clone(),
+                                upstream_fragment_id,
+                                upstream_dispatcher_type: DispatcherType::Hash as _,
+                                fields: fields.clone(),
+                            };
+                        }
+                });
+            }
+        }
+    }
+
+    /// Let the stream manager to create the actors, and do some cleanup work after it fails or finishes.
     async fn create_streaming_job_inner(
         &self,
         stream_job: StreamingJob,
@@ -597,10 +772,12 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
+
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)
             .await;
+
         if let Err(e) = result {
             match stream_job.create_type() {
                 // NOTE: This assumes that we will trigger recovery,
@@ -615,9 +792,11 @@ impl DdlController {
             }
             return Err(e);
         };
+
         tracing::debug!(id = job_id, "finishing stream job");
         let version = self.finish_stream_job(stream_job, internal_tables).await?;
         tracing::debug!(id = job_id, "finished stream job");
+
         Ok(version)
     }
 
@@ -625,9 +804,10 @@ impl DdlController {
         &self,
         job_id: StreamingJobId,
         drop_mode: DropMode,
+        target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
-        let (version, streaming_job_ids) = match job_id {
+        let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
                     .drop_relation(
@@ -666,13 +846,27 @@ impl DdlController {
             }
         };
 
+        if let Some(ReplaceTableInfo {
+            streaming_job,
+            fragment_graph,
+            col_index_mapping,
+        }) = target_replace_info
+        {
+            version = self
+                .replace_table(streaming_job, fragment_graph, col_index_mapping)
+                .await?;
+        }
+
         self.stream_manager
             .drop_streaming_jobs(streaming_job_ids)
             .await;
+
         Ok(version)
     }
 
-    /// `prepare_stream_job` prepares a stream job and returns the stream fragment graph.
+    /// Creates [`StreamFragmentGraph`] from the protobuf message
+    /// (allocate and fill ID for fragments, internal tables, and the table in the local graph),
+    /// and does some preparation work.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
@@ -737,16 +931,20 @@ impl DdlController {
         Ok(parallelism)
     }
 
-    /// `build_stream_job` builds a streaming job and returns the context and table fragments.
+    /// Builds the actor graph:
+    /// - Schedule the fragments based on their distribution
+    /// - Expand each fragment into one or several actors
     async fn build_stream_job(
         &self,
-        env: StreamEnvironment,
+        stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
+        let expr_context = stream_ctx.to_expr_context();
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -790,15 +988,27 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(merge_updates.is_empty());
 
         // 3. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
-        let table_fragments =
-            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+        let table_fragments = TableFragments::new(
+            id.into(),
+            graph,
+            &building_locations.actor_locations,
+            stream_ctx.clone(),
+        );
+
+        let replace_table_job_info = match affected_table_replace_info {
+            Some(replace_table_info) => Some(
+                self.inject_replace_table_job(stream_ctx, &table_fragments, replace_table_info)
+                    .await?,
+            ),
+            None => None,
+        };
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
@@ -811,9 +1021,10 @@ impl DdlController {
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
+            replace_table_job_info,
         };
 
-        // 4. Mark creating tables, including internal tables and the table of the stream job.
+        // 4. Mark tables as creating, including internal tables and the table of the stream job.
         let creating_tables = ctx
             .internal_tables()
             .into_iter()
@@ -861,9 +1072,9 @@ impl DdlController {
                     tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
                 }
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, target_table) => {
                 self.catalog_manager
-                    .cancel_create_sink_procedure(sink)
+                    .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
             StreamingJob::Table(source, table, ..) => {
@@ -923,10 +1134,24 @@ impl DdlController {
                     .finish_create_table_procedure(internal_tables, table)
                     .await?
             }
-            StreamingJob::Sink(sink) => {
-                self.catalog_manager
+            StreamingJob::Sink(sink, target_table) => {
+                let sink_id = sink.id;
+
+                let mut version = self
+                    .catalog_manager
                     .finish_create_sink_procedure(internal_tables, sink)
-                    .await?
+                    .await?;
+
+                if let Some((table, source)) = target_table {
+                    let streaming_job =
+                        StreamingJob::Table(source, table, TableJobType::Unspecified);
+
+                    version = self
+                        .finish_replace_table(&streaming_job, None, Some(sink_id))
+                        .await?;
+                }
+
+                version
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
@@ -998,10 +1223,10 @@ impl DdlController {
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let stream_ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         let fragment_graph = self
             .prepare_replace_table(&mut stream_job, fragment_graph)
@@ -1010,7 +1235,7 @@ impl DdlController {
         let result = try {
             let (ctx, table_fragments) = self
                 .build_replace_table(
-                    env,
+                    stream_ctx,
                     &stream_job,
                     fragment_graph,
                     table_col_index_mapping.clone(),
@@ -1024,7 +1249,7 @@ impl DdlController {
 
         match result {
             Ok(_) => {
-                self.finish_replace_table(&stream_job, table_col_index_mapping)
+                self.finish_replace_table(&stream_job, table_col_index_mapping, None)
                     .await
             }
             Err(err) => {
@@ -1064,13 +1289,14 @@ impl DdlController {
     /// fragments.
     async fn build_replace_table(
         &self,
-        env: StreamEnvironment,
+        stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
         let default_parallelism = fragment_graph.default_parallelism();
+        let expr_context = stream_ctx.to_expr_context();
 
         let old_table_fragments = self
             .fragment_manager
@@ -1090,18 +1316,23 @@ impl DdlController {
 
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
-            .fragment_manager
-            .get_downstream_fragments(id.into())
-            .await?
-            .into_iter()
-            .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
-            .collect::<Option<_>>()
-            .ok_or_else(|| {
-                // The `rewrite` only fails if some column is dropped.
-                MetaError::invalid_parameter(
-                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
-                )
-            })?;
+                .fragment_manager
+                .get_downstream_fragments(id.into())
+                .await?
+                .into_iter()
+                .map(|(d, f)|
+                    if let Some(mapping) = &table_col_index_mapping {
+                        Some((mapping.rewrite_dispatch_strategy(&d)?, f))
+                    } else {
+                        Some((d, f))
+                    })
+                .collect::<Option<_>>()
+                .ok_or_else(|| {
+                    // The `rewrite` only fails if some column is dropped.
+                    MetaError::invalid_parameter(
+                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                    )
+                })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,
@@ -1123,7 +1354,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job, expr_context)
             .await?;
         assert!(dispatchers.is_empty());
 
@@ -1145,7 +1376,7 @@ impl DdlController {
             dummy_id.into(),
             graph,
             &building_locations.actor_locations,
-            env,
+            stream_ctx,
         );
 
         let ctx = ReplaceTableContext {
@@ -1163,14 +1394,20 @@ impl DdlController {
     async fn finish_replace_table(
         &self,
         stream_job: &StreamingJob,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
+        incoming_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(source, table, ..) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(source, table, table_col_index_mapping)
+            .finish_replace_table_procedure(
+                source,
+                table,
+                table_col_index_mapping,
+                incoming_sink_id,
+            )
             .await
     }
 

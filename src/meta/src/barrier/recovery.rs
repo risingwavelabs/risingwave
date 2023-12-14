@@ -23,7 +23,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,

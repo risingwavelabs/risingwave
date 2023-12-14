@@ -20,6 +20,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
@@ -110,7 +111,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
 
                     Statement::CreateIndex {
@@ -228,9 +229,9 @@ pub async fn handle_explain(
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("ERROR: {:?}", e)
+                format!("ERROR: {:?}", e.as_report())
             } else {
-                format!("ERROR: {}", e)
+                format!("ERROR: {}", e.as_report())
             });
         } else {
             // Else, directly return the error.

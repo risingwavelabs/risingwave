@@ -18,6 +18,7 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod encoder;
@@ -31,6 +32,7 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod starrocks;
+pub mod table;
 pub mod test_sink;
 pub mod utils;
 pub mod writer;
@@ -38,11 +40,12 @@ pub mod writer;
 use std::collections::HashMap;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
@@ -58,6 +61,7 @@ use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
+use crate::sink::table::TABLE_SINK;
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
@@ -79,10 +83,13 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::remote::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
+                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { DeltaLakeRust, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { Test, $crate::sink::test_sink::TestSink }
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::table::TableSink }
             }
             $(,$arg)*
         }
@@ -143,6 +150,7 @@ pub struct SinkParam {
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
+    pub target_table: Option<TableId>,
 }
 
 impl SinkParam {
@@ -174,6 +182,7 @@ impl SinkParam {
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
+            target_table: pb_param.target_table.map(TableId::new),
         }
     }
 
@@ -189,6 +198,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 
@@ -214,6 +224,7 @@ impl From<SinkCatalog> for SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
+            target_table: sink_catalog.target_table,
         }
     }
 }
@@ -324,10 +335,14 @@ impl SinkImpl {
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
         param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = param
-            .properties
-            .get(CONNECTOR_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
+        let sink_type = if param.target_table.is_some() {
+            TABLE_SINK
+        } else {
+            param.properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
+                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
+            })?
+        };
+
         match_sink_name_str!(
             sink_type.to_lowercase().as_str(),
             SinkType,
@@ -426,6 +441,12 @@ pub enum SinkError {
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Pulsar error: {0}")]
@@ -463,6 +484,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow_error!("{}", value))
     }
 }
 

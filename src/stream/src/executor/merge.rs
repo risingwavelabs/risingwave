@@ -130,7 +130,11 @@ impl MergeExecutor {
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str, &fragment_id_str])
+                        .with_label_values(&[
+                            &actor_id_str,
+                            &fragment_id_str,
+                            &upstream_fragment_id_str,
+                        ])
                         .inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
@@ -142,7 +146,8 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
+                        barrier.mutation.as_deref()
                     {
                         if select_all
                             .upstream_actor_ids()
@@ -639,14 +644,14 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
