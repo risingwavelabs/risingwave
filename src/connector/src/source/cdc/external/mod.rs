@@ -33,7 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
-use crate::parser::mysql_row_to_datums;
+use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 
@@ -366,8 +366,7 @@ impl MySqlExternalTableReader {
                 let row_stream = rs_stream.map(|row| {
                     // convert mysql row into OwnedRow
                     let mut row = row?;
-                    let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                    mysql_row_to_owned_row(&mut row, &self.rw_schema)
                 });
 
                 pin_mut!(row_stream);
@@ -428,8 +427,7 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                mysql_row_to_owned_row(&mut row, &self.rw_schema)
             });
 
             pin_mut!(row_stream);

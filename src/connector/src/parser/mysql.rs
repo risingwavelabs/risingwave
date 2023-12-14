@@ -15,12 +15,18 @@
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 
-pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Datum> {
+use crate::source::cdc::external::ConnectorResult;
+
+pub fn mysql_row_to_owned_row(
+    mysql_row: &mut MysqlRow,
+    schema: &Schema,
+) -> ConnectorResult<OwnedRow> {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
@@ -95,7 +101,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
         };
         datums.push(datum);
     }
-    datums
+    Ok(OwnedRow::new(datums))
 }
 
 #[cfg(test)]
@@ -105,11 +111,11 @@ mod tests {
     use mysql_async::prelude::*;
     use mysql_async::Row as MySqlRow;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ToText};
     use tokio_stream::StreamExt;
 
-    use crate::parser::mysql_row_to_datums;
+    use crate::parser::mysql_row_to_owned_row;
 
     // manual test case
     #[ignore]
@@ -133,8 +139,9 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            let datums = mysql_row_to_datums(&mut mysql_row, &t1schema);
-            Ok::<_, anyhow::Error>(Some(OwnedRow::new(datums)))
+            Ok::<_, anyhow::Error>(Some(
+                mysql_row_to_owned_row(&mut mysql_row, &t1schema).unwrap(),
+            ))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {

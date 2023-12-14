@@ -14,8 +14,9 @@
 
 use chrono::{NaiveDate, Utc};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
+    DataType, Date, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
@@ -39,10 +40,10 @@ macro_rules! handle_data_type {
     };
 }
 
-pub fn postgres_row_to_datums(
+pub fn postgres_row_to_owned_row(
     row: tokio_postgres::Row,
     schema: &Schema,
-) -> ConnectorResult<Vec<Datum>> {
+) -> ConnectorResult<OwnedRow> {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
@@ -183,6 +184,5 @@ pub fn postgres_row_to_datums(
         };
         datums.push(datum);
     }
-
-    Ok(datums)
+    Ok(OwnedRow::new(datums))
 }

@@ -27,7 +27,7 @@ use tokio_postgres::types::PgLsn;
 use tokio_postgres::NoTls;
 
 use crate::error::ConnectorError;
-use crate::parser::postgres_row_to_datums;
+use crate::parser::postgres_row_to_owned_row;
 use crate::source::cdc::external::{
     CdcOffset, ConnectorResult, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
@@ -207,8 +207,7 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            let datums = postgres_row_to_datums(row, &self.rw_schema)?;
-            Ok::<_, ConnectorError>(OwnedRow::new(datums))
+            postgres_row_to_owned_row(row, &self.rw_schema)
         });
 
         pin_mut!(row_stream);
@@ -248,7 +247,15 @@ mod tests {
     use crate::source::cdc::external::{ExternalTableReader, SchemaTableName};
 
     #[test]
-    fn test_mysql_binlog_offset() {
+    fn test_filter_expression() {
+        let cols = vec!["v1".to_string()];
+        let expr = PostgresExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(v1) > ($1)");
+
+        let cols = vec!["v1".to_string(), "v2".to_string()];
+        let expr = PostgresExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(v1, v2) > ($1, $2)");
+
         let cols = vec!["v1".to_string(), "v2".to_string(), "v3".to_string()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(v1, v2, v3) > ($1, $2, $3)");
