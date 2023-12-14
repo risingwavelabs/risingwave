@@ -106,7 +106,7 @@ pub fn postgres_row_to_datums(
                 }
                 DataType::Interval => {
                     let v = row.try_get::<_, Option<Interval>>(i)?;
-                    v.map(|v| ScalarImpl::from(v))
+                    v.map(ScalarImpl::from)
                 }
                 DataType::List(dtype) => {
                     let mut builder = dtype.create_array_builder(0);
@@ -155,11 +155,11 @@ pub fn postgres_row_to_datums(
                         }
                         DataType::Bytea => {
                             let v = row.try_get::<_, Option<Vec<Vec<u8>>>>(i)?;
-                            v.map(|vec| {
+                            if let Some(vec) = v {
                                 vec.into_iter().for_each(|val| {
                                     builder.append(Some(ScalarImpl::from(val.into_boxed_slice())))
                                 })
-                            });
+                            }
                         }
                         DataType::Struct(_)
                         | DataType::List(_)

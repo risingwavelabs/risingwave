@@ -81,7 +81,7 @@ impl crate::types::to_binary::ToBinary for Serial {
 }
 
 impl ToSql for Serial {
-    accepts!(ANY);
+    accepts!(INT8);
 
     to_sql_checked!();
 

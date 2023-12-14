@@ -860,7 +860,7 @@ fn derive_connect_properties(
             }
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) = external_table_name
-                    .split_once(".")
+                    .split_once('.')
                     .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?;
 
                 // insert 'schema.name' into connect properties

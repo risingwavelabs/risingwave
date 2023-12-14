@@ -545,8 +545,6 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::sink::catalog::SinkType;
-    use crate::sink::SinkParam;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
     };
