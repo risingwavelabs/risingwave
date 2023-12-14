@@ -650,8 +650,14 @@ impl FragmentManager {
         }
 
         if !dirty_sink_into_table_upstream_fragment_id.is_empty() {
+            let to_delete_table_ids: HashSet<_> = to_delete_table_fragments
+                .iter()
+                .map(|table| table.table_id())
+                .collect();
+
             Self::clean_dirty_table_sink_downstreams(
                 dirty_sink_into_table_upstream_fragment_id,
+                to_delete_table_ids,
                 &mut table_fragments,
             )?;
         }
@@ -681,13 +687,28 @@ impl FragmentManager {
     // This could lead to issues. Therefore, we need to find the sink fragment’s downstream, then locate its union node and delete the dirty merge.
     fn clean_dirty_table_sink_downstreams(
         dirty_sink_into_table_upstream_fragment_id: HashSet<u32>,
+        to_delete_table_ids: HashSet<TableId>,
         table_fragments: &mut BTreeMapTransaction<'_, TableId, TableFragments>,
     ) -> MetaResult<()> {
         tracing::info!("cleaning dirty downstream merge nodes for table sink");
 
         let mut dirty_downstream_table_ids = HashMap::new();
         for (table_id, table_fragment) in table_fragments.tree_mut() {
+            if to_delete_table_ids.contains(table_id) {
+                continue;
+            }
+
             for fragment in table_fragment.fragments.values_mut() {
+                if fragment
+                    .get_upstream_fragment_ids()
+                    .iter()
+                    .all(|upstream_fragment_id| {
+                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
+                    })
+                {
+                    continue;
+                }
+
                 for actor in &mut fragment.actors {
                     visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
@@ -701,6 +722,12 @@ impl FragmentManager {
                         true
                     })
                 }
+
+                fragment
+                    .upstream_fragment_ids
+                    .retain(|upstream_fragment_id| {
+                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
+                    });
             }
         }
 
@@ -717,13 +744,13 @@ impl FragmentManager {
             for actor in &mut fragment.actors {
                 visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
-                        let mut new_inputs = vec![];
-                        for input in &mut node.input {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {} else {
-                                new_inputs.push(input.clone());
+                        node.input.retain_mut(|input| {
+                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {
+                                false
+                            } else {
+                                true
                             }
-                        }
-                        node.input = new_inputs;
+                        });
                     }
                     true
                 })
