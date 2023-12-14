@@ -27,6 +27,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
@@ -53,7 +54,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{
     ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv, WorkerId,
 };
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableFragmentsParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_parallel_unit_mapping, to_fragment_parallel_unit_mapping,
     ServingVnodeMapping,
@@ -1510,6 +1511,7 @@ impl ScaleController {
     pub async fn post_apply_reschedule(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
+        table_parallelism: &HashMap<TableId, TableParallelism>,
     ) -> MetaResult<HashMap<WorkerId, Vec<ActorId>>> {
         let mut node_dropped_actors = HashMap::new();
         for table_fragments in self
@@ -1541,7 +1543,7 @@ impl ScaleController {
 
         // Update fragment info after rescheduling in meta store.
         self.fragment_manager
-            .post_apply_reschedules(reschedules.clone())
+            .post_apply_reschedules(reschedules.clone(), table_parallelism.clone())
             .await?;
 
         // Update serving fragment info after rescheduling in meta store.
@@ -1690,7 +1692,7 @@ impl ScaleController {
             &mut no_shuffle_target_fragment_ids,
         );
 
-        let table_parallelisms: HashMap<u32, TableFragmentsParallelism> = table_parallelisms
+        let table_parallelisms: HashMap<u32, TableParallelism> = table_parallelisms
             .into_iter()
             .map(|(id, parallelism)| (id, parallelism))
             .collect();
@@ -1734,7 +1736,7 @@ impl ScaleController {
                             fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
                         if all_available_parallel_unit_ids.contains(single_parallel_unit_id) {
-                            // note, shall we continue?
+                            // NOTE: shall we continue?
                             continue;
                         }
 
@@ -1764,7 +1766,7 @@ impl ScaleController {
                         );
                     }
                     FragmentDistributionType::Hash => match parallelism {
-                        TableFragmentsParallelism::Auto => {
+                        TableParallelism::Auto => {
                             target_plan.insert(
                                 fragment_id,
                                 Self::diff_parallel_unit_change(
@@ -1773,7 +1775,7 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableFragmentsParallelism::Fixed(n) => {
+                        TableParallelism::Fixed(n) => {
                             if n > all_available_parallel_unit_ids.len() {
                                 bail!(
                                     "Not enough ParallelUnits available for fragment {}",
@@ -1795,7 +1797,7 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableFragmentsParallelism::Custom => unreachable!(),
+                        TableParallelism::Custom => unreachable!(),
                     },
                 }
             }
@@ -2273,17 +2275,18 @@ impl ScaleController {
 
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
-    pub(crate) table_parallelisms: HashMap<u32, TableFragmentsParallelism>,
+    pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
 }
 impl GlobalStreamManager {
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
+        table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
+            .reschedule_actors_impl(&mut revert_funcs, reschedules, options, table_parallelism)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -2300,6 +2303,7 @@ impl GlobalStreamManager {
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
+        table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
@@ -2310,6 +2314,7 @@ impl GlobalStreamManager {
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
+            table_parallelism: table_parallelism.unwrap_or_default(),
         };
 
         let fragment_manager_ref = self.fragment_manager.clone();
@@ -2386,6 +2391,7 @@ impl GlobalStreamManager {
             RescheduleOptions {
                 resolve_no_shuffle_upstream: true,
             },
+            None,
         )
         .await?;
 

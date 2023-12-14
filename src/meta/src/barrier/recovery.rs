@@ -462,7 +462,7 @@ impl GlobalBarrierManager {
 
         if let Err(e) = self
             .scale_controller
-            .post_apply_reschedule(&reschedule_fragment)
+            .post_apply_reschedule(&reschedule_fragment, &Default::default())
             .await
         {
             tracing::error!(

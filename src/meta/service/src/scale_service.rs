@@ -170,6 +170,7 @@ impl ScaleService for ScaleServiceImpl {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
                 },
+                None,
             )
             .await?;
 

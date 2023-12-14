@@ -42,7 +42,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    ValTransaction,
+    TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
@@ -1111,6 +1111,7 @@ impl FragmentManager {
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
+        map: HashMap<TableId, TableParallelism>,
     ) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_version = guard.table_revision;

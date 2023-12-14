@@ -98,6 +98,7 @@ message TableFragments {
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
+  TableParallelism parallelism = 7;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.

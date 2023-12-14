@@ -37,7 +37,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob,
 };
-use crate::model::{ActorId, TableFragments, TableFragmentsParallelism};
+use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -714,7 +714,7 @@ impl GlobalStreamManager {
     pub(crate) async fn alter_table_parallelism(
         &self,
         table_id: u32,
-        parallelism: TableFragmentsParallelism,
+        parallelism: TableParallelism,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
@@ -746,6 +746,7 @@ impl GlobalStreamManager {
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
             },
+            Some(HashMap::from([(TableId::new(table_id), parallelism)])),
         )
         .await?;
 

@@ -41,14 +41,14 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum TableFragmentsParallelism {
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TableParallelism {
     Auto,
     Fixed(usize),
     Custom,
 }
 
-impl From<PbTableParallelism> for TableFragmentsParallelism {
+impl From<PbTableParallelism> for TableParallelism {
     fn from(value: PbTableParallelism) -> Self {
         use Parallelism::*;
         match &value.parallelism {
@@ -60,9 +60,9 @@ impl From<PbTableParallelism> for TableFragmentsParallelism {
     }
 }
 
-impl From<TableFragmentsParallelism> for PbTableParallelism {
-    fn from(value: TableFragmentsParallelism) -> Self {
-        use TableFragmentsParallelism::*;
+impl From<TableParallelism> for PbTableParallelism {
+    fn from(value: TableParallelism) -> Self {
+        use TableParallelism::*;
 
         let parallelism = match value {
             Auto => PbParallelism::Auto(PbAutoParallelism {}),
@@ -103,7 +103,7 @@ pub struct TableFragments {
     pub ctx: StreamContext,
 
     /// The parallelism assigned to this table fragments
-    pub assigned_parallelism: TableFragmentsParallelism,
+    pub assigned_parallelism: TableParallelism,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -165,7 +165,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
-            assigned_parallelism: TableFragmentsParallelism::Auto,
+            assigned_parallelism: TableParallelism::Auto,
         }
     }
 
@@ -213,7 +213,7 @@ impl TableFragments {
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
-            assigned_parallelism: TableFragmentsParallelism::Auto,
+            assigned_parallelism: TableParallelism::Auto,
         }
     }
 
