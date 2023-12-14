@@ -633,6 +633,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-wasm-runtime"
 version = "0.1.0"
+source = "git+https://github.com/risingwavelabs/arrow-udf-wasm.git#3b01596f59541711fdf0cdab8264a239e1d2c73d"
 dependencies = [
  "anyhow",
  "arrow-array 49.0.0",
@@ -13449,7 +13450,6 @@ dependencies = [
  "clap",
  "clap_builder",
  "combine",
- "crc32fast",
  "crossbeam-epoch",
  "crossbeam-utils",
  "crypto-bigint 0.5.5",

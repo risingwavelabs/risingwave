@@ -8,4 +8,4 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-arrow-udf = { path = "../../../../arrow-wasm-udf/arrow-udf" }
+arrow-udf = { git = "https://github.com/risingwavelabs/arrow-udf-wasm.git" }
