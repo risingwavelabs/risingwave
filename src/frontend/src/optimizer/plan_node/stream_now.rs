@@ -24,7 +24,7 @@ use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Monotonicity};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
 
@@ -52,8 +52,7 @@ impl StreamNow {
             false,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
-            vec![],
+            vec![(0,Monotonicity::Increasing)],
         );
         Self { base }
     }
