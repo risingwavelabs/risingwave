@@ -554,12 +554,13 @@ mod tests {
         comparator: ExprNodeType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let mem_state = MemoryStateStore::new();
-        create_executor_inner(comparator, mem_state).await
+        create_executor_inner(comparator, mem_state, false).await
     }
 
     async fn create_executor_inner(
         comparator: ExprNodeType,
         mem_state: MemoryStateStore,
+        always_relax: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let (mem_state_l, mem_state_r) = create_in_memory_state_table(mem_state).await;
         let schema = Schema {
@@ -586,7 +587,7 @@ mod tests {
             mem_state_r,
             Arc::new(StreamingMetrics::unused()),
             1024,
-            false,
+            always_relax,
             false,
         );
         (tx_l, tx_r, Box::new(executor).execute())
@@ -624,7 +625,7 @@ mod tests {
         );
         let mem_state = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(1, false);
@@ -647,7 +648,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push the recovery barrier for left and right
         tx_l.push_barrier(2, false);
@@ -694,7 +695,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone()).await;
+            create_executor_inner(ExprNodeType::GreaterThan, mem_state.clone(), false).await;
 
         // push recovery barrier
         tx_l.push_barrier(3, false);
@@ -1175,6 +1176,94 @@ mod tests {
             )
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_always_relax() -> StreamExecutorResult<()> {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 2
+             + 3
+             + 4",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             - 2
+             - 3",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             + 2",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 4",
+        );
+
+        let mem_state = MemoryStateStore::new();
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor_inner(ExprNodeType::LessThanOrEqual, mem_state.clone(), true).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next_unwrap_ready_barrier()?;
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next_unwrap_ready_barrier()?;
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                + 1
+                - 2"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I
+                + 4"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next_unwrap_ready_barrier()?;
+        
         Ok(())
     }
 }
