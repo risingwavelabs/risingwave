@@ -304,6 +304,12 @@ pub fn start_compactor(
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let pull_task_ack = Arc::new(AtomicBool::new(true));
+    let max_pull_task_count = std::cmp::min(
+        compactor_context
+            .max_task_parallelism
+            .load(Ordering::SeqCst),
+        4,
+    );
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -387,8 +393,13 @@ pub fn start_compactor(
 
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack.load(Ordering::SeqCst) {
-                            // reset pending_pull_task_count when all pending task had been refill
-                            pending_pull_task_count = compactor_context.get_free_quota();
+                            // TODO: Compute parallelism on meta side
+                            let free_quota = compactor_context.get_free_quota();
+                            pending_pull_task_count = if free_quota > max_pull_task_count {
+                                max_pull_task_count
+                            } else {
+                                free_quota
+                            };
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
