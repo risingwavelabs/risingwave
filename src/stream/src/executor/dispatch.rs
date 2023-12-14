@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -47,38 +48,33 @@ pub struct DispatchExecutor {
     inner: DispatchExecutorInner,
 }
 
+struct DispatcherMetrics {
+    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+}
+
 struct DispatchExecutorInner {
-    dispatchers: Vec<DispatcherImpl>,
+    dispatchers: Vec<(DispatcherMetrics, DispatcherImpl)>,
     actor_id: u32,
     actor_id_str: String,
     fragment_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
+    actor_out_record_cnt: LabelGuardedIntCounter<2>,
 }
 
 impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
         let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
 
-        let actor_out_record_cnt = self
-            .metrics
-            .actor_out_record_cnt
-            .with_label_values(&[&self.actor_id_str, &self.fragment_id_str]);
-
         match msg {
             Message::Watermark(watermark) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        self.metrics
+                        metrics
                             .actor_output_buffer_blocking_duration_ns
-                            .with_label_values(&[
-                                &self.actor_id_str,
-                                &self.fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
                     })
@@ -87,22 +83,17 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        self.metrics
+                        metrics
                             .actor_output_buffer_blocking_duration_ns
-                            .with_label_values(&[
-                                &self.actor_id_str,
-                                &self.fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
                     })
                     .await?;
 
-                actor_out_record_cnt.inc_by(chunk.cardinality() as _);
+                self.actor_out_record_cnt.inc_by(chunk.cardinality() as _);
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
@@ -110,16 +101,11 @@ impl DispatchExecutorInner {
 
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_barrier(barrier.clone()).await?;
-                        self.metrics
+                        metrics
                             .actor_output_buffer_blocking_duration_ns
-                            .with_label_values(&[
-                                &self.actor_id_str,
-                                &self.fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
                     })
@@ -139,7 +125,23 @@ impl DispatchExecutorInner {
     ) -> StreamResult<()> {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
-            .map(|d| DispatcherImpl::new(&self.context, self.actor_id, d))
+            .map(|d| {
+                DispatcherImpl::new(&self.context, self.actor_id, d).map(|dispatcher| {
+                    (
+                        DispatcherMetrics {
+                            actor_output_buffer_blocking_duration_ns: self
+                                .metrics
+                                .actor_output_buffer_blocking_duration_ns
+                                .with_label_values(&[
+                                    &self.actor_id_str,
+                                    &self.fragment_id_str,
+                                    dispatcher.dispatcher_id_str(),
+                                ]),
+                        },
+                        dispatcher,
+                    )
+                })
+            })
             .try_collect()?;
 
         self.dispatchers.extend(new_dispatchers);
@@ -147,10 +149,10 @@ impl DispatchExecutorInner {
         assert!(
             self.dispatchers
                 .iter()
-                .map(|d| d.dispatcher_id())
+                .map(|(_, d)| d.dispatcher_id())
                 .all_unique(),
             "dispatcher ids must be unique: {:?}",
-            self.dispatchers
+            self.dispatchers.iter().map(|(_, d)| d).collect_vec()
         );
 
         Ok(())
@@ -159,6 +161,7 @@ impl DispatchExecutorInner {
     fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
         self.dispatchers
             .iter_mut()
+            .map(|(_, d)| d)
             .find(|d| d.dispatcher_id() == dispatcher_id)
             .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
     }
@@ -265,7 +268,7 @@ impl DispatchExecutorInner {
             Mutation::Stop(stops) => {
                 // Remove outputs only if this actor itself is not to be stopped.
                 if !stops.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
+                    for (_, dispatcher) in &mut self.dispatchers {
                         dispatcher.remove_outputs(stops);
                     }
                 }
@@ -290,7 +293,7 @@ impl DispatchExecutorInner {
                 }
 
                 if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
+                    for (_, dispatcher) in &mut self.dispatchers {
                         dispatcher.remove_outputs(dropped_actors);
                     }
                 }
@@ -300,7 +303,7 @@ impl DispatchExecutorInner {
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
-        self.dispatchers.retain(|d| !d.is_empty());
+        self.dispatchers.retain(|(_, d)| !d.is_empty());
 
         Ok(())
     }
@@ -315,15 +318,38 @@ impl DispatchExecutor {
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
+        let actor_out_record_cnt = metrics
+            .actor_out_record_cnt
+            .with_label_values(&[&actor_id_str, &fragment_id_str]);
+        let dispatchers = dispatchers
+            .into_iter()
+            .map(|dispatcher| {
+                (
+                    DispatcherMetrics {
+                        actor_output_buffer_blocking_duration_ns: metrics
+                            .actor_output_buffer_blocking_duration_ns
+                            .with_label_values(&[
+                                &actor_id_str,
+                                &fragment_id_str,
+                                dispatcher.dispatcher_id_str(),
+                            ]),
+                    },
+                    dispatcher,
+                )
+            })
+            .collect();
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                actor_id_str: actor_id.to_string(),
-                fragment_id_str: fragment_id.to_string(),
+                actor_id_str,
+                fragment_id_str,
                 context,
                 metrics,
+                actor_out_record_cnt,
             },
         }
     }

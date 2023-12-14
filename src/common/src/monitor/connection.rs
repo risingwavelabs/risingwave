@@ -644,6 +644,8 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_label_values(&[
@@ -673,6 +675,8 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_label_values(&[

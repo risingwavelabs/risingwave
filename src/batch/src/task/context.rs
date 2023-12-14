@@ -174,10 +174,7 @@ impl ComputeNodeContext {
         ));
         let mem_context = MemoryContext::new(
             Some(batch_mem_context),
-            batch_metrics
-                .get_task_metrics()
-                .task_mem_usage
-                .with_label_values(&batch_metrics.task_labels()),
+            batch_metrics.task_mem_usage.clone(),
         );
         Self {
             env,

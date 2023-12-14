@@ -23,6 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
@@ -77,6 +78,7 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     connector_properties: P,
     connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
+    source_is_up: LabelGuardedIntGauge<2>,
 }
 
 fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
@@ -127,6 +129,10 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         )
         .await?;
 
+        let source_is_up = metrics
+            .source_is_up
+            .with_label_values(&[source.id.to_string().as_str(), &source.name]);
+
         Ok(Self {
             source_id: source.id,
             source_name: source.name.clone(),
@@ -137,6 +143,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             connector_properties,
             connector_client: connector_client.clone(),
             fail_cnt: 0,
+            source_is_up,
         })
     }
 
@@ -171,10 +178,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// Uses [`SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
-            self.metrics
-                .source_is_up
-                .with_label_values(&[self.source_id.to_string().as_str(), &self.source_name])
-                .set(res);
+            self.source_is_up.set(res);
         };
         let splits = self.enumerator.list_splits().await.map_err(|e| {
             source_is_up(0);
