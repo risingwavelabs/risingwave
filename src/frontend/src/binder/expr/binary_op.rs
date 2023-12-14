@@ -43,7 +43,7 @@ impl Binder {
             right => right,
         };
 
-        let mut bound_right = self.bind_expr_inner(right)?;
+        let bound_right = self.bind_expr_inner(right)?;
 
         if matches!(op, BinaryOperator::PathMatch | BinaryOperator::PathExists) {
             // jsonb @? jsonpath => jsonb_path_exists(jsonb, jsonpath, '{}', silent => true)
@@ -63,15 +63,6 @@ impl Binder {
                 DataType::Boolean,
             )
             .into());
-        }
-
-        if matches!(op, BinaryOperator::SimilarTo | BinaryOperator::NotSimilarTo) {
-            bound_right = FunctionCall::new_unchecked(
-                ExprType::SimilarToEscape,
-                vec![bound_right],
-                DataType::Varchar,
-            )
-            .into();
         }
 
         func_types.extend(Self::resolve_binary_operator(
@@ -112,11 +103,6 @@ impl Binder {
             BinaryOperator::NotILike => {
                 func_types.push(ExprType::Not);
                 ExprType::ILike
-            }
-            BinaryOperator::SimilarTo => ExprType::RegexpEq,
-            BinaryOperator::NotSimilarTo => {
-                func_types.push(ExprType::Not);
-                ExprType::RegexpEq
             }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,

@@ -280,6 +280,10 @@ impl QueryRewriter<'_> {
                 self.visit_expr(low);
                 self.visit_expr(high);
             }
+            Expr::SimilarTo { expr, pat, .. } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+            }
 
             Expr::IsDistinctFrom(expr1, expr2)
             | Expr::IsNotDistinctFrom(expr1, expr2)

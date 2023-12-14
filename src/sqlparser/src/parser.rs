@@ -1412,17 +1412,11 @@ impl Parser {
                 Keyword::OR => Some(BinaryOperator::Or),
                 Keyword::LIKE => Some(BinaryOperator::Like),
                 Keyword::ILIKE => Some(BinaryOperator::ILike),
-                Keyword::SIMILAR if self.parse_keyword(Keyword::TO) => {
-                    Some(BinaryOperator::SimilarTo)
-                }
                 Keyword::NOT => {
                     if self.parse_keyword(Keyword::LIKE) {
                         Some(BinaryOperator::NotLike)
                     } else if self.parse_keyword(Keyword::ILIKE) {
                         Some(BinaryOperator::NotILike)
-                    } else if self.parse_keyword(Keyword::SIMILAR) & self.parse_keyword(Keyword::TO)
-                    {
-                        Some(BinaryOperator::NotSimilarTo)
                     } else {
                         None
                     }
@@ -1527,15 +1521,17 @@ impl Parser {
                         self.expected("Expected Token::Word after AT", tok)
                     }
                 }
-                Keyword::NOT | Keyword::IN | Keyword::BETWEEN => {
+                Keyword::NOT | Keyword::IN | Keyword::BETWEEN | Keyword::SIMILAR => {
                     self.prev_token();
                     let negated = self.parse_keyword(Keyword::NOT);
                     if self.parse_keyword(Keyword::IN) {
                         self.parse_in(expr, negated)
                     } else if self.parse_keyword(Keyword::BETWEEN) {
                         self.parse_between(expr, negated)
+                    } else if self.parse_keywords(&[Keyword::SIMILAR, Keyword::TO]) {
+                        self.parse_similar_to(expr, negated)
                     } else {
-                        self.expected("IN or BETWEEN after NOT", self.peek_token())
+                        self.expected("IN, BETWEEN or SIMILAR TO after NOT", self.peek_token())
                     }
                 }
                 // Can only happen if `get_next_precedence` got out of sync with this function
@@ -1688,6 +1684,23 @@ impl Parser {
             negated,
             low: Box::new(low),
             high: Box::new(high),
+        })
+    }
+
+    /// Parses `SIMILAR TO <pat> [ ESCAPE <esc_text> ]`
+    pub fn parse_similar_to(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
+        let pat = self.parse_subexpr(Precedence::Between)?;
+        let esc_text = if self.parse_keyword(Keyword::ESCAPE) {
+            Some(Box::new(self.parse_subexpr(Precedence::Between)?))
+        } else {
+            None
+        };
+
+        Ok(Expr::SimilarTo {
+            expr: Box::new(expr),
+            negated,
+            pat: Box::new(pat),
+            esc_text,
         })
     }
 
