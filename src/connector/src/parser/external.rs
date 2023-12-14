@@ -16,7 +16,8 @@ use chrono::{NaiveDate, Utc};
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, Interval, JsonbVal, ListValue, ScalarImpl, Time, Timestamp,
+    Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 
@@ -100,6 +101,23 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
     datums
 }
 
+macro_rules! handle_data_type {
+    ($row:expr, $i:expr, $type:ty, $builder:expr) => {
+        let v = $row.try_get::<_, Option<Vec<$type>>>($i)?;
+        v.map(|vec| {
+            vec.into_iter()
+                .for_each(|val| $builder.append(Some(ScalarImpl::from(val))))
+        });
+    };
+    ($row:expr, $i:expr, $type:ty, $builder:expr, $rw_type:ty) => {
+        let v = $row.try_get::<_, Option<Vec<$type>>>($i)?;
+        v.map(|vec| {
+            vec.into_iter()
+                .for_each(|val| $builder.append(Some(ScalarImpl::from(<$rw_type>::from(val)))))
+        });
+    };
+}
+
 pub fn postgres_row_to_datums(
     row: tokio_postgres::Row,
     schema: &Schema,
@@ -108,7 +126,7 @@ pub fn postgres_row_to_datums(
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let datum = {
-            match rw_field.data_type {
+            match &rw_field.data_type {
                 DataType::Boolean => {
                     let v = row.try_get::<_, Option<bool>>(i)?;
                     v.map(ScalarImpl::from)
@@ -169,7 +187,73 @@ pub fn postgres_row_to_datums(
                     let v = row.try_get::<_, Option<Interval>>(i)?;
                     v.map(|v| ScalarImpl::from(v))
                 }
-                DataType::List(_) | DataType::Struct(_) | DataType::Int256 | DataType::Serial => {
+                DataType::List(dtype) => {
+                    let mut builder = dtype.create_array_builder(0);
+                    match **dtype {
+                        DataType::Boolean => {
+                            handle_data_type!(row, i, bool, builder);
+                        }
+                        DataType::Int16 => {
+                            handle_data_type!(row, i, i16, builder);
+                        }
+                        DataType::Int32 => {
+                            handle_data_type!(row, i, i32, builder);
+                        }
+                        DataType::Int64 => {
+                            handle_data_type!(row, i, i64, builder);
+                        }
+                        DataType::Float32 => {
+                            handle_data_type!(row, i, f32, builder);
+                        }
+                        DataType::Float64 => {
+                            handle_data_type!(row, i, f64, builder);
+                        }
+                        DataType::Decimal => {
+                            handle_data_type!(row, i, RustDecimal, builder, Decimal);
+                        }
+                        DataType::Date => {
+                            handle_data_type!(row, i, NaiveDate, builder, Date);
+                        }
+                        DataType::Varchar => {
+                            handle_data_type!(row, i, String, builder);
+                        }
+                        DataType::Time => {
+                            handle_data_type!(row, i, chrono::NaiveTime, builder, Time);
+                        }
+                        DataType::Timestamp => {
+                            handle_data_type!(row, i, chrono::NaiveDateTime, builder, Timestamp);
+                        }
+                        DataType::Timestamptz => {
+                            handle_data_type!(row, i, chrono::DateTime<Utc>, builder, Timestamptz);
+                        }
+                        DataType::Interval => {
+                            handle_data_type!(row, i, Interval, builder);
+                        }
+                        DataType::Jsonb => {
+                            handle_data_type!(row, i, serde_json::Value, builder, JsonbVal);
+                        }
+                        DataType::Bytea => {
+                            let v = row.try_get::<_, Option<Vec<Vec<u8>>>>(i)?;
+                            v.map(|vec| {
+                                vec.into_iter().for_each(|val| {
+                                    builder.append(Some(ScalarImpl::from(val.into_boxed_slice())))
+                                })
+                            });
+                        }
+                        DataType::Struct(_)
+                        | DataType::List(_)
+                        | DataType::Serial
+                        | DataType::Int256 => {
+                            tracing::warn!(
+                                "unsupported List data type {:?}, set the List to empty",
+                                **dtype
+                            );
+                        }
+                    };
+
+                    Some(ScalarImpl::from(ListValue::new(builder.finish())))
+                }
+                DataType::Struct(_) | DataType::Int256 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
                     tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None
