@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat_with;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -48,12 +49,33 @@ pub struct DispatchExecutor {
     inner: DispatchExecutorInner,
 }
 
-struct DispatcherMetrics {
+struct DispatcherWithMetrics {
+    dispatcher: DispatcherImpl,
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
 }
 
+impl Debug for DispatcherWithMetrics {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.dispatcher.fmt(f)
+    }
+}
+
+impl Deref for DispatcherWithMetrics {
+    type Target = DispatcherImpl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dispatcher
+    }
+}
+
+impl DerefMut for DispatcherWithMetrics {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.dispatcher
+    }
+}
+
 struct DispatchExecutorInner {
-    dispatchers: Vec<(DispatcherMetrics, DispatcherImpl)>,
+    dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
     actor_id_str: String,
     fragment_id_str: String,
@@ -70,10 +92,10 @@ impl DispatchExecutorInner {
             Message::Watermark(watermark) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
+                    .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        metrics
+                        dispatcher
                             .actor_output_buffer_blocking_duration_ns
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
@@ -83,10 +105,10 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
+                    .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        metrics
+                        dispatcher
                             .actor_output_buffer_blocking_duration_ns
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
@@ -101,10 +123,10 @@ impl DispatchExecutorInner {
 
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
-                    .try_for_each_concurrent(limit, |(metrics, dispatcher)| async {
+                    .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_barrier(barrier.clone()).await?;
-                        metrics
+                        dispatcher
                             .actor_output_buffer_blocking_duration_ns
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         StreamResult::Ok(())
@@ -127,19 +149,17 @@ impl DispatchExecutorInner {
             .into_iter()
             .map(|d| {
                 DispatcherImpl::new(&self.context, self.actor_id, d).map(|dispatcher| {
-                    (
-                        DispatcherMetrics {
-                            actor_output_buffer_blocking_duration_ns: self
-                                .metrics
-                                .actor_output_buffer_blocking_duration_ns
-                                .with_label_values(&[
-                                    &self.actor_id_str,
-                                    &self.fragment_id_str,
-                                    dispatcher.dispatcher_id_str(),
-                                ]),
-                        },
+                    DispatcherWithMetrics {
+                        actor_output_buffer_blocking_duration_ns: self
+                            .metrics
+                            .actor_output_buffer_blocking_duration_ns
+                            .with_guarded_label_values(&[
+                                &self.actor_id_str,
+                                &self.fragment_id_str,
+                                dispatcher.dispatcher_id_str(),
+                            ]),
                         dispatcher,
-                    )
+                    }
                 })
             })
             .try_collect()?;
@@ -149,10 +169,10 @@ impl DispatchExecutorInner {
         assert!(
             self.dispatchers
                 .iter()
-                .map(|(_, d)| d.dispatcher_id())
+                .map(|d| d.dispatcher_id())
                 .all_unique(),
             "dispatcher ids must be unique: {:?}",
-            self.dispatchers.iter().map(|(_, d)| d).collect_vec()
+            self.dispatchers
         );
 
         Ok(())
@@ -161,7 +181,6 @@ impl DispatchExecutorInner {
     fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
         self.dispatchers
             .iter_mut()
-            .map(|(_, d)| d)
             .find(|d| d.dispatcher_id() == dispatcher_id)
             .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
     }
@@ -268,7 +287,7 @@ impl DispatchExecutorInner {
             Mutation::Stop(stops) => {
                 // Remove outputs only if this actor itself is not to be stopped.
                 if !stops.contains(&self.actor_id) {
-                    for (_, dispatcher) in &mut self.dispatchers {
+                    for dispatcher in &mut self.dispatchers {
                         dispatcher.remove_outputs(stops);
                     }
                 }
@@ -293,7 +312,7 @@ impl DispatchExecutorInner {
                 }
 
                 if !dropped_actors.contains(&self.actor_id) {
-                    for (_, dispatcher) in &mut self.dispatchers {
+                    for dispatcher in &mut self.dispatchers {
                         dispatcher.remove_outputs(dropped_actors);
                     }
                 }
@@ -303,7 +322,7 @@ impl DispatchExecutorInner {
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
-        self.dispatchers.retain(|(_, d)| !d.is_empty());
+        self.dispatchers.retain(|d| !d.is_empty());
 
         Ok(())
     }
@@ -322,22 +341,18 @@ impl DispatchExecutor {
         let fragment_id_str = fragment_id.to_string();
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
-            .with_label_values(&[&actor_id_str, &fragment_id_str]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
         let dispatchers = dispatchers
             .into_iter()
-            .map(|dispatcher| {
-                (
-                    DispatcherMetrics {
-                        actor_output_buffer_blocking_duration_ns: metrics
-                            .actor_output_buffer_blocking_duration_ns
-                            .with_label_values(&[
-                                &actor_id_str,
-                                &fragment_id_str,
-                                dispatcher.dispatcher_id_str(),
-                            ]),
-                    },
-                    dispatcher,
-                )
+            .map(|dispatcher| DispatcherWithMetrics {
+                actor_output_buffer_blocking_duration_ns: metrics
+                    .actor_output_buffer_blocking_duration_ns
+                    .with_guarded_label_values(&[
+                        &actor_id_str,
+                        &fragment_id_str,
+                        dispatcher.dispatcher_id_str(),
+                    ]),
+                dispatcher,
             })
             .collect();
         Self {

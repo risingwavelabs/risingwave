@@ -698,31 +698,30 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_actor_input_waiting_duration_ns = self
             .metrics
             .join_actor_input_waiting_duration_ns
-            .with_label_values(&[&actor_id_str, &fragment_id_str]);
-        let left_join_match_duration_ns = self.metrics.join_match_duration_ns.with_label_values(&[
-            &actor_id_str,
-            &fragment_id_str,
-            "left",
-        ]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let left_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
         let right_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
 
         let barrier_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
 
         let left_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
 
         let right_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
 
         let mut start_time = Instant::now();
 

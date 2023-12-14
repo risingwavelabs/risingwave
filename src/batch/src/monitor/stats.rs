@@ -198,19 +198,27 @@ impl BatchMetricsWithTaskLabelsInner {
             id.task_id.to_string(),
         ];
         let labels: &[&str; 3] = &task_labels.each_ref().map(|s| s.as_str());
-        let task_first_poll_delay = task_metrics.task_first_poll_delay.with_label_values(labels);
+        let task_first_poll_delay = task_metrics
+            .task_first_poll_delay
+            .with_guarded_label_values(labels);
         let task_fast_poll_duration = task_metrics
             .task_fast_poll_duration
-            .with_label_values(labels);
-        let task_idle_duration = task_metrics.task_idle_duration.with_label_values(labels);
-        let task_poll_duration = task_metrics.task_poll_duration.with_label_values(labels);
+            .with_guarded_label_values(labels);
+        let task_idle_duration = task_metrics
+            .task_idle_duration
+            .with_guarded_label_values(labels);
+        let task_poll_duration = task_metrics
+            .task_poll_duration
+            .with_guarded_label_values(labels);
         let task_scheduled_duration = task_metrics
             .task_scheduled_duration
-            .with_label_values(labels);
+            .with_guarded_label_values(labels);
         let task_slow_poll_duration = task_metrics
             .task_slow_poll_duration
-            .with_label_values(labels);
-        let task_mem_usage = task_metrics.task_mem_usage.with_label_values(labels);
+            .with_guarded_label_values(labels);
+        let task_mem_usage = task_metrics
+            .task_mem_usage
+            .with_guarded_label_values(labels);
         Self {
             batch_manager_metrics,
             executor_metrics,

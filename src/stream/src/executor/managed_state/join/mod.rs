@@ -185,22 +185,25 @@ impl JoinHashMapMetrics {
         let fragment_id = fragment_id.to_string();
         let join_table_id = join_table_id.to_string();
         let degree_table_id = degree_table_id.to_string();
-        let join_lookup_total_count_metric = metrics.join_lookup_total_count.with_label_values(&[
-            (side),
-            &join_table_id,
-            &degree_table_id,
-            &actor_id,
-            &fragment_id,
-        ]);
-        let join_lookup_miss_count_metric = metrics.join_lookup_miss_count.with_label_values(&[
-            (side),
-            &join_table_id,
-            &degree_table_id,
-            &actor_id,
-            &fragment_id,
-        ]);
-        let join_insert_cache_miss_count_metrics =
-            metrics.join_insert_cache_miss_count.with_label_values(&[
+        let join_lookup_total_count_metric =
+            metrics.join_lookup_total_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_lookup_miss_count_metric =
+            metrics.join_lookup_miss_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_insert_cache_miss_count_metrics = metrics
+            .join_insert_cache_miss_count
+            .with_guarded_label_values(&[
                 (side),
                 &join_table_id,
                 &degree_table_id,

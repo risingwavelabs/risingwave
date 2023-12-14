@@ -143,7 +143,7 @@ impl BatchTaskContext for ComputeNodeContext {
             let executor_mem_usage = metrics
                 .executor_metrics()
                 .mem_usage
-                .with_label_values(&metrics.executor_labels(executor_id));
+                .with_guarded_label_values(&metrics.executor_labels(executor_id));
             MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
         } else {
             MemoryContext::none()

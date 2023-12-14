@@ -131,7 +131,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
 
         let source_is_up = metrics
             .source_is_up
-            .with_label_values(&[source.id.to_string().as_str(), &source.name]);
+            .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
             source_id: source.id,
