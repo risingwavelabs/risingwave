@@ -20,8 +20,11 @@ use risingwave_pb::stream_plan::ProjectSetNode;
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, ExprRewriter, ExprVisitor, WatermarkDerivation};
+use crate::expr::{
+    try_derive_watermark, ExprRewriter, ExprVisitor, MonotonicityAnalyzer, WatermarkDerivation,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::Monotonicity;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -44,9 +47,13 @@ impl StreamProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
+        let mut mono_anlazer = MonotonicityAnalyzer {
+            input_mono_cols: input.monotonic_columns().to_vec(),
+        };
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
         let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut monotonic_columns = vec![];
         for (expr_idx, expr) in core.select_list.iter().enumerate() {
             match try_derive_watermark(expr) {
                 WatermarkDerivation::Watermark(input_idx) => {
@@ -55,14 +62,15 @@ impl StreamProjectSet {
                         watermark_columns.insert(expr_idx + 1);
                     }
                 }
-                WatermarkDerivation::Nondecreasing => {
-                    nondecreasing_exprs.push(expr_idx);
-                    watermark_columns.insert(expr_idx + 1);
-                }
                 WatermarkDerivation::Constant => {
                     // XXX(rc): we can produce one watermark on each recovery for this case.
                 }
                 WatermarkDerivation::None => {}
+            }
+            if mono_anlazer.try_derive_monotonicity(&expr) == Some(Monotonicity::Increasing) {
+                nondecreasing_exprs.push(expr_idx);
+                watermark_columns.insert(expr_idx);
+                monotonic_columns.push((expr_idx, Monotonicity::Increasing));
             }
         }
 

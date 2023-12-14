@@ -15,9 +15,11 @@
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
+use sha2::digest::generic_array::arr::Inc;
 
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
+use crate::optimizer::property::Monotonicity;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
@@ -434,8 +436,6 @@ pub enum WatermarkDerivation {
     /// Can derive a watermark if an input column has watermark, the usize field is the input
     /// column index.
     Watermark(usize),
-    /// For nondecreasing functions, we can always produce watermarks from where they are called.
-    Nondecreasing,
     /// Can not derive a watermark in any cases.
     None,
 }
@@ -488,20 +488,18 @@ impl WatermarkAnalyzer {
     }
 
     fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
-        use WatermarkDerivation::{Constant, Nondecreasing, Watermark};
+        use WatermarkDerivation::{Constant, Watermark};
         match func_call.func_type() {
             ExprType::Unspecified => unreachable!(),
             ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
                 (Constant, Constant) => Constant,
                 (Constant, Watermark(idx)) | (Watermark(idx), Constant) => Watermark(idx),
-                (Constant, Nondecreasing) | (Nondecreasing, Constant) => Nondecreasing,
                 _ => WatermarkDerivation::None,
             },
             ExprType::Subtract | ExprType::TumbleStart => {
                 match self.visit_binary_op(func_call.inputs()) {
                     (Constant, Constant) => Constant,
                     (Watermark(idx), Constant) => Watermark(idx),
-                    (Nondecreasing, Constant) => Nondecreasing,
                     _ => WatermarkDerivation::None,
                 }
             }
@@ -514,7 +512,7 @@ impl WatermarkAnalyzer {
             }
             ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
                 (Constant, Constant) => Constant,
-                (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                (derivation @ Watermark(_), Constant) => {
                     if !(func_call.return_type() == DataType::Timestamptz
                         && func_call.inputs()[0].return_type() == DataType::Timestamp)
                         && func_call.inputs()[1]
@@ -550,8 +548,7 @@ impl WatermarkAnalyzer {
                 match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
                     (Constant, _) => Constant,
                     (Watermark(idx), true) => Watermark(idx),
-                    (Nondecreasing, true) => Nondecreasing,
-                    (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
+                    (Watermark(_), false) => WatermarkDerivation::None,
                     (WatermarkDerivation::None, _) => WatermarkDerivation::None,
                 }
             }
@@ -562,7 +559,7 @@ impl WatermarkAnalyzer {
                 },
                 3 => match self.visit_ternary_op(func_call.inputs()) {
                     (Constant, Constant, Constant) => Constant,
-                    (Constant, derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                    (Constant, derivation @ Watermark(_), Constant) => {
                         let zone_without_dst = func_call.inputs()[2]
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
@@ -587,8 +584,170 @@ impl WatermarkAnalyzer {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
                 WatermarkDerivation::None
             }
-            ExprType::Proctime => Nondecreasing,
+            ExprType::Proctime => WatermarkDerivation::None,
             _ => WatermarkDerivation::None,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct MonotonicityAnalyzer {
+    pub input_mono_cols: Vec<(usize, Monotonicity)>,
+}
+
+impl MonotonicityAnalyzer {
+    pub fn try_derive_monotonicity(&self, expr: &ExprImpl) -> Option<Monotonicity> {
+        self.visit_expr(expr)
+    }
+
+    fn visit_expr(&self, expr: &ExprImpl) -> Option<Monotonicity> {
+        match expr {
+            ExprImpl::InputRef(inner) => self
+                .input_mono_cols
+                .iter()
+                .find_map(|(i, m)| (inner.index == *i).then(|| m.clone())),
+            ExprImpl::Literal(_) => Some(Monotonicity::Constant),
+            ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => None,
+            ExprImpl::TableFunction(_) => None,
+            ExprImpl::Subquery(_)
+            | ExprImpl::AggCall(_)
+            | ExprImpl::CorrelatedInputRef(_)
+            | ExprImpl::WindowFunction(_)
+            | ExprImpl::Parameter(_)
+            | ExprImpl::Now(_) => unreachable!(),
+            ExprImpl::UserDefinedFunction(_) => None,
+        }
+    }
+
+    fn visit_unary_op(&self, inputs: &[ExprImpl]) -> Option<Monotonicity> {
+        assert_eq!(inputs.len(), 1);
+        self.visit_expr(&inputs[0])
+    }
+
+    fn visit_binary_op(&self, inputs: &[ExprImpl]) -> Option<(Monotonicity, Monotonicity)> {
+        assert_eq!(inputs.len(), 2);
+        Some((self.visit_expr(&inputs[0])?, self.visit_expr(&inputs[1])?))
+    }
+
+    fn visit_ternary_op(
+        &self,
+        inputs: &[ExprImpl],
+    ) -> Option<(Monotonicity, Monotonicity, Monotonicity)> {
+        assert_eq!(inputs.len(), 3);
+        Some((
+            self.visit_expr(&inputs[0])?,
+            self.visit_expr(&inputs[1])?,
+            self.visit_expr(&inputs[2])?,
+        ))
+    }
+
+    fn visit_function_call(&self, func_call: &FunctionCall) -> Option<Monotonicity> {
+        use Monotonicity::{Constant, Increasing};
+        match func_call.func_type() {
+            ExprType::Unspecified => unreachable!(),
+            ExprType::Add => self.visit_binary_op(func_call.inputs()).map(|m| match m {
+                (Constant, Constant) => Constant,
+                (Constant, Increasing) | (Increasing, Constant) | (Increasing, Increasing) => {
+                    Increasing
+                }
+            }),
+            ExprType::Subtract | ExprType::TumbleStart => self
+                .visit_binary_op(func_call.inputs())
+                .and_then(|m| match m {
+                    (Constant, Constant) => Some(Constant),
+                    (Increasing, Constant) => Some(Increasing),
+                    (Constant, Increasing) | (Increasing, Increasing) => None,
+                }),
+            ExprType::Multiply | ExprType::Divide | ExprType::Modulus => self
+                .visit_binary_op(func_call.inputs())
+                .and_then(|m| match m {
+                    (Constant, Constant) => Some(Constant),
+                    // NOTE(stdrc) not meaningful to derive watermark for other situations
+                    _ => None,
+                }),
+            ExprType::AtTimeZone => {
+                self.visit_binary_op(func_call.inputs())
+                    .and_then(|m| match m {
+                        (Constant, Constant) => Some(Constant),
+                        (Increasing, Constant) => {
+                            if !(func_call.return_type() == DataType::Timestamptz
+                                && func_call.inputs()[0].return_type() == DataType::Timestamp)
+                                && func_call.inputs()[1]
+                                    .as_literal()
+                                    .and_then(|literal| literal.get_data().as_ref())
+                                    .map_or(true, |time_zone| {
+                                        !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
+                                    })
+                            {
+                                None
+                            } else {
+                                Some(Increasing)
+                            }
+                        }
+                        _ => None,
+                    })
+            }
+
+            ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
+                // Requires time zone and interval to be literal, at least for now.
+                let time_zone = match &func_call.inputs()[2] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
+                    _ => return None,
+                };
+                let interval = match &func_call.inputs()[1] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
+                    _ => return None,
+                };
+                // null zone or null interval is treated same as const `interval '1' second`, to be
+                // consistent with other match arms.
+                let zone_without_dst = time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
+                let quantitative_only = interval.map_or(true, |v| {
+                    v.months() == 0 && (v.days() == 0 || zone_without_dst)
+                });
+                self.visit_expr(&func_call.inputs()[0])
+                    .and_then(|m| match (m, quantitative_only) {
+                        (Constant, _) => Some(Constant),
+                        (Increasing, true) => Some(Increasing),
+                        (_, false) => None,
+                    })
+            }
+            ExprType::DateTrunc => match func_call.inputs().len() {
+                2 => match self.visit_binary_op(func_call.inputs()) {
+                    Some((Constant, mono)) => Some(mono),
+                    _ => None,
+                },
+                3 => self
+                    .visit_ternary_op(func_call.inputs())
+                    .and_then(|m| match m {
+                        (Constant, Constant, Constant) => Some(Constant),
+                        (Constant, mono, Constant) => {
+                            let zone_without_dst = func_call.inputs()[2]
+                                .as_literal()
+                                .and_then(|literal| literal.get_data().as_ref())
+                                .map_or(false, |s| s.as_utf8().eq_ignore_ascii_case("UTC"));
+                            if zone_without_dst {
+                                Some(mono)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }),
+                _ => unreachable!(),
+            },
+            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
+            ExprType::ToTimestamp1 => None,
+            ExprType::Cast => {
+                // TODO: need more derivation
+                None
+            }
+            ExprType::Case => {
+                // TODO: need more derivation
+                None
+            }
+            ExprType::Proctime => Some(Increasing),
+            _ => None,
         }
     }
 }

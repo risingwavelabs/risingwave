@@ -23,9 +23,11 @@ use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{
-    try_derive_watermark, Expr, ExprImpl, ExprRewriter, ExprVisitor, WatermarkDerivation,
+    try_derive_watermark, Expr, ExprImpl, ExprRewriter, ExprVisitor, MonotonicityAnalyzer,
+    WatermarkDerivation,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::Monotonicity;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -62,9 +64,13 @@ impl StreamProject {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
+        let mut mono_anlazer = MonotonicityAnalyzer {
+            input_mono_cols: input.monotonic_columns().to_vec(),
+        };
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
         let mut watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
+        let mut monotonic_columns = vec![];
         for (expr_idx, expr) in core.exprs.iter().enumerate() {
             match try_derive_watermark(expr) {
                 WatermarkDerivation::Watermark(input_idx) => {
@@ -73,14 +79,16 @@ impl StreamProject {
                         watermark_columns.insert(expr_idx);
                     }
                 }
-                WatermarkDerivation::Nondecreasing => {
-                    nondecreasing_exprs.push(expr_idx);
-                    watermark_columns.insert(expr_idx);
-                }
                 WatermarkDerivation::Constant => {
                     // XXX(rc): we can produce one watermark on each recovery for this case.
                 }
                 WatermarkDerivation::None => {}
+            }
+
+            if mono_anlazer.try_derive_monotonicity(&expr) == Some(Monotonicity::Increasing) {
+                nondecreasing_exprs.push(expr_idx);
+                watermark_columns.insert(expr_idx);
+                monotonic_columns.push((expr_idx, Monotonicity::Increasing));
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
@@ -91,8 +99,7 @@ impl StreamProject {
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/13983
-            vec![],
+            monotonic_columns,
         );
         StreamProject {
             base,

@@ -15,6 +15,6 @@
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Monotonicity {
     Constant,
-    Decreasing,
+    /// non-strict increasing
     Increasing,
 }
