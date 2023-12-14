@@ -337,7 +337,7 @@ mod test {
         fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 
         fn value_meta(&self) -> ValueMeta {
-            None
+            ValueMeta::default()
         }
     }
 

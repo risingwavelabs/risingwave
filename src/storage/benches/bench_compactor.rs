@@ -511,9 +511,9 @@ fn bench_drop_column_compaction_large(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    // bench_table_build,
-    // bench_table_scan,
-    // bench_merge_iterator_compactor,
+    bench_table_build,
+    bench_table_scan,
+    bench_merge_iterator_compactor,
     bench_drop_column_compaction_small,
     bench_drop_column_compaction_large
 );
