@@ -55,7 +55,7 @@ macro_rules! for_all_params {
             { backup_storage_directory, String, Some("backup".to_string()), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
-            { wasm_storage_url, String, Some("fs://@/tmp/risingwave".to_string()), false },
+            { wasm_storage_url, String, Some("fs://.risingwave/data".to_string()), false },
         }
     };
 }
