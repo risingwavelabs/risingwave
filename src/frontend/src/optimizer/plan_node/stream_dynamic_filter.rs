@@ -27,6 +27,7 @@ use super::{generic, ExprRewritable, PlanTreeNodeUnary};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
+use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -43,8 +44,9 @@ impl StreamDynamicFilter {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
         // TODO(st1page): the condition is wrong, introduce monotonically increasing property of the node
+        // TODO(st1page): https://github.com/risingwavelabs/risingwave/pull/13984
         let right_monotonically_increasing = {
-            if let Some(e) = core.right().as_stream_exchange() {
+            if let Some(e) = core.right().as_stream_exchange() && *e.distribution() == Distribution::Broadcast {
                 if let Some(proj) = e.input().as_stream_project() {
                     proj.input().as_stream_now().is_some()
                 } else {
