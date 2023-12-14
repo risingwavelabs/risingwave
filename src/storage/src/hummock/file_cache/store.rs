@@ -670,12 +670,17 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
-    use crate::hummock::{
-        BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
-    };
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
 
-    #[test]
-    fn test_enc_dec() {
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+    }
+
+    fn block_for_test() -> Box<Block> {
         let options = BlockBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
@@ -687,51 +692,98 @@ mod tests {
         builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
         builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
 
-        let block = Box::new(
+        Box::new(
             Block::decode(
                 builder.build().to_vec().into(),
                 builder.uncompressed_block_size(),
             )
             .unwrap(),
-        );
-
-        let mut buf = vec![];
-        let mut bcursor = block.into_cursor();
-        std::io::copy(&mut bcursor, &mut buf).unwrap();
-
-        let block = <Box<Block> as Value>::read(&buf[..]).unwrap();
-
-        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
-
-        bi.seek_to_first();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
-        assert_eq!(b"v01", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
-        assert_eq!(b"v02", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
-        assert_eq!(b"v03", bi.value());
-
-        bi.next();
-        assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
-        assert_eq!(b"v04", bi.value());
-
-        bi.next();
-        assert!(!bi.is_valid());
+        )
     }
 
-    pub fn construct_full_key_struct(
-        table_id: u32,
-        table_key: &[u8],
-        epoch: u64,
-    ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+    fn sstable_for_test() -> Sstable {
+        Sstable::new(
+            114514,
+            SstableMeta {
+                block_metas: vec![
+                    BlockMeta {
+                        smallest_key: b"0-smallest-key".to_vec(),
+                        len: 100,
+                        ..Default::default()
+                    },
+                    BlockMeta {
+                        smallest_key: b"5-some-key".to_vec(),
+                        offset: 100,
+                        len: 100,
+                        ..Default::default()
+                    },
+                ],
+                bloom_filter: b"0123456789012345".to_vec(),
+                estimated_size: 123,
+                key_count: 123,
+                smallest_key: b"0-smallest-key".to_vec(),
+                largest_key: b"9-largest-key".to_vec(),
+                meta_offset: 123,
+                monotonic_tombstone_events: vec![],
+                version: 2,
+            },
+        )
+    }
+
+    #[test]
+    fn test_cursor() {
+        {
+            let block = block_for_test();
+            let mut cursor = block.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let block = Box::<Block>::read(&buf[..]).unwrap();
+            assert_eq!(target.raw_data(), block.raw_data());
+        }
+
+        {
+            let sstable = Box::new(sstable_for_test());
+            let mut cursor = sstable.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let sstable = Box::<Sstable>::read(&buf[..]).unwrap();
+            assert_eq!(target.id, sstable.id);
+            assert_eq!(target.meta, sstable.meta);
+        }
+
+        {
+            let cached = CachedBlock::Loaded {
+                block: block_for_test(),
+            };
+            let mut cursor = cached.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let cached = CachedBlock::read(&buf[..]).unwrap();
+            let target = match target {
+                CachedBlock::Loaded { block } => block,
+                CachedBlock::Fetched { .. } => panic!(),
+            };
+            let block = match cached {
+                CachedBlock::Loaded { block } => block,
+                CachedBlock::Fetched { .. } => panic!(),
+            };
+            assert_eq!(target.raw_data(), block.raw_data());
+        }
+
+        {
+            let index = SstableBlockIndex {
+                sst_id: 114,
+                block_idx: 514,
+            };
+            let mut cursor = index.into_cursor();
+            let mut buf = vec![];
+            std::io::copy(&mut cursor, &mut buf).unwrap();
+            let target = cursor.into_inner();
+            let index = SstableBlockIndex::read(&buf[..]).unwrap();
+            assert_eq!(target, index);
+        }
     }
 }
