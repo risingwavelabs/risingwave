@@ -41,7 +41,7 @@ impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
-        // TODO: the condition is wrong, introduce monotonically increasing property of the node
+        // TODO(st1page): the condition is wrong, introduce monotonically increasing property of the node
         let right_monotonically_increasing = {
             if let Some(e) = core.right().as_stream_exchange() {
                 if let Some(proj) = e.input().as_stream_project() {
