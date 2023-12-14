@@ -160,7 +160,7 @@ async fn build_table_2(
     let table_key_len = full_key.user_key.table_key.len();
 
     let schema = vec![DataType::Int64; column_num];
-    let column_ids = (0..column_num as i32).into_iter().map(ColumnId::new);
+    let column_ids = (0..column_num as i32).map(ColumnId::new);
     use risingwave_common::types::ScalarImpl;
     let row = OwnedRow::new(vec![Some(ScalarImpl::Int64(5)); column_num]);
     let table_columns: Vec<_> = column_ids

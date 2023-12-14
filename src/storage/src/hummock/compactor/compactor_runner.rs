@@ -868,7 +868,7 @@ where
             && let Some(block_id) = block_id
             && skip_schema_check.get(&object_id).map(|prev_block_id|*prev_block_id != block_id).unwrap_or(true)
             && let Some(schema) = schemas.get(&check_table_id) {
-            match try_drop_invalid_columns(v, &schema) {
+            match try_drop_invalid_columns(v, schema) {
                 None => {
                     if !task_config.disable_drop_column_optimization {
                         // Under the assumption that all values in the same (object, block) group should share the same schema,
