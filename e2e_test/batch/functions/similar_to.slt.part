@@ -1,0 +1,39 @@
+statement ok
+create table t (id int, pat varchar, text varchar);
+
+# example data from https://www.postgresql.org/docs/16/functions-matching.html#FUNCTIONS-SIMILARTO-REGEXP
+statement ok
+insert into
+    t
+values
+    (1, 'abc', 'abc'),
+    (2, 'a', 'abc'),
+    (3, '%(b|d)%', 'abc'),
+    (4, '(b|c)%', 'abc'),
+    (5, '%abc-%', '-abc-'),
+    (6, '%abc-%', 'xabcy');
+
+query T
+select (text similar to pat) from t order by id;
+----
+t
+f
+t
+f
+t
+f
+
+query T
+select text from t where text similar to pat order by id;
+----
+abc
+abc
+-abc-
+
+query I
+select count(1) pat from t where text similar to 'ab%';
+----
+4
+
+statement ok
+drop table t;
