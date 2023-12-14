@@ -123,14 +123,18 @@ pub async fn handle_create_function(
     let link;
     let identifier;
 
-    // judge the type of the UDF, and do some type-specific checks correspondingly.
-    match using {
-        CreateFunctionUsing::Link(l) => {
-            let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
+    match language.as_str() {
+        "python" | "java" | "" => {
+            let CreateFunctionUsing::Link(l) = using else {
                 return Err(ErrorCode::InvalidParameterValue(
-                    "AS must be specified for USING LINK".to_string(),
+                    "USING LINK must be specified".to_string(),
                 )
                 .into());
+            };
+            let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
+                return Err(
+                    ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into(),
+                );
             };
             identifier = id;
             link = l;
@@ -164,37 +168,39 @@ pub async fn handle_create_function(
                     .context("failed to check UDF signature")?;
             }
         }
-        CreateFunctionUsing::Base64(encoded) => {
-            if language != "wasm" {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "LANGUAGE should be \"wasm\" for USING BASE64".to_string(),
-                )
-                .into());
-            }
+        "wasm" => {
+            link = match using {
+                CreateFunctionUsing::Link(link) => link,
+                CreateFunctionUsing::Base64(encoded) => {
+                    // upload wasm binary to object store
+                    use base64::prelude::{Engine, BASE64_STANDARD};
+                    let wasm_binary = BASE64_STANDARD
+                        .decode(encoded)
+                        .context("invalid base64 encoding")?;
 
-            use base64::prelude::{Engine, BASE64_STANDARD};
-            let wasm_binary = BASE64_STANDARD
-                .decode(encoded)
-                .context("invalid base64 encoding")?;
+                    let system_params = session.env().meta_client().get_system_params().await?;
+                    let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
 
-            let system_params = session.env().meta_client().get_system_params().await?;
-            let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
-            link = format!("{}/{}", system_params.wasm_storage_url(), object_name);
+                    // Note: it will panic if the url is invalid. We did a validation on meta startup.
+                    let object_store = build_remote_object_store(
+                        system_params.wasm_storage_url(),
+                        Arc::new(ObjectStoreMetrics::unused()),
+                        "Wasm Engine",
+                        ObjectStoreConfig::default(),
+                    )
+                    .await;
+                    object_store
+                        .upload(&object_name, wasm_binary.into())
+                        .await
+                        .context("failed to upload wasm binary to object store")?;
+
+                    format!("{}/{}", system_params.wasm_storage_url(), object_name)
+                }
+            };
+
             identifier = wasm_identifier(&function_name, &arg_types, &return_type);
-
-            // Note: it will panic if the url is invalid. We did a validation on meta startup.
-            let object_store = build_remote_object_store(
-                system_params.wasm_storage_url(),
-                Arc::new(ObjectStoreMetrics::unused()),
-                "Wasm Engine",
-                ObjectStoreConfig::default(),
-            )
-            .await;
-            object_store
-                .upload(&object_name, wasm_binary.into())
-                .await
-                .context("failed to upload wasm binary to object store")?;
         }
+        _ => unreachable!("invalid language: {language}"),
     };
 
     let function = Function {
