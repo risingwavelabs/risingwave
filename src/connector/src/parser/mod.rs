@@ -64,7 +64,7 @@ mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
-mod plain_parser;
+pub mod plain_parser;
 mod protobuf;
 mod unified;
 mod upsert_parser;
