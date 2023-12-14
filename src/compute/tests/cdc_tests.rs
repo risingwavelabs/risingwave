@@ -41,13 +41,12 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::error::StreamResult;
-use risingwave_stream::executor::external::ExternalStorageTable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
     expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedExecutor as StreamBoxedExecutor,
-    BoxedMessageStream, CdcBackfillExecutor, Executor, ExecutorInfo, MaterializeExecutor, Message,
-    Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
+    BoxedMessageStream, CdcBackfillExecutor, Executor, ExecutorInfo, ExternalStorageTable,
+    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"

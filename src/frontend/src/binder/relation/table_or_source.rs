@@ -22,6 +22,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 
 use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
@@ -247,7 +248,9 @@ impl Binder {
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
-                view_catalog.name, view_catalog.sql, e
+                view_catalog.name,
+                view_catalog.sql,
+                e.as_report()
             ))
         })?;
 

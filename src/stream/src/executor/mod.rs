@@ -106,9 +106,9 @@ mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
-pub use backfill::cdc::cdc_backfill::CdcBackfillExecutor;
+pub use backfill::arrangement_backfill::*;
+pub use backfill::cdc::{CdcBackfillExecutor, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
-pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
@@ -845,6 +845,11 @@ pub async fn expect_first_barrier(
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
+    // TODO: Is this check correct?
+    assert!(matches!(
+        barrier.kind,
+        BarrierKind::Checkpoint | BarrierKind::Initial
+    ));
     Ok(barrier)
 }
 

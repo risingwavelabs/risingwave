@@ -46,6 +46,7 @@ use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
@@ -314,8 +315,10 @@ impl StageRunner {
     async fn run(mut self, shutdown_rx: ShutdownToken) {
         if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
-                "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
-                self.stage.query_id, self.stage.id, e
+                error = %e.as_report(),
+                query_id = ?self.stage.query_id,
+                stage_id = ?self.stage.id,
+                "Failed to schedule tasks"
             );
             self.send_event(QueryMessage::Stage(Failed {
                 id: self.stage.id,
@@ -592,7 +595,7 @@ impl StageRunner {
                     if shutdown_rx0.is_cancelled() {
                         break;
                     }
-                    let err_str = e.to_string();
+                    let err_str = e.to_report_string();
                     // This is possible if The Query Runner drop early before schedule the root
                     // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
                     // The error format is just channel closed so no care.
@@ -824,8 +827,11 @@ impl StageRunner {
                     .await
                 {
                     error!(
-                        "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
-                        task_id, stage_id, query_id, e
+                        error = %e.as_report(),
+                        ?task_id,
+                        ?query_id,
+                        ?stage_id,
+                        "Abort task failed",
                     );
                 };
             });
