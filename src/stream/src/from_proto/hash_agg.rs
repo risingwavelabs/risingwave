@@ -110,7 +110,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 intermediate_state_table,
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
-                metrics: params.executor_stats,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,

@@ -117,7 +117,7 @@ impl QueryExecutionInfo {
             if query.session_id == session_id {
                 let query = query.clone();
                 // Spawn a task to abort. Avoid await point in this function.
-                tokio::spawn(async move { query.abort().await });
+                tokio::spawn(async move { query.abort("cancelled by user".to_string()).await });
             }
         }
     }

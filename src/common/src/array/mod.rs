@@ -15,7 +15,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod arrow;
-pub use arrow::to_record_batch_with_schema;
+pub use arrow::{to_deltalake_record_batch_with_schema, to_record_batch_with_schema};
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -32,6 +32,7 @@ mod num256_array;
 mod primitive_array;
 mod proto_reader;
 pub mod stream_chunk;
+pub mod stream_chunk_builder;
 mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
