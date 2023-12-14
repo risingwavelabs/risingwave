@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
@@ -33,12 +34,19 @@ use crate::source::cdc::external::{
     SchemaTableName,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PostgresOffset {
     pub txid: i64,
-    // Internally, an LSN is a 64-bit integer, representing a byte position in the write-ahead log stream.
+    // In postgres, an LSN is a 64-bit integer, representing a byte position in the write-ahead log stream.
     // It is printed as two hexadecimal numbers of up to 8 digits each, separated by a slash; for example, 16/B374D848
     pub lsn: u64,
+}
+
+// only compare the lsn field
+impl PartialOrd for PostgresOffset {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.lsn.partial_cmp(&other.lsn)
+    }
 }
 
 impl PostgresOffset {
