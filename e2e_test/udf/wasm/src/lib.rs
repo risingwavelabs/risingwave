@@ -48,3 +48,17 @@ fn create_file() -> i32 {
 fn length(s: impl AsRef<[u8]>) -> i32 {
     s.as_ref().len() as i32
 }
+
+#[function("extract_tcp_info(bytea) -> struct<src_addr:varchar,dst_addr:varchar,src_port:smallint,dst_port:smallint>")]
+fn extract_tcp_info(tcp_packet: &[u8]) -> (String, String, i16, i16) {
+    let src_addr = std::net::Ipv4Addr::from(<[u8; 4]>::try_from(&tcp_packet[12..16]).unwrap());
+    let dst_addr = std::net::Ipv4Addr::from(<[u8; 4]>::try_from(&tcp_packet[16..20]).unwrap());
+    let src_port = u16::from_be_bytes(<[u8; 2]>::try_from(&tcp_packet[20..22]).unwrap());
+    let dst_port = u16::from_be_bytes(<[u8; 2]>::try_from(&tcp_packet[22..24]).unwrap());
+    (
+        src_addr.to_string(),
+        dst_addr.to_string(),
+        src_port as i16,
+        dst_port as i16,
+    )
+}

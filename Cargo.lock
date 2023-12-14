@@ -633,7 +633,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-wasm-runtime"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf-wasm.git#3b01596f59541711fdf0cdab8264a239e1d2c73d"
+source = "git+https://github.com/risingwavelabs/arrow-udf-wasm.git#5482dc630cd5af88578192b5ef4f46cb9e3ef72c"
 dependencies = [
  "anyhow",
  "arrow-array 49.0.0",

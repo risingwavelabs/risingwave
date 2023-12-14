@@ -255,7 +255,7 @@ fn datatype_name(ty: &DataType) -> String {
         DataType::Struct(s) => format!(
             "struct<{}>",
             s.iter()
-                .map(|(name, ty)| format!("{} {}", name, datatype_name(ty)))
+                .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
                 .join(",")
         ),
     }
