@@ -33,7 +33,7 @@ use foyer::storage::storage::{Storage, StorageWriter};
 use foyer::storage::store::{LfuFsStoreConfig, NoneStore, NoneStoreWriter};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
-use crate::hummock::{Block, Sstable, SstableMeta};
+use crate::hummock::{Block, HummockResult, Sstable, SstableMeta};
 
 pub mod preclude {
     pub use foyer::storage::storage::{
@@ -441,11 +441,20 @@ impl CachedBlock {
         }
     }
 
-    pub fn into_inner(self) -> Box<Block> {
-        match self {
+    pub fn try_into_block(self) -> HummockResult<Box<Block>> {
+        let block = match self {
             CachedBlock::Loaded { block } => block,
-            CachedBlock::Fetched { .. } => unreachable!(),
-        }
+            // for the block was not loaded yet (refill + inflight), we need to decode it.
+            // TODO(MrCroxx): avoid decode twice?
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                let block = Block::decode(bytes, uncompressed_capacity)?;
+                Box::new(block)
+            }
+        };
+        Ok(block)
     }
 }
 
@@ -503,7 +512,7 @@ impl std::io::Read for CachedBlockCursor {
         match &self.inner {
             CachedBlock::Loaded { block } => {
                 if self.pos < 1 {
-                    self.pos += copy(&[0], &mut buf);
+                    self.pos += copy([0], &mut buf);
                 }
                 self.pos += copy(&block.raw_data()[self.pos - 1..], &mut buf);
             }
@@ -512,7 +521,7 @@ impl std::io::Read for CachedBlockCursor {
                 uncompressed_capacity,
             } => {
                 if self.pos < 1 {
-                    self.pos += copy(&[1], &mut buf);
+                    self.pos += copy([1], &mut buf);
                 }
                 if self.pos < 9 {
                     self.pos += copy(

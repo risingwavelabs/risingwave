@@ -454,7 +454,7 @@ impl SstableStore {
                         .await
                         .map_err(HummockError::file_cache)?
                 {
-                    let block = block.into_inner();
+                    let block = block.try_into_block()?;
                     return Ok(block);
                 }
 
