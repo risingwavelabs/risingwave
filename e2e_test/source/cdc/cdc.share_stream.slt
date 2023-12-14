@@ -149,6 +149,6 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
 sleep 3s
 
 query TTTTTTT
-SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array FROM orders_test where c_bigint=-9223372036854775807
+SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array FROM postgres_all_types where c_bigint=-9223372036854775807
 ----
 f 0001-01-01 00:00:00 0001-01-01 00:00:00 {} {-32767} {"0001-01-01 00:00:00"}
