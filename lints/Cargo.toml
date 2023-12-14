@@ -11,6 +11,10 @@ crate-type = ["cdylib"]
 name = "format_error"
 path = "ui/format_error.rs"
 
+[[example]]
+name = "await_in_loop"
+path = "ui/await_in_loop.rs"
+
 [dependencies]
 clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "a585cda701581a16894858dc088eacd5a02fc78b" } # should match the toolchain version
 dylint_linting = "2.5.0"
@@ -18,6 +22,7 @@ itertools = "0.12"
 
 [dev-dependencies]
 dylint_testing = "2.5.0"
+tokio = { version = "1.13", features = ["rt-multi-thread", "macros", "time"] }
 
 # UI test dependencies
 tracing = "0.1"

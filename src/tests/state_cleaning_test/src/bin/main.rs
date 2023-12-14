@@ -31,6 +31,10 @@ use tokio_postgres::{NoTls, SimpleQueryMessage};
 use tokio_stream::wrappers::ReadDirStream;
 use tracing::{debug, error, info};
 
+#[feature(register_tool)]
+#[register_tool(rw)]
+#[allow(rw::await_in_loop)] // test code
+
 #[derive(clap::Parser, Clone, Debug)]
 struct TestOptions {
     /// The database server host.
