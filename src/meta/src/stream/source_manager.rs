@@ -80,7 +80,7 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 }
 
 fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.properties.clone())?;
+    let mut properties = ConnectorProperties::extract(source.with_properties.clone())?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }

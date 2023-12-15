@@ -156,9 +156,9 @@ impl TableWatermarks {
 }
 
 pub fn merge_multiple_new_table_watermarks(
-    table_watermarks_list: impl IntoIterator<Item = HashMap<u64, PbTableWatermarks>>,
-) -> HashMap<u64, PbTableWatermarks> {
-    let mut ret: HashMap<u64, (bool, BTreeMap<u64, PbEpochNewWatermarks>)> = HashMap::new();
+    table_watermarks_list: impl IntoIterator<Item = HashMap<u32, PbTableWatermarks>>,
+) -> HashMap<u32, PbTableWatermarks> {
+    let mut ret: HashMap<u32, (bool, BTreeMap<u64, PbEpochNewWatermarks>)> = HashMap::new();
     for table_watermarks in table_watermarks_list {
         for (table_id, new_table_watermarks) in table_watermarks {
             let epoch_watermarks = match ret.entry(table_id) {

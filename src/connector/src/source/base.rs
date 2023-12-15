@@ -42,7 +42,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR};
+use super::OPENDAL_S3_CONNECTOR;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::opendal_source::OpendalS3Properties;
@@ -365,48 +365,40 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
-            || props
-                .get(UPSTREAM_SOURCE_KEY)
-                .map(|s| s.eq_ignore_ascii_case(GCS_CONNECTOR))
-                .unwrap_or(false)
     }
 
-    pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
-            || props
-                .get(UPSTREAM_SOURCE_KEY)
-                .map(|s| s.eq_ignore_ascii_case(GCS_CONNECTOR))
-                .unwrap_or(false)
     }
 }
 
 impl ConnectorProperties {
-    pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-        if Self::is_new_fs_connector_hash_map(&props) {
-            let connector = props
+    pub fn extract(mut with_properties: HashMap<String, String>) -> Result<Self> {
+        if Self::is_new_fs_connector_hash_map(&with_properties) {
+            let connector = with_properties
                 .remove(UPSTREAM_SOURCE_KEY)
                 .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
             match connector.as_str() {
                 "s3_v2" => {
-                    let assume_role = props.get("s3.assume_role").cloned();
+                    let assume_role = with_properties.get("s3.assume_role").cloned();
                     return Ok(ConnectorProperties::OpendalS3(Box::new(
                         OpendalS3Properties {
-                            s3_properties: S3Properties::try_from_hashmap(props)?,
+                            s3_properties: S3Properties::try_from_hashmap(with_properties)?,
                             assume_role,
                         },
                     )));
                 }
                 "gcs" => {
                     return Ok(ConnectorProperties::Gcs(Box::new(
-                        GcsProperties::try_from_hashmap(props)?,
+                        GcsProperties::try_from_hashmap(with_properties)?,
                     )));
                 }
                 _ => {
@@ -415,13 +407,13 @@ impl ConnectorProperties {
             }
         }
 
-        let connector = props
+        let connector = with_properties
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(props).map(ConnectorProperties::from),
+            PropType::try_from_hashmap(with_properties).map(ConnectorProperties::from),
             |other| Err(anyhow!("connector '{}' is not supported", other))
         )
     }

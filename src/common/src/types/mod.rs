@@ -49,6 +49,7 @@ use crate::{
 
 mod datetime;
 mod decimal;
+mod fields;
 mod interval;
 mod jsonb;
 mod macros;
@@ -65,6 +66,10 @@ mod successor;
 mod timestamptz;
 mod to_binary;
 mod to_text;
+mod with_data_type;
+
+pub use fields::Fields;
+pub use risingwave_fields_derive::Fields;
 
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
@@ -82,6 +87,7 @@ pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
+pub use self::with_data_type::WithDataType;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
@@ -139,7 +145,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^interval$")]
     Interval,
     #[display("{0}")]
-    #[from_str(ignore)]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
@@ -927,7 +933,7 @@ impl ScalarImpl {
                 Self::List(ListValue::new(builder.finish()))
             }
             DataType::Struct(s) => {
-                if !(str.starts_with('{') && str.ends_with('}')) {
+                if !(str.starts_with('(') && str.ends_with(')')) {
                     return Err(FromSqlError::from_text(str));
                 }
                 let mut fields = Vec::with_capacity(s.len());
@@ -1459,6 +1465,18 @@ mod tests {
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
             DataType::List(Box::new(DataType::Interval))
+        );
+
+        assert_eq!(
+            DataType::from_str("record").unwrap(),
+            DataType::Struct(StructType::unnamed(vec![]))
+        );
+        assert_eq!(
+            DataType::from_str("struct<a int4, b varchar>").unwrap(),
+            DataType::Struct(StructType::new(vec![
+                ("a", DataType::Int32),
+                ("b", DataType::Varchar)
+            ]))
         );
     }
 }

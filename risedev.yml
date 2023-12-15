@@ -609,7 +609,7 @@ profile:
       - use: meta-node
       - use: opendal
         engine: fs
-        bucket: ""
+        bucket: "/tmp/rw_ci"
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -773,6 +773,16 @@ profile:
 
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-deltalake-test:
+    config-path: src/config/ci.toml
     steps:
       - use: minio
       - use: meta-node

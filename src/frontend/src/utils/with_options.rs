@@ -22,8 +22,8 @@ use risingwave_connector::source::kafka::{
 };
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    SqlOption, Statement, Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
+    Value,
 };
 
 use crate::catalog::connection_catalog::resolve_private_link_connection;
@@ -226,29 +226,11 @@ impl TryFrom<&Statement> for WithOptions {
             Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
-                        with_properties,
-                        source_schema,
-                        ..
+                        with_properties, ..
                     },
                 ..
-            } => {
-                let mut options = with_properties.0.clone();
-                if let CompatibleSourceSchema::V2(source_schema) = source_schema {
-                    options.extend_from_slice(source_schema.row_options());
-                }
-                Self::try_from(options.as_slice())
-            }
-            Statement::CreateTable {
-                with_options,
-                source_schema,
-                ..
-            } => {
-                let mut options = with_options.clone();
-                if let Some(CompatibleSourceSchema::V2(source_schema)) = source_schema {
-                    options.extend_from_slice(source_schema.row_options());
-                }
-                Self::try_from(options.as_slice())
-            }
+            } => Self::try_from(with_properties.0.as_slice()),
+            Statement::CreateTable { with_options, .. } => Self::try_from(with_options.as_slice()),
 
             _ => Ok(Default::default()),
         }

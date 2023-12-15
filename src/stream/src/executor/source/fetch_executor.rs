@@ -105,7 +105,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::default(),
+                    // This usage is similar with `backfill`. So we only need to fetch a large data rather than establish a connection for a whole object.
+                    PrefetchOptions::prefetch_for_small_range_scan(),
                 )
                 .await?;
             pin_mut!(table_iter);

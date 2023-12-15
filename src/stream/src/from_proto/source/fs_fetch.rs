@@ -47,12 +47,12 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
-        let properties = ConnectorProperties::extract(source.properties.clone())?;
+        let properties = ConnectorProperties::extract(source.with_properties.clone())?;
         let source_desc_builder = SourceDescBuilder::new(
             source.columns.clone(),
             params.env.source_metrics(),
             source.row_id_index.map(|x| x as _),
-            source.properties.clone(),
+            source.with_properties.clone(),
             source_info.clone(),
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,

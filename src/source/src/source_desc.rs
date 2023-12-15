@@ -51,7 +51,7 @@ pub struct SourceDescBuilder {
     columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
-    properties: HashMap<String, String>,
+    with_properties: HashMap<String, String>,
     source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
@@ -64,7 +64,7 @@ impl SourceDescBuilder {
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
@@ -74,7 +74,7 @@ impl SourceDescBuilder {
             columns,
             metrics,
             row_id_index,
-            properties,
+            with_properties,
             source_info,
             connector_params,
             connector_message_buffer_size,
@@ -100,10 +100,10 @@ impl SourceDescBuilder {
     pub fn build(self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let source = ConnectorSource::new(
-            self.properties,
+            self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
             psrser_config,
@@ -121,7 +121,7 @@ impl SourceDescBuilder {
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let parser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
             &parser_config.protocol_config,
@@ -142,7 +142,7 @@ impl SourceDescBuilder {
         let columns = self.column_catalogs_to_source_column_descs();
 
         let source = FsConnectorSource::new(
-            self.properties.clone(),
+            self.with_properties.clone(),
             columns.clone(),
             self.connector_params
                 .connector_client
@@ -172,7 +172,7 @@ pub mod test_utils {
         schema: &Schema,
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
@@ -195,7 +195,7 @@ pub mod test_utils {
             columns,
             metrics: Default::default(),
             row_id_index,
-            properties,
+            with_properties,
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
