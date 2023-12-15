@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #[allow(rw::await_in_loop)] // test code
-
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
