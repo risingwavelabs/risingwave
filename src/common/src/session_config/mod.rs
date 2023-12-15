@@ -109,7 +109,7 @@ pub struct ConfigMap {
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]
-    transaction_isolation_level: IsolationLevel,
+    transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.

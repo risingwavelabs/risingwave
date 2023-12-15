@@ -285,6 +285,9 @@ pub async fn handle(
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
         }
+        Statement::ShowTransactionIsolationLevel => {
+            transaction::handle_show_isolation_level(handler_args)
+        }
         Statement::Drop(DropStatement {
             object_type,
             object_name,

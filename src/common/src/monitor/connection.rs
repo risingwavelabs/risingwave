@@ -521,23 +521,23 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
         let labels = [self.connection_type.as_str(), endpoint.as_str()];
         let read_rate = GLOBAL_CONNECTION_METRICS
             .read_rate
-            .with_label_values(&labels);
+            .with_guarded_label_values(&labels);
         let reader_count = GLOBAL_CONNECTION_METRICS
             .reader_count
-            .with_label_values(&labels);
+            .with_guarded_label_values(&labels);
         let write_rate = GLOBAL_CONNECTION_METRICS
             .write_rate
-            .with_label_values(&labels);
+            .with_guarded_label_values(&labels);
         let writer_count = GLOBAL_CONNECTION_METRICS
             .writer_count
-            .with_label_values(&labels);
+            .with_guarded_label_values(&labels);
         let connection_count = GLOBAL_CONNECTION_METRICS
             .connection_count
-            .with_label_values(&labels);
+            .with_guarded_label_values(&labels);
 
         GLOBAL_CONNECTION_METRICS
             .connection_create_rate
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .inc();
 
         MonitorAsyncReadWriteImpl::new(
@@ -554,7 +554,7 @@ impl MonitorNewConnection for MonitorNewConnectionImpl {
     fn on_err(&self, endpoint: String) {
         GLOBAL_CONNECTION_METRICS
             .connection_err_rate
-            .with_label_values(&[self.connection_type.as_str(), endpoint.as_str()])
+            .with_guarded_label_values(&[self.connection_type.as_str(), endpoint.as_str()])
             .inc();
     }
 }
@@ -644,9 +644,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "read",
@@ -673,9 +675,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "write",

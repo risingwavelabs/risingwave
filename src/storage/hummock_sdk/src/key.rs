@@ -46,6 +46,37 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
 );
 
+pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
+    match key_range {
+        (Included(start), Excluded(end)) => start == end,
+        _ => false,
+    }
+}
+
+// returning left inclusive and right exclusive
+pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
+    let (left, right) = range;
+    let left = match left {
+        Included(key) | Excluded(key) => key.vnode_part().to_index(),
+        Unbounded => 0,
+    };
+    let right = match right {
+        Included(key) => key.vnode_part().to_index() + 1,
+        Excluded(key) => {
+            let (vnode, inner_key) = key.split_vnode();
+            if inner_key.is_empty() {
+                // When the exclusive end key range contains only a vnode,
+                // the whole vnode is excluded.
+                vnode.to_index()
+            } else {
+                vnode.to_index() + 1
+            }
+        }
+        Unbounded => VirtualNode::COUNT,
+    };
+    (left, right)
+}
+
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
     let res = epoch.to_be();
@@ -1092,5 +1123,32 @@ mod tests {
                 Excluded(TableKey(concat(max_vnode, b"")))
             )
         );
+    }
+
+    #[test]
+    fn test_single_vnode_range() {
+        let left_bound = vec![
+            Included(b"0".as_slice()),
+            Excluded(b"0".as_slice()),
+            Unbounded,
+        ];
+        let right_bound = vec![
+            Included(b"1".as_slice()),
+            Excluded(b"1".as_slice()),
+            Unbounded,
+        ];
+        for vnode in 0..VirtualNode::COUNT {
+            for left in &left_bound {
+                for right in &right_bound {
+                    assert_eq!(
+                        (vnode, vnode + 1),
+                        vnode_range(&map_table_key_range(prefixed_range_with_vnode::<&[u8]>(
+                            (*left, *right),
+                            VirtualNode::from_index(vnode)
+                        )))
+                    )
+                }
+            }
+        }
     }
 }

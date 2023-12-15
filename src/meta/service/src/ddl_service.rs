@@ -934,20 +934,20 @@ fn fill_table_stream_graph_info(
                     // Generate a random server id for mysql cdc source if needed
                     // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
                     // group (that is, different from any other server id being used by any master or slave)
-                    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY)
+                    if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY)
                         && matches!(
                             CdcSourceType::from(connector.as_str()),
                             CdcSourceType::Mysql
                         )
                     {
-                        let props = &mut source_node.source_inner.as_mut().unwrap().properties;
+                        let props = &mut source_node.source_inner.as_mut().unwrap().with_properties;
                         let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
                         props
                             .entry("server.id".to_string())
                             .or_insert(rand_server_id.to_string());
 
                         // make these two `Source` consistent
-                        props.clone_into(&mut source.properties);
+                        props.clone_into(&mut source.with_properties);
                     }
 
                     assert_eq!(
