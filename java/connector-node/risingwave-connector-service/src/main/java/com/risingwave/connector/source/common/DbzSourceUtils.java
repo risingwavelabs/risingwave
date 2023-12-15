@@ -28,12 +28,12 @@ public class DbzSourceUtils {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceUtils.class);
 
     public static boolean waitForStreamingRunning(SourceTypeE sourceType, String dbServerName) {
-        // Right now, we only needs to wait for MySQL source, as it's the only source that support
-        // backfill. After we support backfill for other sources, we need to wait for all sources
-        // too
+        // Wait for streaming source of source that supported backfill
+        LOG.info("Waiting for streaming source of {} to start", dbServerName);
         if (sourceType == SourceTypeE.MYSQL) {
-            LOG.info("Waiting for streaming source of {} to start", dbServerName);
             return waitForStreamingRunningInner("mysql", dbServerName);
+        } else if (sourceType == SourceTypeE.POSTGRES) {
+            return waitForStreamingRunningInner("postgres", dbServerName);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;

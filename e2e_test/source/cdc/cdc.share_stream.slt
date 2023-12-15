@@ -175,7 +175,7 @@ INSERT INTO person VALUES (1101, 'white', 'myc@xpmpe.com', '8157 6974', 'se');
 INSERT INTO person VALUES (1102, 'spencer', 'wip@dkaap.com', '9481 6270', 'angeles');
 "
 
-sleep 2s
+sleep 3s
 
 # 3 history, 3 new rows
 query I
