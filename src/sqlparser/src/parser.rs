@@ -4044,27 +4044,19 @@ impl Parser {
                 }
             };
 
-            return Ok(Statement::SetTimeZone {
+            Ok(Statement::SetTimeZone {
                 local: modifier == Some(Keyword::LOCAL),
-                value,
-            });
-        }
-        let variable = self.parse_identifier()?;
-        if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
-            let value = self.parse_set_variable()?;
-            Ok(Statement::SetVariable {
-                local: modifier == Some(Keyword::LOCAL),
-                variable,
                 value,
             })
-        } else if variable.value == "CHARACTERISTICS" {
+        } else if self.parse_keyword(Keyword::CHARACTERISTICS) && modifier == Some(Keyword::SESSION)
+        {
             self.expect_keywords(&[Keyword::AS, Keyword::TRANSACTION])?;
             Ok(Statement::SetTransaction {
                 modes: self.parse_transaction_modes()?,
                 snapshot: None,
                 session: true,
             })
-        } else if variable.value == "TRANSACTION" && modifier.is_none() {
+        } else if self.parse_keyword(Keyword::TRANSACTION) && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
                 let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
@@ -4079,7 +4071,18 @@ impl Parser {
                 session: false,
             })
         } else {
-            self.expected("equals sign or TO", self.peek_token())
+            let variable = self.parse_identifier()?;
+
+            if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
+                let value = self.parse_set_variable()?;
+                Ok(Statement::SetVariable {
+                    local: modifier == Some(Keyword::LOCAL),
+                    variable,
+                    value,
+                })
+            } else {
+                self.expected("equals sign or TO", self.peek_token())
+            }
         }
     }
 
@@ -4212,6 +4215,10 @@ impl Parser {
                         object: ShowObject::ProcessList,
                         filter: self.parse_show_statement_filter()?,
                     });
+                }
+                Keyword::TRANSACTION => {
+                    self.expect_keywords(&[Keyword::ISOLATION, Keyword::LEVEL])?;
+                    return Ok(Statement::ShowTransactionIsolationLevel);
                 }
                 _ => {}
             }
