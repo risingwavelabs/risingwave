@@ -84,32 +84,34 @@ mod test {
         check(
             result,
             expect![[r#"
-            (
-                [
-                    ColumnDesc {
-                        data_type: Int64,
-                        column_id: #2,
-                        name: "",
-                        field_descs: [],
-                        type_name: "",
-                        generated_or_default_column: None,
-                        description: None,
-                    },
-                    ColumnDesc {
-                        data_type: Int16,
-                        column_id: #3,
-                        name: "",
-                        field_descs: [],
-                        type_name: "",
-                        generated_or_default_column: None,
-                        description: None,
-                    },
-                ],
-                [
-                    1,
-                    2,
-                ],
-            )"#]],
+                (
+                    [
+                        ColumnDesc {
+                            data_type: Int64,
+                            column_id: #2,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                            additional_column_type: Unspecified,
+                        },
+                        ColumnDesc {
+                            data_type: Int16,
+                            column_id: #3,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                            additional_column_type: Unspecified,
+                        },
+                    ],
+                    [
+                        1,
+                        2,
+                    ],
+                )"#]],
         );
 
         let table_columns = vec![
@@ -132,6 +134,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
+                            additional_column_type: Unspecified,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -141,6 +144,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
+                            additional_column_type: Unspecified,
                         },
                     ],
                     [
