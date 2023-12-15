@@ -251,8 +251,19 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
-    use crate::source::cdc::external::postgres::PostgresExternalTableReader;
+    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
     use crate::source::cdc::external::{ExternalTableReader, SchemaTableName};
+
+    #[test]
+    fn test_postgres_offset() {
+        let off1 = PostgresOffset { txid: 4, lsn: 2 };
+        let off2 = PostgresOffset { txid: 1, lsn: 3 };
+        let off3 = PostgresOffset { txid: 5, lsn: 1 };
+
+        assert!(off1 < off2);
+        assert!(off3 < off1);
+        assert!(off2 > off3);
+    }
 
     #[test]
     fn test_filter_expression() {
