@@ -1586,6 +1586,40 @@ impl CatalogController {
         inner.list_all_state_table_ids().await
     }
 
+    pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        let table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .filter(
+                object::Column::SchemaId
+                    .eq(schema_id)
+                    .and(table::Column::TableType.ne(TableType::Table)),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(table_ids)
+    }
+
+    pub async fn list_dml_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        let table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .filter(
+                object::Column::SchemaId
+                    .eq(schema_id)
+                    .and(table::Column::TableType.eq(TableType::Table)),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(table_ids)
+    }
+
     pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()
@@ -1602,6 +1636,19 @@ impl CatalogController {
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         let inner = self.inner.read().await;
         inner.list_sources().await
+    }
+
+    pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
+        let inner = self.inner.read().await;
+        let source_ids: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .join(JoinType::InnerJoin, source::Relation::Object.def())
+            .filter(object::Column::SchemaId.eq(schema_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(source_ids)
     }
 
     pub async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
