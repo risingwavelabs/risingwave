@@ -273,7 +273,7 @@ pub fn bind_sql_column_constraints(
     };
 
     let mut binder = Binder::new_for_ddl(session);
-    binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
+    binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
 
     for column in columns {
         for option_def in column.options {
@@ -464,15 +464,20 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = context.session_ctx();
-    let mut properties = context.with_options().inner().clone().into_iter().collect();
-    validate_compatibility(&source_schema, &mut properties)?;
+    let mut with_properties = context.with_options().inner().clone().into_iter().collect();
+    validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&constraints)?;
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        context.session_ctx(),
+        &source_schema,
+        &with_properties,
+        false,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -486,7 +491,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &source_info,
         &mut columns,
         sql_pk_names,
-        &properties,
+        &with_properties,
     )
     .await?;
 
@@ -515,7 +520,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
@@ -529,7 +534,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
-        properties,
+        with_properties,
         pk_column_ids,
         row_id_index,
         Some(source_info),
@@ -556,14 +561,14 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let properties = context.with_options().inner().clone().into_iter().collect();
+    let with_properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         columns,
         column_defs,
         constraints,
-        properties,
+        with_properties,
         definition,
         source_watermarks,
         append_only,
@@ -578,7 +583,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    properties: HashMap<String, String>,
+    with_properties: HashMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -607,7 +612,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
-        properties,
+        with_properties,
         pk_column_ids,
         row_id_index,
         None,
@@ -623,7 +628,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
-    properties: HashMap<String, String>,
+    with_properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -640,9 +645,9 @@ fn gen_table_plan_inner(
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     // resolve privatelink connection for Table backed by Kafka source
-    let mut with_options = WithOptions::new(properties);
+    let mut with_properties = WithOptions::new(with_properties);
     let connection_id =
-        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, &session)?;
 
     let is_external_source = source_info.is_some();
 
@@ -657,7 +662,7 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: with_options.into_inner().into_iter().collect(),
+        with_properties: with_properties.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
@@ -843,8 +848,8 @@ fn derive_connect_properties(
 ) -> Result<BTreeMap<String, String>> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
-    let mut connect_properties = source.properties.clone();
-    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+    let mut connect_properties = source.with_properties.clone();
+    if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY) {
         let table_name = match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
                 let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
@@ -1103,7 +1108,7 @@ mod tests {
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[test]
     fn test_col_id_gen() {
@@ -1249,5 +1254,76 @@ mod tests {
                 ),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_props_options() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE TABLE t
+    WITH (
+        connector = 'kinesis',
+        aws.region='user_test_topic',
+        endpoint='172.10.1.1:9090,172.10.1.2:9090',
+        aws.credentials.access_key_id = 'your_access_key_1',
+        aws.credentials.secret_access_key = 'your_secret_key_1'
+    )
+    FORMAT PLAIN ENCODE PROTOBUF (
+        message = '.test.TestRecord',
+        aws.credentials.access_key_id = 'your_access_key_2',
+        aws.credentials.secret_access_key = 'your_secret_key_2',
+        schema.location = 'file://{}',
+    )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        // Check source exists.
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .unwrap();
+        assert_eq!(source.name, "t");
+
+        // AwsAuth params exist in options.
+        assert_eq!(
+            source
+                .info
+                .format_encode_options
+                .get("aws.credentials.access_key_id")
+                .unwrap(),
+            "your_access_key_2"
+        );
+        assert_eq!(
+            source
+                .info
+                .format_encode_options
+                .get("aws.credentials.secret_access_key")
+                .unwrap(),
+            "your_secret_key_2"
+        );
+
+        // AwsAuth params exist in props.
+        assert_eq!(
+            source
+                .with_properties
+                .get("aws.credentials.access_key_id")
+                .unwrap(),
+            "your_access_key_1"
+        );
+        assert_eq!(
+            source
+                .with_properties
+                .get("aws.credentials.secret_access_key")
+                .unwrap(),
+            "your_secret_key_1"
+        );
+
+        // Options are not merged into props.
+        assert!(source.with_properties.get("schema.location").is_none());
     }
 }

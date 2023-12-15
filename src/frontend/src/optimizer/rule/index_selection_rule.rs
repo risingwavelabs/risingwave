@@ -236,7 +236,7 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            (*index.primary_table).clone().into(),
+            index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
             false,
@@ -567,7 +567,6 @@ impl IndexSelectionRule {
                 .iter()
                 .map(|x| x.column_index)
                 .collect_vec(),
-            // TODO: Should these be cloning the underlying rc instead?
             logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
