@@ -3398,31 +3398,61 @@ def section_iceberg_metrics(outer_panels):
             "Iceberg Sink Metrics",
             [
                 panels.timeseries_count(
-                    "Write Qps Of Iceberg File Appender",
-                    "iceberg file appender write qps",
+                    "Write Qps Of Iceberg Writer",
+                    "iceberg write qps",
                     [
                         panels.target(
-                            f"{metric('iceberg_file_appender_write_qps')}",
+                            f"{metric('iceberg_write_qps')}",
                            "{{executor_id}} @ {{sink_id}}",
                         ),
                     ]
                 ),
                 panels.timeseries_latency(
-                    "Write latency Of Iceberg File Appender",
+                    "Write Latency Of Iceberg Writer",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
                                 f"p{legend}" + " @ {{sink_id}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
+                            f"sum by(le, sink_id)(rate({metric('iceberg_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_write_latency_count')}[$__rate_interval]))",
                             "avg @ {{sink_id}}",
                         ),
                     ],
+                ),
+                panels.timeseries_count(
+                    "Iceberg rolling unfushed data file",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_rolling_unfushed_data_file')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_count(
+                    "Iceberg position delete cache num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_position_delete_cache_num')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_count(
+                    "Iceberg partition num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_partition_num')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
                 ),
             ]
         )

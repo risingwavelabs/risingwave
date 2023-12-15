@@ -39,7 +39,6 @@ export interface Relation {
   name: string
   owner: number
   columns: (ColumnCatalog | Field)[]
-  properties: { [key: string]: string }
 }
 
 export interface StreamingJob extends Relation {

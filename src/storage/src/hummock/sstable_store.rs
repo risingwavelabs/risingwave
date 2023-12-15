@@ -47,7 +47,6 @@ use crate::hummock::block_stream::{
 };
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
-use crate::hummock::utils::LockTable;
 use crate::hummock::{
     BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
 };
@@ -171,7 +170,6 @@ pub struct SstableStore {
     ///
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
     recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
-    prefetch_lock_table: LockTable,
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
 }
@@ -218,7 +216,6 @@ impl SstableStore {
             meta_file_cache,
 
             recent_filter,
-            prefetch_lock_table: LockTable::default(),
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity,
         }
@@ -240,7 +237,6 @@ impl SstableStore {
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
-            prefetch_lock_table: LockTable::default(),
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             recent_filter: None,
@@ -321,14 +317,6 @@ impl SstableStore {
             )));
         }
         stats.cache_data_block_total += 1;
-        if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
-            return Ok(Box::new(PrefetchBlockStream::new(
-                VecDeque::from([block]),
-                block_index,
-                None,
-            )));
-        }
-        let _guard = self.prefetch_lock_table.lock_for(object_id).await;
         if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),

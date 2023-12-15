@@ -48,8 +48,8 @@ pub enum CdcTableType {
 }
 
 impl CdcTableType {
-    pub fn from_properties(properties: &HashMap<String, String>) -> Self {
-        let connector = properties
+    pub fn from_properties(with_properties: &HashMap<String, String>) -> Self {
+        let connector = with_properties
             .get("connector")
             .map(|c| c.to_ascii_lowercase())
             .unwrap_or_default();
@@ -67,12 +67,12 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         schema: Schema,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(properties, schema).await?,
+                MySqlExternalTableReader::new(with_properties, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(properties, schema).await?,
@@ -294,13 +294,13 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub async fn new(
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         rw_schema: Schema,
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create mysql external table reader");
 
         let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
+            serde_json::to_value(with_properties).unwrap(),
         )
         .map_err(|e| {
             ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))

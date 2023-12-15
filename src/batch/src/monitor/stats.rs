@@ -16,8 +16,8 @@ use std::sync::{Arc, LazyLock};
 
 use prometheus::{IntGauge, Registry};
 use risingwave_common::metrics::{
-    LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
-    LabelGuardedIntGaugeVec, TrAdderGauge,
+    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
+    LabelGuardedIntGauge, LabelGuardedIntGaugeVec, TrAdderGauge,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -171,10 +171,18 @@ pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
 /// labels.
 pub struct BatchMetricsWithTaskLabelsInner {
     batch_manager_metrics: Arc<BatchManagerMetrics>,
-    task_metrics: Arc<BatchTaskMetrics>,
     executor_metrics: Arc<BatchExecutorMetrics>,
     task_id: TaskId,
     task_labels: [String; 3],
+
+    // From BatchTaskMetrics
+    pub task_first_poll_delay: LabelGuardedGauge<3>,
+    pub task_fast_poll_duration: LabelGuardedGauge<3>,
+    pub task_idle_duration: LabelGuardedGauge<3>,
+    pub task_poll_duration: LabelGuardedGauge<3>,
+    pub task_scheduled_duration: LabelGuardedGauge<3>,
+    pub task_slow_poll_duration: LabelGuardedGauge<3>,
+    pub task_mem_usage: LabelGuardedIntGauge<3>,
 }
 
 impl BatchMetricsWithTaskLabelsInner {
@@ -184,25 +192,50 @@ impl BatchMetricsWithTaskLabelsInner {
         executor_metrics: Arc<BatchExecutorMetrics>,
         id: TaskId,
     ) -> Self {
+        let task_labels = [
+            id.query_id.clone(),
+            id.stage_id.to_string(),
+            id.task_id.to_string(),
+        ];
+        let labels: &[&str; 3] = &task_labels.each_ref().map(|s| s.as_str());
+        let task_first_poll_delay = task_metrics
+            .task_first_poll_delay
+            .with_guarded_label_values(labels);
+        let task_fast_poll_duration = task_metrics
+            .task_fast_poll_duration
+            .with_guarded_label_values(labels);
+        let task_idle_duration = task_metrics
+            .task_idle_duration
+            .with_guarded_label_values(labels);
+        let task_poll_duration = task_metrics
+            .task_poll_duration
+            .with_guarded_label_values(labels);
+        let task_scheduled_duration = task_metrics
+            .task_scheduled_duration
+            .with_guarded_label_values(labels);
+        let task_slow_poll_duration = task_metrics
+            .task_slow_poll_duration
+            .with_guarded_label_values(labels);
+        let task_mem_usage = task_metrics
+            .task_mem_usage
+            .with_guarded_label_values(labels);
         Self {
             batch_manager_metrics,
-            task_metrics,
             executor_metrics,
             task_id: id.clone(),
-            task_labels: [id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
+            task_labels,
+            task_first_poll_delay,
+            task_fast_poll_duration,
+            task_idle_duration,
+            task_poll_duration,
+            task_scheduled_duration,
+            task_slow_poll_duration,
+            task_mem_usage,
         }
-    }
-
-    pub fn task_labels(&self) -> [&str; 3] {
-        self.task_labels.each_ref().map(String::as_str)
     }
 
     pub fn task_id(&self) -> TaskId {
         self.task_id.clone()
-    }
-
-    pub fn get_task_metrics(&self) -> &Arc<BatchTaskMetrics> {
-        &self.task_metrics
     }
 
     pub fn executor_metrics(&self) -> &BatchExecutorMetrics {
