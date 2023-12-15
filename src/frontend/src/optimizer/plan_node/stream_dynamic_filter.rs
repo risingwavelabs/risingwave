@@ -122,11 +122,16 @@ impl Distill for StreamDynamicFilter {
                 Pretty::display(&self.cleaned_by_watermark),
             ));
         }
+        if self.condition_always_relax {
+            vec.push((
+                "condition_always_relax",
+                Pretty::display(&self.condition_always_relax),
+            ));
+        }
         childless_record(
             plan_node_name!(
                 "StreamDynamicFilter",
                 { "append_only", self.append_only() },
-                { "condition_always_relax", self.condition_always_relax },
             ),
             vec,
         )
