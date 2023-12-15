@@ -699,7 +699,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-    - label: "end-to-end clickhouse sink test"
+  - label: "end-to-end clickhouse sink test"
     key: "e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
     if: |
