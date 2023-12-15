@@ -17,7 +17,7 @@
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)]
-#![allow(await_in_loop)]
+#![allow(rw::await_in_loop)]
 
 use std::fmt::Display;
 
