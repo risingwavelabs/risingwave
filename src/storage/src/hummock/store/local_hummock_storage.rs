@@ -21,7 +21,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
@@ -106,17 +106,21 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let mut table_key_range = (
+        let table_key_range = (
             Bound::Included(table_key.clone()),
             Bound::Included(table_key.clone()),
         );
 
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &mut table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
+
+        if is_empty_key_range(&table_key_range) {
+            return Ok(None);
+        }
 
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
@@ -129,15 +133,15 @@ impl LocalHummockStorage {
 
     pub async fn iter_flushed(
         &self,
-        mut table_key_range: TableKeyRange,
+        table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &mut table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
 
         let table_key_range = table_key_range;
@@ -157,18 +161,16 @@ impl LocalHummockStorage {
 
     pub async fn iter_all(
         &self,
-        mut table_key_range: TableKeyRange,
+        table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &mut table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
-
-        let table_key_range = table_key_range;
 
         self.hummock_version_reader
             .iter_with_memtable(
@@ -183,21 +185,19 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        mut key_range: TableKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         if self.mem_table.iter(key_range.clone()).next().is_some() {
             return Ok(true);
         }
 
-        let read_snapshot = read_filter_for_local(
+        let (key_range, read_snapshot) = read_filter_for_local(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
-            &mut key_range,
-            self.read_version.clone(),
+            key_range,
+            &self.read_version,
         )?;
-
-        let key_range = key_range;
 
         self.hummock_version_reader
             .may_exist(key_range, read_options, read_snapshot)
@@ -550,7 +550,6 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
     }

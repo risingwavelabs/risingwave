@@ -47,7 +47,7 @@ macro_rules! assert_count_range_scan {
                 bounds,
                 $epoch,
                 ReadOptions {
-                    prefetch_options: PrefetchOptions::new_for_large_range_scan(),
+                    prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },

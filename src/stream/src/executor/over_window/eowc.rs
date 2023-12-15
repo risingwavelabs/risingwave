@@ -385,6 +385,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     if let Some(chunk) = output_chunk {
                         yield Message::Chunk(chunk);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;

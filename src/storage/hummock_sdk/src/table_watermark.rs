@@ -35,25 +35,32 @@ pub struct ReadTableWatermark {
 }
 
 impl ReadTableWatermark {
-    pub fn merge_other(&mut self, other: ReadTableWatermark) {
-        assert_eq!(self.direction, other.direction);
-        for (vnode, watermark) in other.vnode_watermarks {
-            match self.vnode_watermarks.entry(vnode) {
-                btree_map::Entry::Vacant(entry) => {
-                    entry.insert(watermark);
-                }
-                btree_map::Entry::Occupied(mut entry) => {
-                    let prev_watermark = entry.get();
-                    let overwrite = match self.direction {
-                        WatermarkDirection::Ascending => watermark > prev_watermark,
-                        WatermarkDirection::Descending => watermark < prev_watermark,
-                    };
-                    if overwrite {
+    pub fn merge_multiple(mut watermarks: Vec<ReadTableWatermark>) -> Option<ReadTableWatermark> {
+        fn merge_other(this: &mut ReadTableWatermark, other: ReadTableWatermark) {
+            assert_eq!(this.direction, other.direction);
+            for (vnode, watermark) in other.vnode_watermarks {
+                match this.vnode_watermarks.entry(vnode) {
+                    btree_map::Entry::Vacant(entry) => {
                         entry.insert(watermark);
+                    }
+                    btree_map::Entry::Occupied(mut entry) => {
+                        let prev_watermark = entry.get();
+                        let overwrite = match this.direction {
+                            WatermarkDirection::Ascending => watermark > prev_watermark,
+                            WatermarkDirection::Descending => watermark < prev_watermark,
+                        };
+                        if overwrite {
+                            entry.insert(watermark);
+                        }
                     }
                 }
             }
         }
+        let mut ret = watermarks.pop()?;
+        while let Some(watermark) = watermarks.pop() {
+            merge_other(&mut ret, watermark);
+        }
+        Some(ret)
     }
 }
 
@@ -75,7 +82,7 @@ impl TableWatermarksIndex {
         }
     }
 
-    pub fn table_watermark(&self, vnode: VirtualNode, epoch: HummockEpoch) -> Option<Bytes> {
+    pub fn read_watermark(&self, vnode: VirtualNode, epoch: HummockEpoch) -> Option<Bytes> {
         self.index.get(&vnode).and_then(|epoch_watermarks| {
             epoch_watermarks
                 .upper_bound(Included(&epoch))
@@ -85,7 +92,7 @@ impl TableWatermarksIndex {
     }
 
     pub fn latest_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.table_watermark(vnode, HummockEpoch::MAX)
+        self.read_watermark(vnode, HummockEpoch::MAX)
     }
 
     pub fn range_watermarks(
@@ -99,7 +106,7 @@ impl TableWatermarksIndex {
             // the table key range falls in a single vnode. No table watermark will be returned, and instead the key range
             // will be modified.
             let vnode = VirtualNode::from_index(left);
-            if let Some(watermark) = self.table_watermark(vnode, epoch) {
+            if let Some(watermark) = self.read_watermark(vnode, epoch) {
                 match self.watermark_direction {
                     WatermarkDirection::Ascending => {
                         let overwrite_start_key = match &key_range.0 {
@@ -149,7 +156,7 @@ impl TableWatermarksIndex {
         } else {
             for i in left..right {
                 let vnode = VirtualNode::from_index(i);
-                if let Some(watermark) = self.table_watermark(vnode, epoch) {
+                if let Some(watermark) = self.read_watermark(vnode, epoch) {
                     assert!(ret.insert(vnode, watermark).is_none());
                 }
             }
@@ -393,9 +400,9 @@ impl TableWatermarks {
 }
 
 pub fn merge_multiple_new_table_watermarks(
-    table_watermarks_list: impl IntoIterator<Item = HashMap<u64, PbTableWatermarks>>,
-) -> HashMap<u64, PbTableWatermarks> {
-    let mut ret: HashMap<u64, (bool, BTreeMap<u64, PbEpochNewWatermarks>)> = HashMap::new();
+    table_watermarks_list: impl IntoIterator<Item = HashMap<u32, PbTableWatermarks>>,
+) -> HashMap<u32, PbTableWatermarks> {
+    let mut ret: HashMap<u32, (bool, BTreeMap<u64, PbEpochNewWatermarks>)> = HashMap::new();
     for table_watermarks in table_watermarks_list {
         for (table_id, new_table_watermarks) in table_watermarks {
             let epoch_watermarks = match ret.entry(table_id) {
@@ -538,19 +545,27 @@ impl PbTableWatermarks {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::Bound::Included;
+    use std::collections::{Bound, HashMap};
+    use std::ops::Bound::Excluded;
     use std::sync::Arc;
     use std::vec;
 
     use bytes::Bytes;
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-    use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
+    use risingwave_pb::hummock::{HummockVersion, PbTableWatermarks, PbVnodeWatermark};
 
+    use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+    use crate::key::{
+        is_empty_key_range, map_table_key_range, prefix_slice_with_vnode,
+        prefixed_range_with_vnode, TableKeyRange,
+    };
     use crate::table_watermark::{
-        merge_multiple_new_table_watermarks, PbTableWatermarksExt, TableWatermarks, VnodeWatermark,
-        WatermarkDirection,
+        merge_multiple_new_table_watermarks, PbTableWatermarksExt, TableWatermarks,
+        TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
     };
 
     fn build_bitmap(vnodes: impl IntoIterator<Item = usize>) -> Arc<Bitmap> {
@@ -834,5 +849,226 @@ mod tests {
         expected.insert(2, table2_watermark);
         expected.insert(3, table3_watermark);
         assert_eq!(result, expected);
+    }
+
+    const COMMITTED_EPOCH: u64 = 233;
+    const EPOCH1: u64 = COMMITTED_EPOCH + 1;
+    const EPOCH2: u64 = EPOCH1 + 1;
+    const TEST_SINGLE_VNODE: VirtualNode = VirtualNode::from_index(1);
+
+    fn build_watermark_range(
+        direction: WatermarkDirection,
+        (low, high): (Bound<Bytes>, Bound<Bytes>),
+    ) -> TableKeyRange {
+        let range = match direction {
+            WatermarkDirection::Ascending => (low, high),
+            WatermarkDirection::Descending => (high, low),
+        };
+        map_table_key_range(prefixed_range_with_vnode(range, TEST_SINGLE_VNODE))
+    }
+
+    fn build_and_test_watermark_index(
+        direction: WatermarkDirection,
+        watermark1: Bytes,
+        watermark2: Bytes,
+        watermark3: Bytes,
+    ) -> TableWatermarksIndex {
+        let mut index = TableWatermarksIndex::new(direction, COMMITTED_EPOCH);
+        index.add_epoch_watermark(
+            EPOCH1,
+            &vec![VnodeWatermark::new(build_bitmap(0..4), watermark1.clone())],
+            direction,
+        );
+        index.add_epoch_watermark(
+            EPOCH2,
+            &vec![VnodeWatermark::new(build_bitmap(1..5), watermark2.clone())],
+            direction,
+        );
+
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(0), EPOCH1),
+            Some(watermark1.clone())
+        );
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(1), EPOCH1),
+            Some(watermark1.clone())
+        );
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(4), EPOCH1),
+            None
+        );
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(0), EPOCH2),
+            Some(watermark1.clone())
+        );
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(1), EPOCH2),
+            Some(watermark2.clone())
+        );
+        assert_eq!(
+            index.read_watermark(VirtualNode::from_index(4), EPOCH2),
+            Some(watermark2.clone())
+        );
+        assert_eq!(
+            index.latest_watermark(VirtualNode::from_index(0)),
+            Some(watermark1.clone())
+        );
+        assert_eq!(
+            index.latest_watermark(VirtualNode::from_index(1)),
+            Some(watermark2.clone())
+        );
+        assert_eq!(
+            index.latest_watermark(VirtualNode::from_index(4)),
+            Some(watermark2.clone())
+        );
+
+        // test read from multiple vnodes
+        {
+            let range = map_table_key_range((
+                Included(prefix_slice_with_vnode(
+                    VirtualNode::from_index(1),
+                    b"begin",
+                )),
+                Excluded(prefix_slice_with_vnode(VirtualNode::from_index(2), b"end")),
+            ));
+            let mut range_mut = range.clone();
+            let read_watermarks = index.range_watermarks(EPOCH2, &mut range_mut).unwrap();
+            assert_eq!(range_mut, range);
+            assert_eq!(direction, read_watermarks.direction);
+            assert_eq!(2, read_watermarks.vnode_watermarks.len());
+            assert_eq!(
+                &watermark2,
+                read_watermarks
+                    .vnode_watermarks
+                    .get(&VirtualNode::from_index(1))
+                    .unwrap()
+            );
+            assert_eq!(
+                &watermark2,
+                read_watermarks
+                    .vnode_watermarks
+                    .get(&VirtualNode::from_index(2))
+                    .unwrap()
+            );
+        }
+
+        // watermark is watermark2
+        let check_watermark_range =
+            |query_range: (Bound<Bytes>, Bound<Bytes>),
+             output_range: Option<(Bound<Bytes>, Bound<Bytes>)>| {
+                let mut range = build_watermark_range(direction, query_range);
+                assert!(index.range_watermarks(EPOCH2, &mut range).is_none());
+                if let Some(output_range) = output_range {
+                    assert_eq!(range, build_watermark_range(direction, output_range));
+                } else {
+                    assert!(is_empty_key_range(&range));
+                }
+            };
+
+        // test read from single vnode and truncate begin key range
+        check_watermark_range(
+            (Included(watermark1.clone()), Excluded(watermark3.clone())),
+            Some((Included(watermark2.clone()), Excluded(watermark3.clone()))),
+        );
+
+        // test read from single vnode and begin key right at watermark
+        check_watermark_range(
+            (Included(watermark2.clone()), Excluded(watermark3.clone())),
+            Some((Included(watermark2.clone()), Excluded(watermark3.clone()))),
+        );
+        check_watermark_range(
+            (Excluded(watermark2.clone()), Excluded(watermark3.clone())),
+            Some((Excluded(watermark2.clone()), Excluded(watermark3.clone()))),
+        );
+
+        // test read from single vnode and end key right at watermark
+        check_watermark_range(
+            (Excluded(watermark1.clone()), Excluded(watermark2.clone())),
+            None,
+        );
+        check_watermark_range(
+            (Excluded(watermark1.clone()), Included(watermark2.clone())),
+            Some((Included(watermark2.clone()), Included(watermark2.clone()))),
+        );
+
+        index
+    }
+
+    #[test]
+    fn test_watermark_index_ascending() {
+        let watermark1 = Bytes::from_static(b"watermark1");
+        let watermark2 = Bytes::from_static(b"watermark2");
+        let watermark3 = Bytes::from_static(b"watermark3");
+        build_and_test_watermark_index(
+            WatermarkDirection::Ascending,
+            watermark1.clone(),
+            watermark2.clone(),
+            watermark3.clone(),
+        );
+    }
+
+    #[test]
+    fn test_watermark_index_descending() {
+        let watermark1 = Bytes::from_static(b"watermark254");
+        let watermark2 = Bytes::from_static(b"watermark253");
+        let watermark3 = Bytes::from_static(b"watermark252");
+        build_and_test_watermark_index(
+            WatermarkDirection::Descending,
+            watermark1.clone(),
+            watermark2.clone(),
+            watermark3.clone(),
+        );
+    }
+
+    #[test]
+    fn test_apply_committed_index() {
+        let watermark1 = Bytes::from_static(b"watermark1");
+        let watermark2 = Bytes::from_static(b"watermark2");
+        let watermark3 = Bytes::from_static(b"watermark3");
+        let mut index = build_and_test_watermark_index(
+            WatermarkDirection::Ascending,
+            watermark1.clone(),
+            watermark2.clone(),
+            watermark3.clone(),
+        );
+
+        let mut version = HummockVersion {
+            max_committed_epoch: EPOCH1,
+            safe_epoch: EPOCH1,
+            ..Default::default()
+        };
+        let test_table_id = TableId::from(233);
+        version.table_watermarks.insert(
+            test_table_id.table_id,
+            PbTableWatermarks {
+                epoch_watermarks: vec![PbEpochNewWatermarks {
+                    watermarks: vec![PbVnodeWatermark {
+                        watermark: watermark1.to_vec(),
+                        vnode_bitmap: Some(build_bitmap(0..VirtualNode::COUNT).to_protobuf()),
+                    }],
+                    epoch: EPOCH1,
+                }],
+                is_ascending: true,
+            },
+        );
+        let committed_index = version
+            .build_table_watermarks_index()
+            .remove(&test_table_id)
+            .unwrap();
+        index.apply_committed_watermarks(&committed_index);
+        assert_eq!(EPOCH1, index.committed_epoch);
+        assert_eq!(EPOCH2, index.latest_epoch);
+        for vnode in 0..VirtualNode::COUNT {
+            let vnode = VirtualNode::from_index(vnode);
+            let epoch_watermark = index.index.get(&vnode).unwrap();
+            if (1..5).contains(&vnode.to_index()) {
+                assert_eq!(2, epoch_watermark.len());
+                assert_eq!(&watermark1, epoch_watermark.get(&EPOCH1).unwrap());
+                assert_eq!(&watermark2, epoch_watermark.get(&EPOCH2).unwrap());
+            } else {
+                assert_eq!(1, epoch_watermark.len());
+                assert_eq!(&watermark1, epoch_watermark.get(&EPOCH1).unwrap());
+            }
+        }
     }
 }

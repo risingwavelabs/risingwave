@@ -46,6 +46,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
@@ -545,6 +546,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             let _ = builder.take(batch_len);
         }
 
+        let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
@@ -555,6 +557,16 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .or_insert(msg.offset.clone());
 
                 continue;
+            }
+
+            // calculate process_time - event_time lag
+            if let SourceMeta::DebeziumCdc(msg_meta) = &msg.meta {
+                let lag_ms = process_time_ms - msg_meta.source_ts_ms;
+                // report to promethus
+                GLOBAL_SOURCE_METRICS
+                    .direct_cdc_event_lag_latency
+                    .with_label_values(&[&msg_meta.full_table_name])
+                    .observe(lag_ms as f64);
             }
 
             split_offset_mapping.insert(msg.split_id.clone(), msg.offset.clone());
@@ -872,7 +884,7 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -913,12 +925,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -945,12 +957,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -968,8 +980,8 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(props).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(props),
+                    topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
                     ..Default::default()
                 })
             }

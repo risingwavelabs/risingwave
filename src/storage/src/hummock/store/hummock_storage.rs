@@ -25,7 +25,7 @@ use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 use risingwave_hummock_sdk::HummockReadEpoch;
 #[cfg(any(test, feature = "test"))]
@@ -120,14 +120,14 @@ pub type ReadVersionTuple = (
 pub fn get_committed_read_version_tuple(
     version: PinnedVersion,
     table_id: TableId,
-    key_range: &mut TableKeyRange,
+    mut key_range: TableKeyRange,
     epoch: HummockEpoch,
-) -> ReadVersionTuple {
+) -> (TableKeyRange, ReadVersionTuple) {
     let watermark = version
         .table_watermark_index()
         .get(&table_id)
-        .and_then(|index| index.range_watermarks(epoch, key_range));
-    (vec![], vec![], version, watermark)
+        .and_then(|index| index.range_watermarks(epoch, &mut key_range));
+    (key_range, (vec![], vec![], version, watermark))
 }
 
 impl HummockStorage {
@@ -252,14 +252,18 @@ impl HummockStorage {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let mut key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
+        let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let read_version_tuple = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, &mut key_range)
+        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
-            self.build_read_version_tuple(epoch, read_options.table_id, &mut key_range)?
+            self.build_read_version_tuple(epoch, read_options.table_id, key_range)?
         };
+
+        if is_empty_key_range(&key_range) {
+            return Ok(None);
+        }
 
         self.hummock_version_reader
             .get(key, epoch, read_options, read_version_tuple)
@@ -268,15 +272,15 @@ impl HummockStorage {
 
     async fn iter_inner(
         &self,
-        mut key_range: TableKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, &mut key_range)
+        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
-            self.build_read_version_tuple(epoch, read_options.table_id, &mut key_range)?
+            self.build_read_version_tuple(epoch, read_options.table_id, key_range)?
         };
 
         self.hummock_version_reader
@@ -288,8 +292,8 @@ impl HummockStorage {
         &self,
         epoch: u64,
         table_id: TableId,
-        key_range: &mut TableKeyRange,
-    ) -> StorageResult<ReadVersionTuple> {
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
                 validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
@@ -313,18 +317,13 @@ impl HummockStorage {
         &self,
         epoch: u64,
         table_id: TableId,
-        key_range: &mut TableKeyRange,
-    ) -> StorageResult<ReadVersionTuple> {
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         let pinned_version = self.pinned_version.load();
         validate_safe_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<ReadTableWatermark>,
-        ) = if epoch <= pinned_version.max_committed_epoch() {
+        let ret = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple((**pinned_version).clone(), table_id, key_range, epoch)
         } else {
@@ -351,15 +350,11 @@ impl HummockStorage {
                     epoch,
                 )
             } else {
-                let (imm_vec, sst_vec, watermarks) =
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
-                let committed_version = (**pinned_version).clone();
-
-                (imm_vec, sst_vec, committed_version, watermarks)
+                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
             }
         };
 
-        Ok(read_version_tuple)
+        Ok(ret)
     }
 
     async fn new_local_inner(&self, option: NewLocalOptions) -> LocalHummockStorage {

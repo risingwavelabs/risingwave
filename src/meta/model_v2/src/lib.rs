@@ -201,6 +201,7 @@ derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_json_struct!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
+derive_from_json_struct!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
 derive_from_json_struct!(
     FragmentVnodeMapping,

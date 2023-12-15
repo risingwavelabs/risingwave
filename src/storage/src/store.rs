@@ -124,7 +124,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.preload = false;
+            read_options.prefetch_options.prefetch = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -274,23 +274,35 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// Since the streaming-read of object-storage may hung in some case, we still use sync short read
+/// for both batch-query and streaming process. So this configure is unused.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
-    pub preload: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_large_range_scan() -> Self {
-        Self::new_with_exhaust_iter(true)
+    pub fn prefetch_for_large_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: true,
+        }
     }
 
-    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
+    pub fn prefetch_for_small_range_scan() -> Self {
         Self {
-            preload: exhaust_iter,
+            prefetch: true,
+            for_large_query: false,
+        }
+    }
+
+    pub fn new(prefetch: bool, for_large_query: bool) -> Self {
+        Self {
+            prefetch,
+            for_large_query,
         }
     }
 }
@@ -298,7 +310,8 @@ impl PrefetchOptions {
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            preload: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -306,7 +319,8 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.preload,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }

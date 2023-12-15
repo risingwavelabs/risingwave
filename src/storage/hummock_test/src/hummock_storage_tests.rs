@@ -1215,11 +1215,11 @@ async fn test_hummock_version_reader() {
         {
             // test before sync
             {
-                let read_snapshot = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_local(
                     epoch1,
                     TEST_TABLE_ID,
-                    &mut (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    (Unbounded, Unbounded),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1243,11 +1243,11 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_snapshot = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_local(
                     epoch2,
                     TEST_TABLE_ID,
-                    &mut (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    (Unbounded, Unbounded),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1271,11 +1271,11 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_snapshot = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_local(
                     epoch2,
                     TEST_TABLE_ID,
-                    &mut (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    (Unbounded, Unbounded),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1333,21 +1333,17 @@ async fn test_hummock_version_reader() {
                 Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             {
-                let read_snapshot = {
-                    let (imms, ssts, watermark) = read_filter_for_batch(
-                        epoch1,
-                        TEST_TABLE_ID,
-                        &mut (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                    )
-                    .unwrap();
-
-                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                };
+                let (_, read_snapshot) = read_filter_for_batch(
+                    epoch1,
+                    TEST_TABLE_ID,
+                    (Unbounded, Unbounded),
+                    vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ],
+                )
+                .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1369,21 +1365,17 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_snapshot = {
-                    let (imms, ssts, watermark) = read_filter_for_batch(
-                        epoch2,
-                        TEST_TABLE_ID,
-                        &mut (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                    )
-                    .unwrap();
-
-                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                };
+                let (_, read_snapshot) = read_filter_for_batch(
+                    epoch2,
+                    TEST_TABLE_ID,
+                    (Unbounded, Unbounded),
+                    vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ],
+                )
+                .unwrap();
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1410,21 +1402,17 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_snapshot = {
-                    let (imms, ssts, watermark) = read_filter_for_batch(
-                        epoch2,
-                        TEST_TABLE_ID,
-                        &mut (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                    )
-                    .unwrap();
-
-                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                };
+                let (_, read_snapshot) = read_filter_for_batch(
+                    epoch2,
+                    TEST_TABLE_ID,
+                    (Unbounded, Unbounded),
+                    vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ],
+                )
+                .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1447,21 +1435,17 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_snapshot = {
-                    let (imms, ssts, watermark) = read_filter_for_batch(
-                        epoch3,
-                        TEST_TABLE_ID,
-                        &mut (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                    )
-                    .unwrap();
-
-                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                };
+                let (_, read_snapshot) = read_filter_for_batch(
+                    epoch2,
+                    TEST_TABLE_ID,
+                    (Unbounded, Unbounded),
+                    vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ],
+                )
+                .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1489,21 +1473,17 @@ async fn test_hummock_version_reader() {
                 let key_range = (Included(start_key), Excluded(end_key));
 
                 {
-                    let read_snapshot = {
-                        let (imms, ssts, watermark) = read_filter_for_batch(
-                            epoch2,
-                            TEST_TABLE_ID,
-                            &mut (Unbounded, Unbounded),
-                            vec![
-                                basic_read_version.clone(),
-                                read_version_2.clone(),
-                                read_version_3.clone(),
-                            ],
-                        )
-                        .unwrap();
-
-                        (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                    };
+                    let (_, read_snapshot) = read_filter_for_batch(
+                        epoch2,
+                        TEST_TABLE_ID,
+                        (Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
                     let iter = hummock_version_reader
                         .iter(
@@ -1525,21 +1505,17 @@ async fn test_hummock_version_reader() {
                 }
 
                 {
-                    let read_snapshot = {
-                        let (imms, ssts, watermark) = read_filter_for_batch(
-                            epoch3,
-                            TEST_TABLE_ID,
-                            &mut (Unbounded, Unbounded),
-                            vec![
-                                basic_read_version.clone(),
-                                read_version_2.clone(),
-                                read_version_3.clone(),
-                            ],
-                        )
-                        .unwrap();
-
-                        (imms, ssts, test_env.storage.get_pinned_version(), watermark)
-                    };
+                    let (_, read_snapshot) = read_filter_for_batch(
+                        epoch2,
+                        TEST_TABLE_ID,
+                        (Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
                     let iter = hummock_version_reader
                         .iter(

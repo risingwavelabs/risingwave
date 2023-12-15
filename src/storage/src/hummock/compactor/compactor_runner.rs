@@ -43,7 +43,8 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, UnorderedMergeIteratorInner,
+    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
+    UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
@@ -224,8 +225,14 @@ impl CompactorRunner {
                 }
             }
         }
+
+        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
-            UnorderedMergeIteratorInner::for_compactor(table_iters),
+            SkipWatermarkIterator::from_safe_epoch_watermarks(
+                UnorderedMergeIteratorInner::for_compactor(table_iters),
+                &self.compact_task.table_watermarks,
+            ),
             CompactionDeleteRangeIterator::new(del_iter),
         ))
     }
