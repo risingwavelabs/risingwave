@@ -141,6 +141,11 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
         if input.input_levels.len() < intra_sub_level_compact_level_count {
             stats.skip_by_count_limit += 1;
             return false;
+        } else if input.input_levels.len() < 2 * intra_sub_level_compact_level_count
+            && input.select_input_size < self.config.sub_level_max_compaction_bytes
+        {
+            stats.skip_by_count_limit += 1;
+            return false;
         }
 
         let mut max_level_size = 0;

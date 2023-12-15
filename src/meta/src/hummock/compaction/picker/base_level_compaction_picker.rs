@@ -141,7 +141,7 @@ impl LevelCompactionPicker {
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
             std::cmp::max(
-                self.config.max_bytes_for_level_base,
+                self.config.max_bytes_for_level_base * 2,
                 self.config.max_compaction_bytes / 2,
             ),
             1,
@@ -239,6 +239,15 @@ impl LevelCompactionPicker {
                 ValidationRuleType::ToBase,
                 stats,
             ) {
+                if l0.total_file_size > target_level.total_file_size * 8 {
+                    tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                        result.input_levels.len(),
+                        result.total_file_count,
+                        result.select_input_size,
+                        result.target_input_size,
+                        target_level.total_file_size,
+                    );
+                }
                 continue;
             }
 
