@@ -485,31 +485,23 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &batch_metrics.task_labels();
-                let task_metrics = batch_metrics.get_task_metrics();
-                task_metrics
+                batch_metrics
                     .task_first_poll_delay
-                    .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_fast_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_idle_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_scheduled_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_slow_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
                 .rw_catch_unwind()
