@@ -11581,6 +11581,7 @@ dependencies = [
  "futures-task",
  "futures-util",
  "generic-array",
+ "governor",
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
  "hmac",

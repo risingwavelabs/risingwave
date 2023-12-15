@@ -338,7 +338,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 split_id = self.row_meta.as_ref().map(|m| m.split_id),
                                 offset = self.row_meta.as_ref().map(|m| m.offset),
                                 column = desc.name,
-                                suppressed_count = suppressed_count,
+                                suppressed_count,
                                 "failed to parse non-pk column, padding with `NULL`"
                             );
                         }
@@ -605,12 +605,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::error!(
-                            %error,
-                            split_id = &*msg.split_id,
-                            offset = msg.offset,
-                            "failed to parse message, skipping"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(|| LogSuppresser::default());
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::error!(
+                                %error,
+                                split_id = &*msg.split_id,
+                                offset = msg.offset,
+                                suppressed_count,
+                                "failed to parse message, skipping"
+                            );
+                        }
                         parser.source_ctx().report_user_source_error(error);
                     }
                 }

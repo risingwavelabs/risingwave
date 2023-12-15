@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -21,6 +22,7 @@ use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::log::LogSuppresser;
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
@@ -84,7 +86,15 @@ pub(super) fn at_least_one_ok(mut results: Vec<Result<()>>) -> Result<()> {
 
     if let Some(first_ok_index) = first_ok_index {
         if !err_message.is_empty() {
-            tracing::error!("failed to parse some columns: {}", err_message)
+            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                LazyLock::new(|| LogSuppresser::default());
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(
+                    err_message,
+                    suppressed_count,
+                    "failed to parse some columns"
+                );
+            }
         }
         results.remove(first_ok_index)
     } else {

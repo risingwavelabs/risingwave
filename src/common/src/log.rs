@@ -9,7 +9,7 @@ type RateLimiter = governor::RateLimiter<
     governor::clock::MonotonicClock,
 >;
 
-/// LogSuppresser is a helper to suppress log spamming.
+/// `LogSuppresser` is a helper to suppress log spamming.
 pub struct LogSuppresser {
     /// The number of times the log has been suppressed. Will be returned and cleared when the
     /// rate limiter allows next log to be printed.
@@ -30,6 +30,9 @@ impl LogSuppresser {
         }
     }
 
+    /// Check if the log should be suppressed.
+    /// If the log should be suppressed, return `Err(LogSuppressed)`.
+    /// Otherwise, return `Ok(usize)` with count of suppressed messages before.
     pub fn check(&self) -> core::result::Result<usize, LogSuppressed> {
         match self.rate_limiter.check() {
             Ok(()) => Ok(self.suppressed_count.swap(0, Ordering::Relaxed)),
