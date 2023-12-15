@@ -48,6 +48,7 @@ WITH (
 	topic = 'upsert_json')
 FORMAT PLAIN ENCODE JSON
 
+statement ok
 select * from upsert_students_default_key;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
