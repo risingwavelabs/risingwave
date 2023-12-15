@@ -118,7 +118,12 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
             stats.skip_by_count_limit += 1;
             return false;
         }
-
+        if input.input_levels.len() < tier_sub_level_compact_level_count * 2
+            && input.select_input_size < self.config.sub_level_max_compaction_bytes / 2
+        {
+            stats.skip_by_count_limit += 1;
+            return false;
+        }
         true
     }
 }
@@ -139,11 +144,6 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             self.config.level0_sub_level_compact_level_count as usize;
 
         if input.input_levels.len() < intra_sub_level_compact_level_count {
-            stats.skip_by_count_limit += 1;
-            return false;
-        } else if input.input_levels.len() < 2 * intra_sub_level_compact_level_count
-            && input.select_input_size < self.config.sub_level_max_compaction_bytes
-        {
             stats.skip_by_count_limit += 1;
             return false;
         }
