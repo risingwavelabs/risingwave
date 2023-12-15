@@ -16,7 +16,6 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
-
 use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 use crate::optimizer::property::Monotonicity;
