@@ -563,7 +563,7 @@ pub fn handle_addition_columns(
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
     // refer the logic from `parse_source_schema_with_connector`
-    const EXEMPTED_CONNECTORS: [&str; 3] = ["nexmark", "datagen", "pubsub"];
+    const EXEMPTED_CONNECTORS: [&str; 3] = ["nexmark", "datagen", "google_pubsub"];
     let is_connector_exempted_from_additional_column = |connector_name: &str| -> bool {
         connector_name.contains("-cdc") || EXEMPTED_CONNECTORS.contains(&connector_name)
     };
