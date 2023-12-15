@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::super::{HummockResult, HummockValue};
@@ -133,7 +134,9 @@ impl SstableIterator {
                 .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
                                  self.options.cache_policy,
                                  &mut self.stats,
-                ).await {
+                )
+                .verbose_instrument_await("prefetch_blocks")
+                .await {
                 Ok(preload_stream) => self.preload_stream = Some(preload_stream),
                 Err(e) => tracing::warn!("failed to create stream for prefetch data because of {:?}, fall back to block get.", e),
             }
@@ -190,6 +193,7 @@ impl SstableIterator {
                             self.options.cache_policy,
                             &mut self.stats,
                         )
+                        .verbose_instrument_await("prefetch_blocks")
                         .await
                     {
                         Ok(stream) => {
