@@ -20,7 +20,10 @@ use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionExt, HummockVersionUpdateExt,
+};
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, Level};
@@ -76,6 +79,7 @@ impl Drop for PinnedVersionGuard {
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+    table_watermark_index: Arc<HashMap<TableId, TableWatermarksIndex>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -86,10 +90,12 @@ impl PinnedVersion {
     ) -> Self {
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
+        let table_watermark_index = version.build_table_watermarks_index();
 
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
+            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
@@ -101,6 +107,10 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
+    pub fn table_watermark_index(&self) -> &Arc<HashMap<TableId, TableWatermarksIndex>> {
+        &self.table_watermark_index
+    }
+
     pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
@@ -110,9 +120,12 @@ impl PinnedVersion {
         );
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
+        let table_watermark_index = version.build_table_watermarks_index();
+
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
+            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),

@@ -32,7 +32,9 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
-use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
+use risingwave_storage::hummock::{
+    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore,
+};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
@@ -83,21 +85,27 @@ impl HummockJavaBindingIterator {
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
         let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+        let table_id = read_plan.table_id.into();
 
         for vnode in read_plan.vnode_ids {
+            let vnode = VirtualNode::from_index(vnode as usize);
+            let key_range = table_key_range_from_prost(vnode, key_range.clone());
+            let (key_range, read_version_tuple) = get_committed_read_version_tuple(
+                pin_version.clone(),
+                table_id,
+                key_range,
+                read_plan.epoch,
+            );
             let stream = reader
                 .iter(
-                    table_key_range_from_prost(
-                        VirtualNode::from_index(vnode as usize),
-                        key_range.clone(),
-                    ),
+                    key_range,
                     read_plan.epoch,
                     ReadOptions {
-                        table_id: read_plan.table_id.into(),
+                        table_id,
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    read_version_tuple,
                 )
                 .await?;
             streams.push(stream);
