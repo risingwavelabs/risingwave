@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::DataType;
 
 use super::{Access, AccessResult};
