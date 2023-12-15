@@ -403,7 +403,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             bail!("The optimizer inferred that the right side's change always make the condition more relaxed.\
                                 But the right changes make the conditions stricter.");
                         }
-                        
+
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
@@ -419,7 +419,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         .await?
                         .into_iter()
                         .map(Box::pin);
-
 
                         #[for_await]
                         for res in stream::select_all(streams) {
@@ -443,8 +442,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = unused_clean_hint.take() {
-                        self.left_table
-                            .update_watermark(watermark, false);
+                        self.left_table.update_watermark(watermark, false);
                     };
 
                     if let Some(mut watermark) = buffered_right_watermark.take() {
@@ -525,7 +523,7 @@ mod tests {
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use super::*;
-        use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, StreamExecutorResult};
 
     async fn create_in_memory_state_table(
@@ -1247,7 +1245,6 @@ mod tests {
         // push the 1st left chunk
         tx_l.push_chunk(chunk_l1);
 
-
         let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
         assert_eq!(
             chunk,
@@ -1313,11 +1310,11 @@ mod tests {
         tx_r.push_barrier(6, false);
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
-/* This part test need change the `DefaultWatermarkBufferStrategy` to `super::watermark::WatermarkNoBuffer`
+        // This part test need change the `DefaultWatermarkBufferStrategy` to `super::watermark::WatermarkNoBuffer`
         // clean is the Bound::Exclude
-        assert!(!in_table(&table, 4).await);
-        assert!(in_table(&table, 5).await);
-*/
+        // TODO: https://github.com/risingwavelabs/risingwave/issues/14014
+        // assert!(!in_table(&table, 4).await);
+        // assert!(in_table(&table, 5).await);
         Ok(())
     }
 }
