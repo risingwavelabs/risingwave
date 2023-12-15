@@ -90,7 +90,7 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                     self.in_loop = true;
                     if let Some(WhileLet {
                         let_pat: _,
-                        // Don't visit `` to avoid such case:
+                        // Don't visit `let_expr` to avoid such case:
                         // ```rust
                         // while let Some(_) = s.next().await {}
                         // ```
