@@ -165,7 +165,8 @@ mod tests {
             assert_eq!(writer, escaped);
         }
 
-        // 3 quotes (>= 2)
+        // may not contain more than two escape-double-quote separators
+        // 3 double quotes (> 2)
         let pat = r#"one\"two\"three\"four"#;
         let mut writer = String::new();
         let res = similar_to_escape_default(pat, &mut writer);
