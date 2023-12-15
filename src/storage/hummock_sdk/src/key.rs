@@ -1142,10 +1142,10 @@ mod tests {
                 for right in &right_bound {
                     assert_eq!(
                         (vnode, vnode + 1),
-                        vnode_range(&map_table_key_range(prefixed_range_with_vnode::<&[u8]>(
+                        vnode_range(&prefixed_range_with_vnode::<&[u8]>(
                             (*left, *right),
                             VirtualNode::from_index(vnode)
-                        )))
+                        ))
                     )
                 }
             }

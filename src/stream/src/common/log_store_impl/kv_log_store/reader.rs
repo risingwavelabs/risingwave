@@ -19,7 +19,7 @@ use std::pin::Pin;
 use anyhow::anyhow;
 use futures::future::{try_join_all, BoxFuture};
 use futures::stream::select_all;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
@@ -137,42 +137,39 @@ impl<S: StateStore> KvLogStoreReader<S> {
 
         let serde = self.serde.clone();
         let table_id = self.table_id;
-        let state_store = self.state_store.clone();
         let read_metrics = self.metrics.persistent_log_read_metrics.clone();
+        let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
+            let key_range = prefixed_range_with_vnode(
+                (range_start.clone(), Excluded(range_end.clone())),
+                vnode,
+            );
+            let state_store = self.state_store.clone();
+            async move {
+                state_store
+                    .iter(
+                        key_range,
+                        HummockEpoch::MAX,
+                        ReadOptions {
+                            // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
+                            prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
+                            cache_policy: CachePolicy::Fill(CachePriority::Low),
+                            table_id,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+            }
+        }));
 
-        async move {
-            let streams = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
-                let key_range = prefixed_range_with_vnode(
-                    (range_start.clone(), Excluded(range_end.clone())),
-                    vnode,
-                );
-                let state_store = state_store.clone();
-                async move {
-                    state_store
-                        .iter(
-                            key_range,
-                            HummockEpoch::MAX,
-                            ReadOptions {
-                                // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
-                                prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                                cache_policy: CachePolicy::Fill(CachePriority::Low),
-                                table_id,
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                }
-            }))
-            .await?;
-
+        streams_future.map_err(Into::into).map_ok(|streams| {
             // TODO: set chunk size by config
-            Ok(Box::pin(merge_log_store_item_stream(
+            Box::pin(merge_log_store_item_stream(
                 streams,
                 serde,
                 1024,
                 read_metrics,
-            )))
-        }
+            ))
+        })
     }
 }
 
@@ -418,12 +415,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => {
-                            // This is not likely to happen because when consuming state store persisted data,
-                            // we only truncate at barrier
-                            warn!("get non-barrier truncation offset when consuming state store persisted data");
-                            epoch - 1
-                        }
+                        TruncateOffset::Chunk { epoch, .. } => epoch - 1,
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);
