@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::DistributionType;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
@@ -138,6 +140,18 @@ pub struct PartialActorLocation {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
     pub parallel_unit_id: i32,
+    pub status: ActorStatus,
+}
+
+#[derive(FromQueryResult)]
+pub struct FragmentDesc {
+    pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
+    pub fragment_type_mask: i32,
+    pub distribution_type: DistributionType,
+    pub state_table_ids: I32Array,
+    pub upstream_fragment_id: I32Array,
+    pub parallelism: i32,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.

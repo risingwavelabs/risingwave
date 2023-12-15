@@ -34,6 +34,7 @@ use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
     PbView,
 };
+use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -1690,6 +1691,54 @@ impl CatalogController {
         Ok(table_objs
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn find_creating_streaming_job_ids(
+        &self,
+        infos: Vec<PbCreatingJobInfo>,
+    ) -> MetaResult<Vec<ObjectId>> {
+        let inner = self.inner.read().await;
+
+        type JobKey = (DatabaseId, SchemaId, String);
+
+        // Index table is already included if we still assign the same name for index table as the index.
+        let creating_tables: Vec<(ObjectId, String, DatabaseId, SchemaId)> = Table::find()
+            .select_only()
+            .columns([table::Column::TableId, table::Column::Name])
+            .columns([object::Column::DatabaseId, object::Column::SchemaId])
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let creating_sinks: Vec<(ObjectId, String, DatabaseId, SchemaId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::Name])
+            .columns([object::Column::DatabaseId, object::Column::SchemaId])
+            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut job_mapping: HashMap<JobKey, ObjectId> = creating_tables
+            .into_iter()
+            .chain(creating_sinks.into_iter())
+            .map(|(id, name, database_id, schema_id)| ((database_id, schema_id, name), id))
+            .collect();
+
+        Ok(infos
+            .into_iter()
+            .flat_map(|info| {
+                job_mapping.remove(&(
+                    info.database_id as _,
+                    info.schema_id as _,
+                    info.name.clone(),
+                ))
+            })
             .collect())
     }
 

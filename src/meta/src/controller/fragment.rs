@@ -22,8 +22,9 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, sink, ActorId, ConnectorSplits, FragmentId,
-    FragmentVnodeMapping, I32Array, ObjectId, SinkId, StreamNode, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ConnectorSplits, FragmentId,
+    FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, StreamNode, TableId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -50,7 +51,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
-    get_actor_dispatchers, get_parallel_unit_mapping, PartialActorLocation,
+    get_actor_dispatchers, get_parallel_unit_mapping, FragmentDesc, PartialActorLocation,
     PartialFragmentStateTables,
 };
 use crate::manager::{ActorInfos, LocalNotification};
@@ -609,6 +610,20 @@ impl CatalogController {
         )
     }
 
+    pub async fn list_streaming_job_states(&self) -> MetaResult<Vec<(ObjectId, JobStatus)>> {
+        let inner = self.inner.read().await;
+        let job_states: Vec<(ObjectId, JobStatus)> = StreamingJob::find()
+            .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::JobStatus,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(job_states)
+    }
+
     /// Get all actor ids in the target streaming jobs.
     pub async fn get_job_actor_mapping(
         &self,
@@ -716,6 +731,27 @@ impl CatalogController {
         let actor_locations: Vec<PartialActorLocation> =
             Actor::find().into_partial_model().all(&inner.db).await?;
         Ok(actor_locations)
+    }
+
+    pub async fn list_fragment_descs(&self) -> MetaResult<Vec<FragmentDesc>> {
+        let inner = self.inner.read().await;
+        let fragment_descs: Vec<FragmentDesc> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::DistributionType,
+                fragment::Column::StateTableIds,
+                fragment::Column::UpstreamFragmentId,
+            ])
+            .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+            .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+            .group_by(fragment::Column::FragmentId)
+            .into_model()
+            .all(&inner.db)
+            .await?;
+        Ok(fragment_descs)
     }
 
     pub async fn list_sink_actor_mapping(

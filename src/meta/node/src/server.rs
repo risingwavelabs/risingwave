@@ -611,8 +611,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
         barrier_scheduler.clone(),
         stream_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
+        metadata_manager.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
