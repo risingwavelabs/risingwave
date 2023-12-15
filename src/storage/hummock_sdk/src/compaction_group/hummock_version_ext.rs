@@ -585,6 +585,9 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        for table_id in &version_delta.removed_table_ids {
+            let _ = self.table_watermarks.remove(table_id);
+        }
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
             match self.table_watermarks.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
@@ -1023,6 +1026,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         group_deltas: Default::default(),
         gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
+        removed_table_ids: vec![],
     }
 }
 

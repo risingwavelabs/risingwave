@@ -7,10 +7,11 @@ CREATE SOURCE user_behaviors (
     parent_target_type VARCHAR,
     parent_target_id VARCHAR
 ) WITH (
-    connector = 'kafka',
-    topic = 'user_behaviors',
-    properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest'
+    connector = 'datagen',
+    fields.user_id.kind = 'sequence',
+    fields.user_id.start = 1,
+    fields.user_id.end = 100,
+    datagen.rows.per.second = '100'
 ) FORMAT PLAIN ENCODE JSON;
 
 CREATE TABLE data_types (
@@ -34,17 +35,6 @@ CREATE TABLE data_types (
     array_column VARCHAR[]
 );
 
--- sink data_type table to pg
-CREATE SINK data_types_postgres_sink
-FROM
-    data_types WITH (
-    connector = 'jdbc',
-    jdbc.url = 'jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456',
-    table.name = 'data_types',
-    type='upsert',
-    primary_key = 'id'
-);
-
 INSERT INTO data_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, timestamptz_column, interval_column, jsonb_column, bytea_column, array_column)
 VALUES
     (1, 'Varchar value 1', 'Text value 1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '2023-05-22 12:34:56+00:00', '1 day', '{"key": "value"}', E'\\xDEADBEEF', ARRAY['Value 1', 'Value 2']),
@@ -52,4 +42,3 @@ VALUES
     (3, 'Varchar value 3', 'Text value 3', 345, 678, 901, 34.56, 78.90, 12.34, TRUE, '2023-05-24', '12:34:56', '2023-05-24 12:34:56', '2023-05-24 12:34:56+00:00', '3 days', '{"key": "value3"}', E'\\xCAFEBABE', ARRAY['Value 5', 'Value 6']),
     (4, 'Varchar value 4', 'Text value 4', 456, 789, 012, 45.67, 89.01, 23.45, FALSE, '2023-05-25', '23:45:01', '2023-05-25 23:45:01', '2023-05-25 23:45:01+00:00', '4 days', '{"key": "value4"}', E'\\xBABEC0DE', ARRAY['Value 7', 'Value 8']),
     (5, 'Varchar value 5', 'Text value 5', 567, 890, 123, 56.78, 90.12, 34.56, TRUE, '2023-05-26', '12:34:56', '2023-05-26 12:34:56', '2023-05-26 12:34:56+00:00', '5 days', '{"key": "value5"}', E'\\xDEADBABE', ARRAY['Value 9', 'Value 10']);
-

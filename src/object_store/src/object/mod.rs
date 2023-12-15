@@ -621,7 +621,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        if let Err(e) = &res && e.is_object_not_found_error() && path.ends_with("manifest.json") {
+            // Metadata backup's manifest.json not found is expected.
+        } else {
+            try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        }
 
         let data = res?;
         self.object_store_metrics

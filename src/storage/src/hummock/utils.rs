@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -22,7 +21,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use parking_lot::Mutex;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
@@ -593,59 +591,6 @@ pub(crate) async fn wait_for_epoch(
                     return Ok(());
                 }
             }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct LockTable {
-    locks: Arc<Mutex<HashMap<u64, VecDeque<Arc<Notify>>>>>,
-}
-
-pub struct LockGuard {
-    key: u64,
-    locks: Arc<Mutex<HashMap<u64, VecDeque<Arc<Notify>>>>>,
-}
-
-impl Default for LockTable {
-    fn default() -> Self {
-        Self {
-            locks: Arc::new(Mutex::new(HashMap::default())),
-        }
-    }
-}
-
-impl LockTable {
-    pub async fn lock_for(&self, key: u64) -> LockGuard {
-        let notify = {
-            let mut locks = self.locks.lock();
-            if let Some(que) = locks.get_mut(&key) {
-                let notify = Arc::new(Notify::new());
-                que.push_back(notify.clone());
-                Some(notify)
-            } else {
-                locks.insert(key, VecDeque::default());
-                None
-            }
-        };
-        if let Some(notify) = notify {
-            notify.notified().await;
-        }
-        LockGuard {
-            key,
-            locks: self.locks.clone(),
-        }
-    }
-}
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let mut locks = self.locks.lock();
-        let que = locks.get_mut(&self.key).unwrap();
-        if let Some(notify) = que.pop_front() {
-            notify.notify_one();
-        } else {
-            locks.remove(&self.key);
         }
     }
 }

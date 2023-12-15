@@ -306,6 +306,7 @@ impl HummockManager {
                         .len() as u64
                         - 1,
                 );
+            new_version_delta.removed_table_ids.push(*table_id);
         }
 
         // Remove empty group, GC SSTs and remove metric.
