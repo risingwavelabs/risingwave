@@ -166,7 +166,7 @@ mod tests {
         }
 
         // 3 quotes (>= 2)
-        let pat = r#"one"two"three"four"#;
+        let pat = r#"one\"two\"three\"four"#;
         let mut writer = String::new();
         let res = similar_to_escape_default(pat, &mut writer);
         assert!(res.is_err());
