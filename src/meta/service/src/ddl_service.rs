@@ -33,10 +33,7 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, MetaSrvEnv,
-    StreamingJob,
-};
+use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
@@ -58,11 +55,8 @@ impl DdlServiceImpl {
         env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
         metadata_manager: MetadataManager,
-        catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
@@ -70,11 +64,8 @@ impl DdlServiceImpl {
         let ddl_controller = DdlController::new(
             env.clone(),
             metadata_manager.clone(),
-            catalog_manager,
             stream_manager,
             source_manager,
-            cluster_manager,
-            fragment_manager,
             barrier_manager,
             aws_cli_ref.clone(),
         )

@@ -382,7 +382,6 @@ impl ScaleController {
         source_manager: SourceManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
-        // TODO: use metadata mgr in scale controller instead.
         match metadata_manager {
             MetadataManager::V1(mgr) => Self {
                 fragment_manager: mgr.fragment_manager.clone(),

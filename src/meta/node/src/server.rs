@@ -393,7 +393,6 @@ pub async fn start_service_as_election_leader(
         meta_store_sql.clone(),
     )
     .await?;
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let system_params_manager = env.system_params_manager_ref();
     let mut system_params_reader = system_params_manager.get_params().await;
@@ -415,13 +414,6 @@ pub async fn start_service_as_election_leader(
         )));
     }
 
-    let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
-            .await
-            .unwrap(),
-    );
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-
     let metadata_manager = if meta_store_sql.is_some() {
         let cluster_controller = Arc::new(
             ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
@@ -432,9 +424,13 @@ pub async fn start_service_as_election_leader(
         MetadataManager::new_v2(cluster_controller, catalog_controller)
     } else {
         MetadataManager::new_v1(
-            cluster_manager.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
+            Arc::new(
+                ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
+                    .await
+                    .unwrap(),
+            ),
+            Arc::new(CatalogManager::new(env.clone()).await.unwrap()),
+            Arc::new(FragmentManager::new(env.clone()).await.unwrap()),
         )
     };
 
@@ -587,11 +583,8 @@ pub async fn start_service_as_election_leader(
         env.clone(),
         aws_cli.clone(),
         metadata_manager.clone(),
-        catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        cluster_manager,
-        fragment_manager.clone(),
         barrier_manager.clone(),
         sink_manager.clone(),
     )
