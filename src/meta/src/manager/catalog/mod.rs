@@ -2931,7 +2931,8 @@ impl CatalogManager {
         source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: Option<ColIndexMapping>,
-        incoming_sink_id: Option<SinkId>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2990,8 +2991,15 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
-        if let Some(incoming_sink_id) = incoming_sink_id {
+
+        if let Some(incoming_sink_id) = creating_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
+        }
+
+        if let Some(dropping_sink_id) = dropping_sink_id {
+            table
+                .incoming_sinks
+                .retain(|sink_id| *sink_id != dropping_sink_id);
         }
 
         tables.insert(table.id, table.clone());
