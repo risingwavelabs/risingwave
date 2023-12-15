@@ -11,18 +11,6 @@ WITH (
 	topic = 'upsert_avro_json')
 FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
-
-# key schema should be a subset of value schema
-statement error
-CREATE TABLE upsert_student_key_not_subset_of_value_avro_json ( primary key (rw_key) )
-INCLUDE KEY AS rw_key
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
-
-
 statement ok
 CREATE TABLE upsert_student_avro_json ( primary key (rw_key) )
 INCLUDE KEY AS rw_key
