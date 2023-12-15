@@ -345,7 +345,7 @@ pub(crate) mod tests {
                 .sstable(&output_sst, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
-            table_key_count += table.value().meta.key_count;
+            table_key_count += table.value().meta().key_count;
         }
 
         // we have removed these 31 keys before watermark 32.
@@ -481,9 +481,9 @@ pub(crate) mod tests {
                 .unwrap();
             let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
             assert!(
-                table.value().meta.estimated_size > target_table_size,
+                table.value().meta().estimated_size > target_table_size,
                 "table.meta.estimated_size {} <= target_table_size {}",
-                table.value().meta.estimated_size,
+                table.value().meta().estimated_size,
                 target_table_size
             );
         }
@@ -812,7 +812,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .value()
-                .meta
+                .meta()
                 .key_count;
         }
         assert_eq!((kv_count / 2) as u32, key_count);
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .value()
-                .meta
+                .meta()
                 .key_count;
         }
         let expect_count = kv_count as u32 - retention_seconds_expire_second + 1;
@@ -1197,7 +1197,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .value()
-                .meta
+                .meta()
                 .key_count;
         }
         let expect_count = kv_count as u32;

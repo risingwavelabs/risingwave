@@ -46,7 +46,7 @@ impl BackwardSstableIterator {
     pub fn new(sstable: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
-            cur_idx: sstable.value().meta.block_metas.len() - 1,
+            cur_idx: sstable.value().meta().block_metas.len() - 1,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -125,7 +125,7 @@ impl HummockIterator for BackwardSstableIterator {
         let block_idx = self
             .sst
             .value()
-            .meta
+            .meta()
             .block_metas
             .partition_point(|block_meta| {
                 // Compare by version comparator
@@ -186,7 +186,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(handle.value().meta.block_metas.len() > 10);
+        assert!(handle.value().meta().block_metas.len() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -211,7 +211,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.value().meta.block_metas.len() > 10);
+        assert!(sstable.value().meta().block_metas.len() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();

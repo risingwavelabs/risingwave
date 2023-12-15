@@ -179,8 +179,8 @@ impl SstableDeleteRangeIterator {
     /// # Panics
     /// This function will panic if the iterator is invalid.
     pub fn is_last_range(&self) -> bool {
-        debug_assert!(self.next_idx < self.table.value().meta.monotonic_tombstone_events.len());
-        self.next_idx + 1 == self.table.value().meta.monotonic_tombstone_events.len()
+        debug_assert!(self.next_idx < self.table.value().meta().monotonic_tombstone_events.len());
+        self.next_idx + 1 == self.table.value().meta().monotonic_tombstone_events.len()
     }
 }
 
@@ -190,14 +190,14 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
-        self.table.value().meta.monotonic_tombstone_events[self.next_idx]
+        self.table.value().meta().monotonic_tombstone_events[self.next_idx]
             .event_key
             .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
         if self.next_idx > 0 {
-            self.table.value().meta.monotonic_tombstone_events[self.next_idx - 1].new_epoch
+            self.table.value().meta().monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
             HummockEpoch::MAX
         }
@@ -223,7 +223,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
             self.next_idx = self
                 .table
                 .value()
-                .meta
+                .meta()
                 .monotonic_tombstone_events
                 .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
                     event_key.as_ref().le(&target_extended_user_key)
@@ -233,7 +233,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.next_idx < self.table.value().meta.monotonic_tombstone_events.len()
+        self.next_idx < self.table.value().meta().monotonic_tombstone_events.len()
     }
 }
 
@@ -242,13 +242,13 @@ pub fn get_min_delete_range_epoch_from_sstable(
     query_user_key: UserKey<&[u8]>,
 ) -> HummockEpoch {
     let query_extended_user_key = PointRange::from_user_key(query_user_key, false);
-    let idx = table.meta.monotonic_tombstone_events.partition_point(
+    let idx = table.meta().monotonic_tombstone_events.partition_point(
         |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );
     if idx == 0 {
         HummockEpoch::MAX
     } else {
-        table.meta.monotonic_tombstone_events[idx - 1].new_epoch
+        table.meta().monotonic_tombstone_events[idx - 1].new_epoch
     }
 }
 

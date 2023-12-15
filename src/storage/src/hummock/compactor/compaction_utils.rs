@@ -234,7 +234,7 @@ pub async fn generate_splits(
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
                     .await?
                     .value()
-                    .meta
+                    .meta()
                     .block_metas
                     .iter()
                     .map(|block| {

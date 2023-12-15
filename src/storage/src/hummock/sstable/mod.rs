@@ -19,6 +19,7 @@ mod block;
 
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
+use std::sync::Arc;
 
 pub use block::*;
 mod block_iterator;
@@ -210,16 +211,20 @@ impl Display for MonotonicDeleteEvent {
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
-    pub id: HummockSstableObjectId,
-    pub meta: SstableMeta,
-    pub filter_reader: XorFilterReader,
+    inner: Arc<SstableInner>,
+}
+
+struct SstableInner {
+    id: HummockSstableObjectId,
+    meta: SstableMeta,
+    filter_reader: XorFilterReader,
 }
 
 impl Debug for Sstable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Sstable")
-            .field("id", &self.id)
-            .field("meta", &self.meta)
+            .field("id", &self.inner.id)
+            .field("meta", &self.inner.meta)
             .finish()
     }
 }
@@ -228,20 +233,34 @@ impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
-        Self {
+        let inner = SstableInner {
             id,
             meta,
             filter_reader,
-        }
+        };
+        let inner = Arc::new(inner);
+        Self { inner }
+    }
+
+    pub fn id(&self) -> HummockSstableObjectId {
+        self.inner.id
+    }
+
+    pub fn meta(&self) -> &SstableMeta {
+        &self.inner.meta
+    }
+
+    pub fn filter_reader(&self) -> &XorFilterReader {
+        &self.inner.filter_reader
     }
 
     #[inline(always)]
     pub fn has_bloom_filter(&self) -> bool {
-        !self.filter_reader.is_empty()
+        !self.inner.filter_reader.is_empty()
     }
 
     pub fn calculate_block_info(&self, block_index: usize) -> (Range<usize>, usize) {
-        let block_meta = &self.meta.block_metas[block_index];
+        let block_meta = &self.inner.meta.block_metas[block_index];
         let range =
             block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
         let uncompressed_capacity = block_meta.uncompressed_size as usize;
@@ -264,17 +283,17 @@ impl Sstable {
 
     #[inline(always)]
     pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
-        self.filter_reader.may_match(user_key_range, hash)
+        self.inner.filter_reader.may_match(user_key_range, hash)
     }
 
     #[inline(always)]
     pub fn block_count(&self) -> usize {
-        self.meta.block_metas.len()
+        self.inner.meta.block_metas.len()
     }
 
     #[inline(always)]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
+        8 /* id */ + self.inner.filter_reader.estimate_size() + self.inner.meta.encoded_size()
     }
 }
 

@@ -359,7 +359,7 @@ impl ConcatSstableIterator {
                 .sstable(table_info, &mut self.stats)
                 .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let block_metas = &sstable.value().meta.block_metas;
+            let block_metas = &sstable.value().meta().block_metas;
             let mut start_index = match seek_key {
                 None => 0,
                 Some(seek_key) => {
@@ -400,7 +400,7 @@ impl ConcatSstableIterator {
                     .num_pending_read_io
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let mut sstable_iter = SstableStreamIterator::new(
-                    sstable.value().meta.block_metas.clone(),
+                    sstable.value().meta().block_metas.clone(),
                     table_info.clone(),
                     self.existing_table_ids.clone(),
                     start_index,
@@ -659,7 +659,7 @@ mod tests {
             .sstable(&iter.sstables[0], &mut iter.stats)
             .await
             .unwrap();
-        let block_metas = &sst.value().meta.block_metas;
+        let block_metas = &sst.value().meta().block_metas;
         let block_1_smallest_key = block_metas[1].smallest_key.clone();
         let block_2_smallest_key = block_metas[2].smallest_key.clone();
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
