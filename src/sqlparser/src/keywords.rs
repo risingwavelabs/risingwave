@@ -119,6 +119,7 @@ define_keywords!(
     CHAIN,
     CHAR,
     CHARACTER,
+    CHARACTERISTICS,
     CHARACTER_LENGTH,
     CHAR_LENGTH,
     CHECK,
