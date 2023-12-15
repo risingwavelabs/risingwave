@@ -84,7 +84,6 @@ pub enum StatementType {
     ORDER_BY,
     SET_VARIABLE,
     SHOW_VARIABLE,
-    SHOW_TRANSACTION,
     SHOW_COMMAND,
     START_TRANSACTION,
     UPDATE_USER,
