@@ -108,7 +108,7 @@ impl ToBatchPb for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             split: vec![],
         })
     }

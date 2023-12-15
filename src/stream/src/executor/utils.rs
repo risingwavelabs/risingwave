@@ -65,14 +65,18 @@ impl ActorInputMetrics {
         let fragment_id_str = fragment_id.to_string();
         let upstream_fragment_id_str = upstream_fragment_id.to_string();
         Self {
-            actor_in_record_cnt: metrics.actor_in_record_cnt.with_label_values(&[
+            actor_in_record_cnt: metrics.actor_in_record_cnt.with_guarded_label_values(&[
                 &actor_id_str,
                 &fragment_id_str,
                 &upstream_fragment_id_str,
             ]),
             actor_input_buffer_blocking_duration_ns: metrics
                 .actor_input_buffer_blocking_duration_ns
-                .with_label_values(&[&actor_id_str, &fragment_id_str, &upstream_fragment_id_str]),
+                .with_guarded_label_values(&[
+                    &actor_id_str,
+                    &fragment_id_str,
+                    &upstream_fragment_id_str,
+                ]),
         }
     }
 }

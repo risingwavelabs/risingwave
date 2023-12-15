@@ -544,7 +544,7 @@ impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
             bail_not_implemented!("New S3 connector for batch");
@@ -560,7 +560,7 @@ impl ToStream for LogicalSource {
         let mut plan: PlanRef;
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
             plan_prefix = Some(self.rewrite_new_s3_plan()?);

@@ -75,7 +75,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(source.owner as i32)),
                             Some(ScalarImpl::Utf8(
                                 source
-                                    .properties
+                                    .with_properties
                                     .get(UPSTREAM_SOURCE_KEY)
                                     .cloned()
                                     .unwrap_or("".to_string())

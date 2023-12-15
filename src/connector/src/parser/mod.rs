@@ -884,7 +884,7 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -925,12 +925,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -957,12 +957,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -980,8 +980,8 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(props).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(props),
+                    topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
                     ..Default::default()
                 })
             }
