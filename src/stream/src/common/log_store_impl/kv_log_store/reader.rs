@@ -409,7 +409,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
     async fn rewind(&mut self) -> LogStoreResult<bool> {
         self.latest_offset = None;
-        if self.state_store_stream.is_some() {
+        self.read_flushed_chunk_future = None;
+        if self.truncate_offset.is_none()
+            || self.truncate_offset.expect("not none").epoch()
+                < self.first_write_epoch.expect("should have init")
+        {
             // still consuming persisted state store data
             let persisted_epoch =
                 self.truncate_offset
@@ -424,9 +428,9 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);
         } else {
-            self.read_flushed_chunk_future.take();
-            self.rx.rewind();
+            assert!(self.state_store_stream.is_none());
         }
+        self.rx.rewind();
 
         Ok(true)
     }
