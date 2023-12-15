@@ -36,7 +36,6 @@ use crate::parser::{
 use crate::schema::schema_registry::{handle_sr_list, Client};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
-#[deprecated(note = "Please use plain parser instead.")]
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
@@ -70,7 +69,6 @@ impl JsonAccessBuilder {
 }
 
 /// Parser for JSON format
-#[deprecated(note = "Please use plain parser instead.")]
 #[derive(Debug)]
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,

@@ -133,17 +133,17 @@ fn bench_json_parser(c: &mut Criterion) {
         .unwrap();
     let records = generate_json_rows();
     let ctx = Arc::new(SourceContext::default());
-    let mut parser = rt
-        .block_on(PlainParser::new(
-            SpecificParserConfig::DEFAULT_PLAIN_JSON,
-            descs.clone(),
-            ctx.clone(),
-        ))
-        .unwrap();
     c.bench_function("json_parser", |b| {
         b.to_async(&rt).iter_batched(
             || records.clone(),
             |records| async {
+                let mut parser = rt
+                    .block_on(PlainParser::new(
+                        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+                        descs.clone(),
+                        ctx.clone(),
+                    ))
+                    .unwrap();
                 let mut builder =
                     SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
                 for record in records {
