@@ -35,6 +35,9 @@ CREATE SINK s1 AS select * from products WITH (
     primary_key = 'id'
 );
 
+statement ok
+flush;
+
 query I
 select count(*) from products;
 ----
