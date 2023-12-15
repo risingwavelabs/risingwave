@@ -318,13 +318,9 @@ async fn test_read_filter_basic() {
         // build for local
         {
             let key_range = key_range.clone();
-            let (_, hummock_read_snapshot) = read_filter_for_local(
-                epoch,
-                TableId::from(table_id),
-                key_range,
-                read_version.clone(),
-            )
-            .unwrap();
+            let (_, hummock_read_snapshot) =
+                read_filter_for_local(epoch, TableId::from(table_id), key_range, &read_version)
+                    .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());

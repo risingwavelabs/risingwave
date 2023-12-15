@@ -1219,7 +1219,7 @@ async fn test_hummock_version_reader() {
                     epoch1,
                     TEST_TABLE_ID,
                     (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1247,7 +1247,7 @@ async fn test_hummock_version_reader() {
                     epoch2,
                     TEST_TABLE_ID,
                     (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1275,7 +1275,7 @@ async fn test_hummock_version_reader() {
                     epoch2,
                     TEST_TABLE_ID,
                     (Unbounded, Unbounded),
-                    hummock_storage.read_version(),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 

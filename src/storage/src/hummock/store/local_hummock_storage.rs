@@ -115,7 +115,7 @@ impl LocalHummockStorage {
             epoch,
             read_options.table_id,
             table_key_range,
-            self.read_version.clone(),
+            &self.read_version,
         )?;
 
         if is_empty_key_range(&table_key_range) {
@@ -141,7 +141,7 @@ impl LocalHummockStorage {
             epoch,
             read_options.table_id,
             table_key_range,
-            self.read_version.clone(),
+            &self.read_version,
         )?;
 
         let table_key_range = table_key_range;
@@ -169,7 +169,7 @@ impl LocalHummockStorage {
             epoch,
             read_options.table_id,
             table_key_range,
-            self.read_version.clone(),
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -196,7 +196,7 @@ impl LocalHummockStorage {
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
             key_range,
-            self.read_version.clone(),
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -539,7 +539,6 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
     }

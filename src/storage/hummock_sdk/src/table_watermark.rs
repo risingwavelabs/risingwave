@@ -56,11 +56,7 @@ impl ReadTableWatermark {
                 }
             }
         }
-        let mut ret = if let Some(ret) = watermarks.pop() {
-            ret
-        } else {
-            return None;
-        };
+        let mut ret = watermarks.pop()?;
         while let Some(watermark) = watermarks.pop() {
             merge_other(&mut ret, watermark);
         }
@@ -995,9 +991,11 @@ mod tests {
             watermark3.clone(),
         );
 
-        let mut version = HummockVersion::default();
-        version.max_committed_epoch = EPOCH1;
-        version.safe_epoch = EPOCH1;
+        let mut version = HummockVersion {
+            max_committed_epoch: EPOCH1,
+            safe_epoch: EPOCH1,
+            ..Default::default()
+        };
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id.table_id,

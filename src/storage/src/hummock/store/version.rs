@@ -545,7 +545,7 @@ pub fn read_filter_for_local(
     epoch: HummockEpoch,
     table_id: TableId,
     mut table_key_range: TableKeyRange,
-    read_version: Arc<RwLock<HummockReadVersion>>,
+    read_version: &RwLock<HummockReadVersion>,
 ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
     let read_version_guard = read_version.read();
 
