@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_connector::source::{is_key_belong_to_format_encode_options, UPSTREAM_SOURCE_KEY};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
@@ -182,7 +182,7 @@ impl CatalogManager {
     /// We identify a 'legacy' source based on two conditions:
     /// 1. The `format_encode_options` in `source_info` is empty.
     /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
-    /// And if the source is identified as 'legacy', we move the misplaced keys from `with_properties` to `format_encode_options`.
+    /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
     async fn source_backward_compat_check(&self) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
@@ -204,19 +204,14 @@ impl CatalogManager {
                 .get(UPSTREAM_SOURCE_KEY)
                 .unwrap_or(&String::default())
                 .to_owned();
-            source.with_properties.retain(|k, v| {
-                if is_key_belong_to_format_encode_options(k, connector.clone()) {
-                    source
-                        .info
-                        .as_mut()
-                        .unwrap()
-                        .format_encode_options
-                        .insert(k.to_string(), v.to_string());
-                    false
-                } else {
-                    true
-                }
-            });
+            if let Some(source_info) = source.info.as_mut() {
+                source_info
+                    .format_encode_options
+                    .extend(source.with_properties.iter().filter_map(|(k, v)| {
+                        should_copy_to_format_encode_options(k, &connector)
+                            .then_some((k.to_owned(), v.to_owned()))
+                    }))
+            }
             sources.insert(source.id, source);
         }
         commit_meta!(self, sources)?;

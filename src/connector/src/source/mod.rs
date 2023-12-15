@@ -43,7 +43,7 @@ pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 
-pub fn is_key_belong_to_format_encode_options(key: &str, connector: String) -> bool {
+pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "schema.registry",
         "schema.location",
