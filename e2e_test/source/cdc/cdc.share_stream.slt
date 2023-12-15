@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) from pg_source table 'public.postgres_all_types';
 
+statement ok
 CREATE TABLE person_new (
     id int,
     name varchar,
@@ -155,7 +156,7 @@ CREATE TABLE person_new (
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.person';
 
-
+statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
 
 sleep 3s
@@ -183,7 +184,7 @@ SELECT * from person_new_cnt
 6
 
 query ITTTT
-SELECT * from person_new order id limit 3
+SELECT * from person_new order by id limit 3
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
 1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
