@@ -106,7 +106,6 @@ impl LogicalScan {
         self.core.table_desc.as_ref()
     }
 
-    /// FIXME
     pub fn table_catalog(&self) -> Arc<TableCatalog> {
         self.core.table_catalog.clone()
     }
@@ -245,7 +244,7 @@ impl LogicalScan {
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.required_col_idx().to_vec(),
-            self.core.table_catalog.clone(), // FIXME
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
