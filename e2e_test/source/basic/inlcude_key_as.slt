@@ -44,8 +44,8 @@ CREATE TABLE upsert_students_default_key (
 INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
-	topic = 'test')
+    properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_json')
 FORMAT PLAIN ENCODE JSON
 
 statement ok
