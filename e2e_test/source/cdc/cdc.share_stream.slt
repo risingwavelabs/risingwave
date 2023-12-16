@@ -44,6 +44,29 @@ SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
 
+statement ok
+CREATE TABLE IF NOT EXISTS mysql_all_types(
+    c_boolean boolean,
+    c_bit boolean,
+    c_tinyint smallint,
+    c_smallint smallint,
+    c_mediumint integer,
+    c_integer integer,
+    c_bigint bigint,
+    c_decimal decimal,
+    c_float real,
+    c_double double,
+    c_char_255 varchar,
+    c_varchar_10000 varchar,
+    c_binary_255 bytea,
+    c_varbinary_10000 bytea,
+    c_date date,
+    c_time time,
+    c_datetime timestamp,
+    c_timestamp timestamptz,
+    PRIMARY KEY (c_boolean,c_bigint,c_date)
+) from mysql_mytest table 'mytest.mysql_all_types';
+
 statement error
 create table non_exist ( id INT,
  name STRING,
@@ -98,3 +121,9 @@ SELECT order_id,order_date,customer_name,product_id FROM orders_test order by or
 10001 2020-07-30 10:08:22 Jark 102
 10002 2020-07-30 10:11:09 Sally 105
 10003 2020-07-30 12:00:30 Edward 106
+
+query IIIIITTTTTTTTT
+SELECT c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_float, c_double, c_char_255, c_varchar_10000, c_date, c_time, c_datetime, c_timestamp FROM mysql_all_types order by c_bit;
+----
+NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d 1001-01-01 NULL 2000-01-01 00:00:00 NULL
+-128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00

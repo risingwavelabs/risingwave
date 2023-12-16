@@ -363,8 +363,7 @@ impl MySqlExternalTableReader {
                 let row_stream = rs_stream.map(|row| {
                     // convert mysql row into OwnedRow
                     let mut row = row?;
-                    let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                    Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
                 });
 
                 pin_mut!(row_stream);
@@ -425,8 +424,7 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
             });
 
             pin_mut!(row_stream);
@@ -440,23 +438,31 @@ impl MySqlExternalTableReader {
 
     // mysql cannot leverage the given key to narrow down the range of scan,
     // we need to rewrite the comparison conditions by our own.
-    // (a, b) > (x, y) => ('a' > x) OR (('a' = x) AND ('b' > y))
+    // (a, b) > (x, y) => (`a` > x) OR ((`a` = x) AND (`b` > y))
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!("({} > :{})", columns[0], columns[0]));
+        conditions.push(format!(
+            "({} > :{})",
+            Self::quote_column(&columns[0]),
+            columns[0]
+        ));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
-            for (j, item) in columns.iter().enumerate().take(i - 1) {
+            for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!("({} = :{})", item, item));
+                    condition.push_str(&format!("({} = :{})", Self::quote_column(col), col));
                 } else {
-                    condition.push_str(&format!(" AND ({} = :{})", item, item));
+                    condition.push_str(&format!(" AND ({} = :{})", Self::quote_column(col), col));
                 }
             }
             // '>' condition
-            condition.push_str(&format!(" AND ({} > :{})", columns[i - 1], columns[i - 1]));
+            condition.push_str(&format!(
+                " AND ({} > :{})",
+                Self::quote_column(&columns[i - 1]),
+                columns[i - 1]
+            ));
             conditions.push(format!("({})", condition));
         }
         if columns.len() > 1 {
@@ -464,6 +470,10 @@ impl MySqlExternalTableReader {
         } else {
             conditions.join("")
         }
+    }
+
+    fn quote_column(column: &str) -> String {
+        format!("`{}`", column)
     }
 }
 
@@ -544,13 +554,13 @@ mod tests {
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(id > :id)");
+        assert_eq!(expr, "(`id` > :id)");
 
         let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(aa > :aa) OR ((aa = :aa) AND (bb > :bb)) OR ((aa = :aa) AND (bb = :bb) AND (cc > :cc))"
+            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
         );
     }
 
