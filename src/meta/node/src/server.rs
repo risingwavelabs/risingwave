@@ -456,20 +456,32 @@ pub async fn start_service_as_election_leader(
         Some(election_client) => Either::Left(election_client),
     });
 
+    let prometheus_client = opts.prometheus_endpoint.as_ref().map(|x| {
+        use std::str::FromStr;
+        prometheus_http_query::Client::from_str(x).unwrap()
+    });
+    let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        cluster_manager.clone(),
+        catalog_manager.clone(),
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+    ));
     #[cfg(not(madsim))]
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            prometheus_client: opts.prometheus_endpoint.as_ref().map(|x| {
-                use std::str::FromStr;
-                prometheus_http_query::Client::from_str(x).unwrap()
-            }),
-            prometheus_selector: opts.prometheus_selector.unwrap_or_default(),
+            prometheus_client,
+            prometheus_selector,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
+            diagnose_command,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)

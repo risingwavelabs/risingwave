@@ -3309,6 +3309,44 @@ impl CatalogManager {
             .map(|table| table.id)
             .collect()
     }
+
+    pub async fn source_count(&self) -> usize {
+        self.core.lock().await.database.sources.len()
+    }
+
+    pub async fn table_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::Table as i32)
+            .count()
+    }
+
+    pub async fn materialized_view_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::MaterializedView as i32)
+            .count()
+    }
+
+    pub async fn index_count(&self) -> usize {
+        self.core.lock().await.database.indexes.len()
+    }
+
+    pub async fn sink_count(&self) -> usize {
+        self.core.lock().await.database.sinks.len()
+    }
+
+    pub async fn function_count(&self) -> usize {
+        self.core.lock().await.database.functions.len()
+    }
 }
 
 // User related methods
