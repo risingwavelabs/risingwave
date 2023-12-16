@@ -32,6 +32,7 @@ CASES_MAP = {
     'big-query-sink': ['json'],
     'mindsdb': ['json'],
     'vector': ['json'],
+    'nats': ['json'],
 }
 
 def gen_pipeline_steps():
