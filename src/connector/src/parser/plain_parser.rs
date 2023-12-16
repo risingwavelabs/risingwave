@@ -82,21 +82,18 @@ impl PlainParser {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let change_event_op = ChangeEventOperation::Upsert;
+
         if let Some(data) = key && let Some(key_builder) = self.key_builder.as_mut() {
             // key is optional in format plain
             row_op = row_op.with_key(key_builder.generate_accessor(data).await?);
         }
         if let Some(data) = payload {
+            // the data part also can be an empty vec
             row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
-        } else {
-            return Err(RwError::from(ErrorCode::InternalError(
-                "payload is required in format plain, but got empty".to_string(),
-            )));
         }
 
         apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
             .map_err(Into::into)
-        // apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
     }
 }
 

@@ -105,10 +105,9 @@ where
     }
 
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
-        // access value firstly
         match desc.additional_column_type {
             AdditionalColumnType::Key => {
-                return if let Some(key_as_column_name) = &self.key_column_name
+                if let Some(key_as_column_name) = &self.key_column_name
                     && &desc.name == key_as_column_name
                 {
                     self.access(&["key"], Some(&desc.data_type))
@@ -117,14 +116,9 @@ where
                 }
             }
             AdditionalColumnType::Unspecified => {
-                match self.access(&["value", &desc.name], Some(&desc.data_type)) {
-                    Err(AccessError::Undefined { .. }) => (),
-                    other => return other,
-                };
+                self.access(&["value", &desc.name], Some(&desc.data_type))
             }
             _ => unreachable!(),
         }
-
-        Ok(None)
     }
 }
