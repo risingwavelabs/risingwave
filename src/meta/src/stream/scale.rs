@@ -1872,7 +1872,7 @@ impl ScaleController {
                 fragment_map.insert(fragment_id, fragment);
 
                 fragment_parallelism
-                    .insert(fragment_id, table_fragments.assigned_parallelism.clone());
+                    .insert(fragment_id, table_fragments.assigned_parallelism);
             }
 
             actor_status.extend(table_fragments.actor_status);

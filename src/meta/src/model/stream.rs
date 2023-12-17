@@ -153,6 +153,7 @@ impl MetadataModel for TableFragments {
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
+            parallelism: Some(self.assigned_parallelism.into()),
         }
     }
 
@@ -165,7 +166,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
-            assigned_parallelism: TableParallelism::Auto,
+            assigned_parallelism: prost.parallelism.unwrap().into(),
         }
     }
 
@@ -182,6 +183,7 @@ impl TableFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
+            TableParallelism::Auto,
         )
     }
 
@@ -192,6 +194,7 @@ impl TableFragments {
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, ParallelUnit>,
         ctx: StreamContext,
+        table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
@@ -213,7 +216,7 @@ impl TableFragments {
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
-            assigned_parallelism: TableParallelism::Auto,
+            assigned_parallelism: table_parallelism,
         }
     }
 

@@ -1111,7 +1111,7 @@ impl FragmentManager {
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
-        map: HashMap<TableId, TableParallelism>,
+        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
     ) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_version = guard.table_revision;
@@ -1179,6 +1179,12 @@ impl FragmentManager {
                 })
                 .collect_vec();
 
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+
+            if let Some(parallelism) = table_parallelism_assignment.get(&table_id) {
+                table_fragment.assigned_parallelism = *parallelism;
+            }
+
             for (fragment_id, reschedule) in reschedules {
                 let Reschedule {
                     added_actors,
@@ -1189,8 +1195,6 @@ impl FragmentManager {
                     downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
-
-                let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
                 // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
