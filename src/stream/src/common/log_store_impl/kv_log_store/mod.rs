@@ -257,21 +257,26 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 #[cfg(test)]
 mod tests {
     use std::future::{poll_fn, Future};
+    use std::iter::empty;
     use std::pin::pin;
     use std::sync::Arc;
     use std::task::Poll;
 
+    use itertools::Itertools;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::sink::log_store::{
-        LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
+        ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::store::SyncResult;
     use risingwave_storage::StateStore;
 
+    use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
         gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE,
@@ -1003,5 +1008,348 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_rewind_on_consuming_persisted_log() {
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table();
+
+        test_env.register_table(table.clone()).await;
+
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let stream_chunk3 = gen_stream_chunk(20);
+        let stream_chunk4 = gen_stream_chunk(30);
+        let stream_chunk5 = gen_stream_chunk(40);
+        let bitmap = calculate_vnode_bitmap(
+            stream_chunk1
+                .rows()
+                .chain(stream_chunk2.rows())
+                .chain(stream_chunk3.rows())
+                .chain(stream_chunk4.rows())
+                .chain(stream_chunk5.rows()),
+        );
+        let bitmap = Arc::new(bitmap);
+
+        async fn check_reader<'a, 'b>(
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
+        ) -> Vec<ChunkId> {
+            check_reader_inner(reader, data, true).await
+        }
+
+        async fn check_reader_last_unsealed<'a, 'b>(
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
+        ) -> Vec<ChunkId> {
+            check_reader_inner(reader, data, false).await
+        }
+
+        async fn check_reader_inner<'a, 'b>(
+            reader: &'a mut KvLogStoreReader<HummockStorage>,
+            data: impl Iterator<Item = &'b (u64, Option<&'b StreamChunk>)>,
+            last_sealed: bool,
+        ) -> Vec<ChunkId> {
+            let mut chunk_ids = Vec::new();
+            let data = data.collect_vec();
+            let size = data.len();
+            for (i, (epoch, stream_chunk)) in data.into_iter().enumerate() {
+                if let Some(stream_chunk) = stream_chunk {
+                    match reader.next_item().await.unwrap() {
+                        (
+                            item_epoch,
+                            LogStoreReadItem::StreamChunk {
+                                chunk: read_stream_chunk,
+                                chunk_id,
+                            },
+                        ) => {
+                            assert_eq!(item_epoch, *epoch);
+                            assert!(check_stream_chunk_eq(stream_chunk, &read_stream_chunk));
+                            chunk_ids.push(chunk_id);
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+                if last_sealed || i != size - 1 {
+                    match reader.next_item().await.unwrap() {
+                        (item_epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                            assert_eq!(item_epoch, *epoch);
+                            assert!(is_checkpoint)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let mut future = pin!(reader.next_item());
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            chunk_ids
+        }
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap.clone()),
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            + 1;
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+        let epoch2 = epoch1 + 1;
+        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer.write_chunk(stream_chunk2.clone()).await.unwrap();
+        let epoch3 = epoch2 + 1;
+        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer.write_chunk(stream_chunk3.clone()).await.unwrap();
+        writer.flush_current_epoch(u64::MAX, true).await.unwrap();
+
+        test_env.commit_epoch(epoch1).await;
+        test_env.commit_epoch(epoch2).await;
+        test_env.commit_epoch(epoch3).await;
+
+        test_env
+            .storage
+            .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+            .await
+            .unwrap();
+
+        reader.init().await.unwrap();
+
+        let chunk_ids = check_reader(
+            &mut reader,
+            [
+                (epoch1, Some(&stream_chunk1)),
+                (epoch2, Some(&stream_chunk2)),
+                (epoch3, Some(&stream_chunk3)),
+            ]
+            .iter(),
+        )
+        .await;
+        assert_eq!(3, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch1,
+                chunk_id: chunk_ids[0],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(
+            &mut reader,
+            [
+                (epoch1, None),
+                (epoch2, Some(&stream_chunk2)),
+                (epoch3, Some(&stream_chunk3)),
+            ]
+            .iter(),
+        )
+        .await;
+        assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(
+            &mut reader,
+            [
+                (epoch2, Some(&stream_chunk2)),
+                (epoch3, Some(&stream_chunk3)),
+            ]
+            .iter(),
+        )
+        .await;
+        assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch3,
+                chunk_id: chunk_ids[1],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
+        assert_eq!(0, chunk_ids.len());
+
+        // Recovery happens. Test rewind while consuming persisted log. No new data written
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap.clone()),
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch4 = epoch3 + 1;
+        writer
+            .init(EpochPair::new(epoch4, epoch3), false)
+            .await
+            .unwrap();
+
+        reader.init().await.unwrap();
+
+        let data = [
+            (epoch1, Some(&stream_chunk1)),
+            (epoch2, Some(&stream_chunk2)),
+            (epoch3, Some(&stream_chunk3)),
+        ];
+
+        assert_eq!(3, check_reader(&mut reader, data.iter()).await.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
+        assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_ids[0],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
+        assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch2 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
+        assert_eq!(1, chunk_ids.len());
+
+        // Recovery happens again. Test rewind with some new data written and flushed.
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap.clone()),
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        writer
+            .init(EpochPair::new(epoch4, epoch3), false)
+            .await
+            .unwrap();
+        writer.write_chunk(stream_chunk4.clone()).await.unwrap();
+        let epoch5 = epoch4 + 1;
+        writer.flush_current_epoch(epoch5, true).await.unwrap();
+        writer.write_chunk(stream_chunk5.clone()).await.unwrap();
+
+        reader.init().await.unwrap();
+
+        let data = [
+            (epoch1, Some(&stream_chunk1)),
+            (epoch2, Some(&stream_chunk2)),
+            (epoch3, Some(&stream_chunk3)),
+            (epoch4, Some(&stream_chunk4)),
+            (epoch5, Some(&stream_chunk5)),
+        ];
+
+        assert_eq!(
+            5,
+            check_reader_last_unsealed(&mut reader, data.iter())
+                .await
+                .len()
+        );
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
+        assert_eq!(4, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_ids[0],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
+        assert_eq!(4, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch2 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
+        assert_eq!(3, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch3 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
+        assert_eq!(2, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch4,
+                chunk_id: chunk_ids[0],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(
+            &mut reader,
+            [(epoch4, None), (epoch5, Some(&stream_chunk5))].iter(),
+        )
+        .await;
+        assert_eq!(1, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch4 })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids =
+            check_reader_last_unsealed(&mut reader, [(epoch5, Some(&stream_chunk5))].iter()).await;
+        assert_eq!(1, chunk_ids.len());
+
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch5,
+                chunk_id: chunk_ids[0],
+            })
+            .await
+            .unwrap();
+        reader.rewind().await.unwrap();
+        let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;
+        assert!(chunk_ids.is_empty());
     }
 }

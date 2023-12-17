@@ -44,7 +44,7 @@ use risingwave_hummock_sdk::key::{next_key, TableKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
-use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
+use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
@@ -247,11 +247,10 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
-        serialize_pk_with_vnode(
+    pub(crate) fn serialize_epoch(&self, epoch: u64) -> Bytes {
+        serialize_pk(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
-            vnode,
         )
     }
 
