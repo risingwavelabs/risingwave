@@ -159,6 +159,11 @@ impl MetadataModel for TableFragments {
 
     fn from_protobuf(prost: Self::PbType) -> Self {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
+
+        let default_parallelism = PbTableParallelism {
+            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
+        };
+
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
@@ -166,7 +171,7 @@ impl MetadataModel for TableFragments {
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
             ctx,
-            assigned_parallelism: prost.parallelism.unwrap().into(),
+            assigned_parallelism: prost.parallelism.unwrap_or(default_parallelism).into(),
         }
     }
 

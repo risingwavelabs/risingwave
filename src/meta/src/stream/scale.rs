@@ -32,7 +32,7 @@ use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::{
-    PbWorkerChanges, Policy, StableResizePolicy,
+    Policy, StableResizePolicy,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -1871,8 +1871,7 @@ impl ScaleController {
 
                 fragment_map.insert(fragment_id, fragment);
 
-                fragment_parallelism
-                    .insert(fragment_id, table_fragments.assigned_parallelism);
+                fragment_parallelism.insert(fragment_id, table_fragments.assigned_parallelism);
             }
 
             actor_status.extend(table_fragments.actor_status);
@@ -2334,52 +2333,42 @@ impl GlobalStreamManager {
         Ok(())
     }
 
-    async fn trigger_scale_out(
-        &self,
-        workers: Vec<WorkerId>,
-        fragments: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<()> {
+    async fn trigger_parallelism_control(&self) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
-        let fragment_worker_changes = {
+        let table_parallelisms = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
 
-            let fragments = match fragments {
-                None => {
-                    let mut fragments = HashSet::new();
-                    for table_fragments in guard.table_fragments().values() {
-                        for fragment_id in table_fragments.fragment_ids() {
-                            fragments.insert(fragment_id);
-                        }
-                    }
-                    fragments
-                }
-                Some(fragments) => fragments,
-            };
-
-            let mut fragment_worker_changes = HashMap::new();
-
-            for fragment_id in fragments {
-                fragment_worker_changes.insert(
-                    fragment_id,
-                    PbWorkerChanges {
-                        include_worker_ids: workers.clone(),
-                        ..Default::default()
-                    },
-                );
-            }
-
-            fragment_worker_changes
+            guard
+                .table_fragments()
+                .iter()
+                .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
+                .collect()
         };
+
+        let workers = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
 
         let reschedules = self
             .scale_controller
-            .generate_stable_resize_plan(
-                StableResizePolicy {
-                    fragment_worker_changes,
-                },
-                None,
-            )
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms,
+            })
             .await?;
 
         if reschedules.is_empty() {
@@ -2442,9 +2431,8 @@ impl GlobalStreamManager {
                         continue;
                     }
 
-                    match self.trigger_scale_out(include_workers, None).await {
+                    match self.trigger_parallelism_control().await {
                         Ok(_) => {
-                            worker_cache.clear();
                             changed = false;
                         }
                         Err(e) => {
