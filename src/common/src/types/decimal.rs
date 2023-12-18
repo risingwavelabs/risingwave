@@ -85,33 +85,7 @@ impl ToBinary for Decimal {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
-                match self {
-                    Decimal::Normalized(d) => {
-                        d.to_sql(&Type::ANY, &mut output).unwrap();
-                        return Ok(Some(output.freeze()));
-                    }
-                    Decimal::NaN => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xC000);
-                        output.put_i16(0);
-                    }
-                    Decimal::PositiveInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xD000);
-                        output.put_i16(0);
-                    }
-                    Decimal::NegativeInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xF000);
-                        output.put_i16(0);
-                    }
-                };
+                self.to_sql(&Type::NUMERIC, &mut output).unwrap();
                 Ok(Some(output.freeze()))
             }
             _ => unreachable!(),

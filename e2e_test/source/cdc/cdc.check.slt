@@ -42,10 +42,11 @@ select count(*) from t1_rw;
 ----
 1
 
+# 3 inserted in cdc.share_stream.slt and 3 inserted in postgres_cdc.sql
 query I
 select count(*) from person_rw;
 ----
-3
+6
 
 query I
 select count(*) from tt3_rw;

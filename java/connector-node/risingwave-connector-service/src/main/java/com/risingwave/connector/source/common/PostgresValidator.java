@@ -44,6 +44,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private static final String AWS_RDS_HOST = "rds.amazonaws.com";
     private final boolean isAwsRds;
+
+    // Whether the properties to validate is shared by multiple tables.
+    // If true, we will skip validation check for table
     private final boolean isMultiTableShared;
 
     public PostgresValidator(

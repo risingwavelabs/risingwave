@@ -235,10 +235,14 @@ impl PostgresExternalTableReader {
                 col_expr.push_str(", ");
                 arg_expr.push_str(", ");
             }
-            col_expr.push_str(column);
+            col_expr.push_str(&Self::quote_column(column));
             arg_expr.push_str(format!("${}", i + 1).as_str());
         }
         format!("({}) > ({})", col_expr, arg_expr)
+    }
+
+    fn quote_column(column: &str) -> String {
+        format!("\"{}\"", column)
     }
 }
 
@@ -269,15 +273,15 @@ mod tests {
     fn test_filter_expression() {
         let cols = vec!["v1".to_string()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(v1) > ($1)");
+        assert_eq!(expr, "(\"v1\") > ($1)");
 
         let cols = vec!["v1".to_string(), "v2".to_string()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(v1, v2) > ($1, $2)");
+        assert_eq!(expr, "(\"v1\", \"v2\") > ($1, $2)");
 
         let cols = vec!["v1".to_string(), "v2".to_string(), "v3".to_string()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(v1, v2, v3) > ($1, $2, $3)");
+        assert_eq!(expr, "(\"v1\", \"v2\", \"v3\") > ($1, $2, $3)");
     }
 
     // manual test
