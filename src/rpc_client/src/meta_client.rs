@@ -1035,8 +1035,8 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn backup_meta(&self) -> Result<u64> {
-        let req = BackupMetaRequest {};
+    pub async fn backup_meta(&self, remarks: Option<String>) -> Result<u64> {
+        let req = BackupMetaRequest { remarks };
         let resp = self.inner.backup_meta(req).await?;
         Ok(resp.job_id)
     }
