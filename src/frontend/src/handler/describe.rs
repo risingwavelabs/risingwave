@@ -77,12 +77,12 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                         .map(|idx| t.table_catalog.columns[*idx].column_desc.clone())
                         .collect_vec();
                     (
-                        t.table_catalog.columns,
+                        t.table_catalog.columns.clone(),
                         pk_column_catalogs,
                         dist_columns,
                         t.table_indexes,
-                        t.table_catalog.name,
-                        t.table_catalog.description,
+                        t.table_catalog.name.clone(),
+                        t.table_catalog.description.clone(),
                     )
                 }
                 Relation::SystemTable(t) => {

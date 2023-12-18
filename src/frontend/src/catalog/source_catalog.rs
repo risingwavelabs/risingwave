@@ -22,7 +22,6 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
-use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
@@ -36,7 +35,7 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub properties: BTreeMap<String, String>,
+    pub with_properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
@@ -61,7 +60,7 @@ impl SourceCatalog {
             row_id_index: self.row_id_index.map(|idx| idx as _),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
             pk_column_ids: self.pk_col_ids.iter().map(Into::into).collect(),
-            properties: self.properties.clone().into_iter().collect(),
+            with_properties: self.with_properties.clone().into_iter().collect(),
             owner: self.owner,
             info: Some(self.info.clone()),
             watermark_descs: self.watermark_descs.clone(),
@@ -93,7 +92,7 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let with_options = WithOptions::new(prost.properties.clone());
+        let with_properties = prost.with_properties.clone().into_iter().collect();
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
@@ -120,7 +119,7 @@ impl From<&PbSource> for SourceCatalog {
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,
-            properties: with_options.into_inner(),
+            with_properties,
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),

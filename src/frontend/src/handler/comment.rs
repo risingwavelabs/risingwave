@@ -50,7 +50,7 @@ pub async fn handle_comment(
                 let (database_id, schema_id) =
                     session.get_database_and_schema_id_for_create(schema)?;
                 let table = binder.bind_table(None, &table, None)?;
-                binder.bind_columns_to_context(col.real_value(), table.table_catalog.columns)?;
+                binder.bind_columns_to_context(col.real_value(), &table.table_catalog.columns)?;
 
                 let column = binder.bind_column(object_name.0.as_slice())?;
 
