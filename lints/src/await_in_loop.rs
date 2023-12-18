@@ -53,17 +53,17 @@ impl<'tcx> LateLintPass<'tcx> for AwaitInLoop {
 
         let mut visitor = AwaitInLoopVisitor {
             cx,
-            in_loop: false,
-            await_span: None,
+            in_loop: None,
+            found_await: None,
         };
 
         visitor.visit_expr(expr);
 
-        if let Some(await_span) = visitor.await_span {
+        if let Some((await_span, in_loop_span)) = visitor.found_await {
             span_lint_and_help(
                 cx,
                 AWAIT_IN_LOOP,
-                await_span,
+                vec![await_span, in_loop_span],
                 ".await in loop",
                 None,
                 "consider make it concurrent using futures::future::join_all, or ignore it if there are some dependencies between iterations",
@@ -75,8 +75,9 @@ impl<'tcx> LateLintPass<'tcx> for AwaitInLoop {
 struct AwaitInLoopVisitor<'hir, 'tcx> {
     // Useful for debug.
     cx: &'hir LateContext<'tcx>,
-    in_loop: bool,
-    await_span: Option<Span>,
+    in_loop: Option<Span>,
+    // The first span is the `.await` and the second span is the loop.
+    found_await: Option<(Span, Span)>,
 }
 
 impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
@@ -87,7 +88,7 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                 if !matches!(source, LoopSource::Loop) =>
             {
                 if !is_from_async_await(ex.span) {
-                    self.in_loop = true;
+                    self.in_loop = Some(ex.span);
                     if let Some(WhileLet {
                         let_pat: _,
                         // Don't visit `let_expr` to avoid such case:
@@ -102,13 +103,13 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                     } else {
                         walk_expr(self, ex);
                     }
-                    self.in_loop = false;
+                    self.in_loop = None;
                 } else {
                     walk_expr(self, ex);
                 }
             }
             ExprKind::Match(sub, _, source) if matches!(source, MatchSource::AwaitDesugar) => 'm: {
-                if self.in_loop {
+                if let Some(in_loop_span) = self.in_loop {
                     let typeck_results = self.cx.typeck_results();
                     let ty = typeck_results.expr_ty(sub);
                     if let rustc_middle::ty::Adt(adt, _) = ty.kind() {
@@ -116,7 +117,7 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                             break 'm;
                         }
                     }
-                    let _ = self.await_span.get_or_insert(ex.span);
+                    let _ = self.found_await.get_or_insert((ex.span, in_loop_span));
                 }
             }
             _ => walk_expr(self, ex),

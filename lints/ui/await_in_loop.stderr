@@ -1,0 +1,26 @@
+error: .await in loop
+  --> $DIR/await_in_loop.rs:10:5
+   |
+LL | /     for _i in 0..10 {
+LL | |         g().await;
+   | |         ^^^^^^^^^
+LL | |     }
+   | |_____^
+   |
+   = help: consider make it concurrent using futures::future::join_all, or ignore it if there are some dependencies between iterations
+   = note: `-D rw::await-in-loop` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(rw::await_in_loop)]`
+
+error: .await in loop
+  --> $DIR/await_in_loop.rs:30:5
+   |
+LL | /     while let Some(_) = s.next().await {
+LL | |         g().await;
+   | |         ^^^^^^^^^
+LL | |     }
+   | |_____^
+   |
+   = help: consider make it concurrent using futures::future::join_all, or ignore it if there are some dependencies between iterations
+
+error: aborting due to 2 previous errors
+
