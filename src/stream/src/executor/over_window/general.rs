@@ -71,6 +71,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_order_types: Vec<OrderType>,
     input_pk_indices: Vec<usize>,
     input_schema_len: usize,
+    state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
@@ -180,6 +181,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .map(|i| input_schema.fields()[*i].data_type.clone())
             .collect();
 
+        let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
+            &args.partition_key_indices,
+            &args.order_key_indices,
+            &input_info.pk_indices,
+        );
+
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -192,6 +199,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
                 input_schema_len: input_schema.len(),
+                state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
                 metrics: args.metrics,
@@ -337,11 +345,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &mut cache,
                 this.cache_policy,
                 &this.calls,
-                &this.partition_key_indices,
-                &this.order_key_data_types,
-                &this.order_key_order_types,
-                &this.order_key_indices,
-                &this.input_pk_indices,
+                RowConverter {
+                    state_key_to_table_sub_pk_proj: &this.state_key_to_table_sub_pk_proj,
+                    order_key_indices: &this.order_key_indices,
+                    order_key_data_types: &this.order_key_data_types,
+                    order_key_order_types: &this.order_key_order_types,
+                    input_pk_indices: &this.input_pk_indices,
+                },
             );
 
             // Build changes for current partition.
@@ -674,5 +684,70 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowConverter<'a> {
+    state_key_to_table_sub_pk_proj: &'a [usize],
+    order_key_indices: &'a [usize],
+    order_key_data_types: &'a [DataType],
+    order_key_order_types: &'a [OrderType],
+    input_pk_indices: &'a [usize],
+}
+
+impl<'a> RowConverter<'a> {
+    /// Calculate the indices needed for projection from state key to state table sub pk (used to do
+    /// prefixed table scanning). Ideally this function should be called only once by each executor instance.
+    pub(super) fn calc_state_key_to_table_sub_pk_proj(
+        partition_key_indices: &[usize],
+        order_key_indices: &[usize],
+        input_pk_indices: &'a [usize],
+    ) -> Vec<usize> {
+        let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
+        let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
+        for (proj_idx, key_idx) in order_key_indices
+            .iter()
+            .chain(input_pk_indices.iter())
+            .enumerate()
+        {
+            if col_dedup.insert(*key_idx) {
+                projection.push(proj_idx);
+            }
+        }
+        projection.shrink_to_fit();
+        projection
+    }
+
+    /// Convert [`StateKey`] to sub pk (pk without partition key) as [`OwnedRow`].
+    pub(super) fn state_key_to_table_sub_pk(
+        &self,
+        key: &StateKey,
+    ) -> StreamExecutorResult<OwnedRow> {
+        Ok(memcmp_encoding::decode_row(
+            &key.order_key,
+            self.order_key_data_types,
+            self.order_key_order_types,
+        )?
+        .chain(key.pk.as_inner())
+        .project(&self.state_key_to_table_sub_pk_proj)
+        .into_owned_row())
+    }
+
+    /// Convert full input/output row to [`StateKey`].
+    pub(super) fn row_to_state_key(
+        &self,
+        full_row: impl Row + Copy,
+    ) -> StreamExecutorResult<StateKey> {
+        Ok(StateKey {
+            order_key: memcmp_encoding::encode_row(
+                full_row.project(self.order_key_indices),
+                self.order_key_order_types,
+            )?,
+            pk: full_row
+                .project(self.input_pk_indices)
+                .into_owned_row()
+                .into(),
+        })
     }
 }
