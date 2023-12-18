@@ -88,7 +88,12 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.right_degree_table, "HashJoinDegreeRight");
             }
             NodeBody::DynamicFilter(node) => {
-                always!(node.left_table, "DynamicFilterLeft");
+                if node.condition_always_relax {
+                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
+                } else {
+                    always!(node.left_table, "DynamicFilterLeft");
+                }
+
                 always!(node.right_table, "DynamicFilterRight");
             }
 
