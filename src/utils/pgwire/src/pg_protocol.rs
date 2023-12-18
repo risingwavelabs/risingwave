@@ -287,7 +287,7 @@ where
                         elapsed += period;
                         tracing::info!(
                             target: PGWIRE_SLOW_QUERY_LOG,
-                            ?elapsed,
+                            elapsed = %format_args!("{}ms", elapsed.as_millis()),
                             "slow query"
                         );
                     }
@@ -312,7 +312,7 @@ where
                 tracing::info!(
                     target: PGWIRE_QUERY_LOG,
                     status = if result.is_ok() { "ok" } else { "err" },
-                    time = ?elapsed,
+                    time = %format_args!("{}ms", elapsed.as_millis()),
                 );
             }
 
