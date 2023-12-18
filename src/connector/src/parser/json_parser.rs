@@ -141,12 +141,11 @@ impl JsonParser {
 
 pub async fn schema_to_columns(
     schema_location: &str,
-    use_schema_registry: bool,
+    schema_registry_auth: Option<SchemaRegistryAuth>,
     props: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
-    let schema_content = if use_schema_registry {
-        let schema_registry_auth = SchemaRegistryAuth::from(props);
+    let schema_content = if let Some(schema_registry_auth) = schema_registry_auth {
         let client = Client::new(url, &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
         let resolver = ConfluentSchemaResolver::new(client);

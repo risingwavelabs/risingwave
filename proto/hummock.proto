@@ -168,6 +168,7 @@ message HummockVersionDelta {
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
   map<uint32, TableWatermarks> new_table_watermarks = 8;
+  repeated uint32 removed_table_ids = 9;
 }
 
 message HummockVersionDeltas {
