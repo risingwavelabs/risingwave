@@ -490,7 +490,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )?;
 
     // add additional columns before bind pk, because `format upsert` requires the key column
-    handle_addition_columns(&properties, include_column_options, &mut columns)?;
+    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
         &source_schema,
         &source_info,
