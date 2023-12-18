@@ -423,7 +423,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-                            // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/13998
                             if self.condition_always_relax && !self.cleaned_by_watermark {
                                 unused_clean_hint = row[self.key_l].clone()
                             }
