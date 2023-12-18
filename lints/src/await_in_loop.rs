@@ -28,7 +28,7 @@ declare_tool_lint! {
     /// ```
     /// Use instead:
     /// ```no_run
-    /// futures::future::join_all((0..10).iter.map(|_| f())).await;
+    /// futures::future::join_all((0..10).map(|_| f())).await;
     /// ```
     pub rw::AWAIT_IN_LOOP,
     Warn,
