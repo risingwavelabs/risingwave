@@ -314,7 +314,7 @@ impl MySqlExternalTableReader {
             .fields
             .iter()
             .filter(|f| f.name != OFFSET_COLUMN_NAME)
-            .map(|f| format!("{}", Self::quote_column(f.name.as_str())))
+            .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
         Ok(Self {
