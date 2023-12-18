@@ -49,7 +49,7 @@ impl Access for ProtobufAccess {
             .ok_or_else(|| {
                 let err_msg = format!("protobuf schema don't have field {}", path[0]);
                 static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(|| LogSuppresser::default());
+                    LazyLock::new(LogSuppresser::default);
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::error!(suppressed_count, err_msg);
                 }

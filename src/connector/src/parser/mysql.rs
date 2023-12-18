@@ -92,7 +92,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
                     static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(|| LogSuppresser::default());
+                        LazyLock::new(LogSuppresser::default);
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
                     }

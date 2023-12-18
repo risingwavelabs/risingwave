@@ -86,7 +86,7 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Decimal(DecimalSchema { precision, .. }) => {
             if *precision > Decimal::MAX_PRECISION.into() {
                 static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(|| LogSuppresser::default());
+                    LazyLock::new(LogSuppresser::default);
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::warn!(
                     "RisingWave supports decimal precision up to {}, but got {}. Will truncate. ({} suppressed)",

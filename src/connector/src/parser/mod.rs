@@ -331,7 +331,7 @@ impl SourceStreamChunkRowWriter<'_> {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                            LazyLock::new(|| LogSuppresser::default());
+                            LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::warn!(
                                 %error,
@@ -606,7 +606,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                            LazyLock::new(|| LogSuppresser::default());
+                            LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::error!(
                                 %error,

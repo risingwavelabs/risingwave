@@ -13,16 +13,13 @@
 // limitations under the License.
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::LazyLock;
 
 use bytes::Bytes;
-use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::log::LogSuppresser;
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
