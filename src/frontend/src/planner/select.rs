@@ -226,12 +226,12 @@ impl Planner {
         if fields.len() != 1 {
             bail!("subquery must return only one column");
         }
-        let input_column_type = fields[0].data_type().into();
+        let input_column_type = fields[0].data_type();
         Ok(Agg::new(
             vec![PlanAggCall {
                 agg_kind: AggKind::ArrayAgg,
                 return_type: DataType::List(input.schema().fields()[0].data_type().into()),
-                inputs: vec![InputRef::new(0, input_column_type).into()],
+                inputs: vec![InputRef::new(0, input_column_type)],
                 distinct: false,
                 order_by: vec![],
                 filter: Condition::true_cond(),
