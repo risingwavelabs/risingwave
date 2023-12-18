@@ -3846,9 +3846,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cda5c72111199c8aa5e70ccefa2bc5713fa5fe34471c381448ad3318e6b6f90"
+checksum = "8df47c9672ac893c172832c79c41bc4be7b24f71376fb00be461418c7a4d1cfe"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -11765,7 +11765,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.8.5",
+ "rand 0.4.6",
  "static_assertions",
 ]
 
