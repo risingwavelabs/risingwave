@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
@@ -88,7 +91,11 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
+                    }
                     None
                 }
             }
