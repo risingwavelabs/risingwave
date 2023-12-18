@@ -314,7 +314,7 @@ impl MySqlExternalTableReader {
             .fields
             .iter()
             .filter(|f| f.name != OFFSET_COLUMN_NAME)
-            .map(|f| format!("`{}`", f.name.as_str()))
+            .map(|f| format!("{}", Self::quote_column(f.name.as_str())))
             .join(",");
 
         Ok(Self {
@@ -332,7 +332,10 @@ impl MySqlExternalTableReader {
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) {
-        let order_key = primary_keys.iter().join(",");
+        let order_key = primary_keys
+            .iter()
+            .map(|col| Self::quote_column(col))
+            .join(",");
         let sql = if start_pk_row.is_none() {
             format!(
                 "SELECT {} FROM {} ORDER BY {}",
