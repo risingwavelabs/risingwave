@@ -141,7 +141,7 @@ impl LevelCompactionPicker {
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
             std::cmp::max(
-                self.config.max_bytes_for_level_base * 2,
+                self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
             1,
