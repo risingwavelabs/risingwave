@@ -253,6 +253,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         cache: &'a mut PartitionCache,
         cache_policy: CachePolicy,
         calls: &'a [WindowFuncCall],
+        partition_key_indices: &'a [usize],
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
         order_key_indices: &'a [usize],
@@ -260,7 +261,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> Self {
         // TODO(rc): move the calculation to executor?
         let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
-        let mut col_dedup = HashSet::new();
+        let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
         for (proj_idx, key_idx) in order_key_indices
             .iter()
             .chain(input_pk_indices.iter())
