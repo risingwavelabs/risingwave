@@ -66,7 +66,7 @@ impl<'tcx> LateLintPass<'tcx> for AwaitInLoop {
                 vec![await_span, in_loop_span],
                 ".await in loop",
                 None,
-                "consider make it concurrent using futures::future::join_all, or ignore it if there are some dependencies between iterations",
+                "consider make it concurrent using futures::future::join_all, or ignore the lint if the loop body must be executed sequentially",
             )
         }
     }
