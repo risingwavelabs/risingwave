@@ -3277,10 +3277,22 @@ version = "0.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
 dependencies = [
- "enum-ordinalize",
+ "enum-ordinalize 3.1.13",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "educe"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "597b6c9e278fefec3b25dfbb86195aeafe270dc6f13e27a3a20a95ba449f1bfb"
+dependencies = [
+ "enum-ordinalize 4.3.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
 ]
 
 [[package]]
@@ -3408,6 +3420,26 @@ checksum = "e4f76552f53cefc9a7f64987c3701b99d982f7690606fd67de1d09712fbf52f1"
 dependencies = [
  "num-bigint",
  "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea0dcfa4e54eeb516fe454635a95753ddd39acda650ce703031c6973e315dd5"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d28318a75d4aead5c4db25382e8ef717932d0346600cacae6357eb5941bc5ff"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -8199,7 +8231,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe",
+ "educe 0.5.7",
  "either",
  "enum-as-inner",
  "enumflags2",
@@ -8208,6 +8240,7 @@ dependencies = [
  "fixedbitset",
  "fs-err",
  "futures",
+ "governor",
  "hex",
  "http 0.2.9",
  "http-body",
@@ -8686,7 +8719,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe",
+ "educe 0.5.7",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -9380,7 +9413,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "educe",
+ "educe 0.5.7",
  "either",
  "enum-as-inner",
  "expect-test",
@@ -10582,7 +10615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67e8d8e7f43fc5d4c35be73549ea22ed1d712dcf39656a243144677297da5ec"
 dependencies = [
  "async-trait",
- "educe",
+ "educe 0.4.23",
  "fs-err",
  "futures",
  "glob",

@@ -937,7 +937,7 @@ pub(super) fn bind_source_watermark(
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
     let mut binder = Binder::new_for_ddl(session);
-    binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
+    binder.bind_columns_to_context(name.clone(), column_catalogs)?;
 
     let watermark_descs = source_watermarks
         .into_iter()
