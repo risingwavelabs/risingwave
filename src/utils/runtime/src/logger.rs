@@ -18,16 +18,16 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
+use risingwave_common::util::query_log::*;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
-
-const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
-const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
 pub struct LoggerSettings {
     /// The name of the service.
@@ -115,7 +115,7 @@ impl LoggerSettings {
 /// If it is set,
 /// - Dump logs of all SQLs, i.e., tracing target [`PGWIRE_QUERY_LOG`] to
 ///   `RW_QUERY_LOG_PATH/query.log`.
-/// - Dump slow queries, i.e., tracing target [`SLOW_QUERY_LOG`] to
+/// - Dump slow queries, i.e., tracing target [`PGWIRE_SLOW_QUERY_LOG`] to
 ///   `RW_QUERY_LOG_PATH/slow_query.log`.
 ///
 /// Note:
@@ -247,53 +247,73 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 e.as_report(),
             )
         });
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(query_log_path.join("query.log"))
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to create '{}/query.log': {}",
-                    query_log_path.display(),
-                    e.as_report(),
-                )
-            });
-        let layer = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_level(false)
-            .with_file(false)
-            .with_target(false)
-            .with_timer(default_timer.clone())
-            .with_thread_names(true)
-            .with_thread_ids(true)
-            .with_writer(std::sync::Mutex::new(file))
-            .with_filter(filter::Targets::new().with_target(PGWIRE_QUERY_LOG, Level::TRACE));
-        layers.push(layer.boxed());
 
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(query_log_path.join("slow_query.log"))
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to create '{}/slow_query.log': {}",
-                    query_log_path.display(),
-                    e.as_report(),
-                )
-            });
-        let layer = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_level(false)
-            .with_file(false)
-            .with_target(false)
-            .with_timer(default_timer)
-            .with_thread_names(true)
-            .with_thread_ids(true)
-            .with_writer(std::sync::Mutex::new(file))
-            .with_filter(filter::Targets::new().with_target(SLOW_QUERY_LOG, Level::TRACE));
-        layers.push(layer.boxed());
+        /// Newtype wrapper for `DefaultFields`.
+        ///
+        /// `fmt::Layer` will share the same `FormattedFields` extension for spans across
+        /// different layers, as long as the type of `N: FormatFields` is the same. This
+        /// will cause several problems:
+        ///
+        /// - `with_ansi(false)` does not take effect and it will follow the settings of
+        ///   the primary fmt layer installed above.
+        /// - `Span::record` will update the same `FormattedFields` multiple times,
+        ///   leading to duplicated fields.
+        ///
+        /// As a workaround, we use a newtype wrapper here to get a different type id.
+        /// The const generic parameter `SLOW` is further used to distinguish between the
+        /// query log and the slow query log.
+        #[derive(Default)]
+        struct FmtFields<const SLOW: bool>(DefaultFields);
+
+        impl<'writer, const SLOW: bool> FormatFields<'writer> for FmtFields<SLOW> {
+            fn format_fields<R: tracing_subscriber::field::RecordFields>(
+                &self,
+                writer: tracing_subscriber::fmt::format::Writer<'writer>,
+                fields: R,
+            ) -> std::fmt::Result {
+                self.0.format_fields(writer, fields)
+            }
+        }
+
+        for (file_name, target, is_slow) in [
+            ("query.log", PGWIRE_QUERY_LOG, false),
+            ("slow_query.log", PGWIRE_SLOW_QUERY_LOG, true),
+        ] {
+            let path = query_log_path.join(file_name);
+
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .unwrap_or_else(|e| {
+                    panic!("failed to create `{}`: {}", path.display(), e.as_report(),)
+                });
+
+            let layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_level(false)
+                .with_file(false)
+                .with_target(false)
+                .with_timer(default_timer.clone())
+                .with_thread_names(true)
+                .with_thread_ids(true)
+                .with_writer(file);
+
+            let layer = match is_slow {
+                true => layer.fmt_fields(FmtFields::<true>::default()).boxed(),
+                false => layer.fmt_fields(FmtFields::<false>::default()).boxed(),
+            };
+
+            let layer = layer.with_filter(
+                filter::Targets::new()
+                    // Root span must be enabled to provide common info like the SQL query.
+                    .with_target(PGWIRE_ROOT_SPAN_TARGET, Level::INFO)
+                    .with_target(target, Level::INFO),
+            );
+
+            layers.push(layer.boxed());
+        }
     }
 
     if settings.enable_tokio_console {
