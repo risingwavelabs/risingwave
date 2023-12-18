@@ -374,12 +374,12 @@ impl CacheRefillTask {
 
         for psst in parent_ssts {
             for pblk in 0..psst.block_count() {
-                let pleft = &psst.meta().block_metas[pblk].smallest_key;
+                let pleft = &psst.meta.block_metas[pblk].smallest_key;
                 let pright = if pblk + 1 == psst.block_count() {
                     // `largest_key` can be included or excluded, both are treated as included here
-                    &psst.meta().largest_key
+                    &psst.meta.largest_key
                 } else {
-                    &psst.meta().block_metas[pblk + 1].smallest_key
+                    &psst.meta.block_metas[pblk + 1].smallest_key
                 };
 
                 // partition point: unit.right < pblk.left
@@ -396,13 +396,13 @@ impl CacheRefillTask {
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
                     let unit = SstableUnit {
-                        sst_obj_id: u.sst.id(),
+                        sst_obj_id: u.sst.id,
                         blks: u.blks.clone(),
                     };
                     if res.contains(&unit) {
                         continue;
                     }
-                    if filter.contains(&(psst.id(), pblk)) {
+                    if filter.contains(&(psst.id, pblk)) {
                         res.insert(unit);
                     }
                 }
@@ -479,7 +479,7 @@ impl CacheRefillTask {
             for blk_start in (0..sst.block_count()).step_by(unit) {
                 let blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
                 let unit = SstableUnit {
-                    sst_obj_id: sst.id(),
+                    sst_obj_id: sst.id,
                     blks: blk_start..blk_end,
                 };
                 futures.push(
@@ -519,7 +519,7 @@ impl CacheRefillTask {
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, &parent_ssts);
 
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
-            holders.into_iter().map(|meta| (meta.id(), meta)).collect();
+            holders.into_iter().map(|meta| (meta.id, meta)).collect();
         let futures = units.into_iter().map(|unit| {
             let ssts = &ssts;
             async move {
@@ -542,7 +542,7 @@ impl CacheRefillTask {
 
         // update filter for sst id only
         if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert((sst.id(), usize::MAX));
+            filter.insert((sst.id, usize::MAX));
         }
 
         let blocks = unit.blks.size().unwrap();
@@ -563,7 +563,7 @@ impl CacheRefillTask {
         for blk in unit.blks {
             let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
-                sst_id: sst.id(),
+                sst_id: sst.id,
                 block_idx: blk as u64,
             };
             // see `CachedBlock::serialized_len()`
@@ -593,7 +593,7 @@ impl CacheRefillTask {
 
                 let data = sstable_store
                     .store()
-                    .read(&sstable_store.get_sst_data_path(sst.id()), range.clone())
+                    .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
                     .await?;
                 let mut futures = vec![];
                 for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
@@ -693,15 +693,15 @@ impl<'a> Unit<'a> {
     }
 
     fn smallest_key(&self) -> &Vec<u8> {
-        &self.sst.meta().block_metas[self.blks.start].smallest_key
+        &self.sst.meta.block_metas[self.blks.start].smallest_key
     }
 
     // `largest_key` can be included or excluded, both are treated as included here
     fn largest_key(&self) -> &Vec<u8> {
         if self.blks.end == self.sst.block_count() {
-            &self.sst.meta().largest_key
+            &self.sst.meta.largest_key
         } else {
-            &self.sst.meta().block_metas[self.blks.end].smallest_key
+            &self.sst.meta.block_metas[self.blks.end].smallest_key
         }
     }
 

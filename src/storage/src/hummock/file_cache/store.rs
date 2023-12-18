@@ -405,8 +405,16 @@ impl std::io::Read for SstableBlockIndexCursor {
 impl Cursor for SstableBlockIndexCursor {
     type T = SstableBlockIndex;
 
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
     fn into_inner(self) -> Self::T {
         self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.serialized_len()
     }
 }
 
@@ -532,8 +540,16 @@ impl std::io::Read for CachedBlockCursor {
 impl Cursor for CachedBlockCursor {
     type T = CachedBlock;
 
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
     fn into_inner(self) -> Self::T {
         self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.serialized_len()
     }
 }
 
@@ -580,8 +596,16 @@ impl std::io::Read for BoxBlockCursor {
 impl Cursor for BoxBlockCursor {
     type T = Box<Block>;
 
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
     fn into_inner(self) -> Self::T {
         self.inner
+    }
+
+    fn len(&self) -> usize {
+        self.inner.raw_data().len()
     }
 }
 
@@ -589,7 +613,7 @@ impl Value for Box<Sstable> {
     type Cursor = BoxSstableCursor;
 
     fn serialized_len(&self) -> usize {
-        8 + self.meta().encoded_size() // id (8B) + meta size
+        8 + self.meta.encoded_size() // id (8B) + meta size
     }
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
@@ -614,8 +638,8 @@ pub struct BoxSstableCursor {
 impl BoxSstableCursor {
     pub fn new(inner: Box<Sstable>) -> Self {
         let mut bytes = vec![];
-        bytes.put_u64(inner.id());
-        inner.meta().encode_to(&mut bytes);
+        bytes.put_u64(inner.id);
+        inner.meta.encode_to(&mut bytes);
         Self {
             inner,
             bytes,
@@ -636,8 +660,16 @@ impl std::io::Read for BoxSstableCursor {
 impl Cursor for BoxSstableCursor {
     type T = Box<Sstable>;
 
+    fn inner(&self) -> &Self::T {
+        &self.inner
+    }
+
     fn into_inner(self) -> Self::T {
         self.inner
+    }
+
+    fn len(&self) -> usize {
+        8 + self.inner.meta.encoded_size()
     }
 }
 
@@ -726,8 +758,8 @@ mod tests {
             std::io::copy(&mut cursor, &mut buf).unwrap();
             let target = cursor.into_inner();
             let sstable = Box::<Sstable>::read(&buf[..]).unwrap();
-            assert_eq!(target.id(), sstable.id());
-            assert_eq!(target.meta(), sstable.meta());
+            assert_eq!(target.id, sstable.id);
+            assert_eq!(target.meta, sstable.meta);
         }
 
         {

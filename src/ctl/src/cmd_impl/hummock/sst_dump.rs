@@ -205,7 +205,7 @@ pub async fn sst_dump_via_sstable_store(
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
     let sstable = sstable_cache.value().as_ref();
-    let sstable_meta = &sstable.meta();
+    let sstable_meta = &sstable.meta;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);
 
@@ -270,9 +270,9 @@ async fn print_block(
     println!("\tBlock {}", block_idx);
     println!("\t-----------");
 
-    let block_meta = &sst.meta().block_metas[block_idx];
+    let block_meta = &sst.meta.block_metas[block_idx];
     let smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let data_path = sstable_store.get_sst_data_path(sst.id());
+    let data_path = sstable_store.get_sst_data_path(sst.id);
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();

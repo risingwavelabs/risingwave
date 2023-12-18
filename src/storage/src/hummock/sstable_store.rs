@@ -311,7 +311,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Box<dyn BlockStream>> {
         const MAX_PREFETCH_BLOCK: usize = 16;
-        let object_id = sst.id();
+        let object_id = sst.id;
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
             let block = self.get(sst, block_index, policy, stats).await?;
             return Ok(Box::new(PrefetchBlockStream::new(
@@ -337,8 +337,8 @@ impl SstableStore {
             )));
         }
         let end_index = std::cmp::min(end_index, block_index + MAX_PREFETCH_BLOCK);
-        let mut end_index = std::cmp::min(end_index, sst.meta().block_metas.len());
-        let start_offset = sst.meta().block_metas[block_index].offset as usize;
+        let mut end_index = std::cmp::min(end_index, sst.meta.block_metas.len());
+        let start_offset = sst.meta.block_metas[block_index].offset as usize;
         let mut min_hit_index = end_index;
         let mut hit_count = 0;
         for idx in block_index..end_index {
@@ -357,7 +357,7 @@ impl SstableStore {
         stats.cache_data_prefetch_count += 1;
         stats.cache_data_prefetch_block_count += (end_index - block_index) as u64;
         let end_offset = start_offset
-            + sst.meta().block_metas[block_index..end_index]
+            + sst.meta.block_metas[block_index..end_index]
                 .iter()
                 .map(|meta| meta.len as usize)
                 .sum::<usize>();
@@ -380,7 +380,7 @@ impl SstableStore {
                     start_offset,
                     end_offset,
                     object_id,
-                    sst.meta().estimated_size,
+                    sst.meta.estimated_size,
                 );
                 return Err(e.into());
             }
@@ -391,14 +391,14 @@ impl SstableStore {
         let mut offset = 0;
         let mut blocks = VecDeque::default();
         for idx in block_index..end_index {
-            let end = offset + sst.meta().block_metas[idx].len as usize;
+            let end = offset + sst.meta.block_metas[idx].len as usize;
             if end > buf.len() {
                 return Err(ObjectError::internal("read unexpected EOF").into());
             }
             // copy again to avoid holding a large data in memory.
             let block = Block::decode_with_copy(
                 buf.slice(offset..end),
-                sst.meta().block_metas[idx].uncompressed_size as usize,
+                sst.meta.block_metas[idx].uncompressed_size as usize,
                 true,
             )?;
             let holder = if let CachePolicy::Fill(priority) = policy {
@@ -430,11 +430,11 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
-        let object_id = sst.id();
+        let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
-        let file_size = sst.meta().estimated_size;
+        let file_size = sst.meta.estimated_size;
         let mut fetch_block = || {
             let file_cache = self.data_file_cache.clone();
             stats.cache_data_block_miss += 1;
@@ -1204,9 +1204,9 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         std::mem::take(&mut meta.bloom_filter);
-        assert_eq!(holder.value().meta(), &meta);
+        assert_eq!(holder.value().meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
-        assert_eq!(holder.value().meta(), &meta);
+        assert_eq!(holder.value().meta, meta);
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,
