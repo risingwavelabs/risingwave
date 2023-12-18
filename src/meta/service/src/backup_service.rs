@@ -38,9 +38,10 @@ impl BackupServiceImpl {
 impl BackupService for BackupServiceImpl {
     async fn backup_meta(
         &self,
-        _request: Request<BackupMetaRequest>,
+        request: Request<BackupMetaRequest>,
     ) -> Result<Response<BackupMetaResponse>, Status> {
-        let job_id = self.backup_manager.start_backup_job().await?;
+        let remarks = request.into_inner().remarks;
+        let job_id = self.backup_manager.start_backup_job(remarks).await?;
         Ok(Response::new(BackupMetaResponse { job_id }))
     }
 

@@ -844,6 +844,14 @@ impl SessionImpl {
             VisibilityMode::Checkpoint => false,
         }
     }
+
+    pub fn statement_timeout(&self) -> Duration {
+        if self.config().statement_timeout() == 0 {
+            Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
+        } else {
+            Duration::from_secs(self.config().statement_timeout() as u64)
+        }
+    }
 }
 
 pub struct SessionManagerImpl {

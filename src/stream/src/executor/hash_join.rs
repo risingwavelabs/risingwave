@@ -693,6 +693,36 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
+
+        // initialized some metrics
+        let join_actor_input_waiting_duration_ns = self
+            .metrics
+            .join_actor_input_waiting_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let left_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+        let right_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+
+        let barrier_join_match_duration_ns = self
+            .metrics
+            .join_match_duration_ns
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+
+        let left_join_cached_entry_count = self
+            .metrics
+            .join_cached_entry_count
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+
+        let right_join_cached_entry_count = self
+            .metrics
+            .join_cached_entry_count
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -700,10 +730,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .instrument_await("hash_join_barrier_align")
             .await
         {
-            self.metrics
-                .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str, &fragment_id_str])
-                .inc_by(start_time.elapsed().as_nanos() as u64);
+            join_actor_input_waiting_duration_ns.inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
                     for watermark_to_emit in
@@ -740,10 +767,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         left_start_time = Instant::now();
                     }
                     left_time += left_start_time.elapsed();
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
-                        .inc_by(left_time.as_nanos() as u64);
+                    left_join_match_duration_ns.inc_by(left_time.as_nanos() as u64);
                     self.try_flush_data().await?;
                 }
                 AlignedMessage::Right(chunk) => {
@@ -767,10 +791,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         right_start_time = Instant::now();
                     }
                     right_time += right_start_time.elapsed();
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
-                        .inc_by(right_time.as_nanos() as u64);
+                    right_join_match_duration_ns.inc_by(right_time.as_nanos() as u64);
                     self.try_flush_data().await?;
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -793,16 +814,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.side_r.ht.update_epoch(barrier.epoch.curr);
 
                     // Report metrics of cached join rows/entries
-                    for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        self.metrics
-                            .join_cached_entry_count
-                            .with_label_values(&[&actor_id_str, &fragment_id_str, side])
-                            .set(ht.entry_count() as i64);
+                    for (join_cached_entry_count, ht) in [
+                        (&left_join_cached_entry_count, &self.side_l.ht),
+                        (&right_join_cached_entry_count, &self.side_r.ht),
+                    ] {
+                        join_cached_entry_count.set(ht.entry_count() as i64);
                     }
 
-                    self.metrics
-                        .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
+                    barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }

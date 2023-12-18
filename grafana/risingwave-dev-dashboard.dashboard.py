@@ -1016,13 +1016,13 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Input Rows",
+                panels.timeseries_rowsps(
+                    "Actor Input Throughput (rows/s)",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                         panels.target_hidden(
                             f"rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])",
@@ -1030,8 +1030,8 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
-                    "Actor Output Rows",
+                panels.timeseries_rowsps(
+                    "Actor Output Throughput (rows/s)",
                     "",
                     [
                         panels.target(
@@ -1124,6 +1124,19 @@ def section_streaming_actors(outer_panels):
                             f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
                             "cache miss count - table {{table_id}} actor {{actor_id}}",
                         ),
+
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache lookup count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache left miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "partition range cache right miss count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_percentage(
@@ -1132,7 +1145,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id))",
-                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
+                            "Join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, fragment_id))",
@@ -1160,12 +1173,20 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id))",
-                            "materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
+                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}  {{%s}}"
                             % NODE_LABEL,
                         ),
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
                             "Over window cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
+                            "Over window partition range cache left miss ratio - table {{table_id}} fragment {{fragment_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id))",
+                            "Over window partition range cache right miss ratio - table {{table_id}} fragment {{fragment_id}} ",
                         ),
                     ],
                 ),
@@ -1381,6 +1402,11 @@ def section_streaming_actors(outer_panels):
                         panels.target_hidden(
                             f"{metric('stream_over_window_cached_entry_count')}",
                             "over window cached count | table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('stream_over_window_range_cache_entry_count')}) by (table_id, fragment_id)",
+                            "over window partition range cache entry count | table {{table_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -3372,31 +3398,61 @@ def section_iceberg_metrics(outer_panels):
             "Iceberg Sink Metrics",
             [
                 panels.timeseries_count(
-                    "Write Qps Of Iceberg File Appender",
-                    "iceberg file appender write qps",
+                    "Write Qps Of Iceberg Writer",
+                    "iceberg write qps",
                     [
                         panels.target(
-                            f"{metric('iceberg_file_appender_write_qps')}",
+                            f"{metric('iceberg_write_qps')}",
                            "{{executor_id}} @ {{sink_id}}",
                         ),
                     ]
                 ),
                 panels.timeseries_latency(
-                    "Write latency Of Iceberg File Appender",
+                    "Write Latency Of Iceberg Writer",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
                                 f"p{legend}" + " @ {{sink_id}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
+                            f"sum by(le, sink_id)(rate({metric('iceberg_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_write_latency_count')}[$__rate_interval]))",
                             "avg @ {{sink_id}}",
                         ),
                     ],
+                ),
+                panels.timeseries_count(
+                    "Iceberg rolling unfushed data file",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_rolling_unfushed_data_file')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_count(
+                    "Iceberg position delete cache num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_position_delete_cache_num')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_count(
+                    "Iceberg partition num",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_partition_num')}",
+                           "{{executor_id}} @ {{sink_id}}",
+                        ),
+                    ]
                 ),
             ]
         )
