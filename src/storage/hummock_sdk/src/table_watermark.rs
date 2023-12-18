@@ -823,7 +823,7 @@ mod tests {
             WatermarkDirection::Ascending => (low, high),
             WatermarkDirection::Descending => (high, low),
         };
-        map_table_key_range(prefixed_range_with_vnode(range, TEST_SINGLE_VNODE))
+        prefixed_range_with_vnode(range, TEST_SINGLE_VNODE)
     }
 
     fn build_and_test_watermark_index(

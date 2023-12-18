@@ -103,4 +103,8 @@ impl ExternalStorageTable {
     pub fn table_reader(&self) -> &ExternalTableReaderImpl {
         &self.table_reader
     }
+
+    pub fn qualified_table_name(&self) -> String {
+        format!("{}.{}", self.schema_name, self.table_name)
+    }
 }

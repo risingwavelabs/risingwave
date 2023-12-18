@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
 use itertools::Itertools;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -82,11 +85,16 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Double => DataType::Float64,
         Schema::Decimal(DecimalSchema { precision, .. }) => {
             if *precision > Decimal::MAX_PRECISION.into() {
-                tracing::warn!(
-                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(
+                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate. ({} suppressed)",
                     Decimal::MAX_PRECISION,
+                    suppressed_count,
                     precision
                 );
+                }
             }
             DataType::Decimal
         }

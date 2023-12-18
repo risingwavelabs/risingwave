@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
@@ -28,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
@@ -330,13 +332,18 @@ impl SourceStreamChunkRowWriter<'_> {
                         // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::warn!(
-                            %error,
-                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                            offset = self.row_meta.as_ref().map(|m| m.offset),
-                            column = desc.name,
-                            "failed to parse non-pk column, padding with `NULL`"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(LogSuppresser::default);
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                %error,
+                                split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                                offset = self.row_meta.as_ref().map(|m| m.offset),
+                                column = desc.name,
+                                suppressed_count,
+                                "failed to parse non-pk column, padding with `NULL`"
+                            );
+                        }
                         Ok(A::output_for(Datum::None))
                     }
                 }
@@ -600,12 +607,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::error!(
-                            %error,
-                            split_id = &*msg.split_id,
-                            offset = msg.offset,
-                            "failed to parse message, skipping"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(LogSuppresser::default);
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::error!(
+                                %error,
+                                split_id = &*msg.split_id,
+                                offset = msg.offset,
+                                suppressed_count,
+                                "failed to parse message, skipping"
+                            );
+                        }
                         parser.source_ctx().report_user_source_error(error);
                     }
                 }

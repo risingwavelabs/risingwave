@@ -12,81 +12,109 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 
-use crate::source::cdc::external::ConnectorResult;
+macro_rules! handle_data_type {
+    ($row:expr, $i:expr, $name:expr, $type:ty) => {{
+        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
+        match res {
+            Ok(val) => val.map(|v| ScalarImpl::from(v)),
+            Err(err) => {
+                tracing::error!("parse column `{}` fail: {}", $name, err);
+                None
+            }
+        }
+    }};
+    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
+        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
+        match res {
+            Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
+            Err(err) => {
+                tracing::error!("parse column `{}` fail: {}", $name, err);
+                None
+            }
+        }
+    }};
+}
 
-pub fn mysql_row_to_owned_row(
-    mysql_row: &mut MysqlRow,
-    schema: &Schema,
-) -> ConnectorResult<OwnedRow> {
+pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
+        let name = rw_field.name.as_str();
         let datum = {
             match rw_field.data_type {
                 DataType::Boolean => {
-                    let v = mysql_row.take::<bool, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, bool)
                 }
                 DataType::Int16 => {
-                    let v = mysql_row.take::<i16, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i16)
                 }
                 DataType::Int32 => {
-                    let v = mysql_row.take::<i32, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i32)
                 }
                 DataType::Int64 => {
-                    let v = mysql_row.take::<i64, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, i64)
                 }
                 DataType::Float32 => {
-                    let v = mysql_row.take::<f32, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, f32)
                 }
                 DataType::Float64 => {
-                    let v = mysql_row.take::<f64, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, f64)
                 }
                 DataType::Decimal => {
-                    let v = mysql_row.take::<RustDecimal, _>(i);
-                    v.map(|v| ScalarImpl::from(Decimal::from(v)))
+                    handle_data_type!(mysql_row, i, name, RustDecimal, Decimal)
                 }
                 DataType::Varchar => {
-                    let v = mysql_row.take::<String, _>(i);
-                    v.map(ScalarImpl::from)
+                    handle_data_type!(mysql_row, i, name, String)
                 }
                 DataType::Date => {
-                    let v = mysql_row.take::<NaiveDate, _>(i);
-                    v.map(|v| ScalarImpl::from(Date::from(v)))
+                    handle_data_type!(mysql_row, i, name, NaiveDate, Date)
                 }
                 DataType::Time => {
-                    let v = mysql_row.take::<chrono::NaiveTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Time::from(v)))
+                    handle_data_type!(mysql_row, i, name, chrono::NaiveTime, Time)
                 }
                 DataType::Timestamp => {
-                    let v = mysql_row.take::<chrono::NaiveDateTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Timestamp::from(v)))
+                    handle_data_type!(mysql_row, i, name, chrono::NaiveDateTime, Timestamp)
                 }
                 DataType::Timestamptz => {
-                    let v = mysql_row.take::<chrono::NaiveDateTime, _>(i);
-                    v.map(|v| ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros())))
+                    let res = mysql_row
+                        .take_opt::<Option<chrono::NaiveDateTime>, _>(i)
+                        .unwrap_or(Ok(None));
+                    match res {
+                        Ok(val) => val.map(|v| {
+                            ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
+                        }),
+                        Err(err) => {
+                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            None
+                        }
+                    }
                 }
                 DataType::Bytea => {
-                    let v = mysql_row.take::<Vec<u8>, _>(i);
-                    v.map(|v| ScalarImpl::from(v.into_boxed_slice()))
+                    let res = mysql_row
+                        .take_opt::<Option<Vec<u8>>, _>(i)
+                        .unwrap_or(Ok(None));
+                    match res {
+                        Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
+                        Err(err) => {
+                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            None
+                        }
+                    }
                 }
                 DataType::Jsonb => {
-                    let v = mysql_row.take::<serde_json::Value, _>(i);
-                    v.map(|v| ScalarImpl::from(JsonbVal::from(v)))
+                    handle_data_type!(mysql_row, i, name, serde_json::Value, JsonbVal)
                 }
                 DataType::Interval
                 | DataType::Struct(_)
@@ -94,14 +122,18 @@ pub fn mysql_row_to_owned_row(
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                        LazyLock::new(LogSuppresser::default);
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
+                    }
                     None
                 }
             }
         };
         datums.push(datum);
     }
-    Ok(OwnedRow::new(datums))
+    OwnedRow::new(datums)
 }
 
 #[cfg(test)]
@@ -139,9 +171,7 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            Ok::<_, anyhow::Error>(Some(
-                mysql_row_to_owned_row(&mut mysql_row, &t1schema).unwrap(),
-            ))
+            Ok::<_, anyhow::Error>(Some(mysql_row_to_owned_row(&mut mysql_row, &t1schema)))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {
