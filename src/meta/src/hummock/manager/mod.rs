@@ -360,8 +360,7 @@ impl HummockManager {
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
-        let sys_params_manager = env.system_params_manager();
-        let sys_params = sys_params_manager.get_params().await;
+        let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
@@ -2474,7 +2473,7 @@ impl HummockManager {
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
-        let params = self.env.system_params_manager().get_params().await;
+        let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
             1,
@@ -3175,12 +3174,18 @@ async fn write_exclusive_cluster_id(
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
     match object_store.read(&cluster_id_full_path, ..).await {
-        Ok(cluster_id) => Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, path {}.",
-            String::from_utf8(cluster_id.to_vec()).unwrap(),
-            cluster_id_full_path,
-        ))
-        .into()),
+        Ok(stored_cluster_id) => {
+            let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
+            if cluster_id.deref() == stored_cluster_id {
+                return Ok(());
+            }
+
+            Err(ObjectError::internal(format!(
+                "Data directory is already used by another cluster with id {:?}, path {}.",
+                stored_cluster_id, cluster_id_full_path,
+            ))
+            .into())
+        }
         Err(e) => {
             if e.is_object_not_found_error() {
                 object_store

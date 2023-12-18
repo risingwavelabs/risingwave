@@ -195,7 +195,7 @@ pub struct GlobalStreamManager {
 
     pub reschedule_lock: RwLock<()>,
 
-    pub(crate) scale_controller: ScaleControllerRef,
+    pub(crate) scale_controller: Option<ScaleControllerRef>,
 }
 
 impl GlobalStreamManager {
@@ -206,11 +206,14 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            env.clone(),
-        ));
+        let scale_controller = match &metadata_manager {
+            MetadataManager::V1(_) => {
+                let scale_controller =
+                    ScaleController::new(&metadata_manager, source_manager.clone(), env.clone());
+                Some(Arc::new(scale_controller))
+            }
+            MetadataManager::V2(_) => None,
+        };
         Ok(Self {
             env,
             metadata_manager,
@@ -825,7 +828,7 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
-            let system_params = env.system_params_manager().get_params().await;
+            let system_params = env.system_params_reader().await;
             let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);

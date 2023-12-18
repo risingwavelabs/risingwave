@@ -666,6 +666,8 @@ impl GlobalBarrierManager {
 
         let plan = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .generate_stable_resize_plan(
                 StableResizePolicy {
                     fragment_worker_changes,
@@ -676,6 +678,8 @@ impl GlobalBarrierManager {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .prepare_reschedule_command(
                 plan,
                 RescheduleOptions {
@@ -686,6 +690,8 @@ impl GlobalBarrierManager {
 
         if let Err(e) = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .post_apply_reschedule(&reschedule_fragment)
             .await
         {

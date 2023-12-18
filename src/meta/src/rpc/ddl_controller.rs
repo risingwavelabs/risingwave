@@ -168,8 +168,7 @@ pub struct CreatingStreamingJobPermit {
 impl CreatingStreamingJobPermit {
     async fn new(env: &MetaSrvEnv) -> Self {
         let mut permits = env
-            .system_params_manager()
-            .get_params()
+            .system_params_reader()
             .await
             .max_concurrent_creating_streaming_jobs() as usize;
         if permits == 0 {

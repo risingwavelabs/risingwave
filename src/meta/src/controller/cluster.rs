@@ -123,7 +123,7 @@ impl ClusterController {
         self.inner.read().await
     }
 
-    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i32>> {
+    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
         self.inner.read().await.count_worker_by_type().await
     }
 
@@ -493,8 +493,8 @@ impl ClusterControllerInner {
         })
     }
 
-    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i32>> {
-        let workers: Vec<(WorkerType, i32)> = Worker::find()
+    pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
+        let workers: Vec<(WorkerType, i64)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerType)
             .column_as(worker::Column::WorkerId.count(), "count")

@@ -2074,8 +2074,14 @@ impl GlobalStreamManager {
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
     ) -> MetaResult<()> {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("support reschedule in v2");
+        };
+
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .prepare_reschedule_command(reschedules, options)
             .await?;
 
@@ -2083,10 +2089,6 @@ impl GlobalStreamManager {
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
-        };
-
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support reschedule in v2");
         };
 
         let fragment_manager_ref = mgr.fragment_manager.clone();
@@ -2132,6 +2134,8 @@ impl GlobalStreamManager {
 
         let reschedules = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .generate_stable_resize_plan(
                 StableResizePolicy {
                     fragment_worker_changes,

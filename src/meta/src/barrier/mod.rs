@@ -172,7 +172,7 @@ pub struct GlobalBarrierManager {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 
     sink_manager: SinkCoordinatorManager,
 
@@ -526,11 +526,14 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            env.clone(),
-        ));
+        let scale_controller = match &metadata_manager {
+            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                env.clone(),
+            ))),
+            MetadataManager::V2(_) => None,
+        };
         Self {
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
@@ -570,8 +573,11 @@ impl GlobalBarrierManager {
 
     /// Check whether we should pause on bootstrap from the system parameter and reset it.
     async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
-        let pm = self.env.system_params_manager();
-        let paused = pm.get_params().await.pause_on_next_bootstrap();
+        let paused = self
+            .env
+            .system_params_reader()
+            .await
+            .pause_on_next_bootstrap();
         if paused {
             tracing::warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
@@ -579,8 +585,16 @@ impl GlobalBarrierManager {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                .await?;
+            if let Some(system_ctl) = self.env.system_params_controller() {
+                system_ctl
+                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                    .await?;
+            } else {
+                self.env
+                    .system_params_manager()
+                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                    .await?;
+            }
         }
         Ok(paused)
     }
@@ -589,11 +603,7 @@ impl GlobalBarrierManager {
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         // Initialize the barrier manager.
         let interval = Duration::from_millis(
-            self.env
-                .system_params_manager()
-                .get_params()
-                .await
-                .barrier_interval_ms() as u64,
+            self.env.system_params_reader().await.barrier_interval_ms() as u64,
         );
         tracing::info!(
             "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",

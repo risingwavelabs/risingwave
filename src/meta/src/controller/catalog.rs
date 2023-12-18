@@ -41,7 +41,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Expr, SimpleExpr};
+use sea_orm::sea_query::{Alias, Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
@@ -49,6 +49,7 @@ use sea_orm::{
     TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::info;
 
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
@@ -383,7 +384,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let tables = Table::find()
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
                 table::Column::TableType
                     .eq(TableType::MaterializedView)
@@ -410,7 +411,6 @@ impl CatalogController {
         let creating_job_ids: Vec<ObjectId> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
-            .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Foreground)
@@ -419,6 +419,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
+        println!("ddd: {:?}", creating_job_ids);
         if creating_job_ids.is_empty() {
             return Ok(ReleaseContext::default());
         }
@@ -1805,7 +1806,7 @@ impl CatalogController {
             .select_only()
             .column(table::Column::TableId)
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
             .all(&inner.db)
@@ -1924,14 +1925,21 @@ impl CatalogControllerInner {
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .all(&self.db)
             .await?;
+
+        let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+
         let internal_table_objs = Table::find()
             .find_also_related(Object)
-            .join(JoinType::LeftJoin, table::Relation::Object2.def())
-            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
             .filter(
                 table::Column::TableType
                     .eq(TableType::Internal)
-                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    .and(table::Column::BelongsToJobId.is_in(created_streaming_job_ids)),
             )
             .all(&self.db)
             .await?;
@@ -1990,6 +1998,7 @@ impl CatalogControllerInner {
     async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
         let index_objs = Index::find()
             .find_also_related(Object)
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .all(&self.db)
             .await?;

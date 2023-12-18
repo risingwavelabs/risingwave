@@ -36,7 +36,7 @@ pub struct ScaleServiceImpl {
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 }
 
 impl ScaleServiceImpl {
@@ -46,11 +46,14 @@ impl ScaleServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
     ) -> Self {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_manager.env.clone(),
-        ));
+        let scale_controller = match &metadata_manager {
+            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                stream_manager.env.clone(),
+            ))),
+            MetadataManager::V2(_) => None,
+        };
         Self {
             metadata_manager,
             source_manager,
@@ -226,7 +229,12 @@ impl ScaleService for ScaleServiceImpl {
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let plan = self.scale_controller.get_reschedule_plan(policy).await?;
+        let Some(scale_controller) = &self.scale_controller else {
+            return Err(Status::unimplemented(
+                "reschedule plan is not supported in v2",
+            ));
+        };
+        let plan = scale_controller.get_reschedule_plan(policy).await?;
 
         let next_revision = self.get_revision().await;
 

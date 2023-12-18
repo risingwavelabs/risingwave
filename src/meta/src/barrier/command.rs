@@ -259,7 +259,7 @@ pub struct CommandContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 
     /// The tracing span of this command.
     ///
@@ -282,7 +282,7 @@ impl CommandContext {
         command: Command,
         kind: BarrierKind,
         source_manager: SourceManagerRef,
-        scale_controller: ScaleControllerRef,
+        scale_controller: Option<ScaleControllerRef>,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -855,6 +855,8 @@ impl CommandContext {
             Command::RescheduleFragment { reschedules } => {
                 let node_dropped_actors = self
                     .scale_controller
+                    .as_ref()
+                    .unwrap()
                     .post_apply_reschedule(reschedules)
                     .await?;
                 self.clean_up(node_dropped_actors).await?;
