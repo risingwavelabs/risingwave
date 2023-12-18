@@ -43,8 +43,9 @@ impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
-        // TODO(st1page): the condition is wrong, introduce monotonically increasing property of the node
-        // TODO(st1page): https://github.com/risingwavelabs/risingwave/pull/13984
+        // TODO(st1page): here we just check if RHS
+        // is a `StreamNow`. It will be generalized to more cases
+        // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
         let right_monotonically_increasing = {
             if let Some(e) = core.right().as_stream_exchange() && *e.distribution() == Distribution::Broadcast {
                 if let Some(proj) = e.input().as_stream_project() {
