@@ -117,7 +117,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         for (idx, (op, row)) in chunk.rows().enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
 
-            let satisfy = if let Some(array) = &eval_results {
+            let satisfied_dyn_filter_cond = if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
                     results.value_at(idx).unwrap_or(false)
                 } else {
@@ -131,16 +131,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             match op {
                 Op::Insert | Op::Delete => {
                     new_ops.push(op);
-                    if satisfy {
+                    if satisfied_dyn_filter_cond {
                         new_visibility.append(true);
                     } else {
                         new_visibility.append(false);
                     }
                 }
                 Op::UpdateDelete => {
-                    last_res = satisfy;
+                    last_res = satisfied_dyn_filter_cond;
                 }
-                Op::UpdateInsert => match (last_res, satisfy) {
+                Op::UpdateInsert => match (last_res, satisfied_dyn_filter_cond) {
                     (true, false) => {
                         new_ops.push(Op::Delete);
                         new_ops.push(Op::UpdateInsert);
@@ -170,7 +170,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 
             // Do not need to maintain the emitted records in the left table when the condition is always relaxed
             // Also, if the delete value satisfy the condition, there could not be in the state table.
-            if self.condition_always_relax && satisfy {
+            if self.condition_always_relax && satisfied_dyn_filter_cond {
                 continue;
             }
             // Store the rows without a null left key
