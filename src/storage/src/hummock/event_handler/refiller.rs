@@ -344,7 +344,7 @@ impl CacheRefillTask {
     fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
-        parent_ssts: &[impl Deref<Target = Box<Sstable>>],
+        parent_ssts: &[impl Deref<Target = Sstable>],
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
@@ -602,11 +602,6 @@ impl CacheRefillTask {
                     let bytes = data.slice(offset..offset + len);
 
                     let future = async move {
-                        // let value = CachedBlock::Fetched {
-                        //     bytes,
-                        //     uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
-                        // };
-
                         let block =
                             Block::decode(bytes, writer.weight() - writer.key().serialized_len())?;
                         let value = CachedBlock::Loaded {

@@ -405,16 +405,8 @@ impl std::io::Read for SstableBlockIndexCursor {
 impl Cursor for SstableBlockIndexCursor {
     type T = SstableBlockIndex;
 
-    fn inner(&self) -> &Self::T {
-        &self.inner
-    }
-
     fn into_inner(self) -> Self::T {
         self.inner
-    }
-
-    fn len(&self) -> usize {
-        self.inner.serialized_len()
     }
 }
 
@@ -540,16 +532,8 @@ impl std::io::Read for CachedBlockCursor {
 impl Cursor for CachedBlockCursor {
     type T = CachedBlock;
 
-    fn inner(&self) -> &Self::T {
-        &self.inner
-    }
-
     fn into_inner(self) -> Self::T {
         self.inner
-    }
-
-    fn len(&self) -> usize {
-        self.inner.serialized_len()
     }
 }
 
@@ -596,50 +580,74 @@ impl std::io::Read for BoxBlockCursor {
 impl Cursor for BoxBlockCursor {
     type T = Box<Block>;
 
-    fn inner(&self) -> &Self::T {
-        &self.inner
-    }
-
     fn into_inner(self) -> Self::T {
         self.inner
     }
+}
 
-    fn len(&self) -> usize {
-        self.inner.raw_data().len()
+#[derive(Debug)]
+pub struct CachedSstable(Arc<Sstable>);
+
+impl Clone for CachedSstable {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
     }
 }
 
-impl Value for Box<Sstable> {
-    type Cursor = BoxSstableCursor;
+impl From<Box<Sstable>> for CachedSstable {
+    fn from(value: Box<Sstable>) -> Self {
+        Self(Arc::new(*value))
+    }
+}
+
+impl From<CachedSstable> for Box<Sstable> {
+    fn from(value: CachedSstable) -> Self {
+        Box::new(Arc::unwrap_or_clone(value.0))
+    }
+}
+
+impl CachedSstable {
+    pub fn into_inner(self) -> Arc<Sstable> {
+        self.0
+    }
+}
+
+impl Value for CachedSstable {
+    type Cursor = CachedSstableCursor;
+
+    fn weight(&self) -> usize {
+        self.0.estimate_size()
+    }
 
     fn serialized_len(&self) -> usize {
-        8 + self.meta.encoded_size() // id (8B) + meta size
+        8 + self.0.meta.encoded_size() // id (8B) + meta size
     }
 
     fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let id = buf.get_u64();
         let meta = SstableMeta::decode(buf).unwrap();
-        let sstable = Box::new(Sstable::new(id, meta));
-        Ok(sstable)
+        let sstable = Arc::new(Sstable::new(id, meta));
+        Ok(Self(sstable))
     }
 
     fn into_cursor(self) -> Self::Cursor {
-        BoxSstableCursor::new(self)
+        CachedSstableCursor::new(self)
     }
 }
 
 #[derive(Debug)]
-pub struct BoxSstableCursor {
-    inner: Box<Sstable>,
-    bytes: Vec<u8>,
+pub struct CachedSstableCursor {
+    inner: CachedSstable,
     pos: usize,
+    /// store pre-encoded bytes here, for it's hard to encode JIT
+    bytes: Vec<u8>,
 }
 
-impl BoxSstableCursor {
-    pub fn new(inner: Box<Sstable>) -> Self {
+impl CachedSstableCursor {
+    pub fn new(inner: CachedSstable) -> Self {
         let mut bytes = vec![];
-        bytes.put_u64(inner.id);
-        inner.meta.encode_to(&mut bytes);
+        bytes.put_u64(inner.0.id);
+        inner.0.meta.encode_to(&mut bytes);
         Self {
             inner,
             bytes,
@@ -648,7 +656,7 @@ impl BoxSstableCursor {
     }
 }
 
-impl std::io::Read for BoxSstableCursor {
+impl std::io::Read for CachedSstableCursor {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let pos = self.pos;
         self.pos += copy(&self.bytes[self.pos..], buf);
@@ -657,19 +665,11 @@ impl std::io::Read for BoxSstableCursor {
     }
 }
 
-impl Cursor for BoxSstableCursor {
-    type T = Box<Sstable>;
-
-    fn inner(&self) -> &Self::T {
-        &self.inner
-    }
+impl Cursor for CachedSstableCursor {
+    type T = CachedSstable;
 
     fn into_inner(self) -> Self::T {
         self.inner
-    }
-
-    fn len(&self) -> usize {
-        8 + self.inner.meta.encoded_size()
     }
 }
 
@@ -752,14 +752,14 @@ mod tests {
         }
 
         {
-            let sstable = Box::new(sstable_for_test());
+            let sstable: CachedSstable = Box::new(sstable_for_test()).into();
             let mut cursor = sstable.into_cursor();
             let mut buf = vec![];
             std::io::copy(&mut cursor, &mut buf).unwrap();
             let target = cursor.into_inner();
-            let sstable = Box::<Sstable>::read(&buf[..]).unwrap();
-            assert_eq!(target.id, sstable.id);
-            assert_eq!(target.meta, sstable.meta);
+            let sstable = CachedSstable::read(&buf[..]).unwrap();
+            assert_eq!(target.0.id, sstable.0.id);
+            assert_eq!(target.0.meta, sstable.0.meta);
         }
 
         {

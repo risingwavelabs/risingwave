@@ -39,8 +39,8 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, FileCache, RecentFilter, Sstable,
-    SstableBlockIndex, SstableMeta, SstableWriter,
+    Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, CachedSstable, FileCache,
+    RecentFilter, Sstable, SstableBlockIndex, SstableMeta, SstableWriter,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -121,7 +121,7 @@ impl LruCacheEventListener for BlockCacheEventListener {
     }
 }
 
-struct MetaCacheEventListener(FileCache<HummockSstableObjectId, Box<Sstable>>);
+struct MetaCacheEventListener(FileCache<HummockSstableObjectId, CachedSstable>);
 
 impl LruCacheEventListener for MetaCacheEventListener {
     type K = HummockSstableObjectId;
@@ -131,20 +131,20 @@ impl LruCacheEventListener for MetaCacheEventListener {
         // temporarily avoid spawn task while task drop with madsim
         // FYI: https://github.com/madsim-rs/madsim/issues/182
         #[cfg(not(madsim))]
-        self.0.insert_if_not_exists_async(key, value);
+        self.0.insert_if_not_exists_async(key, value.into());
     }
 }
 
-pub enum CachedOrOwned<K, V>
+pub enum CachedOrShared<K, V>
 where
     K: LruKey,
     V: LruValue,
 {
-    Cached(CacheableEntry<K, V>),
-    Owned(V),
+    Cached(CacheableEntry<K, Box<V>>),
+    Shared(Arc<V>),
 }
 
-impl<K, V> Deref for CachedOrOwned<K, V>
+impl<K, V> Deref for CachedOrShared<K, V>
 where
     K: LruKey,
     V: LruValue,
@@ -153,8 +153,8 @@ where
 
     fn deref(&self) -> &Self::Target {
         match self {
-            CachedOrOwned::Cached(entry) => entry,
-            CachedOrOwned::Owned(v) => v,
+            CachedOrShared::Cached(entry) => entry,
+            CachedOrShared::Shared(v) => v,
         }
     }
 }
@@ -166,7 +166,7 @@ pub struct SstableStore {
     meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
 
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
-    meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
+    meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
@@ -185,7 +185,7 @@ impl SstableStore {
         high_priority_ratio: usize,
         prefetch_buffer_capacity: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
-        meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
+        meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
         recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
@@ -585,9 +585,9 @@ impl SstableStore {
     pub async fn sstable_cached(
         &self,
         sst_obj_id: HummockSstableObjectId,
-    ) -> HummockResult<Option<CachedOrOwned<HummockSstableObjectId, Box<Sstable>>>> {
+    ) -> HummockResult<Option<CachedOrShared<HummockSstableObjectId, Sstable>>> {
         if let Some(sst) = self.meta_cache.lookup(sst_obj_id, &sst_obj_id) {
-            return Ok(Some(CachedOrOwned::Cached(sst)));
+            return Ok(Some(CachedOrShared::Cached(sst)));
         }
 
         if let Some(sst) = self
@@ -596,7 +596,7 @@ impl SstableStore {
             .await
             .map_err(HummockError::file_cache)?
         {
-            return Ok(Some(CachedOrOwned::Owned(sst)));
+            return Ok(Some(CachedOrShared::Shared(sst.into_inner())));
         }
 
         Ok(None)
@@ -627,6 +627,8 @@ impl SstableStore {
                             .await
                             .map_err(HummockError::file_cache)?
                         {
+                            // TODO(MrCroxx): Make meta cache receives Arc<Sstable> to reduce copy?
+                            let sst: Box<Sstable> = sst.into();
                             let charge = sst.estimate_size();
                             return Ok((sst, charge));
                         }
