@@ -12408,6 +12408,7 @@ dependencies = [
  "futures-util",
  "generic-array",
  "getrandom",
+ "governor",
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
  "hmac",
