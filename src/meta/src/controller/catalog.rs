@@ -41,7 +41,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::sea_query::{Alias, Expr, SimpleExpr};
+use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
@@ -49,7 +49,6 @@ use sea_orm::{
     TransactionTrait, Value,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::info;
 
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
