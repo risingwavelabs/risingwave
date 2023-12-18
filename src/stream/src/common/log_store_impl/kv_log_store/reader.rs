@@ -72,14 +72,20 @@ impl RewindDelay {
     }
 
     async fn rewind_delay(&mut self, truncate_offset: Option<TruncateOffset>) {
-        if let Some(prev_rewind_truncate_offset) = &self.last_rewind_truncate_offset
-            && let Some(truncate_offset) = &truncate_offset
-            && truncate_offset > prev_rewind_truncate_offset {
-            // Have new truncate progress before this round of rewind.
-            // Reset rewind backoff
-            self.last_rewind_truncate_offset = Some(*truncate_offset);
-            self.backoff_policy = initial_rewind_backoff_policy();
-        }
+        match (&self.last_rewind_truncate_offset, &truncate_offset) {
+            (Some(prev_rewind_truncate_offset), Some(truncate_offset)) => {
+                if truncate_offset > prev_rewind_truncate_offset {
+                    self.last_rewind_truncate_offset = Some(*truncate_offset);
+                    // Have new truncate progress before this round of rewind.
+                    // Reset rewind backoff
+                    self.backoff_policy = initial_rewind_backoff_policy();
+                }
+            }
+            (None, _) => {
+                self.last_rewind_truncate_offset = truncate_offset;
+            }
+            _ => {}
+        };
         if let Some(delay) = self.backoff_policy.next() {
             sleep(delay).await;
         }
