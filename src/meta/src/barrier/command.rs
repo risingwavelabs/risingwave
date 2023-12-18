@@ -100,6 +100,8 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
+    /// The TableIds here are the ids for the stream job.
+    /// It does not include internal table ids.
     DropStreamingJobs(HashSet<TableId>),
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
