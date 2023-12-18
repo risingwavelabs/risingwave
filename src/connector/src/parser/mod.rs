@@ -788,9 +788,6 @@ impl ByteStreamSourceParserImpl {
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
         match (protocol, encode) {
-            // (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
-            //     JsonParser::new(parser_config.specific, rw_columns, source_ctx).map(Self::Json)
-            // }
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
