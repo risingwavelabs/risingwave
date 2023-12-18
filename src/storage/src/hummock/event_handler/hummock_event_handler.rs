@@ -605,8 +605,7 @@ impl HummockEventHandler {
 
                 debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
 
                 {
@@ -642,8 +641,7 @@ impl HummockEventHandler {
             } => {
                 debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
