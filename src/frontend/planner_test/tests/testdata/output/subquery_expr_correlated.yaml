@@ -971,3 +971,39 @@
             └─LogicalJoin { type: Inner, on: ((t.b = di.d1) OR (t.c = di.d2)), output: all }
               ├─LogicalScan { table: t, columns: [t.a, t.b, t.c], predicate: IsNotNull(t.a) }
               └─LogicalScan { table: di, columns: [di.d1, di.d2] }
+- name: correlated array subquery
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    select Array(select c from t2 where b = d) arr from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [array_agg(t2.c)] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.b) }
+      │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c] }
+          ├─BatchHashAgg { group_key: [t1.b], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(t1.b) }
+          │   └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t2.d) }
+            └─BatchProject { exprs: [t2.d, t2.c] }
+              └─BatchFilter { predicate: IsNotNull(t2.d) }
+                └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden), t1.b#1(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1._row_id, t1.b) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [array_agg(t2.c), t1._row_id, t1.b, t1.b] }
+        ├─StreamExchange { dist: HashShard(t1.b) }
+        │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t1.b, array_agg(t2.c)] }
+          └─StreamHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c), count] }
+            └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, t2._row_id] }
+              ├─StreamProject { exprs: [t1.b] }
+              │ └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
+              │   └─StreamExchange { dist: HashShard(t1.b) }
+              │     └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+              └─StreamExchange { dist: HashShard(t2.d) }
+                └─StreamProject { exprs: [t2.d, t2.c, t2._row_id] }
+                  └─StreamFilter { predicate: IsNotNull(t2.d) }
+                    └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
