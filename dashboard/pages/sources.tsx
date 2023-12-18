@@ -17,7 +17,7 @@
 
 import {
   Column,
-  connectorColumn,
+  connectorColumnSource,
   dependentsColumn,
   Relations,
 } from "../components/Relations"
@@ -32,7 +32,7 @@ export default function DataSources() {
   }
 
   return Relations("Sources", getSources, [
-    connectorColumn,
+    connectorColumnSource,
     rowFormatColumn,
     dependentsColumn,
   ])

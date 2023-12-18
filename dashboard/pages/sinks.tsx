@@ -16,12 +16,15 @@
  */
 
 import {
-  connectorColumn,
+  connectorColumnSink,
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
 import { getSinks } from "./api/streaming"
 
 export default function Sinks() {
-  return Relations("Sinks", getSinks, [connectorColumn, ...streamingJobColumns])
+  return Relations("Sinks", getSinks, [
+    connectorColumnSink,
+    ...streamingJobColumns,
+  ])
 }
