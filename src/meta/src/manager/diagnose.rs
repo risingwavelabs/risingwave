@@ -24,6 +24,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::Level;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
+use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_rpc_client::ComputeClientPool;
 use serde_json::json;
 
 use crate::hummock::HummockManagerRef;
@@ -75,9 +77,11 @@ impl DiagnoseCommand {
         let _ = writeln!(report);
         self.write_worker_nodes(&mut report).await;
         let _ = writeln!(report);
+        self.write_streaming_prometheus(&mut report).await;
+        let _ = writeln!(report);
         self.write_storage(&mut report).await;
         let _ = writeln!(report);
-        self.write_streaming_prometheus(&mut report).await;
+        self.write_await_tree(&mut report).await;
         let _ = writeln!(report);
         self.write_event_logs(&mut report);
         report
@@ -283,7 +287,7 @@ impl DiagnoseCommand {
         );
 
         let _ = writeln!(s);
-        let _ = writeln!(s, "worker node panics");
+        let _ = writeln!(s, "latest worker node panics");
         Self::write_event_logs_impl(
             s,
             event_logs.iter(),
@@ -294,6 +298,34 @@ impl DiagnoseCommand {
                 Some(json!(info).to_string())
             },
             Some(10),
+        );
+
+        let _ = writeln!(s);
+        let _ = writeln!(s, "latest create stream job failures");
+        Self::write_event_logs_impl(
+            s,
+            event_logs.iter(),
+            |e| {
+                let Event::CreateStreamJobFail(info) = e else {
+                    return None;
+                };
+                Some(json!(info).to_string())
+            },
+            Some(3),
+        );
+
+        let _ = writeln!(s);
+        let _ = writeln!(s, "latest dirty stream job clear-ups");
+        Self::write_event_logs_impl(
+            s,
+            event_logs.iter(),
+            |e| {
+                let Event::DirtyStreamJobClear(info) = e else {
+                    return None;
+                };
+                Some(json!(info).to_string())
+            },
+            Some(3),
         );
     }
 
@@ -461,6 +493,7 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "top range delete ratio");
         let _ = writeln!(s, "{}", format_table(top_range_delete_sst));
 
+        let _ = writeln!(s);
         self.write_storage_prometheus(s).await;
     }
 
@@ -493,7 +526,7 @@ impl DiagnoseCommand {
     }
 
     async fn write_storage_prometheus(&self, s: &mut String) {
-        let _ = writeln!(s, "top Hummock Get by duration");
+        let _ = writeln!(s, "top Hummock Get by duration (second)");
         let query = format!(
             "topk(3, histogram_quantile(0.9, sum(rate(state_store_get_duration_bucket{{{}}}[10m])) by (le, table_id)))",
             self.prometheus_selector
@@ -581,6 +614,51 @@ impl DiagnoseCommand {
                     })
                     .join(",");
                 let _ = writeln!(s, "{}: {:.3}", l, i.sample().value());
+            }
+        }
+    }
+
+    async fn write_await_tree(&self, s: &mut String) {
+        // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
+        let worker_nodes = self
+            .cluster_manager
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
+            .await;
+
+        let mut all = Default::default();
+
+        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
+            a.actor_traces.extend(b.actor_traces);
+            a.rpc_traces.extend(b.rpc_traces);
+            a.compaction_task_traces.extend(b.compaction_task_traces);
+        }
+
+        let compute_clients = ComputeClientPool::default();
+        for worker_node in &worker_nodes {
+            if let Ok(client) = compute_clients.get(worker_node).await && let Ok(result) = client.stack_trace().await {
+                merge(&mut all, result);
+            }
+        }
+
+        if !all.actor_traces.is_empty() {
+            let _ = writeln!(s, "--- Actor Traces ---");
+            for (actor_id, trace) in &all.actor_traces {
+                let _ = writeln!(s, ">> Actor {}", *actor_id);
+                let _ = writeln!(s, "{trace}");
+            }
+        }
+        if !all.rpc_traces.is_empty() {
+            let _ = writeln!(s, "--- RPC Traces ---");
+            for (name, trace) in &all.rpc_traces {
+                let _ = writeln!(s, ">> RPC {name}");
+                let _ = writeln!(s, "{trace}");
+            }
+        }
+        if !all.compaction_task_traces.is_empty() {
+            let _ = writeln!(s, "--- Compactor Traces ---");
+            for (name, trace) in &all.compaction_task_traces {
+                let _ = writeln!(s, ">> Compaction Task {name}");
+                let _ = writeln!(s, "{trace}");
             }
         }
     }
