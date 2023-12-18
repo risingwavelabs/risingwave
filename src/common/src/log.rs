@@ -59,10 +59,10 @@ impl LogSuppresser {
 }
 
 impl Default for LogSuppresser {
-    /// Default rate limiter allows 1 log per 10 seconds.
+    /// Default rate limiter allows 1 log per second.
     fn default() -> Self {
-        Self::new(RateLimiter::direct(Quota::per_minute(
-            NonZeroU32::new(6).unwrap(),
+        Self::new(RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(1).unwrap(),
         )))
     }
 }
