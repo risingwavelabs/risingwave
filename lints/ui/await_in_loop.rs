@@ -35,6 +35,18 @@ async fn f2() {
     while let Some(_) = s.next().await {
         tokio::time::sleep(Duration::ZERO).await;
     }
+
+    let mut handles = vec![];
+    for i in 0..10 {
+        handles.push(tokio::spawn(async move {
+            println!("hello world {}", i);
+        }));
+    }
+
+    // Don't lint, we add JoinHandle in whitelist.
+    for handle in handles {
+        handle.await.unwrap();
+    }
 }
 
 #[tokio::main]

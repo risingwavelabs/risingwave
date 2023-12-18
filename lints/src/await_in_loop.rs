@@ -113,8 +113,13 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                     let typeck_results = self.cx.typeck_results();
                     let ty = typeck_results.expr_ty(sub);
                     if let rustc_middle::ty::Adt(adt, _) = ty.kind() {
-                        if match_def_path(self.cx, adt.did(), &["tokio", "time", "sleep", "Sleep"]) {
-                            break 'm;
+                        for path in [
+                            &["tokio", "time", "sleep", "Sleep"] as &[&str],
+                            &["tokio", "runtime", "task", "join", "JoinHandle"],
+                        ] {
+                            if match_def_path(self.cx, adt.did(), path) {
+                                break 'm;
+                            }
                         }
                     }
                     let _ = self.found_await.get_or_insert((ex.span, in_loop_span));
