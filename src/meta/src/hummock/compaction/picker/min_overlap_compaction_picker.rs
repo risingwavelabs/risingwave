@@ -115,7 +115,7 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let mut picker =
+        let picker =
             TrivialMovePicker::new(self.level, self.target_level, self.overlap_strategy.clone());
         if let Some(input) = picker.pick_trivial_move_task(
             &levels.get_level(self.level).table_infos,
