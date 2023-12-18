@@ -96,9 +96,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         hex::encode(key_range.right.as_slice())
     };
 
-    let stale_ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
-    let range_tombstone_ratio =
-        sstable_info.range_tombstone_count * 100 / sstable_info.total_key_count;
+    let stale_ratio = (sstable_info.stale_key_count * 100)
+        .checked_div(sstable_info.total_key_count)
+        .unwrap_or(0);
+    let range_tombstone_ratio = (sstable_info.range_tombstone_count * 100)
+        .checked_div(sstable_info.total_key_count)
+        .unwrap_or(0);
     writeln!(
         s,
         "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, range_tombstone_count={} range_tombstone_ratio={}% bloom_filter_kind {:?}",
