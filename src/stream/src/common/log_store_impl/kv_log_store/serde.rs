@@ -247,11 +247,10 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
-        serialize_pk_with_vnode(
+    pub(crate) fn serialize_epoch(&self, epoch: u64) -> Bytes {
+        serialize_pk(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
-            vnode,
         )
     }
 

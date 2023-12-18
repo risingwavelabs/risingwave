@@ -826,6 +826,10 @@ impl DdlController {
                 });
             }
         }
+
+        union_fragment
+            .upstream_fragment_ids
+            .push(upstream_fragment_id);
     }
 
     /// Let the stream manager to create the actors, and do some cleanup work after it fails or finishes.
