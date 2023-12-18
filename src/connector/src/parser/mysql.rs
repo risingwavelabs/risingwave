@@ -119,11 +119,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRo
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    tracing::warn!(
-                        column = rw_field.name,
-                        data_type = rw_field.data_type,
-                        "unsupported data type, set to null"
-                    );
+                    tracing::warn!(column = rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None
                 }
             }
@@ -168,8 +164,7 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            let owned_row = mysql_row_to_datums(&mut mysql_row, &t1schema).unwrap();
-            Ok::<_, anyhow::Error>(Some(owned_row))
+            Ok::<_, anyhow::Error>(Some(mysql_row_to_datums(&mut mysql_row, &t1schema)))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {
