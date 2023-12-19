@@ -3,7 +3,7 @@ version: "3"
 services:
   fe:
     platform: linux/amd64
-    image: apache/doris:2.0.0_alpha-be-x86_64
+    image: apache/doris:2.0.0_alpha-fe-x86_64
     hostname: fe
     environment:
      - FE_SERVERS=fe1:172.21.0.2:9010
