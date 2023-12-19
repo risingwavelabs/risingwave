@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AdditionalColumnType;
@@ -26,88 +23,22 @@ use crate::source::{
 pub type CompatibleAdditionalColumnsFn =
     Box<dyn Fn(ColumnId, &str) -> ColumnCatalog + Send + Sync + 'static>;
 
-pub static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
-    HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>>,
-> = LazyLock::new(|| {
-    let mut res: HashMap<String, Vec<(&'static str, CompatibleAdditionalColumnsFn)>> =
-        HashMap::new();
+pub fn get_connector_compatible_additional_columns(
+    connector_name: &str,
+) -> Option<Vec<(&'static str, CompatibleAdditionalColumnsFn)>> {
+    let compatible_columns = match connector_name {
+        KAFKA_CONNECTOR => kafka_compatible_column_vec(),
+        PULSAR_CONNECTOR => pulsar_compatible_column_vec(),
+        KINESIS_CONNECTOR => kinesis_compatible_column_vec(),
+        S3_V2_CONNECTOR | S3_CONNECTOR => s3_compatible_column_column_vec(),
+        _ => return None,
+    };
+    Some(compatible_columns)
+}
 
-    res.insert(
-        KAFKA_CONNECTOR.to_string(),
-        vec![
-            (
-                "key",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named_with_additional_column(
-                            name,
-                            id,
-                            DataType::Bytea,
-                            AdditionalColumnType::Key,
-                        ),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "timestamp",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named_with_additional_column(
-                            name,
-                            id,
-                            DataType::Timestamptz,
-                            AdditionalColumnType::Timestamp,
-                        ),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "partition",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named_with_additional_column(
-                            name,
-                            id,
-                            DataType::Int64,
-                            AdditionalColumnType::Partition,
-                        ),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            (
-                "offset",
-                Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::named_with_additional_column(
-                            name,
-                            id,
-                            DataType::Int64,
-                            AdditionalColumnType::Offset,
-                        ),
-                        is_hidden: false,
-                    }
-                }),
-            ),
-            // Todo(tabVersion): add header column desc
-            // (
-            //     "header",
-            //     Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            //         ColumnCatalog {
-            //             column_desc: ColumnDesc::named(name, id, DataType::List(
-            //
-            //             )),
-            //             is_hidden: false,
-            //         }
-            //     }),
-            // ),
-        ],
-    );
-    res.insert(
-        PULSAR_CONNECTOR.to_string(),
-        vec![(
+fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+    vec![
+        (
             "key",
             Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
                 ColumnCatalog {
@@ -120,60 +51,111 @@ pub static CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
                     is_hidden: false,
                 }
             }),
-        )],
-    );
-    res.insert(
-        KINESIS_CONNECTOR.to_string(),
-        vec![(
-            "key",
+        ),
+        (
+            "timestamp",
             Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
                 ColumnCatalog {
                     column_desc: ColumnDesc::named_with_additional_column(
                         name,
                         id,
-                        DataType::Bytea,
-                        AdditionalColumnType::Key,
+                        DataType::Timestamptz,
+                        AdditionalColumnType::Timestamp,
                     ),
                     is_hidden: false,
                 }
             }),
-        )],
-    );
-    res.insert(
-        S3_CONNECTOR.to_string(),
-        vec![(
-            "file",
+        ),
+        (
+            "partition",
             Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
                 ColumnCatalog {
                     column_desc: ColumnDesc::named_with_additional_column(
                         name,
                         id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Filename,
+                        DataType::Int64,
+                        AdditionalColumnType::Partition,
                     ),
                     is_hidden: false,
                 }
             }),
-        )],
-    );
-    res.insert(
-        // TODO(tabVersion): change to Opendal S3 and GCS
-        S3_V2_CONNECTOR.to_string(),
-        vec![(
-            "file",
+        ),
+        (
+            "offset",
             Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
                 ColumnCatalog {
                     column_desc: ColumnDesc::named_with_additional_column(
                         name,
                         id,
-                        DataType::Varchar,
-                        AdditionalColumnType::Filename,
+                        DataType::Int64,
+                        AdditionalColumnType::Offset,
                     ),
                     is_hidden: false,
                 }
             }),
-        )],
-    );
+        ),
+        // Todo(tabVersion): add header column desc
+        // (
+        //     "header",
+        //     Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+        //         ColumnCatalog {
+        //             column_desc: ColumnDesc::named(name, id, DataType::List(
+        //
+        //             )),
+        //             is_hidden: false,
+        //         }
+        //     }),
+        // ),
+    ]
+}
 
-    res
-});
+fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+    vec![(
+        "key",
+        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+            ColumnCatalog {
+                column_desc: ColumnDesc::named_with_additional_column(
+                    name,
+                    id,
+                    DataType::Bytea,
+                    AdditionalColumnType::Key,
+                ),
+                is_hidden: false,
+            }
+        }),
+    )]
+}
+
+fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+    vec![(
+        "key",
+        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+            ColumnCatalog {
+                column_desc: ColumnDesc::named_with_additional_column(
+                    name,
+                    id,
+                    DataType::Bytea,
+                    AdditionalColumnType::Key,
+                ),
+                is_hidden: false,
+            }
+        }),
+    )]
+}
+
+fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
+    vec![(
+        "file",
+        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+            ColumnCatalog {
+                column_desc: ColumnDesc::named_with_additional_column(
+                    name,
+                    id,
+                    DataType::Varchar,
+                    AdditionalColumnType::Filename,
+                ),
+                is_hidden: false,
+            }
+        }),
+    )]
+}

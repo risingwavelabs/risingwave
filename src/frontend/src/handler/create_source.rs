@@ -27,7 +27,6 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::additional_columns::CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS;
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
@@ -44,8 +43,9 @@ use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
-    PULSAR_CONNECTOR, S3_CONNECTOR, S3_V2_CONNECTOR,
+    get_connector_compatible_additional_columns, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -672,34 +672,23 @@ pub fn handle_addition_columns(
     mut include_columns_options: Vec<(Ident, Option<Ident>)>,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
-    // refer the logic from `parse_source_schema_with_connector`
-    const EXEMPTED_CONNECTORS: [&str; 4] = ["nexmark", "datagen", "google_pubsub", "test"];
-    let is_connector_exempted_from_additional_column = |connector_name: &str| -> bool {
-        connector_name.contains("-cdc") || EXEMPTED_CONNECTORS.contains(&connector_name)
-    };
-
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
 
-    let is_exempted = is_connector_exempted_from_additional_column(connector_name.as_str());
-    match (is_exempted, include_columns_options.is_empty()) {
-        (true, true) => return Ok(()),
-        (true, false) => {
-            return Err(RwError::from(ProtocolError(format!(
-                "connector {} does not work with additional columns, but got {:?}",
-                connector_name, include_columns_options
-            ))))
-        }
-        (false, _) => {}
-    }
-
-    let addition_col_list = CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS
-        .get(connector_name.as_str())
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "Connector {} accepts no additional column",
-                connector_name
-            )))
-        })?;
+    let addition_col_list =
+        match get_connector_compatible_additional_columns(connector_name.as_str()) {
+            Some(cols) => cols,
+            // early return if there are no accepted additional columns for the connector
+            None => {
+                return if include_columns_options.is_empty() {
+                    Ok(())
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Connector {} accepts no additional column but got {:?}",
+                        connector_name, include_columns_options
+                    ))))
+                }
+            }
+        };
     let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
         format!("_rw_{}_{}", connector_name, addi_column_name)
     };

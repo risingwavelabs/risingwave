@@ -40,7 +40,7 @@ pub use manager::{SourceColumnDesc, SourceColumnType};
 pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::parser::additional_columns::{
-    CompatibleAdditionalColumnsFn, CONNECTOR_COMPATIBLE_ADDITIONAL_COLUMNS,
+    get_connector_compatible_additional_columns, CompatibleAdditionalColumnsFn,
 };
 pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
