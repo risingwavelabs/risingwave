@@ -14,6 +14,7 @@
 
 mod catalog;
 mod cluster;
+#[cfg_attr(coverage, coverage(off))]
 pub mod diagnose;
 mod env;
 pub mod event_log;
