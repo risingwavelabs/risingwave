@@ -33,6 +33,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -59,7 +60,6 @@ use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -358,7 +358,7 @@ where
         let output_column_ids_to_input_idx = output_column_ids
             .iter()
             .enumerate()
-            .map(|(pos, id) | (*id, pos))
+            .map(|(pos, id)| (*id, pos))
             .collect::<HashMap<_, _>>();
 
         let column_ids: Vec<i32> = table_catalog
@@ -691,7 +691,6 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-
         Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
     }
 }
@@ -940,7 +939,7 @@ where
     }
 
     fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
-        fill_non_output_indices(&self.output_indices, &self.i2o_mapping, &self.data_types, chunk)
+        fill_non_output_indices(&self.i2o_mapping, &self.data_types, chunk)
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -1549,7 +1548,6 @@ fn end_range_to_memcomparable<R: Row>(
 }
 
 fn fill_non_output_indices(
-    output_indices: &[usize],
     i2o_mapping: &ColIndexMapping,
     data_types: &[DataType],
     chunk: StreamChunk,
@@ -1584,10 +1582,8 @@ mod tests {
         expect.assert_eq(&actual);
     }
 
-
     #[test]
     fn test_fill_non_output_indices() {
-        let output_indices = vec![2, 0];
         let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
         let replicated_chunk = [OwnedRow::new(vec![
             Some(222_i32.into()),
@@ -1598,12 +1594,15 @@ mod tests {
             DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
         );
         let i2o_mapping = ColIndexMapping::new(vec![Some(2), None, Some(0)], 2);
-        let filled_chunk = fill_non_output_indices(&output_indices, &i2o_mapping, &data_types, replicated_chunk);
-        check(filled_chunk, expect![[r#"
-            StreamChunk { cardinality: 1, capacity: 1, data: 
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 1, capacity: 1, data:
             +---+---+---+-----+
             | + | 2 |   | 222 |
             +---+---+---+-----+
-             }"#]]);
+             }"#]],
+        );
     }
 }

@@ -30,7 +30,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::{ReplicatedStateTable, StateTable, WatermarkCacheStateTable};
+use crate::common::table::state_table::{
+    ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
+};
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
 
 #[tokio::test]
@@ -2028,7 +2030,6 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     assert!(res.is_none());
 }
 
-
 #[tokio::test]
 async fn test_replicated_state_table_replication() {
     type TestReplicatedStateTable = ReplicatedStateTable<HummockStorage, BasicSerde>;
@@ -2061,12 +2062,14 @@ async fn test_replicated_state_table_replication() {
 
     // Create a replicated state table
     let output_column_ids = vec![ColumnId::from(2), ColumnId::from(0)];
-    let mut replicated_state_table = TestReplicatedStateTable::from_table_catalog_with_output_column_ids(
-        &table,
-        test_env.storage.clone(),
-        None,
-        output_column_ids,
-    ).await;
+    let mut replicated_state_table =
+        TestReplicatedStateTable::from_table_catalog_with_output_column_ids(
+            &table,
+            test_env.storage.clone(),
+            None,
+            output_column_ids,
+        )
+        .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -2091,10 +2094,12 @@ async fn test_replicated_state_table_replication() {
         );
         let iter = state_table
             .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
-            .await.unwrap();
+            .await
+            .unwrap();
         let replicated_iter = replicated_state_table
             .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
-            .await.unwrap();
+            .await
+            .unwrap();
         pin_mut!(iter);
         pin_mut!(replicated_iter);
 
@@ -2110,30 +2115,31 @@ async fn test_replicated_state_table_replication() {
 
         let res = replicated_iter.next().await.unwrap().unwrap();
         assert_eq!(
-            &OwnedRow::new(vec![
-                Some(111_i32.into()),
-                Some(1_i32.into()),
-            ]),
+            &OwnedRow::new(vec![Some(111_i32.into()), Some(1_i32.into()),]),
             res.as_ref()
         );
     }
 
     // Test replication
-    let state_table_chunk = [(Op::Insert, OwnedRow::new(vec![
-        Some(2_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-    ]))];
+    let state_table_chunk = [(
+        Op::Insert,
+        OwnedRow::new(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+    )];
     let state_table_chunk = StreamChunk::from_rows(
         &state_table_chunk,
-        &[DataType::Int32, DataType::Int32, DataType::Int32]
+        &[DataType::Int32, DataType::Int32, DataType::Int32],
     );
     state_table.write_chunk(state_table_chunk);
-    let replicate_chunk = [(Op::Insert, OwnedRow::new(vec![
-        Some(222_i32.into()),
-        Some(2_i32.into()),
-    ]))];
-    let replicate_chunk = StreamChunk::from_rows(&replicate_chunk, &[DataType::Int32, DataType::Int32]);
+    let replicate_chunk = [(
+        Op::Insert,
+        OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into())]),
+    )];
+    let replicate_chunk =
+        StreamChunk::from_rows(&replicate_chunk, &[DataType::Int32, DataType::Int32]);
     replicated_state_table.write_chunk(replicate_chunk);
 
     epoch.inc();
@@ -2148,7 +2154,8 @@ async fn test_replicated_state_table_replication() {
 
         let iter = state_table
             .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
-            .await.unwrap();
+            .await
+            .unwrap();
 
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
             std::ops::Bound::Excluded(OwnedRow::new(vec![Some(1_i32.into())])),
@@ -2156,7 +2163,8 @@ async fn test_replicated_state_table_replication() {
         );
         let replicated_iter = replicated_state_table
             .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
-            .await.unwrap();
+            .await
+            .unwrap();
         pin_mut!(iter);
         pin_mut!(replicated_iter);
 
@@ -2172,14 +2180,10 @@ async fn test_replicated_state_table_replication() {
 
         let res = replicated_iter.next().await.unwrap().unwrap();
         assert_eq!(
-            &OwnedRow::new(vec![
-                Some(222_i32.into()),
-                Some(2_i32.into()),
-            ]),
+            &OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into()),]),
             res.as_ref()
         );
     }
 
     // Changes will not be visible in replicated state table. We have to write chunk to it.
 }
-
