@@ -114,16 +114,21 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     pub fn new_default() -> Self {
-        let cert = PathBuf::new().join("tests/ssl/demo.crt");
-        let key = PathBuf::new().join("tests/ssl/demo.key");
-        let path_to_cur_proj = PathBuf::new().join("src/utils/pgwire");
+        let cert = if let Ok(cert) = std::env::var("RW_SSL_CERT") {
+            PathBuf::from(cert)
+        } else {
+            PathBuf::new().join("src/utils/pgwire").join("tests/ssl/demo.crt")
+        };
+
+        let key = if let Ok(key) = std::env::var("RW_SSL_KEY") {
+            PathBuf::from(key)
+        } else {
+            PathBuf::new().join("src/utils/pgwire").join("tests/ssl/demo.key")
+        };
 
         Self {
-            // Now the demo crt and key are hard code generated via simple self-signed CA.
-            // In future it should change to configure by user.
-            // The path is mounted from project root.
-            cert: path_to_cur_proj.join(cert),
-            key: path_to_cur_proj.join(key),
+            cert,
+            key,
         }
     }
 }
