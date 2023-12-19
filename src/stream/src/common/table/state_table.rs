@@ -940,7 +940,7 @@ where
     }
 
     fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
-        fill_non_output_indices(&self.output_indices, &self.data_types, chunk)
+        fill_non_output_indices(&self.output_indices, &self.i2o_mapping, &self.data_types, chunk)
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -1550,6 +1550,7 @@ fn end_range_to_memcomparable<R: Row>(
 
 fn fill_non_output_indices(
     output_indices: &[usize],
+    i2o_mapping: &ColIndexMapping,
     data_types: &[DataType],
     chunk: StreamChunk,
 ) -> StreamChunk {
@@ -1557,7 +1558,7 @@ fn fill_non_output_indices(
     let (ops, columns, vis) = chunk.into_inner();
     let mut full_columns = Vec::with_capacity(data_types.len());
     for (i, data_type) in data_types.iter().enumerate() {
-        if let Some(j) = output_indices.iter().position(|&j| i == j) {
+        if let Some(j) = i2o_mapping.try_map(i) {
             full_columns.push(columns[j].clone());
         } else {
             let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
@@ -1596,7 +1597,8 @@ mod tests {
             vec![Op::Insert],
             DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
         );
-        let filled_chunk = fill_non_output_indices(&output_indices, &data_types, replicated_chunk);
+        let i2o_mapping = ColIndexMapping::new(vec![Some(2), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&output_indices, &i2o_mapping, &data_types, replicated_chunk);
         check(filled_chunk, expect![[r#"
             StreamChunk { cardinality: 1, capacity: 1, data: 
             +---+---+---+-----+
