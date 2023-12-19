@@ -344,7 +344,7 @@ impl CacheRefillTask {
     fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
-        parent_ssts: &[impl Deref<Target = Box<Sstable>>],
+        parent_ssts: &[impl Deref<Target = Sstable>],
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
@@ -606,6 +606,7 @@ impl CacheRefillTask {
                             bytes,
                             uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
                         };
+
                         writer.force();
                         // TODO(MrCroxx): compress if raw is not compressed?
                         // skip compression for it may already be compressed.

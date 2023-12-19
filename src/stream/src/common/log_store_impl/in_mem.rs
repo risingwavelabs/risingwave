@@ -233,6 +233,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         self.truncate_offset = offset;
         Ok(())
     }
+
+    async fn rewind(&mut self) -> LogStoreResult<bool> {
+        Ok(false)
+    }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
