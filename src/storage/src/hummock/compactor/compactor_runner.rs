@@ -395,6 +395,7 @@ pub async fn compact(
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
         && compact_task.task_type() == TaskType::Dynamic;
+
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
             Ok(splits) => {
@@ -425,7 +426,7 @@ pub async fn compact(
             compact_task,
             context.clone(),
             vec![],
-            TaskStatus::NoAvailResourceCanceled,
+            TaskStatus::NoAvailCpuResourceCanceled,
         );
     }
 
@@ -481,7 +482,7 @@ pub async fn compact(
                 context.memory_limiter.get_memory_usage(),
                 context.memory_limiter.quota()
             );
-        task_status = TaskStatus::NoAvailResourceCanceled;
+        task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return compact_done(compact_task, context.clone(), output_ssts, task_status);
     }
 
