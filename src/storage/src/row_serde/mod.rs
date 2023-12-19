@@ -95,6 +95,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_column_type: Normal,
+                            version: Pr13707,
                         },
                         ColumnDesc {
                             data_type: Int16,
@@ -105,6 +106,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_column_type: Normal,
+                            version: Pr13707,
                         },
                     ],
                     [
@@ -135,6 +137,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_column_type: Normal,
+                            version: Pr13707,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -145,6 +148,7 @@ mod test {
                             generated_or_default_column: None,
                             description: None,
                             additional_column_type: Normal,
+                            version: Pr13707,
                         },
                     ],
                     [

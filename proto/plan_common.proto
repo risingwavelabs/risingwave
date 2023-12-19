@@ -26,6 +26,16 @@ enum AdditionalColumnType {
   NORMAL = 7;
 }
 
+enum ColumnDescVersion {
+  COLUMN_DESC_VERSION_UNSPECIFIED = 0;
+  // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
+  // in case DEFAULT_KEY_COLUMN_NAME changes
+  COLUMN_DESC_VERSION_PR_13707 = 1;
+
+  // for test only
+  COLUMN_DESC_VERSION_MAX = 2147483647;
+}
+
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
@@ -55,6 +65,8 @@ message ColumnDesc {
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
   AdditionalColumnType additional_column_type = 9;
+
+  ColumnDescVersion version = 10;
 }
 
 message ColumnCatalog {

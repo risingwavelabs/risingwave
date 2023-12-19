@@ -19,7 +19,7 @@ use risingwave_common::catalog::{
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
 /// counterpart in `StreamScan`
@@ -135,6 +135,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             generated_or_default_column: None,
             description: None,
             additional_column_type: s.additional_column_type,
+            version: ColumnDescVersion::Pr13707,
         }
     }
 }
