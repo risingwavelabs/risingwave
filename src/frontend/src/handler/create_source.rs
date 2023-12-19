@@ -1647,7 +1647,7 @@ pub mod tests {
             Err(e) => {
                 assert_eq!(
                     e.to_string(),
-                    "Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE JSON"
+                    "Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE Json"
                 )
             }
             _ => unreachable!(),
@@ -1657,7 +1657,7 @@ pub mod tests {
             .to_string();
         match frontend.run_sql(sql).await {
             Err(e) => {
-                assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE JSON")
+                assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE Json")
             }
             _ => unreachable!(),
         }
