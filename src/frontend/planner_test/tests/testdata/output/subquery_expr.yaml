@@ -24,7 +24,7 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
-      └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+      └─LogicalMaxOneRow
         └─LogicalScan { table: t, columns: [t.x] }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
@@ -73,7 +73,7 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
-      └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+      └─LogicalMaxOneRow
         └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
           └─LogicalScan { table: t, columns: [t.x] }
   stream_error: Scalar subquery might produce more than one row.
@@ -90,7 +90,7 @@
     LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
-      └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+      └─LogicalMaxOneRow
         └─LogicalScan { table: t, columns: [t.x] }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
@@ -109,7 +109,7 @@
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalJoin { type: LeftOuter, on: true, output: all }
     │ ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    │ └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+    │ └─LogicalMaxOneRow
     │   └─LogicalScan { table: t, columns: [t.x] }
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   stream_error: Scalar subquery might produce more than one row.
@@ -129,11 +129,11 @@
     LogicalProject { exprs: [(t.x + $expr1) as $expr2] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [t.x] }
-      └─LogicalProject { exprs: [(t.x + t.x) as $expr1] }
-        └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+      └─LogicalMaxOneRow
+        └─LogicalProject { exprs: [(t.x + t.x) as $expr1] }
           └─LogicalJoin { type: LeftOuter, on: true, output: all }
             ├─LogicalScan { table: t, columns: [t.x] }
-            └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+            └─LogicalMaxOneRow
               └─LogicalScan { table: t, columns: [t.x] }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |

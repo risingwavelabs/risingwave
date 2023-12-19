@@ -466,8 +466,8 @@
     LogicalProject { exprs: [1:Int32, RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
-        └─LogicalLimit { limit: 1, offset: 0, check_exceeding: true }
+      └─LogicalMaxOneRow
+        └─LogicalProject { exprs: [RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
           └─LogicalProjectSet { select_list: [RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   stream_error: Scalar subquery might produce more than one row.
