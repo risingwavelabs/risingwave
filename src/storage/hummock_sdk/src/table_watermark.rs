@@ -82,6 +82,10 @@ impl TableWatermarksIndex {
         }
     }
 
+    pub fn index(&self) -> &HashMap<VirtualNode, BTreeMap<HummockEpoch, Bytes>> {
+        &self.index
+    }
+
     pub fn read_watermark(&self, vnode: VirtualNode, epoch: HummockEpoch) -> Option<Bytes> {
         self.index.get(&vnode).and_then(|epoch_watermarks| {
             epoch_watermarks
