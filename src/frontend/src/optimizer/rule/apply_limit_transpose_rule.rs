@@ -57,10 +57,6 @@ impl Rule for ApplyLimitTransposeRule {
         }
 
         let logical_limit: &LogicalLimit = right.as_logical_limit()?;
-        if logical_limit.check_exceeding {
-            return None;
-        }
-
         let limit_input = logical_limit.input();
         let limit = logical_limit.limit();
         let offset = logical_limit.offset();

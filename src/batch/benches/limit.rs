@@ -35,7 +35,6 @@ fn create_limit_executor(
         input,
         offset,
         limit,
-        false,
         "LimitExecutor".into(),
     ))
 }

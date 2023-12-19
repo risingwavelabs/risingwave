@@ -48,7 +48,7 @@ impl Planner {
                 // Should be rejected by parser.
                 assert!(!with_ties);
                 // Create a logical limit if with limit/offset but without order-by
-                LogicalLimit::create(plan, limit, offset, false)
+                LogicalLimit::create(plan, limit, offset)
             } else {
                 // Create a logical top-n if with limit/offset and order-by
                 LogicalTopN::create(plan, limit, offset, order.clone(), with_ties, vec![])?

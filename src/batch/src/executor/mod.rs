@@ -216,7 +216,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Sort => SortExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::GroupTopN => GroupTopNExecutorBuilder,
-            NodeBody::Limit => MaxOneRowExecutor,
+            NodeBody::Limit => LimitExecutor,
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutor<()>,

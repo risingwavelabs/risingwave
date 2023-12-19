@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
-use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use super::utils::Distill;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -35,25 +33,17 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalLimit {
     pub base: PlanBase<Logical>,
     pub(super) core: generic::Limit<PlanRef>,
-
-    /// Whether to report an error when the number of rows from the input
-    /// exceeds the limit.
-    pub check_exceeding: bool,
 }
 
 impl LogicalLimit {
-    fn new(core: generic::Limit<PlanRef>, check_exceeding: bool) -> Self {
+    pub fn new(core: generic::Limit<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
-        LogicalLimit {
-            base,
-            core,
-            check_exceeding,
-        }
+        LogicalLimit { base, core }
     }
 
     /// the function will check if the cond is bool expression
-    pub fn create(input: PlanRef, limit: u64, offset: u64, check_exceeding: bool) -> PlanRef {
-        Self::new(generic::Limit::new(input, limit, offset), check_exceeding).into()
+    pub fn create(input: PlanRef, limit: u64, offset: u64) -> PlanRef {
+        Self::new(generic::Limit::new(input, limit, offset)).into()
     }
 
     pub fn limit(&self) -> u64 {
@@ -73,7 +63,7 @@ impl PlanTreeNodeUnary for LogicalLimit {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core, self.check_exceeding)
+        Self::new(core)
     }
 
     #[must_use]
@@ -86,13 +76,7 @@ impl PlanTreeNodeUnary for LogicalLimit {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalLimit}
-
-impl Distill for LogicalLimit {
-    fn distill<'a>(&self) -> XmlNode<'a> {
-        self.core
-            .distill_inner("LogicalLimit", self.check_exceeding)
-    }
-}
+impl_distill_by_unit!(LogicalLimit, core, "LogicalLimit");
 
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -121,19 +105,12 @@ impl ToBatch for LogicalLimit {
         let new_input = self.input().to_batch()?;
         let mut new_logical = self.core.clone();
         new_logical.input = new_input;
-        Ok(BatchLimit::new(new_logical, self.check_exceeding).into())
+        Ok(BatchLimit::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalLimit {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.check_exceeding {
-            // `check_exceeding` is currently only used for the runtime check of
-            // scalar subqueries, while it's not supported in streaming mode, so
-            // we raise a precise error here.
-            bail!("Scalar subquery might produce more than one row.");
-        }
-
         // use the first column as an order to provide determinism for streaming queries.
         let order = Order::new(vec![ColumnOrder::new(0, OrderType::ascending())]);
         let topn = LogicalTopN::new(

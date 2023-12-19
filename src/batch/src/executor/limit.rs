@@ -15,7 +15,6 @@
 use std::cmp::min;
 
 use futures_async_stream::try_stream;
-use futures_util::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
@@ -35,9 +34,6 @@ pub struct LimitExecutor {
     limit: usize,
     /// offset parameter
     offset: usize,
-    /// Whether to report an error when the number of rows from the input
-    /// exceeds the limit.
-    check_exceeding: bool,
     /// Identity string of the executor
     identity: String,
 }
@@ -55,13 +51,11 @@ impl BoxedExecutorBuilder for LimitExecutor {
 
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;
-        let check_exceeding = limit_node.get_check_exceeding();
 
         Ok(Box::new(Self::new(
             child,
             limit,
             offset,
-            check_exceeding,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -70,29 +64,21 @@ impl BoxedExecutorBuilder for LimitExecutor {
 impl LimitExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        if self.limit == 0 && !self.check_exceeding {
+        if self.limit == 0 {
             return Ok(());
         }
-
-        // the number of rows have been received from child
-        let mut received = 0;
         // the number of rows have been skipped due to offset
         let mut skipped = 0;
         // the number of rows have been returned as execute result
         let mut returned = 0;
 
-        let mut input = self.child.execute();
-
         #[for_await]
-        for data_chunk in &mut input {
-            let data_chunk = data_chunk?;
-            let cardinality = data_chunk.cardinality();
-            received += cardinality;
-
+        for data_chunk in self.child.execute() {
             if returned == self.limit {
                 break;
             }
-
+            let data_chunk = data_chunk?;
+            let cardinality = data_chunk.cardinality();
             if cardinality + skipped <= self.offset {
                 skipped += cardinality;
                 continue;
@@ -130,23 +116,6 @@ impl LimitExecutor {
                 .with_visibility(new_vis.into_iter().collect::<Bitmap>())
                 .compact();
         }
-
-        // Consume the rest of the input to check if the limit is reached.
-        if self.check_exceeding {
-            while received <= self.offset + self.limit {
-                if let Some(data_chunk) = input.try_next().await? {
-                    received += data_chunk.cardinality();
-                } else {
-                    break;
-                }
-            }
-
-            if received > self.offset + self.limit {
-                // `check_exceeding` is currently only used for the runtime check of
-                // scalar subqueries, so we raise a precise error here.
-                bail!("Scalar subquery produced more than one row.");
-            }
-        }
     }
 }
 
@@ -165,18 +134,11 @@ impl Executor for LimitExecutor {
 }
 
 impl LimitExecutor {
-    pub fn new(
-        child: BoxedExecutor,
-        limit: usize,
-        offset: usize,
-        check_exceeding: bool,
-        identity: String,
-    ) -> Self {
+    pub fn new(child: BoxedExecutor, limit: usize, offset: usize, identity: String) -> Self {
         Self {
             child,
             limit,
             offset,
-            check_exceeding,
             identity,
         }
     }
@@ -227,7 +189,6 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            check_exceeding: false,
             identity: "LimitExecutor2".to_string(),
         });
         let fields = &limit_executor.schema().fields;
@@ -350,7 +311,6 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            check_exceeding: false,
             identity: "LimitExecutor2".to_string(),
         });
 

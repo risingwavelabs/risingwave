@@ -139,7 +139,6 @@ message GroupTopNNode {
 message LimitNode {
   uint64 limit = 1;
   uint64 offset = 2;
-  bool check_exceeding = 3;
 }
 
 message NestedLoopJoinNode {

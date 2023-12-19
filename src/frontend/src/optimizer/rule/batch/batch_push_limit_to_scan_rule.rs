@@ -34,15 +34,7 @@ impl Rule for BatchPushLimitToScanRule {
         if scan.limit().is_some() {
             return None;
         }
-
-        let pushed_limit = if limit.check_exceeding {
-            // If to check exceeding, we have to fetch at least one more row
-            // to avoid false negative.
-            limit.limit() + limit.offset() + 1
-        } else {
-            limit.limit() + limit.offset()
-        };
-
+        let pushed_limit = limit.limit() + limit.offset();
         let new_scan = BatchSeqScan::new_with_dist(
             scan.core().clone(),
             scan.base.distribution().clone(),

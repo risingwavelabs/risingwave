@@ -46,7 +46,6 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Limit<PlanRef> {
         Some(self.input.stream_key()?.to_vec())
     }
 }
-
 impl<PlanRef> Limit<PlanRef> {
     pub fn new(input: PlanRef, limit: u64, offset: u64) -> Self {
         Limit {
@@ -55,25 +54,16 @@ impl<PlanRef> Limit<PlanRef> {
             offset,
         }
     }
-
-    pub fn distill_inner<'a>(
-        &self,
-        name: impl Into<Str<'a>>,
-        check_exceeding: bool,
-    ) -> XmlNode<'a> {
-        let mut fields = vec![
-            ("limit", Pretty::debug(&self.limit)),
-            ("offset", Pretty::debug(&self.offset)),
-        ];
-        if check_exceeding {
-            fields.push(("check_exceeding", Pretty::debug(&true)));
-        }
-        childless_record(name, fields)
-    }
 }
 
 impl<PlanRef> DistillUnit for Limit<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
-        self.distill_inner(name, false)
+        childless_record(
+            name,
+            vec![
+                ("limit", Pretty::debug(&self.limit)),
+                ("offset", Pretty::debug(&self.offset)),
+            ],
+        )
     }
 }
