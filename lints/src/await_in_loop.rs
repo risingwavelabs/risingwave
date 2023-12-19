@@ -18,7 +18,14 @@ declare_tool_lint! {
     /// This can't be concurrent
     ///
     /// ### Known problems
-    /// Ignore it if your loop body must be executed sequentially or if it is not on the critical path.
+    ///
+    /// Can cause false positives.
+    ///
+    /// It is possible that the loop body must be executed sequentially.
+    ///
+    /// Also it'll make your code a little bit more complicated, and may introduce
+    /// some redundant clones due to the limitation of rust compiler. If your code
+    /// is not in the critical path, feel free to ignore that.
     ///
     /// ### Example
     /// ```no_run
@@ -87,6 +94,8 @@ impl<'hir, 'tcx> Visitor<'hir> for AwaitInLoopVisitor<'hir, 'tcx> {
                 // In most cases, a raw `loop` can't be concurrent.
                 if !matches!(source, LoopSource::Loop) =>
             {
+                // `.await` will be expanded as a match-until-yield loop in HIR.
+                // We need to ignore the expanded loop itself.
                 if !is_from_async_await(ex.span) {
                     self.in_loop = Some(ex.span);
                     if let Some(WhileLet {
