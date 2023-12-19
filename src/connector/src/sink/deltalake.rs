@@ -524,7 +524,7 @@ mod test {
 
     #[tokio::test]
     async fn test_deltalake() {
-        let dir = tempdir::TempDir::new("./deltalake").unwrap();
+        let dir = tempfile::tempdir_in("./deltalake").unwrap();
         let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
