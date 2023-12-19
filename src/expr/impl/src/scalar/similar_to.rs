@@ -24,18 +24,9 @@ fn similar_escape_internal(
     esc_text: Option<char>,
     writer: &mut impl Write,
 ) -> std::result::Result<(), ExprError> {
-    macro_rules! write_str {
-        ($s:tt) => {
-            writer
-                .write_str($s)
-                .map_err(|e| ExprError::Internal(e.into()))?
-        };
-    }
-    macro_rules! write_char {
-        ($c:tt) => {
-            writer
-                .write_char($c)
-                .map_err(|e| ExprError::Internal(e.into()))?
+    macro_rules! write_ {
+        ($s:expr) => {
+            write!(writer, "{}", s).unwrap();
         };
     }
 
