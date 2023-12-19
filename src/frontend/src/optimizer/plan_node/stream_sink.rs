@@ -284,7 +284,8 @@ impl StreamSink {
             match format_desc {
                 Some(f) => (
                     UserDefinedAppendOnly::from(&f.format),
-                    Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                    Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?
+                        || Self::is_user_force_append_only(properties)?,
                     false,
                 ),
                 None => (
