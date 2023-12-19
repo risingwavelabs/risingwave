@@ -170,6 +170,7 @@ impl Binder {
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
             _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
