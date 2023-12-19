@@ -595,39 +595,55 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        let mut actor_infos = vec![];
-        for (node_id, actors) in &info.actor_map {
-            let host = info
-                .node_map
-                .get(node_id)
-                .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
-                .host
-                .clone();
-            actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
-                actor_id,
-                host: host.clone(),
-            }));
-        }
+        let actor_infos: Vec<_> = info
+            .actor_map
+            .iter()
+            .map(|(node_id, actors)| {
+                let host = info
+                    .node_map
+                    .get(node_id)
+                    .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
+                    .host
+                    .clone();
+                Ok(actors.iter().map(move |&actor_id| ActorInfo {
+                    actor_id,
+                    host: host.clone(),
+                })) as MetaResult<_>
+            })
+            .flatten_ok()
+            .try_collect()?;
 
         let mut node_actors = self.fragment_manager.all_node_actors(false).await;
-        for (node_id, actors) in &info.actor_map {
+
+        let res = info.actor_map.iter().map(|(node_id, actors)| {
+            let new_actors = node_actors.remove(node_id).unwrap_or_default();
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
+            let actor_infos = actor_infos.clone();
 
-            client
-                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos.clone(),
-                })
-                .await?;
+            async move {
+                let client = self.env.stream_client_pool().get(node).await?;
+                client
+                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
+                        info: actor_infos,
+                    })
+                    .await?;
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: node_actors.remove(node_id).unwrap_or_default(),
-                })
-                .await?;
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+                client
+                    .update_actors(UpdateActorsRequest {
+                        request_id,
+                        actors: new_actors,
+                    })
+                    .await?;
+
+                Ok(()) as MetaResult<()>
+            }
+        }).collect::<FuturesUnordered<_>>();
+
+        #[for_await]
+        for r in res {
+            r?;
         }
 
         Ok(())
