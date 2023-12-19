@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::future::try_join_all;
+use futures::stream::FuturesUnordered;
+use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
@@ -638,18 +640,28 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        for (node_id, actors) in &info.actor_map {
-            let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
+        let res = info
+            .actor_map
+            .iter()
+            .map(|(node_id, actors)| async move {
+                let actors = actors.clone();
+                let node = info.node_map.get(node_id).unwrap();
+                let client = self.env.stream_client_pool().get(node).await?;
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-            client
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: actors.to_owned(),
-                })
-                .await?;
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
+                    .await
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        #[for_await]
+        for r in res {
+            r?;
         }
 
         Ok(())
