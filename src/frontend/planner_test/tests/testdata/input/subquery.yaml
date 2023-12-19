@@ -301,3 +301,8 @@
     SELECT generate_series(1, (select 1));
   expected_outputs:
     - batch_plan
+- name: array subquery
+  sql: |
+    select Array(select 1 union select 2);
+  expected_outputs:
+    - batch_plan

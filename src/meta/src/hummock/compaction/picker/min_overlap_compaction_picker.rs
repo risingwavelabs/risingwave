@@ -20,7 +20,10 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
+use super::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, TrivialMovePicker,
+    MAX_COMPACT_LEVEL_COUNT,
+};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -112,6 +115,16 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        let picker =
+            TrivialMovePicker::new(self.level, self.target_level, self.overlap_strategy.clone());
+        if let Some(input) = picker.pick_trivial_move_task(
+            &levels.get_level(self.level).table_infos,
+            &levels.get_level(self.target_level).table_infos,
+            level_handlers,
+            stats,
+        ) {
+            return Some(input);
+        }
         assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &levels.get_level(self.level).table_infos,

@@ -28,6 +28,7 @@ pub mod memcmp_encoding;
 pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
+pub mod query_log;
 pub mod resource_util;
 pub mod row_id;
 pub mod row_serde;

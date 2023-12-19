@@ -32,7 +32,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::PbTableWatermarksExt;
+use crate::table_watermark::{PbTableWatermarksExt, TableWatermarks, TableWatermarksIndex};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -188,6 +188,19 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
+    }
+
+    pub fn build_table_watermarks_index(&self) -> HashMap<TableId, TableWatermarksIndex> {
+        self.table_watermarks
+            .iter()
+            .map(|(table_id, table_watermarks)| {
+                (
+                    TableId::from(*table_id),
+                    TableWatermarks::from_protobuf(table_watermarks)
+                        .build_index(self.max_committed_epoch),
+                )
+            })
+            .collect()
     }
 
     pub fn safe_epoch_table_watermarks(
@@ -572,6 +585,9 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        for table_id in &version_delta.removed_table_ids {
+            let _ = self.table_watermarks.remove(table_id);
+        }
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
             match self.table_watermarks.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
@@ -1010,6 +1026,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         group_deltas: Default::default(),
         gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
+        removed_table_ids: vec![],
     }
 }
 
