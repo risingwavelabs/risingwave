@@ -60,22 +60,28 @@ impl Executor for MaxOneRowExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut any = false;
+        let mut result = None;
 
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = chunk?;
             for row in chunk.rows() {
-                if any {
+                if result.is_some() {
                     // `MaxOneRow` is currently only used for the runtime check of
                     // scalar subqueries, so we raise a precise error here.
                     bail!("Scalar subquery produced more than one row.");
                 } else {
-                    any = true;
-                    let one_row_chunk = DataChunk::from_rows(&[row], &data_types);
-                    yield one_row_chunk;
+                    // We do not immediately yield the chunk here. Instead, we store
+                    // it in `result` and only yield it when the child executor is
+                    // exhausted, in case the parent executor cancels the execution
+                    // after receiving the row.
+                    result = Some(DataChunk::from_rows(&[row], &data_types));
                 }
             }
+        }
+
+        if let Some(result) = result {
+            yield result;
         }
     }
 }
