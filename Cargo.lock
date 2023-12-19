@@ -3784,11 +3784,11 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b6c6bc7a5cfdba3af30c7fdea5841c6e8564369116d3276cf13d742245f8cef"
+checksum = "caed9c227536e3b6fb92aea800c44de7516ecc339a11eb01544549dd6f43cb69"
 dependencies = [
- "foyer-common",
+ "foyer-common 0.2.0",
  "foyer-intrusive",
  "foyer-storage",
  "foyer-workspace-hack",
@@ -3811,6 +3811,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "foyer-common"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f10010b8cb0f380cc30ff8c82ec7f6addc2ced72b3758d336f351831a56a4a59"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "foyer-workspace-hack",
+ "itertools 0.12.0",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "paste",
+ "tracing",
+]
+
+[[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3818,7 +3834,7 @@ checksum = "2f967c3c40435a621fb1b8670d8f6501d67e79cea08b1ce07c150147aabdc588"
 dependencies = [
  "bytes",
  "cmsketch",
- "foyer-common",
+ "foyer-common 0.1.0",
  "foyer-workspace-hack",
  "itertools 0.12.0",
  "memoffset",
@@ -3830,16 +3846,16 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e0c1b14504ee66a9c6e9a81982fb62fe8dc1b45d15684bd3e1fcda4bc6c25d"
+checksum = "8df47c9672ac893c172832c79c41bc4be7b24f71376fb00be461418c7a4d1cfe"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
  "cmsketch",
- "foyer-common",
+ "foyer-common 0.2.0",
  "foyer-intrusive",
  "foyer-workspace-hack",
  "futures",
