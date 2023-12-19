@@ -215,7 +215,7 @@ fn bench_expr(c: &mut Criterion) {
             .into_ref(),
             // 31: position target
             Utf8Array::from_iter_display(
-                [Some("hello, hawaii guitar"), Some("data")]
+                [Some("hello, hawaii guitar"), Some("Here are some data")]
                     .into_iter()
                     .cycle()
                     .take(CHUNK_SIZE),
