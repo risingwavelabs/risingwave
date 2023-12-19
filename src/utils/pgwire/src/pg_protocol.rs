@@ -117,19 +117,20 @@ impl TlsConfig {
         let cert = if let Ok(cert) = std::env::var("RW_SSL_CERT") {
             PathBuf::from(cert)
         } else {
-            PathBuf::new().join("src/utils/pgwire").join("tests/ssl/demo.crt")
+            PathBuf::new()
+                .join("src/utils/pgwire")
+                .join("tests/ssl/demo.crt")
         };
 
         let key = if let Ok(key) = std::env::var("RW_SSL_KEY") {
             PathBuf::from(key)
         } else {
-            PathBuf::new().join("src/utils/pgwire").join("tests/ssl/demo.key")
+            PathBuf::new()
+                .join("src/utils/pgwire")
+                .join("tests/ssl/demo.key")
         };
 
-        Self {
-            cert,
-            key,
-        }
+        Self { cert, key }
     }
 }
 
