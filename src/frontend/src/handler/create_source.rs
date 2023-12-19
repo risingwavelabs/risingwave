@@ -860,18 +860,18 @@ pub(crate) async fn bind_source_pk(
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
-        (Format::Upsert, Encode::Json) => {
+        (Format::Upsert, encode @ Encode::Json | encode @ Encode::Avro) => {
             if let Some(ref key_column_name) = key_column_name && sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
-                        format!("upsert json supports only one primary key column ({}).", key_column_name)
+                        format!("upsert {:?} supports only one primary key column ({}).", encode, key_column_name)
                     )));
                 }
                 // the column name have been converted to real value in `handle_addition_columns`
                 // so we don't ignore ascii case here
                 if !key_column_name.eq(sql_defined_pk_names[0].as_str()) {
                     return Err(RwError::from(ProtocolError(format!(
-                        "upsert json's key column {} not match with sql defined primary key {}",
+                        "upsert {}'s key column {} not match with sql defined primary key {}", encode,
                         key_column_name, sql_defined_pk_names[0]
                     ))));
                 }
@@ -879,36 +879,14 @@ pub(crate) async fn bind_source_pk(
             } else {
                 return if key_column_name.is_none() {
                     Err(
-                        RwError::from(ProtocolError("INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE JSON".to_string()))
+                        RwError::from(ProtocolError(format!("INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE {:?}", encode)
+                        ))
                     )
                 } else {
                     Err(RwError::from(ProtocolError(format!(
-                        "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE JSON",
-                        key_column_name.unwrap()))))
+                        "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE {:?}",
+                        key_column_name.unwrap(), encode))))
                 }
-            }
-        }
-        (Format::Upsert, Encode::Avro) => {
-            // prev deprecated logic:
-            // if key schema can be inferred from schema registry, then use it
-            if sql_defined_pk && sql_defined_pk_names.len() != 1 {
-                return Err(RwError::from(ProtocolError(
-                    "upsert avro supports only one primary key column.".to_string(),
-                )));
-            }
-            if let Some(ref key_column_name) = key_column_name {
-                if key_column_name.eq(sql_defined_pk_names[0].as_str()) {
-                    sql_defined_pk_names
-                } else {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "upsert avro's key column {} not match with sql defined primary key {}",
-                        key_column_name, sql_defined_pk_names[0]
-                    ))));
-                }
-            } else {
-                return Err(RwError::from(ProtocolError(
-                    "INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE AVRO".to_string(),
-                )));
             }
         }
 
