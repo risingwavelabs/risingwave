@@ -126,7 +126,7 @@ fn similar_to_escape_with_escape_text(
     esc_text: &str,
     writer: &mut impl Write,
 ) -> Result<()> {
-    if esc_text.len() > 1 {
+    if esc_text.chars().nth(1).is_some() {
         return Err(ExprError::InvalidParam {
             name: "escape string",
             reason: format!(
