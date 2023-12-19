@@ -255,7 +255,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             cache_policy,
 
             calls,
-            row_conv: row_conv,
+            row_conv,
 
             stats: Default::default(),
 

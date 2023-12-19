@@ -730,7 +730,7 @@ impl<'a> RowConverter<'a> {
             self.order_key_order_types,
         )?
         .chain(key.pk.as_inner())
-        .project(&self.state_key_to_table_sub_pk_proj)
+        .project(self.state_key_to_table_sub_pk_proj)
         .into_owned_row())
     }
 
