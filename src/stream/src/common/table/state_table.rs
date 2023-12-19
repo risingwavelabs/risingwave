@@ -212,6 +212,9 @@ where
 }
 
 // initialize
+// FIXME(kwannoel): Enforce that none of the constructors here
+// should be used by replicated state table.
+// Apart from from_table_catalog_inner.
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
     StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
@@ -364,8 +367,8 @@ where
             .map(|col| col.column_desc.as_ref().unwrap().get_column_id())
             .collect_vec();
 
+        // Compute i2o mapping
         let mut i2o_mapping = vec![None; column_ids.len()];
-
         let mut output_column_indices = vec![];
         for (i, column_id) in column_ids.into_iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column_id.into()) {
@@ -937,21 +940,7 @@ where
     }
 
     fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
-        let cardinality = chunk.cardinality();
-        let (ops, columns, vis) = chunk.into_inner();
-        let mut full_columns = Vec::with_capacity(self.data_types.len());
-        for (i, data_type) in self.data_types.iter().enumerate() {
-            if let Some(j) = self.i2o_mapping.try_map(i) {
-                full_columns.push(columns[j].clone());
-            } else {
-                let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
-                column_builder.append_n_null(cardinality);
-                let column: ArrayRef = column_builder.finish().into();
-                full_columns.push(column)
-            }
-        }
-        let data_chunk = DataChunk::new(columns, vis);
-        StreamChunk::from_parts(ops, data_chunk)
+        fill_non_output_indices(&self.output_indices, &self.data_types, chunk)
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -1556,5 +1545,63 @@ fn end_range_to_memcomparable<R: Row>(
             let serialized = serialize_pk_prefix(r);
             Excluded(serialized)
         }
+    }
+}
+
+fn fill_non_output_indices(
+    output_indices: &[usize],
+    data_types: &[DataType],
+    chunk: StreamChunk,
+) -> StreamChunk {
+    let cardinality = chunk.cardinality();
+    let (ops, columns, vis) = chunk.into_inner();
+    let mut full_columns = Vec::with_capacity(data_types.len());
+    for (i, data_type) in data_types.iter().enumerate() {
+        if let Some(j) = output_indices.iter().position(|&j| i == j) {
+            full_columns.push(columns[j].clone());
+        } else {
+            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
+            column_builder.append_n_null(cardinality);
+            let column: ArrayRef = column_builder.finish().into();
+            full_columns.push(column)
+        }
+    }
+    let data_chunk = DataChunk::new(full_columns, vis);
+    StreamChunk::from_parts(ops, data_chunk)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+
+    #[test]
+    fn test_fill_non_output_indices() {
+        let output_indices = vec![2, 0];
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [OwnedRow::new(vec![
+            Some(222_i32.into()),
+            Some(2_i32.into()),
+        ])];
+        let replicated_chunk = StreamChunk::from_parts(
+            vec![Op::Insert],
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
+        );
+        let filled_chunk = fill_non_output_indices(&output_indices, &data_types, replicated_chunk);
+        check(filled_chunk, expect![[r#"
+            StreamChunk { cardinality: 1, capacity: 1, data: 
+            +---+---+---+-----+
+            | + | 2 |   | 222 |
+            +---+---+---+-----+
+             }"#]]);
     }
 }
