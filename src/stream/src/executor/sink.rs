@@ -366,6 +366,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
             match log_reader.rewind().await {
                 Ok((true, curr_vnode_bitmap)) => {
+                    warn!(
+                        error = %e.as_report(),
+                        executor_id = sink_writer_param.executor_id,
+                        "rewind successfully after sink error"
+                    );
                     sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
                     Ok(())
                 }
