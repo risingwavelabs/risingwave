@@ -1,5 +1,5 @@
 table_name: "sink_bench"
-pk_indexs:
+pk_indices:
   - 0
 columns:
   - name: "v1"

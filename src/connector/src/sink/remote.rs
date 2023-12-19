@@ -486,9 +486,11 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn mock_log_sinker_with_corrdinator(
+    #[cfg(feature = "sink_bench")]
+    async fn mock_log_sinker_with_coordinator(
         &self,
-        writer_param: SinkWriterParam,coordinator: Self::Coordinator
+        writer_param: SinkWriterParam,
+        coordinator: Self::Coordinator,
     ) -> Result<Self::LogSinker> {
         Ok(CoordinatedSinkWriter::mock(
             Box::new(coordinator),
@@ -498,8 +500,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                 writer_param.sink_metrics.clone(),
             )
             .await?,
-        )
-        .await?
+        )?
         .into_log_sinker(writer_param.sink_metrics))
     }
 
