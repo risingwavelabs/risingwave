@@ -167,6 +167,9 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
 
+    #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    ssl_endpoint_identification_algorithm: Option<String>,
+
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
@@ -293,6 +296,15 @@ impl KafkaCommon {
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
+        }
+        if let Some(ssl_endpoint_identification_algorithm) =
+            self.ssl_endpoint_identification_algorithm.as_ref()
+        {
+            // accept only `none` and `http` here, let the sdk do the check
+            config.set(
+                "ssl.endpoint.identification.algorithm",
+                ssl_endpoint_identification_algorithm,
+            );
         }
 
         // SASL mechanism

@@ -63,8 +63,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    # FIXME: decrease this when we found what's causing the build to be slow.
-    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "docslt"
@@ -279,6 +277,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end deltalake sink test"
+    if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "e2e java-binding test"
     if: build.pull_request.labels includes "ci/run-java-binding-tests" || build.env("CI_STEPS") =~ /(^|,)java-binding-tests?(,|$$)/
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
@@ -329,7 +342,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "check"

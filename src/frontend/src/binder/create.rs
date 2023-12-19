@@ -22,7 +22,7 @@ impl Binder {
     pub fn bind_columns_to_context(
         &mut self,
         name: String,
-        column_catalogs: Vec<ColumnCatalog>,
+        column_catalogs: &[ColumnCatalog],
     ) -> Result<()> {
         let columns = column_catalogs
             .iter()

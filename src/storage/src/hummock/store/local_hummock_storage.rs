@@ -21,7 +21,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
@@ -31,7 +31,7 @@ use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -111,12 +111,16 @@ impl LocalHummockStorage {
             Bound::Included(table_key.clone()),
         );
 
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
+
+        if is_empty_key_range(&table_key_range) {
+            return Ok(None);
+        }
 
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
@@ -133,12 +137,14 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
+
+        let table_key_range = table_key_range;
 
         self.hummock_version_reader
             .iter(table_key_range, epoch, read_options, read_snapshot)
@@ -159,11 +165,11 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
-        let read_snapshot = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
-            &table_key_range,
-            self.read_version.clone(),
+            table_key_range,
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -186,11 +192,11 @@ impl LocalHummockStorage {
             return Ok(true);
         }
 
-        let read_snapshot = read_filter_for_local(
+        let (key_range, read_snapshot) = read_filter_for_local(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
-            &key_range,
-            self.read_version.clone(),
+            key_range,
+            &self.read_version,
         )?;
 
         self.hummock_version_reader
@@ -533,7 +539,6 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
     }
@@ -550,13 +555,15 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = OrderedMergeIteratorInner<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
-pub type HummockStorageIteratorPayloadInner<'a> = UnorderedMergeIteratorInner<
-    HummockIteratorUnion<
-        Forward,
-        StagingDataIterator,
-        SstableIterator,
-        ConcatIteratorInner<SstableIterator>,
-        MemTableHummockIterator<'a>,
+pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
+    UnorderedMergeIteratorInner<
+        HummockIteratorUnion<
+            Forward,
+            StagingDataIterator,
+            SstableIterator,
+            ConcatIteratorInner<SstableIterator>,
+            MemTableHummockIterator<'a>,
+        >,
     >,
 >;
 

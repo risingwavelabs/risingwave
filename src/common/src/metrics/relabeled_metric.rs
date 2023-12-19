@@ -95,9 +95,9 @@ impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricV
             for label in relabeled_vals.iter_mut().take(self.relabel_num) {
                 *label = "";
             }
-            return self.metric.with_label_values(&relabeled_vals);
+            return self.metric.with_guarded_label_values(&relabeled_vals);
         }
-        self.metric.with_label_values(vals)
+        self.metric.with_guarded_label_values(vals)
     }
 }
 

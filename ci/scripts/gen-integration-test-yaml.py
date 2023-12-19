@@ -33,6 +33,7 @@ CASES_MAP = {
     'mindsdb': ['json'],
     'vector': ['json'],
     'nats': ['json'],
+    'doris-sink': ['json'],
 }
 
 def gen_pipeline_steps():

@@ -24,6 +24,7 @@ use super::exchange::input::BoxedInput;
 use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::utils::ActorInputMetrics;
 use crate::executor::{
     expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
 };
@@ -112,21 +113,20 @@ impl ReceiverExecutor {
 impl Executor for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
-        let actor_id_str = actor_id.to_string();
-        let fragment_id_str = self.fragment_id.to_string();
-        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let mut metrics = ActorInputMetrics::new(
+            &self.metrics,
+            actor_id,
+            self.fragment_id,
+            self.upstream_fragment_id,
+        );
 
         let stream = #[try_stream]
         async move {
             let mut start_time = Instant::now();
             while let Some(msg) = self.input.next().await {
-                self.metrics
+                metrics
                     .actor_input_buffer_blocking_duration_ns
-                    .with_label_values(&[
-                        &actor_id_str,
-                        &fragment_id_str,
-                        &upstream_fragment_id_str,
-                    ])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let mut msg: Message = msg?;
 
@@ -135,10 +135,7 @@ impl Executor for ReceiverExecutor {
                         // Do nothing.
                     }
                     Message::Chunk(chunk) => {
-                        self.metrics
-                            .actor_in_record_cnt
-                            .with_label_values(&[&actor_id_str, &fragment_id_str])
-                            .inc_by(chunk.cardinality() as _);
+                        metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
                         tracing::debug!(
@@ -193,7 +190,12 @@ impl Executor for ReceiverExecutor {
                             self.input = new_upstream;
 
                             self.upstream_fragment_id = new_upstream_fragment_id;
-                            upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+                            metrics = ActorInputMetrics::new(
+                                &self.metrics,
+                                actor_id,
+                                self.fragment_id,
+                                self.upstream_fragment_id,
+                            );
                         }
                     }
                 };

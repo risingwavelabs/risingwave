@@ -54,7 +54,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source.columns.clone(),
                     params.env.source_metrics(),
                     source.row_id_index.map(|x| x as _),
-                    source.properties.clone(),
+                    source.with_properties.clone(),
                     source_info.clone(),
                     params.env.connector_params(),
                     params.env.config().developer.connector_message_buffer_size,
@@ -94,13 +94,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let connector = source
-                    .properties
+                    .with_properties
                     .get("connector")
                     .map(|c| c.to_ascii_lowercase())
                     .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
                 let is_fs_v2_connector =
-                    ConnectorProperties::is_new_fs_connector_hash_map(&source.properties);
+                    ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
 
                 if is_fs_connector {
                     FsSourceExecutor::new(

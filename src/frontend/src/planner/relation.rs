@@ -71,7 +71,7 @@ impl Planner {
         let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            base_table.table_catalog.clone().into(),
+            base_table.table_catalog.clone(),
             base_table
                 .table_indexes
                 .iter()
