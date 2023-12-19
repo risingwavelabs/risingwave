@@ -94,7 +94,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Unspecified,
+                            additional_column_type: Normal,
                         },
                         ColumnDesc {
                             data_type: Int16,
@@ -104,7 +104,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Unspecified,
+                            additional_column_type: Normal,
                         },
                     ],
                     [
@@ -134,7 +134,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Unspecified,
+                            additional_column_type: Normal,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -144,7 +144,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Unspecified,
+                            additional_column_type: Normal,
                         },
                     ],
                     [

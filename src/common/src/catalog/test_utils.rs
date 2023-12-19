@@ -35,6 +35,7 @@ impl ColumnDescTestExt for ColumnDesc {
             column_type: Some(data_type),
             column_id,
             name: name.to_string(),
+            additional_column_type: AdditionalColumnType::Normal as i32,
             ..Default::default()
         }
     }
@@ -58,7 +59,7 @@ impl ColumnDescTestExt for ColumnDesc {
             field_descs: fields,
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Unspecified as i32,
+            additional_column_type: AdditionalColumnType::Normal as i32,
         }
     }
 }

@@ -115,7 +115,7 @@ where
                     self.access(&["key", &desc.name], Some(&desc.data_type))
                 }
             }
-            AdditionalColumnType::Unspecified => {
+            AdditionalColumnType::Unspecified | AdditionalColumnType::Normal => {
                 self.access(&["value", &desc.name], Some(&desc.data_type))
             }
             _ => unreachable!(),

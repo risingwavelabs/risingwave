@@ -61,7 +61,7 @@ fn avro_field_to_column_desc(
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_column_type: AdditionalColumnType::Unspecified as i32,
+                additional_column_type: AdditionalColumnType::Normal as i32,
             })
         }
         _ => {
@@ -70,6 +70,7 @@ fn avro_field_to_column_desc(
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
+                additional_column_type: AdditionalColumnType::Normal as i32,
                 ..Default::default()
             })
         }

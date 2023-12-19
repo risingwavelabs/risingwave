@@ -114,7 +114,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 
@@ -127,7 +127,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 
@@ -191,7 +191,7 @@ impl ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 
@@ -213,7 +213,7 @@ impl ColumnDesc {
             type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 
@@ -230,7 +230,7 @@ impl ColumnDesc {
             type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 

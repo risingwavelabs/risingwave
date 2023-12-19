@@ -345,7 +345,7 @@ impl SourceStreamChunkRowWriter<'_> {
                     | &AdditionalColumnType::Filename
                     | &AdditionalColumnType::Offset
                     | &AdditionalColumnType::Header,
-                    // AdditionalColumnType::Unspecified is means it comes from message payload
+                    // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
                     // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
                 ) => {
                     todo!()

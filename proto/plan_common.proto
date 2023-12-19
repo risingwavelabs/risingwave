@@ -23,6 +23,7 @@ enum AdditionalColumnType {
   OFFSET = 4;
   HEADER = 5;
   FILENAME = 6;
+  NORMAL = 7;
 }
 
 message ColumnDesc {

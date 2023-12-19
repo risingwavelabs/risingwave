@@ -87,7 +87,7 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
-            additional_column_type: AdditionalColumnType::Unspecified,
+            additional_column_type: AdditionalColumnType::Normal,
         }
     }
 

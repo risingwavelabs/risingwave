@@ -669,7 +669,7 @@ pub(crate) async fn bind_columns_from_source(
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
-    mut include_columns_options: Vec<(Ident, Option<Ident>)>,
+    mut additional_columns: Vec<(Ident, Option<Ident>)>,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
@@ -679,12 +679,12 @@ pub fn handle_addition_columns(
             Some(cols) => cols,
             // early return if there are no accepted additional columns for the connector
             None => {
-                return if include_columns_options.is_empty() {
+                return if additional_columns.is_empty() {
                     Ok(())
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "Connector {} accepts no additional column but got {:?}",
-                        connector_name, include_columns_options
+                        connector_name, additional_columns
                     ))))
                 }
             }
@@ -701,11 +701,11 @@ pub fn handle_addition_columns(
 
     for (col_name, gen_column_catalog_fn) in addition_col_list {
         // always insert in spec order
-        if let Some(idx) = include_columns_options
+        if let Some(idx) = additional_columns
             .iter()
             .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
         {
-            let (_, alias) = include_columns_options.remove(idx);
+            let (_, alias) = additional_columns.remove(idx);
             columns.push(gen_column_catalog_fn(
                 latest_col_id.next(),
                 alias
@@ -715,10 +715,10 @@ pub fn handle_addition_columns(
             ))
         }
     }
-    if !include_columns_options.is_empty() {
+    if !additional_columns.is_empty() {
         return Err(RwError::from(ProtocolError(format!(
             "Unknown additional columns {:?}",
-            include_columns_options
+            additional_columns
         ))));
     }
 
@@ -845,7 +845,9 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if col.column_desc.additional_column_type != AdditionalColumnType::Unspecified {
+            if (col.column_desc.additional_column_type != AdditionalColumnType::Unspecified)
+                && (col.column_desc.additional_column_type != AdditionalColumnType::Normal)
+            {
                 Some(col.name().to_string())
             } else {
                 None
