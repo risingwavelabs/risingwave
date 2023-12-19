@@ -57,6 +57,24 @@ pub struct StreamSink {
     sink_desc: SinkDesc,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum UserDefinedAppendOnly {
+    DefinedAppendOnly,
+    DefinedNonAppendOnly,
+    NotDefined,
+}
+
+impl From<&SinkFormat> for UserDefinedAppendOnly {
+    fn from(value: &SinkFormat) -> Self {
+        match value {
+            SinkFormat::AppendOnly => UserDefinedAppendOnly::DefinedAppendOnly,
+            SinkFormat::Upsert | SinkFormat::Debezium => {
+                UserDefinedAppendOnly::DefinedNonAppendOnly
+            }
+        }
+    }
+}
+
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
@@ -211,12 +229,15 @@ impl StreamSink {
         Ok((input, sink_desc))
     }
 
-    fn is_user_defined_append_only(properties: &WithOptions) -> Result<bool> {
-        if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
-            if sink_type != SINK_TYPE_APPEND_ONLY
-                && sink_type != SINK_TYPE_DEBEZIUM
-                && sink_type != SINK_TYPE_UPSERT
-            {
+    fn user_defined_append_only(properties: &WithOptions) -> Result<UserDefinedAppendOnly> {
+        if properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY) {
+            return Ok(UserDefinedAppendOnly::DefinedAppendOnly);
+        } else if properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_DEBEZIUM)
+            || properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_UPSERT)
+        {
+            return Ok(UserDefinedAppendOnly::DefinedNonAppendOnly);
+        } else {
+            if properties.get(SINK_TYPE_OPTION).is_some() {
                 return Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!(
@@ -228,9 +249,10 @@ impl StreamSink {
                     ),
                 )))
                 .into());
+            } else {
+                return Ok(UserDefinedAppendOnly::NotDefined);
             }
-        }
-        Ok(properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY))
+        };
     }
 
     fn is_user_force_append_only(properties: &WithOptions) -> Result<bool> {
@@ -256,38 +278,41 @@ impl StreamSink {
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-        let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
-            Some(f) => (
-                f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
-                false,
-            ),
-            None => (
-                Self::is_user_defined_append_only(properties)?,
-                Self::is_user_force_append_only(properties)?,
-                true,
-            ),
-        };
+
+        use UserDefinedAppendOnly::*;
+        let (user_defined_append_only, user_force_append_only, from_format_clause) =
+            match format_desc {
+                Some(f) => (
+                    UserDefinedAppendOnly::from(&f.format),
+                    Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                    false,
+                ),
+                None => (
+                    Self::user_defined_append_only(properties)?,
+                    Self::is_user_force_append_only(properties)?,
+                    true,
+                ),
+            };
 
         match (
             frontend_derived_append_only,
             user_defined_append_only,
             user_force_append_only,
         ) {
-            (true, true, _) => Ok(SinkType::AppendOnly),
-            (false, true, true) => Ok(SinkType::ForceAppendOnly),
-            (_, false, false) => Ok(SinkType::Upsert),
-            (false, true, false) => {
+            (true, DefinedAppendOnly|NotDefined, _) => Ok(SinkType::AppendOnly),
+            (false, DefinedAppendOnly, true) => Ok(SinkType::ForceAppendOnly),
+            (_, NotDefined|DefinedNonAppendOnly, false) => Ok(SinkType::Upsert),
+            (false, DefinedAppendOnly, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy {"WITH"} else {"FORMAT ENCODE"}),
+                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if from_format_clause {"WITH"} else {"FORMAT ENCODE"}),
                 )))
                 .into())
             }
-            (_, false, true) => {
+            (_, DefinedNonAppendOnly|NotDefined, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy {"type='append-only'"} else {"FORMAT PLAIN"}),
+                    format!("Cannot force the sink to be append-only without \"{}\".", if from_format_clause {"type='append-only'"} else {"FORMAT PLAIN"}),
                 )))
                 .into())
             }
