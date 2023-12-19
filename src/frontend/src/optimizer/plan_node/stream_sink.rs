@@ -278,7 +278,6 @@ impl StreamSink {
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-
         use UserDefinedAppendOnly::*;
         let (user_defined_append_only, user_force_append_only, from_format_clause) =
             match format_desc {
@@ -417,11 +416,6 @@ impl_plan_tree_node_for_unary! { StreamSink }
 
 impl Distill for StreamSink {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let sink_type = if self.sink_desc.sink_type.is_append_only() {
-            "append-only"
-        } else {
-            "upsert"
-        };
         let column_names = self
             .sink_desc
             .columns
@@ -431,7 +425,10 @@ impl Distill for StreamSink {
             .collect();
         let column_names = Pretty::Array(column_names);
         let mut vec = Vec::with_capacity(3);
-        vec.push(("type", Pretty::from(sink_type)));
+        vec.push((
+            "type",
+            Pretty::from(format!("{:?}", self.sink_desc.sink_type)),
+        ));
         vec.push(("columns", column_names));
         if self.sink_desc.sink_type.is_upsert() {
             let pk = IndicesDisplay {
