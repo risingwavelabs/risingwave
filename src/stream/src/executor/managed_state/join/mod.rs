@@ -27,6 +27,7 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -158,73 +159,74 @@ type JoinHashMapInner<K> =
     ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
-    /// Metrics used by join executor
-    metrics: Arc<StreamingMetrics>,
     /// Basic information
-    actor_id: String,
-    fragment_id: String,
-    join_table_id: String,
-    degree_table_id: String,
-    side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
     /// How many times have we miss the cache when insert row
     insert_cache_miss_count: usize,
+
+    // Metrics
+    join_lookup_total_count_metric: LabelGuardedIntCounter<5>,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter<5>,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<5>,
 }
 
 impl JoinHashMapMetrics {
     pub fn new(
-        metrics: Arc<StreamingMetrics>,
+        metrics: &StreamingMetrics,
         actor_id: ActorId,
         fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
         degree_table_id: u32,
     ) -> Self {
+        let actor_id = actor_id.to_string();
+        let fragment_id = fragment_id.to_string();
+        let join_table_id = join_table_id.to_string();
+        let degree_table_id = degree_table_id.to_string();
+        let join_lookup_total_count_metric =
+            metrics.join_lookup_total_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_lookup_miss_count_metric =
+            metrics.join_lookup_miss_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_insert_cache_miss_count_metrics = metrics
+            .join_insert_cache_miss_count
+            .with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+
         Self {
-            metrics,
-            actor_id: actor_id.to_string(),
-            fragment_id: fragment_id.to_string(),
-            join_table_id: join_table_id.to_string(),
-            degree_table_id: degree_table_id.to_string(),
-            side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
+            join_lookup_total_count_metric,
+            join_lookup_miss_count_metric,
+            join_insert_cache_miss_count_metrics,
         }
     }
 
     pub fn flush(&mut self) {
-        self.metrics
-            .join_lookup_total_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_lookup_total_count_metric
             .inc_by(self.total_lookup_count as u64);
-        self.metrics
-            .join_lookup_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_lookup_miss_count_metric
             .inc_by(self.lookup_miss_count as u64);
-        self.metrics
-            .join_insert_cache_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
+        self.join_insert_cache_miss_count_metrics
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
@@ -341,7 +343,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             need_degree_table,
             pk_contained_in_jk,
             metrics: JoinHashMapMetrics::new(
-                metrics,
+                &metrics,
                 actor_id,
                 fragment_id,
                 side,

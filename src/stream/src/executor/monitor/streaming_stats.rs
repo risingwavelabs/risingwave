@@ -55,7 +55,7 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
-    pub actor_in_record_cnt: LabelGuardedIntCounterVec<2>,
+    pub actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
 
     // Source
@@ -352,7 +352,7 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
-            &["actor_id", "fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -1048,33 +1048,39 @@ impl StreamingMetrics {
         connector: &str,
     ) -> SinkMetrics {
         let label_list = [identity, connector, sink_id_str];
-        let sink_commit_duration_metrics = self.sink_commit_duration.with_label_values(&label_list);
+        let sink_commit_duration_metrics = self
+            .sink_commit_duration
+            .with_guarded_label_values(&label_list);
         let connector_sink_rows_received = self
             .connector_sink_rows_received
-            .with_label_values(&[connector, sink_id_str]);
+            .with_guarded_label_values(&[connector, sink_id_str]);
 
         let log_store_latest_read_epoch = self
             .log_store_latest_read_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
         let log_store_latest_write_epoch = self
             .log_store_latest_write_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
         let log_store_first_write_epoch = self
             .log_store_first_write_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
-        let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
-        let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
+        let log_store_write_rows = self
+            .log_store_write_rows
+            .with_guarded_label_values(&label_list);
+        let log_store_read_rows = self
+            .log_store_read_rows
+            .with_guarded_label_values(&label_list);
 
         let label_list = [identity, sink_id_str];
         let iceberg_file_appender_write_qps = self
             .iceberg_file_appender_write_qps
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
         let iceberg_file_appender_write_latency = self
             .iceberg_file_appender_write_latency
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
         SinkMetrics {
             sink_commit_duration_metrics,
