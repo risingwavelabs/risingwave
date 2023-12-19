@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
+use anyhow::anyhow;
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
@@ -48,6 +49,7 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::parser::unified::AccessError;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -347,9 +349,10 @@ impl SourceStreamChunkRowWriter<'_> {
                     | &AdditionalColumnType::Header,
                     // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
                     // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
-                ) => {
-                    todo!()
-                }
+                ) => Err(AccessError::Other(anyhow!(
+                    "Column type {:?} not implemented yet",
+                    &desc.additional_column_type
+                ))),
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     match f(desc) {
