@@ -31,9 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
-use risingwave_pb::meta::get_reschedule_plan_request::{
-    Policy, StableResizePolicy,
-};
+use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -398,6 +396,7 @@ impl ScaleController {
         &self,
         reschedule: &mut HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
+        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<RescheduleContext> {
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
@@ -487,6 +486,7 @@ impl ScaleController {
                 &fragment_map,
                 &no_shuffle_source_fragment_ids,
                 &no_shuffle_target_fragment_ids,
+                table_parallelisms,
             )?;
         }
 
@@ -726,12 +726,13 @@ impl ScaleController {
         &self,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
+        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<(
         HashMap<FragmentId, Reschedule>,
         HashMap<FragmentId, HashSet<ActorId>>,
     )> {
         let ctx = self
-            .build_reschedule_context(&mut reschedules, options)
+            .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
@@ -1919,6 +1920,7 @@ impl ScaleController {
             &fragment_map,
             &no_shuffle_source_fragment_ids,
             &no_shuffle_target_fragment_ids,
+            None,
         )?;
 
         for (
@@ -2226,6 +2228,7 @@ impl ScaleController {
         fragment_map: &HashMap<FragmentId, Fragment>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
+        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()>
     where
         T: Clone + Eq,
@@ -2304,9 +2307,11 @@ impl GlobalStreamManager {
         options: RescheduleOptions,
         table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
+        let mut table_parallelism = table_parallelism;
+
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .prepare_reschedule_command(reschedules, options)
+            .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);

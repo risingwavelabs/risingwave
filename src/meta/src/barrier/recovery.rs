@@ -415,7 +415,7 @@ impl GlobalBarrierManager {
             return Ok(false);
         }
 
-        let table_parallelisms = {
+        let mut table_parallelisms = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
 
             guard
@@ -457,6 +457,7 @@ impl GlobalBarrierManager {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: true,
                 },
+                None,
             )
             .await?;
 
