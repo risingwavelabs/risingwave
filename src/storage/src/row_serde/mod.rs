@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::row::{OwnedRow, Project, RowExt};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 pub mod row_serde_util;
 

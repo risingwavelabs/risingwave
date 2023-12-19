@@ -2185,5 +2185,29 @@ async fn test_replicated_state_table_replication() {
         );
     }
 
-    // Changes will not be visible in replicated state table. We have to write chunk to it.
+    // Test that after commit, the local state store can
+    // merge the replicated records with the local records
+    test_env.commit_epoch(epoch.prev).await;
+
+    {
+        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
+            (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        let replicated_iter = replicated_state_table
+            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+        pin_mut!(replicated_iter);
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(111_i32.into()), Some(1_i32.into()),]),
+            res.as_ref()
+        );
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into()),]),
+            res.as_ref()
+        );
+    }
 }
