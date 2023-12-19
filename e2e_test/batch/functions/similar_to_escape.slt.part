@@ -13,7 +13,7 @@ values
     (5, '%abc-%', '-abc-'),
     (6, '%abc-%', 'xabcy');
 
-query T
+query B
 select (text similar to pat) from t order by id;
 ----
 t
@@ -23,7 +23,7 @@ f
 t
 f
 
-query T
+query B
 select (text not similar to pat) from t order by id;
 ----
 f
@@ -57,30 +57,40 @@ select count(1) from t where text not similar to 'ab%';
 ----
 2
 
-query T
+query B
 select 'foobar' similar to '%#"o_b#"%';
 ----
 f
 
 # default escape string
-query T
+query B
 select 'foobar' similar to '%#"o_b#"%' escape '\';
 ----
 f
 
 # fallback to default escape string
-query T
+query B
 select 'foobar' similar to '%#"o_b#"%' escape '';
 ----
 f
 
-query T
+query B
 select 'foobar' similar to '%#"o_b#"%' escape '#';
 ----
 t
 
-query T
+query B
 select 'foobar' not similar to '%#"o_b#"%' escape '#';
+----
+f
+
+query B
+select 'foobar' similar to '%🤡"o_b🤡"%' escape '🤡';
+----
+t
+
+query B
+select 'foobar' not similar to '%👪"o_b👪"%' escape '👪';
 ----
 f
 

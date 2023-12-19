@@ -192,4 +192,33 @@ mod tests {
         let res = similar_to_escape_with_escape_text(pat, "##", &mut writer);
         assert!(res.is_err())
     }
+
+    #[test]
+    fn test_escape_with_escape_unicode() {
+        let cases = vec![
+            ("", "^(?:)$"),
+            ("_bcd%", "^(?:.bcd.*)$"),
+            ("bcd%", "^(?:bcd.*)$"),
+            (r#"_bcd\%"#, r#"^(?:.bcd\\.*)$"#),
+            ("bcd[]ee", "^(?:bcd[]ee)$"),
+            (r#"bcd[]ee"""#, r#"^(?:bcd[]ee"")$"#),
+            (r#"bcd[]"ee""#, r#"^(?:bcd[]"ee")$"#),
+            ("bcd[pp]ee", "^(?:bcd[pp]ee)$"),
+            ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
+            ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
+            ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+            (r#"%💅"o_b💅"%"#, "^(?:.*){1,1}?(o.b){1,1}(?:.*)$"),
+        ];
+
+        for (pat, escaped) in cases {
+            let mut writer = String::new();
+            similar_to_escape_with_escape_text(pat, "💅", &mut writer).ok();
+            assert_eq!(writer, escaped);
+        }
+
+        let pat = "xxx";
+        let mut writer = String::new();
+        let res = similar_to_escape_with_escape_text(pat, "💅💅", &mut writer);
+        assert!(res.is_err())
+    }
 }
