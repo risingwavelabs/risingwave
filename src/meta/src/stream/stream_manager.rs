@@ -436,7 +436,7 @@ impl GlobalStreamManager {
         let res = building_worker_actors
             .iter()
             .map(|(worker_id, actors)| async move {
-                let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
+                let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
 
                 let client = self.env.stream_client_pool().get(worker_node).await?;
 
