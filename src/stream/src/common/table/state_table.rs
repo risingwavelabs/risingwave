@@ -582,14 +582,6 @@ where
         &self.data_types
     }
 
-    /// FIXME(kwannoel): Should this constructed in plan phase?
-    pub fn get_output_data_types(&self) -> Vec<DataType> {
-        self.output_indices
-            .iter()
-            .map(|i| self.data_types[*i].clone())
-            .collect_vec()
-    }
-
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
     }
