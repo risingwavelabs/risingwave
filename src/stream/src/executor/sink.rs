@@ -31,10 +31,11 @@ use risingwave_connector::sink::log_store::{
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, Mutation};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -156,7 +157,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer.init(epoch_pair).await?;
+        log_writer
+            .init(epoch_pair, barrier.is_pause_on_startup())
+            .await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
@@ -237,6 +240,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
                         }
+
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
@@ -254,6 +266,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 match msg? {
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(chunk) => {
+                        actor_context
+                            .streaming_metrics
+                            .sink_input_row_count
+                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
+                            .inc_by(chunk.capacity() as u64);
+
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         let chunk = merge_chunk_row(chunk, &stream_key);
@@ -272,6 +290,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
+                                _ => (),
+                            }
+                        }
+
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                             .await?;
@@ -316,7 +342,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .monitored(metrics);
 
         if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
-            let mut err_str = e.to_string();
+            let mut err_str = e.to_report_string();
             if actor_context
                 .error_suppressor
                 .lock()
@@ -437,6 +463,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -564,6 +591,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -688,6 +716,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {

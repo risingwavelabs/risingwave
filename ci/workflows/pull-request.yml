@@ -63,7 +63,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "docslt"
@@ -184,7 +183,7 @@ steps:
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
-    if: build.pull_request.labels includes "ci/run-java-connector-node-integration-tests" || build.env("CI_STEPS") =~ /(^|,)java-connector-node-integration-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-connector-node-integration-tests" || build.env("CI_STEPS") =~ /(^|,)java-connector-node-integration-tests?(,|$$)/
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
     depends_on:
       - "build"
@@ -278,6 +277,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end deltalake sink test"
+    if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "e2e java-binding test"
     if: build.pull_request.labels includes "ci/run-java-binding-tests" || build.env("CI_STEPS") =~ /(^|,)java-binding-tests?(,|$$)/
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
@@ -328,7 +342,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "check"
@@ -410,7 +424,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=8 KILL_RATE=0.5 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -517,7 +531,7 @@ steps:
 
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
-    command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
+    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
     if: |
       build.pull_request.labels includes "breaking-change" ||
         build.pull_request.labels includes "ci/run-backwards-compat-tests" ||
@@ -530,6 +544,21 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        # Test the 4 latest versions against the latest main.
+        # e.g.
+        # 1: 2.0.0
+        # 2: 1.1.1
+        # 3: 1.0.1
+        # 4: 1.0.0
+        # It is ordered by the full version number, rather than minor / major version.
+        # We can change to just be on major version in the future.
+        version_offset:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
     timeout_in_minutes: 25
 
   # Sqlsmith differential testing

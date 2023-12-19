@@ -28,6 +28,7 @@ use crate::tokenizer::Token;
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameDatabase { database_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,6 +36,7 @@ pub enum AlterDatabaseOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
+    RenameSchema { schema_name: ObjectName },
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -137,6 +139,9 @@ impl fmt::Display for AlterDatabaseOperation {
             AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
             }
+            AlterDatabaseOperation::RenameDatabase { database_name } => {
+                write!(f, "RENAME TO {}", database_name)
+            }
         }
     }
 }
@@ -146,6 +151,9 @@ impl fmt::Display for AlterSchemaOperation {
         match self {
             AlterSchemaOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSchemaOperation::RenameSchema { schema_name } => {
+                write!(f, "RENAME TO {}", schema_name)
             }
         }
     }

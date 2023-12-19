@@ -26,7 +26,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/MrCroxx/foyer", rev = "ce2e222" }
+foyer = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -55,6 +55,7 @@ spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -88,11 +89,11 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
+expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
-expect-test = "1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"

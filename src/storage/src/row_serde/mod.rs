@@ -43,7 +43,7 @@ pub fn get_output_column_indices(
     (i2o_mapping, output_column_indices)
 }
 
-/// Find out the [`ColumnDesc`] by a list of [`ColumnId`].
+/// Find out the [`ColumnDesc`] selected with a list of [`ColumnId`].
 ///
 /// # Returns
 ///
@@ -82,10 +82,12 @@ impl ColumnMapping {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use std::fmt::Debug;
-    use risingwave_common::types::DataType;
+
     use expect_test::{expect, Expect};
+    use risingwave_common::types::DataType;
+
     use super::*;
 
     fn check(actual: impl Debug, expect: Expect) {
@@ -110,5 +112,84 @@ mod tests {
                 0,
                 1,
             ]"#]]);
+    }
+
+    #[test]
+    fn test_find_columns_by_ids() {
+        let table_columns = vec![
+            ColumnDesc::unnamed(1.into(), DataType::Varchar),
+            ColumnDesc::unnamed(2.into(), DataType::Int64),
+            ColumnDesc::unnamed(3.into(), DataType::Int16),
+        ];
+        let column_ids = vec![2.into(), 3.into()];
+        let result = find_columns_by_ids(&table_columns, &column_ids);
+        check(
+            result,
+            expect![[r#"
+            (
+                [
+                    ColumnDesc {
+                        data_type: Int64,
+                        column_id: #2,
+                        name: "",
+                        field_descs: [],
+                        type_name: "",
+                        generated_or_default_column: None,
+                        description: None,
+                    },
+                    ColumnDesc {
+                        data_type: Int16,
+                        column_id: #3,
+                        name: "",
+                        field_descs: [],
+                        type_name: "",
+                        generated_or_default_column: None,
+                        description: None,
+                    },
+                ],
+                [
+                    1,
+                    2,
+                ],
+            )"#]],
+        );
+
+        let table_columns = vec![
+            ColumnDesc::unnamed(2.into(), DataType::Int64),
+            ColumnDesc::unnamed(1.into(), DataType::Varchar),
+            ColumnDesc::unnamed(3.into(), DataType::Int16),
+        ];
+        let column_ids = vec![2.into(), 1.into()];
+        let result = find_columns_by_ids(&table_columns, &column_ids);
+        check(
+            result,
+            expect![[r#"
+                (
+                    [
+                        ColumnDesc {
+                            data_type: Int64,
+                            column_id: #2,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                        },
+                        ColumnDesc {
+                            data_type: Varchar,
+                            column_id: #1,
+                            name: "",
+                            field_descs: [],
+                            type_name: "",
+                            generated_or_default_column: None,
+                            description: None,
+                        },
+                    ],
+                    [
+                        0,
+                        1,
+                    ],
+                )"#]],
+        );
     }
 }

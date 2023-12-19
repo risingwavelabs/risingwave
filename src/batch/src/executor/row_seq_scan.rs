@@ -56,6 +56,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
     epoch: BatchQueryEpoch,
+    limit: Option<u64>,
 }
 
 /// Range for batch scan.
@@ -138,6 +139,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
+        limit: Option<u64>,
         metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
         Self {
@@ -148,6 +150,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             scan_ranges,
             ordered,
             epoch,
+            limit,
         }
     }
 }
@@ -245,10 +248,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let ordered = seq_scan_node.ordered;
 
         let epoch = source.epoch.clone();
-        let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
-            chunk_size_
-                .get_chunk_size()
-                .min(source.context.get_config().developer.chunk_size as u32)
+        let limit = seq_scan_node.limit;
+        let chunk_size = if let Some(limit) = seq_scan_node.limit {
+            (limit as u32).min(source.context.get_config().developer.chunk_size as u32)
         } else {
             source.context.get_config().developer.chunk_size as u32
         };
@@ -275,6 +277,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 epoch,
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
+                limit,
                 metrics,
             )))
         })
@@ -306,6 +309,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             scan_ranges,
             ordered,
             epoch,
+            limit,
         } = *self;
         let table = Arc::new(table);
 
@@ -314,7 +318,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics
                 .executor_metrics()
                 .row_seq_scan_next_duration
-                .with_label_values(&metrics.executor_labels(&identity))
+                .with_guarded_label_values(&metrics.executor_labels(&identity))
         });
 
         if ordered {
@@ -328,6 +332,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .into_iter()
             .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
 
+        // the number of rows have been returned as execute result
+        let mut returned = 0;
+        if let Some(limit) = &limit && returned >= *limit {
+            return Ok(());
+        }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
         // Point Get
         for point_get in point_gets {
@@ -336,12 +345,20 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 Self::execute_point_get(table, point_get, epoch.clone(), histogram.clone()).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                    returned += chunk.cardinality() as u64;
                     yield chunk;
+                    if let Some(limit) = &limit && returned >= *limit {
+                        return Ok(());
+                    }
                 }
             }
         }
         if let Some(chunk) = data_chunk_builder.consume_all() {
+            returned += chunk.cardinality() as u64;
             yield chunk;
+            if let Some(limit) = &limit && returned >= *limit {
+                return Ok(());
+            }
         }
 
         // Range Scan
@@ -354,12 +371,18 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 ordered,
                 epoch.clone(),
                 chunk_size,
+                limit,
                 histogram,
             ))
         }));
         #[for_await]
         for chunk in range_scans {
-            yield chunk?;
+            let chunk = chunk?;
+            returned += chunk.cardinality() as u64;
+            yield chunk;
+            if let Some(limit) = &limit && returned >= *limit {
+                return Ok(());
+            }
         }
     }
 
@@ -391,6 +414,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         ordered: bool,
         epoch: BatchQueryEpoch,
         chunk_size: usize,
+        limit: Option<u64>,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) {
         let ScanRange {
@@ -443,7 +467,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
-                PrefetchOptions::new_for_large_range_scan(),
+                PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
 

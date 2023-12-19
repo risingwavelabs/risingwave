@@ -33,7 +33,7 @@ use demo;
 CREATE table demo_bhv_table(
     user_id int,
     target_id text,
-    event_timestamp datetime
+    event_timestamp_local datetime
 ) UNIQUE KEY(`user_id`)
 DISTRIBUTED BY HASH(`user_id`) BUCKETS 1
 PROPERTIES (
@@ -46,9 +46,9 @@ GRANT ALL ON *.* TO 'users'@'%';
 4. Execute the SQL queries in sequence:
 
 - append-only sql:
-    - append-only/create_source.sql
-    - append-only/create_mv.sql
-    - append-only/create_sink.sql
+    - create_source.sql
+    - create_mv.sql
+    - create_sink.sql
 
 - upsert sql:
     - upsert/create_table.sql

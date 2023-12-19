@@ -24,7 +24,6 @@ use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
-use hyper::Response;
 use io::StreamReader;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
@@ -125,9 +124,9 @@ impl S3FileReader {
                     .partition_input_bytes
                     .with_label_values(&[&actor_id, &source_id, &split_id])
                     .inc_by(batch_size as u64);
+                let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
-                yield batch.clone();
-                batch.clear();
+                yield yield_batch;
             }
         }
         if !batch.is_empty() {
@@ -145,7 +144,10 @@ impl S3FileReader {
         bucket_name: &str,
         object_name: &str,
         start: usize,
-    ) -> std::result::Result<ByteStream, SdkError<GetObjectError, Response<SdkBody>>> {
+    ) -> std::result::Result<
+        ByteStream,
+        SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+    > {
         let range = if start == 0 {
             None
         } else {

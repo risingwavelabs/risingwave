@@ -24,6 +24,9 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(bound_map)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 mod compaction_test_runner;
 mod delete_range_runner;

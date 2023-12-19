@@ -29,6 +29,7 @@ pub mod aggregate;
 pub mod codegen;
 mod error;
 pub mod expr;
+pub mod expr_context;
 pub mod scalar;
 pub mod sig;
 pub mod table_function;

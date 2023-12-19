@@ -27,7 +27,7 @@ use thiserror::Error;
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
-use crate::array::ArrayResult;
+use crate::array::{ArrayError, ArrayResult};
 use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -254,6 +254,12 @@ impl InvalidParamsError {
     }
 }
 
+impl From<InvalidParamsError> for ArrayError {
+    fn from(e: InvalidParamsError) -> Self {
+        ArrayError::internal(e)
+    }
+}
+
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for Date {
@@ -318,7 +324,7 @@ impl ToText for Timestamp {
 }
 
 impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
                 let mut output = BytesMut::new();
@@ -331,7 +337,7 @@ impl ToBinary for Date {
 }
 
 impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
                 let mut output = BytesMut::new();
@@ -344,7 +350,7 @@ impl ToBinary for Time {
 }
 
 impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
                 let mut output = BytesMut::new();

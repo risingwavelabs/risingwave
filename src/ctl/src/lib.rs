@@ -19,7 +19,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
-use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
@@ -87,6 +87,15 @@ enum DebugCommonKind {
     User,
     Table,
     MetaMember,
+    SourceCatalog,
+    SinkCatalog,
+    IndexCatalog,
+    FunctionCatalog,
+    ViewCatalog,
+    ConnectionCatalog,
+    DatabaseCatalog,
+    SchemaCatalog,
+    TableCatalog,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -160,7 +169,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = MAX_EPOCH)]
+        #[clap(short, long = "epoch", default_value_t = HummockEpoch::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
@@ -348,6 +357,10 @@ pub struct ScaleVerticalCommands {
     /// The target parallelism per worker, requires `workers` to be set.
     #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
+
+    /// It will exclude all other workers to maintain the target parallelism only for the target workers.
+    #[clap(long, default_value_t = false)]
+    exclusive: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -432,7 +445,10 @@ enum MetaCommands {
         resolve_no_shuffle: bool,
     },
     /// backup meta by taking a meta snapshot
-    BackupMeta,
+    BackupMeta {
+        #[clap(long)]
+        remarks: Option<String>,
+    },
     /// restore meta by recovering from a meta snapshot
     RestoreMeta {
         #[command(flatten)]
@@ -663,7 +679,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::reschedule(context, plan, revision, from, dry_run, resolve_no_shuffle)
                 .await?
         }
-        Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::BackupMeta { remarks }) => {
+            cmd_impl::meta::backup_meta(context, remarks).await?
+        }
         Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
             risingwave_meta::backup_restore::restore(opts).await?
         }

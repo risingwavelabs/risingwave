@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
@@ -31,7 +32,7 @@ use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::{KAFKA_CONNECTOR, KINESIS_CONNECTOR, PULSAR_CONNECTOR};
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
 
 use crate::catalog::IndexCatalog;
@@ -73,7 +74,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().get_timezone().into(),
+            timezone: session.config().timezone(),
         };
         Self {
             chunk_stream,
@@ -125,7 +126,9 @@ fn pg_value_format(
                 Ok(d.text_format(data_type).into())
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => Ok(d
+            .binary_format(data_type)
+            .context("failed to format binary value")?),
     }
 }
 
@@ -252,18 +255,6 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     };
 
     connector == KAFKA_CONNECTOR
-}
-
-#[inline(always)]
-pub fn is_key_mq_connector(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-
-    matches!(
-        connector.as_str(),
-        KINESIS_CONNECTOR | PULSAR_CONNECTOR | KAFKA_CONNECTOR
-    )
 }
 
 #[inline(always)]

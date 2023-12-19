@@ -20,7 +20,10 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
+use super::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, TrivialMovePicker,
+    MAX_COMPACT_LEVEL_COUNT,
+};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -28,7 +31,6 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
-    split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -37,14 +39,12 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        split_by_table: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             level,
             target_level,
             max_select_bytes,
-            split_by_table,
             overlap_strategy,
         }
     }
@@ -64,9 +64,6 @@ impl MinOverlappingPicker {
             let mut select_file_size = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
-                    break;
-                }
-                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {
@@ -118,6 +115,16 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        let picker =
+            TrivialMovePicker::new(self.level, self.target_level, self.overlap_strategy.clone());
+        if let Some(input) = picker.pick_trivial_move_task(
+            &levels.get_level(self.level).table_infos,
+            &levels.get_level(self.target_level).table_infos,
+            level_handlers,
+            stats,
+        ) {
+            return Some(input);
+        }
         assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &levels.get_level(self.level).table_infos,
@@ -405,13 +412,8 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -487,13 +489,8 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -833,7 +830,7 @@ pub mod tests {
         ];
         // no limit
         let picker =
-            MinOverlappingPicker::new(2, 3, 1000, false, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(2, 3, 1000, Arc::new(RangeOverlapStrategy::default()));
         let (select_files, target_files) = picker.pick_tables(
             &levels[1].table_infos,
             &levels[2].table_infos,

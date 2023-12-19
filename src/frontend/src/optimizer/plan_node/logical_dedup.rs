@@ -25,6 +25,7 @@ use super::{
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
 
@@ -138,6 +139,8 @@ impl ToBatch for LogicalDedup {
 }
 
 impl ExprRewritable for LogicalDedup {}
+
+impl ExprVisitable for LogicalDedup {}
 
 impl ColPrunable for LogicalDedup {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

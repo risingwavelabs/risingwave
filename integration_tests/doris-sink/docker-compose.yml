@@ -2,6 +2,7 @@
 version: "3"
 services:
   fe:
+    platform: linux/amd64
     image: apache/doris:2.0.0_alpha-fe-x86_64
     hostname: fe
     environment:
@@ -14,6 +15,7 @@ services:
       mynetwork:
         ipv4_address: 172.21.0.2
   be:
+    platform: linux/amd64
     image: apache/doris:2.0.0_alpha-be-x86_64
     hostname: be
     environment:
@@ -26,64 +28,54 @@ services:
     networks:
       mynetwork:
         ipv4_address: 172.21.0.3
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
+      service: risingwave-standalone
     networks:
       mynetwork:
         ipv4_address: 172.21.0.4
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
-    networks:
-      mynetwork:
-        ipv4_address: 172.21.0.5
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
     networks:
       mynetwork:
-        ipv4_address: 172.21.0.6
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
-    networks:
-      mynetwork:
-        ipv4_address: 172.21.0.7
+        ipv4_address: 172.21.0.5
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
     networks:
       mynetwork:
-        ipv4_address: 172.21.0.8
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
-    networks:
-      mynetwork:
-        ipv4_address: 172.21.0.9
+        ipv4_address: 172.21.0.6
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: minio-0
     networks:
       mynetwork:
-        ipv4_address: 172.21.0.10
+        ipv4_address: 172.21.0.7
   prometheus-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
     networks:
       mynetwork:
-        ipv4_address: 172.21.0.11
+        ipv4_address: 172.21.0.8
+  mysql:
+    image: mysql:latest
+    ports:
+      - "3306:3306"
+    volumes:
+      - "./doris_prepare.sql:/doris_prepare.sql"
+    command: tail -f /dev/null
+    restart: on-failure
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.9
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

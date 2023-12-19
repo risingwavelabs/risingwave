@@ -28,7 +28,7 @@ use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
@@ -119,8 +119,7 @@ pub struct TableCatalog {
     /// `None`.
     pub row_id_index: Option<usize>,
 
-    /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`.
+    /// The column indices which are stored in the state store's value with row-encoding.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
@@ -156,8 +155,8 @@ pub struct TableCatalog {
     /// description of table, set by `comment on`.
     pub description: Option<String>,
 
-    /// Output indices for replicated state table.
-    pub output_column_ids: Vec<ColumnId>,
+    /// Incoming sinks, used for sink into table
+    pub incoming_sinks: Vec<SinkId>,
 }
 
 // How the stream job was created will determine
@@ -274,11 +273,6 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
-        self
-    }
-
-    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
-        self.output_column_ids = output_column_ids;
         self
     }
 
@@ -450,7 +444,7 @@ impl TableCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
-            output_column_ids: self.output_column_ids.iter().map(|id| { id.get_id() }).collect(),
+            incoming_sinks: self.incoming_sinks.clone(),
         }
     }
 
@@ -565,7 +559,7 @@ impl From<PbTable> for TableCatalog {
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
-            output_column_ids: tb.output_column_ids.iter().map(ColumnId::from).collect(),
+            incoming_sinks: tb.incoming_sinks.clone(),
         }
     }
 }
@@ -659,7 +653,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
-            ..Default::default()
+            incoming_sinks: vec![],
         }
         .into();
 
@@ -717,7 +711,7 @@ mod tests {
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
-                output_column_ids: vec![],
+                incoming_sinks: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

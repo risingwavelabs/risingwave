@@ -23,8 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::external::ExternalStorageTable;
-use crate::executor::CdcBackfillExecutor;
+use crate::executor::{CdcBackfillExecutor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -35,13 +34,9 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
-        // For reporting the progress.
-        let progress = stream
-            .context
-            .register_create_mview_progress(params.actor_context.id);
 
         let output_indices = node
             .output_indices
@@ -100,11 +95,9 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             external_table,
             upstream,
             output_indices,
-            Some(progress),
-            params.executor_stats,
-            Some(state_table),
             None,
-            true,
+            params.executor_stats,
+            state_table,
             params.env.config().developer.chunk_size,
         )
         .boxed())

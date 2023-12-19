@@ -20,10 +20,10 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::prelude::{Actor, Fragment, StreamingJob};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, fragment, ActorId, ConnectorSplits, Dispatchers, FragmentId, FragmentVnodeMapping,
-    I32Array, ObjectId, StreamNode, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, ActorId, ConnectorSplits, ExprContext, FragmentId,
+    FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -34,7 +34,7 @@ use risingwave_pb::meta::{FragmentParallelUnitMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamEnvironment,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -44,7 +44,7 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-use crate::controller::utils::get_parallel_unit_mapping;
+use crate::controller::utils::{get_actor_dispatchers, get_parallel_unit_mapping};
 use crate::manager::ActorInfos;
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
@@ -70,6 +70,7 @@ impl CatalogControllerInner {
 }
 
 impl CatalogController {
+    #[allow(clippy::type_complexity)]
     pub fn extract_fragment_and_actors_from_table_fragments(
         PbTableFragments {
             table_id,
@@ -78,31 +79,42 @@ impl CatalogController {
             actor_splits,
             ..
         }: PbTableFragments,
-    ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
+    ) -> MetaResult<
+        Vec<(
+            fragment::Model,
+            Vec<actor::Model>,
+            HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+        )>,
+    > {
         let mut result = vec![];
 
         let fragments: BTreeMap<_, _> = fragments.into_iter().collect();
 
         for (_, fragment) in fragments {
-            let (fragment, actors) = Self::extract_fragment_and_actors(
+            let (fragment, actors, dispatchers) = Self::extract_fragment_and_actors(
                 table_id as _,
                 fragment,
                 &actor_status,
                 &actor_splits,
             )?;
 
-            result.push((fragment, actors));
+            result.push((fragment, actors, dispatchers));
         }
 
         Ok(result)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn extract_fragment_and_actors(
         job_id: ObjectId,
         pb_fragment: PbFragment,
         pb_actor_status: &HashMap<u32, PbActorStatus>,
         pb_actor_splits: &HashMap<u32, PbConnectorSplits>,
-    ) -> MetaResult<(fragment::Model, Vec<actor::Model>)> {
+    ) -> MetaResult<(
+        fragment::Model,
+        Vec<actor::Model>,
+        HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+    )> {
         let PbFragment {
             fragment_id: pb_fragment_id,
             fragment_type_mask: pb_fragment_type_mask,
@@ -130,6 +142,7 @@ impl CatalogController {
         };
 
         let mut actors = vec![];
+        let mut actor_dispatchers = HashMap::new();
 
         for mut actor in pb_actors {
             let mut upstream_actors = BTreeMap::new();
@@ -157,6 +170,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: _,
+                expr_context: pb_expr_context,
             } = actor;
 
             let splits = pb_actor_splits.get(&actor_id).cloned().map(ConnectorSplits);
@@ -186,6 +200,7 @@ impl CatalogController {
                     .cloned()
                     .collect::<BTreeSet<_>>()
             );
+            let pb_expr_context = pb_expr_context.expect("no expression context found");
 
             actors.push(actor::Model {
                 actor_id: actor_id as _,
@@ -194,9 +209,16 @@ impl CatalogController {
                 splits,
                 parallel_unit_id,
                 upstream_actor_ids: upstream_actors.into(),
-                dispatchers: Dispatchers(pb_dispatcher),
                 vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
+                expr_context: ExprContext(pb_expr_context),
             });
+            actor_dispatchers.insert(
+                actor_id as ActorId,
+                pb_dispatcher
+                    .into_iter()
+                    .map(|dispatcher| (actor_id, dispatcher).into())
+                    .collect(),
+            );
         }
 
         let upstream_fragment_id = pb_upstream_fragment_ids.into();
@@ -220,23 +242,28 @@ impl CatalogController {
             upstream_fragment_id,
         };
 
-        Ok((fragment, actors))
+        Ok((fragment, actors, actor_dispatchers))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn compose_table_fragments(
         table_id: u32,
         state: PbState,
-        env: Option<PbStreamEnvironment>,
-        fragments: Vec<(fragment::Model, Vec<actor::Model>)>,
+        ctx: Option<PbStreamContext>,
+        fragments: Vec<(
+            fragment::Model,
+            Vec<actor::Model>,
+            HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+        )>,
         parallel_units_map: HashMap<u32, PbParallelUnit>,
     ) -> MetaResult<PbTableFragments> {
         let mut pb_fragments = HashMap::new();
         let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = HashMap::new();
 
-        for (fragment, actors) in fragments {
+        for (fragment, actors, actor_dispatcher) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
-                Self::compose_fragment(fragment, actors, &parallel_units_map)?;
+                Self::compose_fragment(fragment, actors, actor_dispatcher, &parallel_units_map)?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
 
@@ -250,7 +277,7 @@ impl CatalogController {
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            env,
+            ctx,
         };
 
         Ok(table_fragments)
@@ -260,6 +287,7 @@ impl CatalogController {
     pub(crate) fn compose_fragment(
         fragment: fragment::Model,
         actors: Vec<actor::Model>,
+        mut actor_dispatcher: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         parallel_units_map: &HashMap<u32, PbParallelUnit>,
     ) -> MetaResult<(
         PbFragment,
@@ -301,9 +329,8 @@ impl CatalogController {
                 parallel_unit_id,
                 splits,
                 upstream_actor_ids,
-                dispatchers,
                 vnode_bitmap,
-                ..
+                expr_context,
             } = actor;
 
             let upstream_fragment_actors = upstream_actor_ids.into_inner();
@@ -325,6 +352,7 @@ impl CatalogController {
             };
 
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
+            let pb_expr_context = Some(expr_context.into_inner());
 
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
@@ -332,7 +360,12 @@ impl CatalogController {
                 .map(|&id| id as _)
                 .collect();
 
-            let pb_dispatcher = dispatchers.into_inner();
+            let pb_dispatcher = actor_dispatcher
+                .remove(&actor_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect();
 
             pb_actor_status.insert(
                 actor_id as _,
@@ -359,6 +392,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: "".to_string(),
+                expr_context: pb_expr_context,
             })
         }
 
@@ -492,19 +526,36 @@ impl CatalogController {
             .filter(fragment::Column::JobId.eq(job_id))
             .all(&inner.db)
             .await?;
+        let mut actor_dispatchers = get_actor_dispatchers(
+            &inner.db,
+            fragment_actors
+                .iter()
+                .flat_map(|(_, actors)| actors.iter().map(|actor| actor.actor_id))
+                .collect(),
+        )
+        .await?;
         let job_info = StreamingJob::find_by_id(job_id)
             .one(&inner.db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
+        let mut fragment_info = vec![];
+        for (fragment, actors) in fragment_actors {
+            let mut dispatcher_info = HashMap::new();
+            for actor in &actors {
+                if let Some(dispatchers) = actor_dispatchers.remove(&actor.actor_id) {
+                    dispatcher_info.insert(actor.actor_id, dispatchers);
+                }
+            }
+            fragment_info.push((fragment, actors, dispatcher_info));
+        }
+
         let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         Self::compose_table_fragments(
             job_id as _,
             job_info.job_status.into(),
-            job_info
-                .timezone
-                .map(|tz| PbStreamEnvironment { timezone: tz }),
-            fragment_actors,
+            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
+            fragment_info,
             parallel_units_map,
         )
     }
@@ -670,10 +721,26 @@ impl CatalogController {
                 .await?
         };
 
+        let mut actor_dispatchers = get_actor_dispatchers(
+            &inner.db,
+            fragment_actors
+                .iter()
+                .flat_map(|(_, actors)| actors.iter().map(|actor| actor.actor_id))
+                .collect(),
+        )
+        .await?;
+
         let mut node_actors = HashMap::new();
         for (fragment, actors) in fragment_actors {
+            let mut dispatcher_info = HashMap::new();
+            for actor in &actors {
+                if let Some(dispatchers) = actor_dispatchers.remove(&actor.actor_id) {
+                    dispatcher_info.insert(actor.actor_id, dispatchers);
+                }
+            }
+
             let (table_fragments, actor_status, _) =
-                Self::compose_fragment(fragment, actors, &parallel_units_map)?;
+                Self::compose_fragment(fragment, actors, dispatcher_info, &parallel_units_map)?;
             for actor in table_fragments.actors {
                 let node_id = actor_status[&actor.actor_id]
                     .get_parallel_unit()
@@ -766,9 +833,15 @@ impl CatalogController {
         let mut root_fragments = HashMap::new();
         for fragment in fragments {
             let actors = fragment.find_related(Actor).all(&inner.db).await?;
+            let actor_dispatchers = get_actor_dispatchers(
+                &inner.db,
+                actors.iter().map(|actor| actor.actor_id).collect(),
+            )
+            .await?;
+
             root_fragments.insert(
                 fragment.job_id,
-                Self::compose_fragment(fragment, actors, &parallel_units_map)?.0,
+                Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0,
             );
         }
 
@@ -790,7 +863,6 @@ impl CatalogController {
                     r#type: d.r#type,
                     dist_key_indices: d.dist_key_indices.clone(),
                     output_indices: d.output_indices.clone(),
-                    downstream_table_name: d.downstream_table_name.clone(),
                 };
                 (fragment_id, strategy)
             })
@@ -809,7 +881,13 @@ impl CatalogController {
             }
             assert_eq!(fragment_actors.len(), 1);
             let (fragment, actors) = fragment_actors.pop().unwrap();
-            let fragment = Self::compose_fragment(fragment, actors, &parallel_units_map)?.0;
+            let actor_dispatchers = get_actor_dispatchers(
+                &inner.db,
+                actors.iter().map(|actor| actor.actor_id).collect(),
+            )
+            .await?;
+            let fragment =
+                Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0;
             chain_fragments.push((dispatch_strategy, fragment));
         }
 
@@ -831,9 +909,19 @@ impl CatalogController {
 
         let parallel_units_map = get_parallel_unit_mapping(&inner.db).await?;
         let fragment = fragments.pop().unwrap();
-        let actors = fragment.find_related(Actor).all(&inner.db).await?;
+        let actor_with_dispatchers = fragment
+            .find_related(Actor)
+            .find_with_related(ActorDispatcher)
+            .all(&inner.db)
+            .await?;
+        let mut actors = vec![];
+        let mut actor_dispatchers = HashMap::new();
+        for (actor, dispatchers) in actor_with_dispatchers {
+            actor_dispatchers.insert(actor.actor_id, dispatchers);
+            actors.push(actor);
+        }
 
-        Ok(Self::compose_fragment(fragment, actors, &parallel_units_map)?.0)
+        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers, &parallel_units_map)?.0)
     }
 }
 
@@ -849,13 +937,15 @@ mod tests {
     use risingwave_meta_model_v2::actor::ActorStatus;
     use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
-        actor, fragment, ActorId, ActorUpstreamActors, ConnectorSplits, Dispatchers, FragmentId,
-        FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId, VnodeBitmap,
+        actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
+        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId,
+        VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment};
+    use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
     use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
     use risingwave_pb::stream_plan::{
@@ -962,6 +1052,9 @@ mod tests {
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
                     mview_definition: "".to_string(),
+                    expr_context: Some(PbExprContext {
+                        time_zone: String::from("America/New_York"),
+                    }),
                 }
             })
             .collect_vec();
@@ -993,7 +1086,7 @@ mod tests {
 
         let pb_actor_splits = Default::default();
 
-        let (fragment, actors) = CatalogController::extract_fragment_and_actors(
+        let (fragment, actors, actor_dispatchers) = CatalogController::extract_fragment_and_actors(
             TEST_JOB_ID,
             pb_fragment.clone(),
             &pb_actor_status,
@@ -1002,7 +1095,7 @@ mod tests {
 
         check_fragment_template(fragment.clone(), pb_actors.clone(), &upstream_actor_ids);
         check_fragment(fragment, pb_fragment);
-        check_actors(actors, pb_actors, pb_actor_status, pb_actor_splits);
+        check_actors(actors, actor_dispatchers, pb_actors, pb_actor_splits);
 
         Ok(())
     }
@@ -1074,7 +1167,6 @@ mod tests {
 
                 let actor_upstream_actor_ids =
                     upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
-                let dispatchers = generate_dispatchers_for_actor(actor_id);
 
                 actor::Model {
                     actor_id: actor_id as ActorId,
@@ -1083,11 +1175,26 @@ mod tests {
                     splits: actor_splits,
                     parallel_unit_id: parallel_unit_id as i32,
                     upstream_actor_ids: ActorUpstreamActors(actor_upstream_actor_ids),
-                    dispatchers: Dispatchers(dispatchers),
                     vnode_bitmap,
+                    expr_context: ExprContext(PbExprContext {
+                        time_zone: String::from("America/New_York"),
+                    }),
                 }
             })
             .collect_vec();
+
+        let actor_dispatchers: HashMap<_, _> = (0..actor_count)
+            .map(|actor_id| {
+                let dispatchers = generate_dispatchers_for_actor(actor_id);
+                (
+                    actor_id as ActorId,
+                    dispatchers
+                        .into_iter()
+                        .map(|dispatcher| (actor_id, dispatcher).into())
+                        .collect_vec(),
+                )
+            })
+            .collect();
 
         let stream_node = {
             let template_actor = actors.first().cloned().unwrap();
@@ -1116,6 +1223,7 @@ mod tests {
         let (pb_fragment, pb_actor_status, pb_actor_splits) = CatalogController::compose_fragment(
             fragment.clone(),
             actors.clone(),
+            actor_dispatchers.clone(),
             &parallel_units_map,
         )
         .unwrap();
@@ -1135,15 +1243,15 @@ mod tests {
 
         check_fragment_template(fragment.clone(), pb_actors.clone(), &upstream_actor_ids);
         check_fragment(fragment, pb_fragment);
-        check_actors(actors, pb_actors, pb_actor_status, pb_actor_splits);
+        check_actors(actors, actor_dispatchers, pb_actors, pb_actor_splits);
 
         Ok(())
     }
 
     fn check_actors(
         actors: Vec<actor::Model>,
+        mut actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         pb_actors: Vec<PbStreamActor>,
-        _pb_actor_status: HashMap<u32, PbActorStatus>,
         pb_actor_splits: HashMap<u32, PbConnectorSplits>,
     ) {
         for (
@@ -1154,8 +1262,8 @@ mod tests {
                 splits,
                 parallel_unit_id,
                 upstream_actor_ids,
-                dispatchers,
                 vnode_bitmap,
+                expr_context,
             },
             PbStreamActor {
                 actor_id: pb_actor_id,
@@ -1165,6 +1273,7 @@ mod tests {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition,
+                expr_context: pb_expr_context,
             },
         ) in actors.into_iter().zip_eq_debug(pb_actors.into_iter())
         {
@@ -1181,7 +1290,15 @@ mod tests {
                     .collect_vec(),
                 pb_upstream_actor_id
             );
-            assert_eq!(dispatchers, Dispatchers(pb_dispatcher));
+
+            let actor_dispatcher: Vec<PbDispatcher> = actor_dispatchers
+                .remove(&actor_id)
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect();
+
+            assert_eq!(actor_dispatcher, pb_dispatcher);
             assert_eq!(
                 vnode_bitmap,
                 pb_vnode_bitmap
@@ -1212,6 +1329,8 @@ mod tests {
                     .cloned()
                     .map(ConnectorSplits)
             );
+
+            assert_eq!(Some(expr_context.into_inner()), pb_expr_context);
         }
     }
 

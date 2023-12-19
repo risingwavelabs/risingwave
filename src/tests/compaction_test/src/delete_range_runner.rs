@@ -27,7 +27,9 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -35,8 +37,8 @@ use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestEx
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
@@ -156,7 +158,7 @@ async fn compaction_test(
         stream_job_status: PbStreamJobStatus::Created.into(),
         create_type: PbCreateType::Foreground.into(),
         description: None,
-        ..Default::default()
+        incoming_sinks: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -200,10 +202,11 @@ async fn compaction_test(
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
-    let remote_object_store = parse_remote_object_store(
+    let remote_object_store = build_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
+        ObjectStoreConfig::default(),
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(
@@ -212,7 +215,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
+        storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,

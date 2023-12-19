@@ -20,6 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::{bail, bail_not_implemented};
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
@@ -28,7 +30,7 @@ use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
@@ -217,6 +219,30 @@ impl Planner {
         Ok(LogicalProject::create(count_star.into(), vec![ge.into()]))
     }
 
+    /// Helper to create an `ARRAY_AGG` operator with the given `input`.
+    /// It is represented by `ARRAY_AGG($0) -> input`
+    fn create_array_agg(&self, input: PlanRef) -> Result<PlanRef> {
+        let fields = input.schema().fields();
+        if fields.len() != 1 {
+            bail!("subquery must return only one column");
+        }
+        let input_column_type = fields[0].data_type();
+        Ok(Agg::new(
+            vec![PlanAggCall {
+                agg_kind: AggKind::ArrayAgg,
+                return_type: DataType::List(input.schema().fields()[0].data_type().into()),
+                inputs: vec![InputRef::new(0, input_column_type)],
+                distinct: false,
+                order_by: vec![],
+                filter: Condition::true_cond(),
+                direct_args: vec![],
+            }],
+            IndexSet::empty(),
+            input,
+        )
+        .into())
+    }
+
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
     /// `LeftSemi/LeftAnti` [`LogicalApply`]
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
@@ -297,13 +323,7 @@ impl Planner {
                 let right_expr = InputRef::new(input.schema().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
-            kind => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("Not supported subquery kind: {:?}", kind),
-                    1343.into(),
-                )
-                .into())
-            }
+            kind => bail_not_implemented!(issue = 1343, "Not supported subquery kind: {:?}", kind),
         };
         *input = Self::create_apply(
             correlated_id,
@@ -378,13 +398,10 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
+                SubqueryKind::Array => {
+                    right = self.create_array_agg(right)?;
                 }
+                _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             }
 
             root = Self::create_apply(

@@ -44,7 +44,7 @@
     href="https://hub.docker.com/r/risingwavelabs/risingwave"
     target="_blank"
   >
-    <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
+    <img alt="Docker" src="https://img.shields.io/docker/pulls/risingwavelabs/risingwave" />
   </a>
   <a
     href="https://twitter.com/risingwavelabs"
@@ -77,8 +77,8 @@ risingwave playground
 ```
 **Ubuntu**
 ```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.4.0/risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
-tar xvf risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v1.5.0/risingwave-v1.5.0-x86_64-unknown-linux-all-in-one.tar.gz
+tar xvf risingwave-v1.5.0-x86_64-unknown-linux-all-in-one.tar.gz
 ./risingwave playground
 ```
 Now connect to RisingWave using `psql`:

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
@@ -26,7 +27,9 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption, ColumnId};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
+};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
@@ -36,13 +39,14 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, range_of_prefix,
+    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
 };
-use risingwave_pb::catalog::{Table};
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_pb::catalog::Table;
+use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
+use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
@@ -56,7 +60,6 @@ use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_storage::row_serde::{get_output_column_indices};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -146,23 +149,25 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// Output indices, only applicable for replicated state tables.
-    /// They MUST include pk indices as a subset.
-    output_indices: Vec<usize>,
-
     /// "i" here refers to the base state_table's actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
     /// It is only applicable for replication.
     i2o_mapping: ColIndexMapping,
+
+    /// Output indices
+    /// Used for:
+    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 2. Computing output pk indices to used them for backfill state.
+    output_indices: Vec<usize>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
-pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
+pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 /// `WatermarkCacheStateTable` caches the watermark column.
 /// It will reduce state cleaning overhead.
 pub type WatermarkCacheStateTable<S> =
@@ -220,7 +225,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, true).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, true, vec![]).await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -229,7 +234,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, vec![]).await
     }
 
     /// Create state table from table catalog and store.
@@ -238,6 +243,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
         is_consistent_op: bool,
+        output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -283,17 +289,6 @@ where
                 .map(|idx| *idx as usize)
                 .collect()
         };
-
-        let column_ids: Vec<ColumnId> = table_catalog
-            .get_output_column_ids()
-            .iter()
-            .map(ColumnId::from)
-            .collect();
-
-        let (i2o_mapping, output_indices) = get_output_column_indices(
-            &table_columns,
-            &column_ids,
-        );
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let new_local_options = if IS_REPLICATED {
@@ -355,6 +350,37 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
+
+        // Get info for replicated state table.
+        let output_column_ids_to_input_idx = output_column_ids
+            .iter()
+            .enumerate()
+            .map(|(pos, id) | (*id, pos))
+            .collect::<HashMap<_, _>>();
+
+        let column_ids: Vec<i32> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().get_column_id())
+            .collect_vec();
+
+        let mut i2o_mapping = vec![None; column_ids.len()];
+
+        let mut output_column_indices = vec![];
+        for (i, column_id) in column_ids.into_iter().enumerate() {
+            if let Some(pos) = output_column_ids_to_input_idx.get(&column_id.into()) {
+                i2o_mapping[i] = Some(*pos);
+                output_column_indices.push(i);
+            }
+        }
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+
+        let columns = table_catalog
+            .columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().into())
+            .collect_vec();
+        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
         Self {
             table_id,
@@ -522,7 +548,6 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
-
         Self {
             table_id,
             local_store: local_state_store,
@@ -618,6 +643,7 @@ where
     ///
     /// Returns `None` if any of the primary key columns is not in the output columns.
     pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        assert!(IS_REPLICATED);
         self.pk_indices
             .iter()
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
@@ -649,6 +675,24 @@ where
     }
 }
 
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    /// Create replicated state table from table catalog with output indices
+    pub async fn from_table_catalog_with_output_column_ids(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        output_column_ids: Vec<ColumnId>,
+    ) -> Self {
+
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
+    }
+}
+
 // point get
 impl<
         S,
@@ -667,12 +711,14 @@ where
         match encoded_row {
             Some(encoded_row) => {
                 let row = self.row_serde.deserialize(&encoded_row)?;
-                let row = if IS_REPLICATED {
-                    row.project(&self.output_indices).to_owned_row()
+                if IS_REPLICATED {
+                    // If the table is replicated, we need to deserialize the row with the output
+                    // indices.
+                    let row = row.project(&self.output_indices);
+                    Ok(Some(row.into_owned_row()))
                 } else {
-                    OwnedRow::new(row)
-                };
-                Ok(Some(row))
+                    Ok(Some(OwnedRow::new(row)))
+                }
             }
             None => Ok(None),
         }
@@ -772,8 +818,8 @@ where
     SD: ValueRowSerde,
 {
     fn handle_mem_table_error(&self, e: StorageError) {
-        let e = match e {
-            StorageError::MemTable(e) => e,
+        let e = match e.into_inner() {
+            ErrorKind::MemTable(e) => e,
             _ => unreachable!("should only get memtable error"),
         };
         match *e {
@@ -1237,9 +1283,28 @@ where
         ))
     }
 
+    pub async fn iter_with_vnode_and_output_indices(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + '_> {
+        assert!(IS_REPLICATED);
+        let stream = self
+            .iter_with_vnode(vnode, pk_range, prefetch_options)
+            .await?;
+        Ok(stream.map(|row| {
+            row.map(|keyed_row| {
+                let (vnode_prefixed_key, row) = keyed_row.into_parts();
+                let row = row.project(&self.output_indices).into_owned_row();
+                KeyedRow::new(vnode_prefixed_key, row)
+            })
+        }))
+    }
+
     async fn iter_kv(
         &self,
-        key_range: (Bound<Bytes>, Bound<Bytes>),
+        table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
@@ -1251,7 +1316,6 @@ where
             cache_policy: CachePolicy::Fill(CachePriority::High),
             ..Default::default()
         };
-        let table_key_range = map_table_key_range(key_range);
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
@@ -1270,13 +1334,11 @@ where
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
 
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
@@ -1291,13 +1353,15 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 
         trace!(
             table_id = %self.table_id(),
-            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?prefix_hint, ?pk_prefix,
              ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
@@ -1305,7 +1369,7 @@ where
         let memcomparable_range =
             prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
 
-        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         Ok(deserialize_keyed_row_stream(
             self.iter_kv(
@@ -1330,8 +1394,7 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
-        let memcomparable_range_with_vnode =
-            prefixed_range(memcomparable_range, &vnode.to_be_bytes());
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         // TODO: provide a trace of useful params.
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
@@ -1354,8 +1417,8 @@ where
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let table_key_range = map_table_key_range(prefixed_range(encoded_key_range, &vnode));
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
+        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
 
         // Construct prefix hint for prefix bloom filter.
         if self.prefix_hint_len != 0 {
@@ -1369,7 +1432,9 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+                Some(Bytes::copy_from_slice(
+                    &encoded_prefix[..encoded_prefix_len],
+                ))
             }
         };
 

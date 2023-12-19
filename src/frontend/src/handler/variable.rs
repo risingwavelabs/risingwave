@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::ConfigReporter;
+use risingwave_common::error::Result;
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -26,20 +27,26 @@ use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
+/// convert `SetVariableValue` to string while remove the quotes on literals.
+pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
+    match value {
+        SetVariableValue::Single(var) => Some(var.to_string_unquoted()),
+        SetVariableValue::List(list) => Some(
+            list.iter()
+                .map(|var| var.to_string_unquoted())
+                .join(SESSION_CONFIG_LIST_SEP),
+        ),
+        SetVariableValue::Default => None,
+    }
+}
+
 pub fn handle_set(
     handler_args: HandlerArgs,
     name: Ident,
-    value: Vec<SetVariableValue>,
+    value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_vals = value
-        .into_iter()
-        .map(|v| match v {
-            SetVariableValue::Literal(Value::DoubleQuotedString(s))
-            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
-            _ => v.to_string(),
-        })
-        .collect_vec();
+    let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -60,7 +67,7 @@ pub fn handle_set(
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
         &name.real_value().to_lowercase(),
-        string_vals,
+        string_val,
         Reporter {
             status: &mut status,
         },
@@ -76,8 +83,9 @@ pub(super) fn handle_set_time_zone(
     value: SetTimeZoneValue,
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
-        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Local => {
+            iana_time_zone::get_timezone().context("Failed to get local time zone")
+        }
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
@@ -85,7 +93,7 @@ pub(super) fn handle_set_time_zone(
         _ => Ok(value.to_string()),
     }?;
 
-    handler_args.session.set_config("timezone", vec![tz_info])?;
+    handler_args.session.set_config("timezone", tz_info)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
@@ -114,7 +122,7 @@ pub(super) async fn handle_show(
 fn handle_show_all(handler_args: HandlerArgs) -> Result<Vec<Row>> {
     let config_reader = handler_args.session.config();
 
-    let all_variables = config_reader.get_all();
+    let all_variables = config_reader.show_all();
 
     let rows = all_variables
         .iter()

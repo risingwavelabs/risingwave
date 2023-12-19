@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub mod prelude;
 
 pub mod actor;
+pub mod actor_dispatcher;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -196,10 +197,11 @@ derive_from_json_struct!(
 derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
 derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
-derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
 
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
+derive_from_json_struct!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
+derive_from_json_struct!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
 derive_from_json_struct!(
     FragmentVnodeMapping,

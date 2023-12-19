@@ -4,19 +4,19 @@ set -euo pipefail
 
 source env_vars.sh
 
+COMPOSE_FILE_PATH="integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml"
+
 if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
-  echo "--- docker compose compactor node logs"
-  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs compactor-0
 
-  echo "--- docker compose compute node logs"
-  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs compute-node-0
-
-  echo "--- docker compose frontend node logs"
-  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs frontend-node-0
-
-  echo "--- docker compose meta node logs"
-  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs meta-node-0
-
-  echo "--- docker compose connector node logs"
-  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs connector-node
+  if docker-compose -f "$COMPOSE_FILE_PATH" ps | grep "risingwave-standalone" > /dev/null; then
+      echo "--- upload risingwave standalone docker compose logs"
+      docker-compose -f "$COMPOSE_FILE_PATH" logs risingwave-standalone > risingwave-standalone.log
+  else
+      echo "--- upload risingwave docker compose logs"
+      docker-compose -f "$COMPOSE_FILE_PATH" logs compactor-0 > risingwave-compactor.log
+      docker-compose -f "$COMPOSE_FILE_PATH" logs compute-node-0 > risingwave-compute.log
+      docker-compose -f "$COMPOSE_FILE_PATH" logs frontend-node-0 > risingwave-frontend.log
+      docker-compose -f "$COMPOSE_FILE_PATH" logs meta-node-0 > risingwave-meta.log
+  fi
+    buildkite-agent artifact upload "./risingwave-*.log"
 fi

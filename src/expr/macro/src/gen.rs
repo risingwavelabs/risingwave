@@ -117,6 +117,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
@@ -137,8 +139,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
-                    append_only: false,
                 }) };
             }
         })
@@ -550,8 +550,26 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_agg_build_fn(user_fn)?
+        };
+        let build_retractable = match append_only {
+            true => quote! { None },
+            false => quote! { Some(#build_fn) },
+        };
+        let build_append_only = match append_only {
+            false => quote! { None },
+            true => quote! { Some(#build_fn) },
+        };
+        let retractable_state_type = match append_only {
+            true => quote! { None },
+            false => state_type.clone(),
+        };
+        let append_only_state_type = match append_only {
+            false => quote! { None },
+            true => state_type,
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
@@ -567,10 +585,13 @@ impl FunctionAttr {
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
-                    build: FuncBuilder::Aggregate(#build_fn),
+                    build: FuncBuilder::Aggregate {
+                        retractable: #build_retractable,
+                        append_only: #build_append_only,
+                        retractable_state_type: #retractable_state_type,
+                        append_only_state_type: #append_only_state_type,
+                    },
                     type_infer: #type_infer_fn,
-                    state_type: #state_type,
-                    append_only: #append_only,
                     deprecated: #deprecated,
                 }) };
             }
@@ -735,7 +756,7 @@ impl FunctionAttr {
             quote! { state = #next_state; }
         };
         let get_result = if custom_state.is_some() {
-            quote! { Ok(Some(state.downcast_ref::<#state_type>().into())) }
+            quote! { Ok(state.downcast_ref::<#state_type>().into()) }
         } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
             && impl_.finalize.is_some()
         {
@@ -876,6 +897,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
+        } else if self.rewritten {
+            quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_table_function(user_fn)?
         };
@@ -896,8 +919,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
-                    append_only: false,
                 }) };
             }
         })
@@ -924,10 +945,9 @@ impl FunctionAttr {
         let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
         let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
         let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
-        let arg_arrays = self
-            .args
+        let arg_arrays = arg_ids
             .iter()
-            .map(|t| format_ident!("{}", types::array_type(t)));
+            .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
         let outputs = (0..return_types.len())
             .map(|i| format_ident!("o{i}"))
             .collect_vec();
@@ -985,9 +1005,11 @@ impl FunctionAttr {
         };
         let iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { iter.flatten() },
+            ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
             ReturnTypeKind::Result => quote! { iter? },
-            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
+            ReturnTypeKind::ResultOption => {
+                quote! { if let Some(it) = iter? { it } else { continue; } }
+            }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(

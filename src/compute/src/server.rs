@@ -62,14 +62,13 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
-use crate::memory_management::{
-    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
-};
+use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::manager::MemoryManager;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
@@ -100,8 +99,7 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
-        Arc::new(config.streaming.clone());
+    let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -272,10 +270,6 @@ pub async fn compute_node_serve(
         await_tree_config.clone(),
     ));
 
-    // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
-    let batch_mgr_clone = batch_mgr.clone();
-    let stream_mgr_clone = stream_mgr.clone();
-
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
     // `total_compute_memory_bytes` for memory control. This is just a workaround for some
     // memory control issues and should be modified as soon as we figure out a better solution.
@@ -283,15 +277,13 @@ pub async fn compute_node_serve(
     // Related issues:
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
-    let memory_mgr = GlobalMemoryManager::new(
+    let memory_mgr = MemoryManager::new(
         streaming_metrics.clone(),
         compute_memory_bytes + storage_memory_bytes,
     );
 
     // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
-        batch_mgr_clone,
-        stream_mgr_clone,
         system_params.barrier_interval_ms(),
         system_params_manager.watch_params(),
     ));
@@ -404,6 +396,9 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
+            .http2_max_pending_accept_reset_streams(Some(
+                config.server.grpc_max_reset_stream as usize,
+            ))
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -437,12 +432,12 @@ pub async fn compute_node_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if let Err(_err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                    tracing::warn!(error = %err.as_report(), "Failed to join shutdown");
                                 }
                             }
                         },

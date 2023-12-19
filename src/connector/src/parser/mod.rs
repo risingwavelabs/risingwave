@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
@@ -28,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
@@ -46,6 +48,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
@@ -327,13 +330,18 @@ impl SourceStreamChunkRowWriter<'_> {
                         // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::warn!(
-                            %error,
-                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                            offset = self.row_meta.as_ref().map(|m| m.offset),
-                            column = desc.name,
-                            "failed to parse non-pk column, padding with `NULL`"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(LogSuppresser::default);
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                %error,
+                                split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                                offset = self.row_meta.as_ref().map(|m| m.offset),
+                                column = desc.name,
+                                suppressed_count,
+                                "failed to parse non-pk column, padding with `NULL`"
+                            );
+                        }
                         Ok(A::output_for(Datum::None))
                     }
                 }
@@ -545,6 +553,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             let _ = builder.take(batch_len);
         }
 
+        let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
                 tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
@@ -555,6 +564,16 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     .or_insert(msg.offset.clone());
 
                 continue;
+            }
+
+            // calculate process_time - event_time lag
+            if let SourceMeta::DebeziumCdc(msg_meta) = &msg.meta {
+                let lag_ms = process_time_ms - msg_meta.source_ts_ms;
+                // report to promethus
+                GLOBAL_SOURCE_METRICS
+                    .direct_cdc_event_lag_latency
+                    .with_label_values(&[&msg_meta.full_table_name])
+                    .observe(lag_ms as f64);
             }
 
             split_offset_mapping.insert(msg.split_id.clone(), msg.offset.clone());
@@ -586,12 +605,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::error!(
-                            %error,
-                            split_id = &*msg.split_id,
-                            offset = msg.offset,
-                            "failed to parse message, skipping"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(LogSuppresser::default);
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::error!(
+                                %error,
+                                split_id = &*msg.split_id,
+                                offset = msg.offset,
+                                suppressed_count,
+                                "failed to parse message, skipping"
+                            );
+                        }
                         parser.source_ctx().report_user_source_error(error);
                     }
                 }
@@ -872,7 +896,7 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -913,12 +937,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -945,12 +969,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -968,8 +992,8 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(props).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(props),
+                    topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
                     ..Default::default()
                 })
             }

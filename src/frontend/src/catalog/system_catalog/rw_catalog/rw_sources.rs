@@ -75,19 +75,15 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(source.owner as i32)),
                             Some(ScalarImpl::Utf8(
                                 source
-                                    .properties
+                                    .with_properties
                                     .get(UPSTREAM_SOURCE_KEY)
                                     .cloned()
                                     .unwrap_or("".to_string())
                                     .to_uppercase()
                                     .into(),
                             )),
-                            Some(ScalarImpl::List(ListValue::new(
-                                source
-                                    .columns
-                                    .iter()
-                                    .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
-                                    .collect_vec(),
+                            Some(ScalarImpl::List(ListValue::from_iter(
+                                source.columns.iter().map(|c| c.name()),
                             ))),
                             source
                                 .info

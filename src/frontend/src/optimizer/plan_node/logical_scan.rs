@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -21,6 +22,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -31,6 +33,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -38,6 +41,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,16 +67,17 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        table_desc: Rc<TableDesc>,
+        table_catalog: Arc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
+        let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
         generic::Scan::new(
             table_name,
-            (0..table_desc.columns.len()).collect(),
-            table_desc,
+            output_col_idx,
+            table_catalog,
             indexes,
             ctx,
             Condition::true_cond(),
@@ -95,9 +100,14 @@ impl LogicalScan {
         self.core.table_cardinality
     }
 
+    // FIXME(kwannoel): Fetch from `table_catalog` + lazily instantiate?
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
+    }
+
+    pub fn table_catalog(&self) -> Arc<TableCatalog> {
+        self.core.table_catalog.clone()
     }
 
     /// Get the descs of the output columns.
@@ -182,7 +192,7 @@ impl LogicalScan {
         {
             let index_scan = self.core.to_index_scan(
                 &index.name,
-                index.index_table.table_desc().into(),
+                index.index_table.clone(),
                 p2s_mapping,
                 index.function_mapping(),
             );
@@ -190,16 +200,6 @@ impl LogicalScan {
         } else {
             None
         }
-    }
-
-    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
-    /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: u32) {
-        self.core.chunk_size = Some(chunk_size);
-    }
-
-    pub fn chunk_size(&self) -> Option<u32> {
-        self.core.chunk_size
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
@@ -244,7 +244,7 @@ impl LogicalScan {
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.required_col_idx().to_vec(),
-            self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -263,7 +263,7 @@ impl LogicalScan {
         generic::Scan::new_inner(
             self.table_name().to_string(),
             self.output_col_idx().to_vec(),
-            self.core.table_desc.clone(),
+            self.table_catalog(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
@@ -277,7 +277,7 @@ impl LogicalScan {
         generic::Scan::new_inner(
             self.table_name().to_string(),
             output_col_idx,
-            self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
@@ -379,6 +379,12 @@ impl ExprRewritable for LogicalScan {
     }
 }
 
+impl ExprVisitable for LogicalScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
         &self,
@@ -430,15 +436,11 @@ impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
             required_order
-                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
+                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_max_split_range_gap(),
+                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
@@ -448,7 +450,7 @@ impl LogicalScan {
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
+                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -519,7 +521,20 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            if self
+                .ctx()
+                .session_ctx()
+                .config()
+                .streaming_enable_arrangement_backfill()
+            {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    StreamScanType::ArrangementBackfill,
+                )
+                .into())
+            } else {
+                Ok(StreamTableScan::new(self.core.clone()).into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

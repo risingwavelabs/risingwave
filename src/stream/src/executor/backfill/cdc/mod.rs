@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod cdc_backfill;
+mod cdc_backfill;
 mod state;
+mod upstream_table;
 
-pub use state::BACKFILL_STATE_KEY_SUFFIX;
+pub use cdc_backfill::CdcBackfillExecutor;
+pub use upstream_table::external::ExternalStorageTable;

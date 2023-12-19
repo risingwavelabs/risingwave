@@ -17,6 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
+use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
     Query, StructField, TrimWhereField, UnaryOperator,
@@ -168,11 +169,8 @@ impl Binder {
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported expression {:?}", expr),
-                112.into(),
-            )
-            .into()),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
+            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
 
@@ -184,12 +182,11 @@ impl Binder {
             vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
-            ErrorCode::NotImplemented(
-                format!(
-                    "function extract({} from {:?}) doesn't exist",
-                    field, arg_type
-                ),
-                112.into(),
+            not_implemented!(
+                issue = 112,
+                "function extract({} from {:?}) doesn't exist",
+                field,
+                arg_type
             )
         })?
         .into())
@@ -291,13 +288,7 @@ impl Binder {
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported unary expression: {:?}", op),
-                    112.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
@@ -539,11 +530,7 @@ impl Binder {
 
     pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
         if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
-            return Err(ErrorCode::NotImplemented(
-                "Collate collation other than `C` or `POSIX` is not implemented".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("Collate collation other than `C` or `POSIX` is not implemented");
         }
 
         let bound_inner = self.bind_expr_inner(expr)?;
@@ -592,12 +579,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
-    let new_err = || {
-        ErrorCode::NotImplemented(
-            format!("unsupported data type: {:}", data_type),
-            None.into(),
-        )
-    };
+    let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt => DataType::Int16,
@@ -615,11 +597,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
-            return Err(ErrorCode::NotImplemented(
-                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
         AstDataType::Struct(types) => DataType::new_struct(
             types

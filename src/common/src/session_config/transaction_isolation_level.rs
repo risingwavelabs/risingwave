@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::str::FromStr;
 
-use crate::error::{ErrorCode, RwError};
-use crate::session_config::{ConfigEntry, CONFIG_KEYS, TRANSACTION_ISOLATION_LEVEL};
+use crate::error::{bail_not_implemented, NotImplemented};
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
@@ -28,30 +28,21 @@ pub enum IsolationLevel {
     Serializable,
 }
 
-impl ConfigEntry for IsolationLevel {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[TRANSACTION_ISOLATION_LEVEL]
-    }
-}
+impl FromStr for IsolationLevel {
+    type Err = NotImplemented;
 
-impl TryFrom<&[&str]> for IsolationLevel {
-    type Error = RwError;
-
-    fn try_from(_value: &[&str]) -> Result<Self, Self::Error> {
-        Err(
-            ErrorCode::InternalError("Support set transaction isolation level first".to_string())
-                .into(),
-        )
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        bail_not_implemented!(issue = 10736, "isolation level");
     }
 }
 
 impl std::fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ReadCommitted => write!(f, "READ_COMMITTED"),
-            Self::ReadUncommitted => write!(f, "READ_UNCOMMITTED"),
-            Self::RepeatableRead => write!(f, "REPEATABLE_READ"),
-            Self::Serializable => write!(f, "SERIALIZABLE"),
+            Self::ReadCommitted => write!(f, "read committed"),
+            Self::ReadUncommitted => write!(f, "read uncommitted"),
+            Self::RepeatableRead => write!(f, "repeatable read"),
+            Self::Serializable => write!(f, "serializable"),
         }
     }
 }

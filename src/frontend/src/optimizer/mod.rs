@@ -16,22 +16,29 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 
 pub mod plan_node;
+
 pub use plan_node::{Explain, PlanRef};
+
 pub mod property;
 
 mod delta_join_solver;
 mod heuristic_optimizer;
 mod plan_rewriter;
+
 pub use plan_rewriter::PlanRewriter;
+
 mod plan_visitor;
+
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;
@@ -39,7 +46,7 @@ pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -60,10 +67,11 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::Union;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
-    ToStream,
+    ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
@@ -259,6 +267,13 @@ impl PlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -292,6 +307,13 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -308,7 +330,7 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
-        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -452,13 +474,23 @@ impl PlanRoot {
                 .collect_vec()
         };
 
-        fn inject_project_if_needed(columns: &[ColumnCatalog], node: PlanRef) -> Result<PlanRef> {
+        fn inject_project_for_generated_column_if_needed(
+            columns: &[ColumnCatalog],
+            node: PlanRef,
+        ) -> Result<PlanRef> {
             let exprs = LogicalSource::derive_output_exprs_from_generated_columns(columns)?;
             if let Some(exprs) = exprs {
                 let logical_project = generic::Project::new(exprs, node);
                 return Ok(StreamProject::new(logical_project).into());
             }
             Ok(node)
+        }
+
+        #[derive(PartialEq, Debug, Copy, Clone)]
+        enum PrimaryKeyKind {
+            UserDefinedPrimaryKey,
+            RowIdAsPrimaryKey,
+            AppendOnly,
         }
 
         fn inject_dml_node(
@@ -472,7 +504,7 @@ impl PlanRoot {
             let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
 
             // Add generated columns.
-            dml_node = inject_project_if_needed(columns, dml_node)?;
+            dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
@@ -483,13 +515,6 @@ impl PlanRoot {
             };
 
             Ok(dml_node)
-        }
-
-        #[derive(PartialEq, Debug, Copy, Clone)]
-        enum PrimaryKeyKind {
-            UserDefinedPrimaryKey,
-            RowIdAsPrimaryKey,
-            AppendOnly,
         }
 
         let kind = if append_only {
@@ -513,12 +538,14 @@ impl PlanRoot {
 
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
-            external_source_node = inject_project_if_needed(&columns, external_source_node)?;
+            external_source_node =
+                inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
             external_source_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     RequiredDist::hash_shard(&pk_column_indices)
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
+
                 PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
@@ -690,6 +717,7 @@ impl PlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
+        target_table: Option<TableId>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -698,6 +726,7 @@ impl PlanRoot {
             sink_name,
             db_name,
             sink_from_table_name,
+            target_table,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -725,8 +754,13 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
 }
 
 fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
-    let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
-    Ok(plan)
+    let mut v = TimestamptzExprFinder::default();
+    plan.visit_exprs_recursive(&mut v);
+    if v.has() {
+        Ok(plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut()))
+    } else {
+        Ok(plan)
+    }
 }
 
 fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bool) -> bool {

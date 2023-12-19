@@ -30,6 +30,7 @@ use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
+use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
@@ -41,11 +42,12 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
+use super::OPENDAL_S3_CONNECTOR;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::{FsPageItem, S3Properties, S3_V2_CONNECTOR};
+use crate::source::filesystem::opendal_source::OpendalS3Properties;
+use crate::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::S3_CONNECTOR;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -66,6 +68,8 @@ pub trait SourceProperties: TryFromHashmap + Clone {
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
+
+    fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
 impl<P: DeserializeOwned> TryFromHashmap for P {
@@ -75,7 +79,7 @@ impl<P: DeserializeOwned> TryFromHashmap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties>(
+pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
@@ -361,56 +365,55 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
     }
 
-    pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
-        props
+    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
+        with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
-    }
-
-    pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
-        let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
-        match connector.as_str() {
-            S3_V2_CONNECTOR => {
-                tracing::info!(
-                    "using new fs source, rewrite connector from '{}' to '{}'",
-                    S3_V2_CONNECTOR,
-                    S3_CONNECTOR
-                );
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
-            }
-            _ => {
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
-            }
-        }
     }
 }
 
 impl ConnectorProperties {
-    pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-        if Self::is_new_fs_connector_hash_map(&props) {
-            _ = props
+    pub fn extract(mut with_properties: HashMap<String, String>) -> Result<Self> {
+        if Self::is_new_fs_connector_hash_map(&with_properties) {
+            let connector = with_properties
                 .remove(UPSTREAM_SOURCE_KEY)
                 .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-            return Ok(ConnectorProperties::S3(Box::new(
-                S3Properties::try_from_hashmap(props)?,
-            )));
+            match connector.as_str() {
+                "s3_v2" => {
+                    let assume_role = with_properties.get("s3.assume_role").cloned();
+                    return Ok(ConnectorProperties::OpendalS3(Box::new(
+                        OpendalS3Properties {
+                            s3_properties: S3Properties::try_from_hashmap(with_properties)?,
+                            assume_role,
+                        },
+                    )));
+                }
+                "gcs" => {
+                    return Ok(ConnectorProperties::Gcs(Box::new(
+                        GcsProperties::try_from_hashmap(with_properties)?,
+                    )));
+                }
+                _ => {
+                    unreachable!()
+                }
+            }
         }
 
-        let connector = props
+        let connector = with_properties
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(props).map(ConnectorProperties::from),
+            PropType::try_from_hashmap(with_properties).map(ConnectorProperties::from),
             |other| Err(anyhow!("connector '{}' is not supported", other))
         )
     }
@@ -422,6 +425,10 @@ impl ConnectorProperties {
 
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+    }
+
+    pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
@@ -736,27 +743,33 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "3306");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "123456");
-            assert_eq!(c.props.get("database.name").unwrap(), "mydb");
-            assert_eq!(c.props.get("table.name").unwrap(), "products");
+            assert_eq!(
+                c.properties.get("connector_node_addr").unwrap(),
+                "localhost"
+            );
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "3306");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "123456");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mydb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "products");
         } else {
             panic!("extract cdc config failed");
         }
 
         let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
-            assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
-            assert_eq!(c.props.get("database.port").unwrap(), "5432");
-            assert_eq!(c.props.get("database.user").unwrap(), "root");
-            assert_eq!(c.props.get("database.password").unwrap(), "654321");
-            assert_eq!(c.props.get("schema.name").unwrap(), "public");
-            assert_eq!(c.props.get("database.name").unwrap(), "mypgdb");
-            assert_eq!(c.props.get("table.name").unwrap(), "orders");
+            assert_eq!(
+                c.properties.get("connector_node_addr").unwrap(),
+                "localhost"
+            );
+            assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
+            assert_eq!(c.properties.get("database.port").unwrap(), "5432");
+            assert_eq!(c.properties.get("database.user").unwrap(), "root");
+            assert_eq!(c.properties.get("database.password").unwrap(), "654321");
+            assert_eq!(c.properties.get("schema.name").unwrap(), "public");
+            assert_eq!(c.properties.get("database.name").unwrap(), "mypgdb");
+            assert_eq!(c.properties.get("table.name").unwrap(), "orders");
         } else {
             panic!("extract cdc config failed");
         }
