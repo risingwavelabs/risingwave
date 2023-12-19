@@ -524,7 +524,7 @@ mod test {
 
     #[tokio::test]
     async fn test_deltalake() {
-        let dir = tempfile::tempdir_in("./deltalake").unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
@@ -537,7 +537,7 @@ mod test {
             "connector".to_string() => "deltalake_rust".to_string(),
             "force_append_only".to_string() => "true".to_string(),
             "type".to_string() => "append-only".to_string(),
-            "location".to_string() => format!("file://{}",path),
+            "location".to_string() => format!("file://{}", path),
         };
 
         let schema = Schema::new(vec![
