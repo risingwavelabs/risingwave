@@ -15,7 +15,6 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::{Arc, LazyLock, Weak};
@@ -107,30 +106,17 @@ where
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     /// The path to the TLS certificate.
-    pub cert: PathBuf,
+    pub cert: String,
     /// The path to the TLS key.
-    pub key: PathBuf,
+    pub key: String,
 }
 
 impl TlsConfig {
-    pub fn new_default() -> Self {
-        let cert = if let Ok(cert) = std::env::var("RW_SSL_CERT") {
-            PathBuf::from(cert)
-        } else {
-            PathBuf::new()
-                .join("src/utils/pgwire")
-                .join("tests/ssl/demo.crt")
-        };
-
-        let key = if let Ok(key) = std::env::var("RW_SSL_KEY") {
-            PathBuf::from(key)
-        } else {
-            PathBuf::new()
-                .join("src/utils/pgwire")
-                .join("tests/ssl/demo.key")
-        };
-
-        Self { cert, key }
+    pub fn new_default() -> Option<Self> {
+        let cert = std::env::var("RW_SSL_CERT").ok()?;
+        let key = std::env::var("RW_SSL_KEY").ok()?;
+        tracing::info!("RW_SSL_CERT={}, RW_SSL_KEY={}", cert, key);
+        Some(Self { cert, key })
     }
 }
 
