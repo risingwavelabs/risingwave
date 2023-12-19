@@ -65,6 +65,7 @@ impl DiagnoseCommand {
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     pub async fn report(&self) -> String {
         let mut report = String::new();
         let _ = writeln!(
@@ -87,6 +88,7 @@ impl DiagnoseCommand {
         report
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
         let _ = writeln!(s, "number of fragment: {}", self.fragment_num().await);
         let _ = writeln!(s, "number of actor: {}", self.actor_num().await);
@@ -122,11 +124,13 @@ impl DiagnoseCommand {
         );
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn fragment_num(&self) -> usize {
         let core = self.fragment_manager.get_fragment_read_guard().await;
         core.table_fragments().len()
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn actor_num(&self) -> usize {
         let core = self.fragment_manager.get_fragment_read_guard().await;
         core.table_fragments()
@@ -135,6 +139,7 @@ impl DiagnoseCommand {
             .sum()
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_worker_nodes(&self, s: &mut String) {
         let mut worker_actor_count: HashMap<u32, usize> = HashMap::new();
         for f in self
@@ -232,6 +237,7 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs(&self, s: &mut String) {
         let event_logs = self
             .event_log_manager
@@ -329,6 +335,7 @@ impl DiagnoseCommand {
         );
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs_impl<'a, F>(
         s: &mut String,
         event_logs: impl Iterator<Item = &'a EventLog>,
@@ -369,6 +376,7 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
         let version = self.hummock_manger.get_current_version().await;
         let mut sst_num = 0;
@@ -497,6 +505,7 @@ impl DiagnoseCommand {
         self.write_storage_prometheus(s).await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_streaming_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top sources by throughput (rows/s)");
         let query = format!(
@@ -525,6 +534,7 @@ impl DiagnoseCommand {
             .await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top Hummock Get by duration (second)");
         let query = format!(
@@ -589,6 +599,7 @@ impl DiagnoseCommand {
             .await;
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_instant_vector_impl<'a>(&self, s: &mut String, query: &str, labels: Vec<&str>) {
         let Some(ref client) = self.prometheus_client else {
             return;
@@ -618,6 +629,7 @@ impl DiagnoseCommand {
         }
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     async fn write_await_tree(&self, s: &mut String) {
         // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
         let worker_nodes = self
@@ -664,6 +676,7 @@ impl DiagnoseCommand {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
     match t {
         Some(t) => {
@@ -675,6 +688,7 @@ fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Optio
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -> String {
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }
