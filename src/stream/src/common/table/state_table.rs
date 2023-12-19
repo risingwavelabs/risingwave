@@ -361,28 +361,25 @@ where
             .map(|(pos, id)| (*id, pos))
             .collect::<HashMap<_, _>>();
 
-        let column_ids: Vec<i32> = table_catalog
+        // Compute column descriptions
+        let columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().get_column_id())
+            .map(|c| c.column_desc.as_ref().unwrap().into())
             .collect_vec();
 
         // Compute i2o mapping
-        let mut i2o_mapping = vec![None; column_ids.len()];
+        let mut i2o_mapping = vec![None; columns.len()];
         let mut output_column_indices = vec![];
-        for (i, column_id) in column_ids.into_iter().enumerate() {
-            if let Some(pos) = output_column_ids_to_input_idx.get(&column_id.into()) {
+        for (i, column) in columns.iter().enumerate() {
+            if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
                 i2o_mapping[i] = Some(*pos);
                 output_column_indices.push(i);
             }
         }
         let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
 
-        let columns = table_catalog
-            .columns
-            .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().into())
-            .collect_vec();
+        // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
         Self {
