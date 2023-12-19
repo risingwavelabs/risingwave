@@ -35,8 +35,29 @@ impl PlanVisitor for HasMaxOneRowApply {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
+enum CheckResult {
+    #[default]
+    Ok,
+    CannotBeUnnested,
+    MoreThanOneRow,
+}
+
+impl Into<Result<(), RwError>> for CheckResult {
+    fn into(self) -> Result<(), RwError> {
+        let msg = match self {
+            CheckResult::Ok => return Ok(()),
+            CheckResult::CannotBeUnnested => "Subquery can not be unnested.",
+            CheckResult::MoreThanOneRow => "Scalar subquery might produce more than one row.",
+        };
+
+        Err(ErrorCode::InternalError(msg.to_owned()).into())
+    }
+}
+
+#[derive(Default)]
 pub struct CheckApplyElimination {
-    result: Result<(), &'static str>,
+    result: CheckResult,
 }
 
 impl PlanVisitor for CheckApplyElimination {
@@ -45,21 +66,16 @@ impl PlanVisitor for CheckApplyElimination {
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|_, _| ())
+        Merge(std::cmp::max)
     }
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) {
-        if self.result.is_err() {
-            return;
-        }
-
         // If there's a runtime max-one-row check on the right side, it's likely to be the
         // reason for the failed unnesting. Report users with a more precise error message.
-        if let Some(limit) = plan.right().as_logical_limit()
-          && limit.check_exceeding && limit.offset() == 0 && limit.limit() == 1 {
-            self.result = Err("Scalar subquery might produce more than one row.");
+        if plan.right().as_logical_max_one_row().is_some() {
+            self.result = CheckResult::MoreThanOneRow;
         } else {
-            self.result = Err("Subquery can not be unnested.");
+            self.result = CheckResult::CannotBeUnnested;
         }
     }
 }
@@ -69,10 +85,8 @@ impl PlanRef {
     /// Checks if all `LogicalApply` nodes in the plan have been eliminated, that is,
     /// subqueries are successfully unnested.
     pub fn check_apply_elimination(&self) -> Result<(), RwError> {
-        let mut visitor = CheckApplyElimination { result: Ok(()) };
+        let mut visitor = CheckApplyElimination::default();
         visitor.visit(self.clone());
-        visitor
-            .result
-            .map_err(|e| ErrorCode::InternalError(e.to_owned()).into())
+        visitor.result.into()
     }
 }

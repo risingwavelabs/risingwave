@@ -81,6 +81,10 @@ impl PlanVisitor for CardinalityVisitor {
         self.visit(plan.input()).min(plan.limit() as usize)
     }
 
+    fn visit_logical_max_one_row(&mut self, plan: &plan_node::LogicalMaxOneRow) -> Cardinality {
+        self.visit(plan.input()).min(1)
+    }
+
     fn visit_logical_project(&mut self, plan: &plan_node::LogicalProject) -> Cardinality {
         self.visit(plan.input())
     }

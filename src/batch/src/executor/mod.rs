@@ -24,6 +24,7 @@ mod insert;
 mod join;
 mod limit;
 mod managed;
+mod max_one_row;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -53,6 +54,7 @@ pub use hash_agg::*;
 pub use hop_window::*;
 pub use insert::*;
 pub use join::*;
+pub use max_one_row::*;
 pub use limit::*;
 pub use managed::*;
 pub use merge_sort_exchange::*;
@@ -214,7 +216,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Sort => SortExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::GroupTopN => GroupTopNExecutorBuilder,
-            NodeBody::Limit => LimitExecutor,
+            NodeBody::Limit => MaxOneRowExecutor,
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutor<()>,
@@ -231,6 +233,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
+            NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuidler,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,

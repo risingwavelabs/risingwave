@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalLimit};
+use crate::optimizer::plan_node::{LogicalApply, LogicalMaxOneRow};
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::PlanRef;
 
 /// Eliminate max one row restriction from `LogicalApply`.
 ///
 /// If we cannot guarantee that the right side of `Apply` will return at most one row
-/// in compile time, we will add a `Limit` with the `check_exceeding` runtime check
-/// to satisfy the max one row restriction.
+/// in compile time, we will add a `MaxOneRow` that does runtime check to satisfy the
+/// max one row restriction.
 ///
 /// As a result, the `max_one_row` flag of `LogicalApply` will always be `false`
 /// after applying this rule.
@@ -37,7 +37,7 @@ impl Rule for MaxOneRowEliminateRule {
         }
 
         if !right.max_one_row() {
-            right = LogicalLimit::create(right, 1, 0, true);
+            right = LogicalMaxOneRow::create(right);
             debug_assert!(right.max_one_row());
         }
 

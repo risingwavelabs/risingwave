@@ -281,6 +281,8 @@ message SortOverWindowNode {
   repeated common.ColumnOrder order_by = 3;
 }
 
+message MaxOneRowNode {}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -312,10 +314,11 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
-    SortOverWindowNode sort_over_window = 37;
+    SortOverWindowNode sort_over_window = 35;
+    MaxOneRowNode max_one_row = 36;
     // The following nodes are used for testing.
-    bool block_executor = 35;
-    bool busy_loop_executor = 36;
+    bool block_executor = 100;
+    bool busy_loop_executor = 101;
   }
   string identity = 24;
 }
