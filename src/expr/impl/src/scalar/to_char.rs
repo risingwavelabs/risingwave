@@ -34,14 +34,6 @@ fn invalid_pattern_err() -> ExprError {
     }
 }
 
-#[inline(always)]
-fn unsupported_pattern_err() -> ExprError {
-    ExprError::InvalidParam {
-        name: "pattern",
-        reason: "unsupported format specification for an interval value.".into(),
-    }
-}
-
 self_cell::self_cell! {
     pub struct ChronoPattern {
         owner: String,
@@ -62,7 +54,7 @@ impl ChronoPattern {
     /// Compile the pg pattern to chrono pattern.
     // TODO: Chrono can not fully support the pg format, so consider using other implementations
     // later.
-    pub fn compile(tmpl: &str) -> ChronoPattern {
+    pub fn compile(tmpl: &str, is_interval: bool) -> ChronoPattern {
         // mapping from pg pattern to chrono pattern
         // pg pattern: https://www.postgresql.org/docs/current/functions-formatting.html
         // chrono pattern: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
@@ -118,7 +110,13 @@ impl ChronoPattern {
         // replace all pg patterns with chrono patterns
         let mut chrono_tmpl = String::new();
         AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
-            dst.push_str(PATTERNS[mat.pattern()].1);
+            if is_interval && PATTERNS[mat.pattern()].1 == "%6f" {
+                dst.push_str("%.6f");
+            } else if is_interval && PATTERNS[mat.pattern()].1 == "%3f" {
+                dst.push_str("%.3f");
+            } else {
+                dst.push_str(PATTERNS[mat.pattern()].1);
+            }
             true
         });
         tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
@@ -130,7 +128,7 @@ impl ChronoPattern {
 
 #[function(
     "to_char(timestamp, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1, false)"
 )]
 fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
@@ -142,7 +140,7 @@ fn _timestamptz_to_char() {}
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1, false)"
 )]
 fn timestamptz_to_char3(
     data: Timestamptz,
@@ -159,7 +157,7 @@ fn timestamptz_to_char3(
 
 #[function(
     "to_char(interval, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1, true)"
 )]
 fn interval_to_char(
     interval: Interval,
@@ -319,10 +317,17 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                     }
                     Ok(())
                 }
-                // TODO: support Internal(_), Nanosecond3NoDot and Nanosecond6NoDot are valid.
-                // TimezoneOffsetPermissive and Nanosecond9NoDot are invalid.
-                Internal(_) => Err(unsupported_pattern_err()),
-                ShortMonthName | LongMonthName | TimezoneOffset | TimezoneOffsetZ
+                Nanosecond3 => {
+                    let usec = interval.usecs() % 1_000_000;
+                    write!(w, "{:03}", usec / 1000).unwrap();
+                    Ok(())
+                }
+                Nanosecond6 => {
+                    let usec = interval.usecs() % 1_000_000;
+                    write!(w, "{:06}", usec).unwrap();
+                    Ok(())
+                }
+                Internal(_) | ShortMonthName | LongMonthName | TimezoneOffset | TimezoneOffsetZ
                 | TimezoneOffsetColon => Err(invalid_pattern_err()),
                 ShortWeekdayName
                 | LongWeekdayName
@@ -331,8 +336,6 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                 | TimezoneOffsetTripleColon
                 | TimezoneOffsetColonZ
                 | Nanosecond
-                | Nanosecond3
-                | Nanosecond6
                 | Nanosecond9
                 | RFC2822
                 | RFC3339 => unreachable!(),

@@ -67,7 +67,7 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
 
 #[function(
     "to_timestamp1(varchar, varchar) -> timestamp",
-    prebuild = "ChronoPattern::compile($1)",
+    prebuild = "ChronoPattern::compile($1, false)",
     deprecated
 )]
 pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
@@ -82,7 +82,7 @@ pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
 
 #[function(
     "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1, false)"
 )]
 pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
     let parsed = parse(s, tmpl)?;
@@ -98,7 +98,7 @@ fn _to_timestamp1() {}
 
 #[function(
     "char_to_date(varchar, varchar) -> date",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1, false)"
 )]
 pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
     let mut parsed = parse(s, tmpl)?;
@@ -130,7 +130,8 @@ mod tests {
                 "2020-02-03 09:34:56",
             ),
         ] {
-            let actual = to_timestamp_legacy(input, &ChronoPattern::compile(format)).unwrap();
+            let actual =
+                to_timestamp_legacy(input, &ChronoPattern::compile(format, false)).unwrap();
             assert_eq!(actual.to_string(), expected);
         }
     }
