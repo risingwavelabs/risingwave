@@ -26,11 +26,11 @@ fn similar_escape_internal(
 ) -> std::result::Result<(), ExprError> {
     macro_rules! write_ {
         ($s:expr) => {
-            write!(writer, "{}", s).unwrap();
+            write!(writer, "{}", $s).unwrap()
         };
     }
 
-    write_str!("^(?:");
+    write_!("^(?:");
 
     let mut nquotes = 0;
     let mut afterescape = false;
@@ -41,8 +41,8 @@ fn similar_escape_internal(
             c if afterescape => {
                 if c == '"' && !incharclass {
                     match nquotes {
-                        0 => write_str!("){1,1}?("),
-                        1 => write_str!("){1,1}(?:"),
+                        0 => write_!("){1,1}?("),
+                        1 => write_!("){1,1}(?:"),
                         _ => {
                             return Err(ExprError::InvalidParam {
                                 name: "pat",
@@ -52,8 +52,8 @@ fn similar_escape_internal(
                     }
                     nquotes += 1;
                 } else {
-                    write_char!('\\');
-                    write_char!(c);
+                    write_!('\\');
+                    write_!(c);
                 }
 
                 afterescape = false;
@@ -63,39 +63,39 @@ fn similar_escape_internal(
             }
             c if incharclass => {
                 if c == '\\' {
-                    write_char!('\\');
+                    write_!('\\');
                 }
-                write_char!(c);
+                write_!(c);
 
                 if c == ']' {
                     incharclass = false;
                 }
             }
             c @ '[' => {
-                write_char!(c);
+                write_!(c);
                 incharclass = true;
             }
             '%' => {
-                write_str!(".*");
+                write_!(".*");
             }
             '_' => {
-                write_char!('.');
+                write_!('.');
             }
             '(' => {
                 // convert to non-capturing parenthesis
-                write_str!("(?:");
+                write_!("(?:");
             }
             c @ ('\\' | '.' | '^' | '$') => {
-                write_char!('\\');
-                write_char!(c);
+                write_!('\\');
+                write_!(c);
             }
             c => {
-                write_char!(c);
+                write_!(c);
             }
         }
     }
 
-    write_str!(")$");
+    write_!(")$");
 
     Ok(())
 }
