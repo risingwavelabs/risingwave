@@ -67,17 +67,19 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
+        let for_system_time_as_of_proctime = base_table.for_system_time_as_of_proctime;
+        let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            Rc::new(base_table.table_catalog.table_desc()),
+            base_table.table_catalog.clone(),
             base_table
                 .table_indexes
                 .iter()
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_proctime,
-            base_table.table_catalog.cardinality,
+            for_system_time_as_of_proctime,
+            table_cardinality,
         )
         .into())
     }

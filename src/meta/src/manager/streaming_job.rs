@@ -233,7 +233,7 @@ impl StreamingJob {
             Self::Sink(sink, _) => sink.properties.clone(),
             Self::Table(_, table, ..) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
-            Self::Source(source) => source.properties.clone(),
+            Self::Source(source) => source.with_properties.clone(),
         }
     }
 

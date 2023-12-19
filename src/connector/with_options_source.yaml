@@ -20,10 +20,6 @@ KafkaProperties:
     field_type: String
     required: false
     alias: scan.startup.timestamp_millis
-  - name: properties.group.id
-    field_type: String
-    required: false
-    alias: kafka.consumer.group
   - name: upsert
     field_type: String
     comments: 'This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
@@ -46,6 +42,9 @@ KafkaProperties:
   - name: properties.security.protocol
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
     required: false
   - name: properties.ssl.ca.location
     field_type: String

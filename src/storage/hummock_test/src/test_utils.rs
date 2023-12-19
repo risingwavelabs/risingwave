@@ -262,9 +262,7 @@ impl HummockTestEnv {
                 res.uncommitted_ssts,
                 res.table_watermarks
                     .into_iter()
-                    .map(|(table_id, watermark)| {
-                        (table_id.table_id as u64, watermark.to_protobuf())
-                    })
+                    .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
                     .collect(),
             )
             .await

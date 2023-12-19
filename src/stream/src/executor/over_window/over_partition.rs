@@ -217,6 +217,13 @@ pub(super) fn shrink_partition_cache(
     }
 }
 
+#[derive(Default)]
+pub(super) struct OverPartitionStats {
+    pub lookup_count: u64,
+    pub left_miss_count: u64,
+    pub right_miss_count: u64,
+}
+
 /// A wrapper of [`PartitionCache`] that provides helper methods to manipulate the cache.
 /// By putting this type inside `private` module, we can avoid misuse of the internal fields and
 /// methods.
@@ -231,6 +238,9 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     order_key_indices: &'a [usize],
     input_pk_indices: &'a [usize],
     state_key_to_table_sub_pk_proj: Vec<usize>,
+
+    stats: OverPartitionStats,
+
     _phantom: PhantomData<S>,
 }
 
@@ -243,6 +253,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         cache: &'a mut PartitionCache,
         cache_policy: CachePolicy,
         calls: &'a [WindowFuncCall],
+        partition_key_indices: &'a [usize],
         order_key_data_types: &'a [DataType],
         order_key_order_types: &'a [OrderType],
         order_key_indices: &'a [usize],
@@ -250,7 +261,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> Self {
         // TODO(rc): move the calculation to executor?
         let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
-        let mut col_dedup = HashSet::new();
+        let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
         for (proj_idx, key_idx) in order_key_indices
             .iter()
             .chain(input_pk_indices.iter())
@@ -273,8 +284,18 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             order_key_indices,
             input_pk_indices,
             state_key_to_table_sub_pk_proj: projection,
+
+            stats: Default::default(),
+
             _phantom: PhantomData,
         }
+    }
+
+    /// Get a summary for the execution happened in the [`OverPartition`] in current round.
+    /// This will consume the [`OverPartition`] value itself.
+    pub fn summarize(self) -> OverPartitionStats {
+        // We may extend this function in the future.
+        self.stats
     }
 
     /// Get the number of cached entries ignoring sentinels.
@@ -402,6 +423,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
                 let ranges =
                     self::find_affected_ranges(self.calls, DeltaBTreeMap::new(cache_inner, delta));
+                self.stats.lookup_count += 1;
 
                 if ranges.is_empty() {
                     // no ranges affected, we're done
@@ -420,12 +442,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             };
 
             if left_reached_sentinel {
-                // TODO(rc): should count cache miss for this, and also the below
+                self.stats.left_miss_count += 1;
                 tracing::trace!(partition=?self.this_partition_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if right_reached_sentinel {
+                self.stats.right_miss_count += 1;
                 tracing::trace!(partition=?self.this_partition_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;

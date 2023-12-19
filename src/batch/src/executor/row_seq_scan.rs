@@ -318,7 +318,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics
                 .executor_metrics()
                 .row_seq_scan_next_duration
-                .with_label_values(&metrics.executor_labels(&identity))
+                .with_guarded_label_values(&metrics.executor_labels(&identity))
         });
 
         if ordered {
@@ -467,7 +467,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
-                PrefetchOptions::new_with_exhaust_iter(limit.is_none()),
+                PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
 

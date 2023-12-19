@@ -58,10 +58,16 @@ pub struct MetaSnapshotMetadata {
     pub safe_epoch: u64,
     #[serde(default)]
     pub format_version: u32,
+    pub remarks: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
-    pub fn new(id: MetaSnapshotId, v: &HummockVersion, format_version: u32) -> Self {
+    pub fn new(
+        id: MetaSnapshotId,
+        v: &HummockVersion,
+        format_version: u32,
+        remarks: Option<String>,
+    ) -> Self {
         Self {
             id,
             hummock_version_id: v.id,
@@ -71,6 +77,7 @@ impl MetaSnapshotMetadata {
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
             format_version,
+            remarks,
         }
     }
 }
@@ -108,6 +115,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),
+            remarks: m.remarks.clone(),
         }
     }
 }

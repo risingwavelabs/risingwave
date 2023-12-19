@@ -37,6 +37,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.table_id);
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
+
         Ok(Box::new(DmlExecutor::new(
             params.info,
             upstream,
@@ -44,6 +45,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             table_id,
             node.table_version_id,
             column_descs,
+            params.env.config().developer.chunk_size,
         )))
     }
 }

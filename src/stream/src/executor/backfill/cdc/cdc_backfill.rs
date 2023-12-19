@@ -35,8 +35,8 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
-use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
-use crate::executor::backfill::upstream_table::snapshot::{
+use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
@@ -109,6 +109,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let pk_order = self.external_table.pk_order_types().to_vec();
 
         let upstream_table_id = self.external_table.table_id().table_id;
+        let upstream_table_name = self.external_table.qualified_table_name();
         let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
@@ -118,7 +119,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // `None` means it starts from the beginning.
         let mut current_pk_pos: Option<OwnedRow>;
 
-        tracing::info!(upstream_table_id, ?pk_in_output_indices);
+        tracing::info!(
+            upstream_table_id,
+            upstream_table_name,
+            ?pk_in_output_indices
+        );
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -158,6 +163,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
+            upstream_table_name,
             ?current_pk_pos,
             is_finished = state.is_finished,
             snapshot_row_count = total_snapshot_row_count,
@@ -417,7 +423,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::info!(
             upstream_table_id,
-            "CdcBackfill has already finished and forward messages directly to the downstream"
+            "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 
         // Wait for first barrier to come after backfill is finished.

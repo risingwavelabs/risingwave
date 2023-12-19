@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
@@ -166,11 +167,55 @@ impl CatalogManager {
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        self.source_backward_compat_check().await?;
         Ok(())
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
+    }
+
+    /// This function is for maintaining backward compatibility with older source formats when `format_encode_options` is
+    /// merged into `with_properties`.
+    /// Context: <https://github.com/risingwavelabs/risingwave/pull/13762>.
+    ///
+    /// We identify a 'legacy' source based on two conditions:
+    /// 1. The `format_encode_options` in `source_info` is empty.
+    /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
+    async fn source_backward_compat_check(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let legacy_sources = sources
+            .tree_ref()
+            .iter()
+            .filter(|(_, source)| {
+                if let Some(source_info) = &source.info && source_info.format_encode_options.is_empty() {
+                    true
+                } else {
+                    false
+                }
+        })
+        .map(|t| t.1.clone())
+        .collect_vec();
+        for mut source in legacy_sources {
+            let connector = source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .unwrap_or(&String::default())
+                .to_owned();
+            if let Some(source_info) = source.info.as_mut() {
+                source_info
+                    .format_encode_options
+                    .extend(source.with_properties.iter().filter_map(|(k, v)| {
+                        should_copy_to_format_encode_options(k, &connector)
+                            .then_some((k.to_owned(), v.to_owned()))
+                    }))
+            }
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, sources)?;
+        Ok(())
     }
 }
 
@@ -854,6 +899,27 @@ impl CatalogManager {
             }
         }
 
+        let mut tables_to_update = vec![];
+        for table in database_core.tables.values() {
+            if table.incoming_sinks.is_empty() {
+                continue;
+            }
+
+            if table
+                .incoming_sinks
+                .iter()
+                .all(|sink_id| database_core.sinks.contains_key(sink_id))
+            {
+                continue;
+            }
+
+            let mut table = table.clone();
+            table
+                .incoming_sinks
+                .retain(|sink_id| database_core.sinks.contains_key(sink_id));
+            tables_to_update.push(table);
+        }
+
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
@@ -862,7 +928,32 @@ impl CatalogManager {
             let table = tables.remove(table_id);
             assert!(table.is_some(), "table_id {} missing", table_id)
         }
+
+        for table in &tables_to_update {
+            let table_id = table.id;
+            if tables.contains_key(&table_id) {
+                tracing::debug!("updating sink target table_id: {}", table_id);
+                tables.insert(table_id, table.clone());
+            }
+        }
+
         commit_meta!(self, tables)?;
+
+        if !tables_to_update.is_empty() {
+            let _ = self
+                .notify_frontend(
+                    Operation::Update,
+                    Info::RelationGroup(RelationGroup {
+                        relations: tables_to_update
+                            .into_iter()
+                            .map(|table| Relation {
+                                relation_info: RelationInfo::Table(table).into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
+        }
 
         // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
         // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
@@ -2886,7 +2977,8 @@ impl CatalogManager {
         source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: Option<ColIndexMapping>,
-        incoming_sink_id: Option<SinkId>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2945,8 +3037,15 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
-        if let Some(incoming_sink_id) = incoming_sink_id {
+
+        if let Some(incoming_sink_id) = creating_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
+        }
+
+        if let Some(dropping_sink_id) = dropping_sink_id {
+            table
+                .incoming_sinks
+                .retain(|sink_id| *sink_id != dropping_sink_id);
         }
 
         tables.insert(table.id, table.clone());

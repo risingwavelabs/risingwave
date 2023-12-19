@@ -165,6 +165,11 @@ pub trait LogReader: Send + Sized + 'static {
         &mut self,
         offset: TruncateOffset,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    /// Reset the log reader to after the latest truncate offset
+    ///
+    /// The return flag means whether the log store support rewind
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_;
 }
 
 pub trait LogStoreFactory: 'static {
@@ -204,6 +209,10 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.truncate(offset)
     }
+
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_ {
+        self.inner.rewind()
+    }
 }
 
 pub struct MonitoredLogReader<R: LogReader> {
@@ -233,6 +242,10 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
 
     async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         self.inner.truncate(offset).await
+    }
+
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_ {
+        self.inner.rewind()
     }
 }
 
