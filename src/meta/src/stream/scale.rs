@@ -459,6 +459,7 @@ impl ScaleController {
         // Index for actor status, including actor's parallel unit
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
+        let mut fragment_to_table = HashMap::new();
         for table_fragments in self.fragment_manager.list_table_fragments().await {
             fragment_state.extend(
                 table_fragments
@@ -468,6 +469,12 @@ impl ScaleController {
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
             actor_status.extend(table_fragments.actor_status.clone());
+
+            fragment_to_table.extend(
+                table_fragments
+                    .fragment_ids()
+                    .map(|f| (f, table_fragments.table_id())),
+            );
         }
 
         // NoShuffle relation index
@@ -486,6 +493,7 @@ impl ScaleController {
                 &fragment_map,
                 &no_shuffle_source_fragment_ids,
                 &no_shuffle_target_fragment_ids,
+                &fragment_to_table,
                 table_parallelisms,
             )?;
         }
@@ -1920,6 +1928,7 @@ impl ScaleController {
             &fragment_map,
             &no_shuffle_source_fragment_ids,
             &no_shuffle_target_fragment_ids,
+            &Default::default(),
             None,
         )?;
 
@@ -2228,7 +2237,8 @@ impl ScaleController {
         fragment_map: &HashMap<FragmentId, Fragment>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
-        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
+        fragment_to_table: &HashMap<FragmentId, TableId>,
+        mut table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()>
     where
         T: Clone + Eq,
@@ -2265,8 +2275,43 @@ impl ScaleController {
                 }
 
                 reschedule.insert(*upstream_fragment_id, reschedule_plan.clone());
+
+                if let Some(table_parallelisms) = table_parallelisms.as_deref_mut() {
+                    let table_id = fragment_to_table.get(&fragment_id).unwrap();
+                    let upstream_table_id = fragment_to_table.get(upstream_fragment_id).unwrap();
+
+                    if let Some(TableParallelism::Custom) = table_parallelisms.get(table_id) {
+                        if let Some(upstream_table_parallelism) =
+                            table_parallelisms.get(upstream_table_id)
+                        {
+                            if upstream_table_parallelism != &TableParallelism::Custom {
+                                bail!(
+                                    "Cannot change upstream table {} from {:?} to {:?}",
+                                    upstream_table_id,
+                                    upstream_table_parallelism,
+                                    TableParallelism::Custom
+                                )
+                            }
+                        } else {
+                            table_parallelisms.insert(*upstream_table_id, TableParallelism::Custom);
+                        }
+                    }
+                }
+
                 queue.push_back(*upstream_fragment_id);
             }
+        }
+
+        if let Some(table_parallelisms) = table_parallelisms {
+            let downstream_fragment_ids = reschedule
+                .keys()
+                .filter(|fragment_id| no_shuffle_target_fragment_ids.contains(fragment_id));
+
+            let downstream_table_ids = downstream_fragment_ids
+                .map(|fragment_id| fragment_to_table.get(fragment_id).unwrap())
+                .collect::<HashSet<_>>();
+
+            table_parallelisms.retain(|table_id, _| !downstream_table_ids.contains(table_id))
         }
 
         reschedule.retain(|fragment_id, _| !no_shuffle_target_fragment_ids.contains(fragment_id));

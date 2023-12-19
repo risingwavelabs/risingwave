@@ -25,7 +25,7 @@ pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
     parallelism: SetVariableValue,
-    _stmt_type: StatementType,
+    stmt_type: StatementType,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -39,8 +39,6 @@ pub async fn handle_alter_parallelism(
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
-
-        println!("table {:#?}", table);
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
         table.id
@@ -67,5 +65,5 @@ pub async fn handle_alter_parallelism(
         .alter_parallelism(table_id, target_parallelism)
         .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+    Ok(RwPgResponse::empty_result(stmt_type))
 }

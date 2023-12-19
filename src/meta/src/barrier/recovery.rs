@@ -415,7 +415,7 @@ impl GlobalBarrierManager {
             return Ok(false);
         }
 
-        let mut table_parallelisms = {
+        let table_parallelisms = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
 
             guard
