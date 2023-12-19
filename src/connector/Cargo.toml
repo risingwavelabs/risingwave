@@ -152,7 +152,6 @@ rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 syn = { version = "1", features = ["full"] }
-tempdir = "0.3.7"
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
