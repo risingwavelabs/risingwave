@@ -74,7 +74,7 @@ impl Executor for MaxOneRowExecutor {
                     // We do not immediately yield the chunk here. Instead, we store
                     // it in `result` and only yield it when the child executor is
                     // exhausted, in case the parent executor cancels the execution
-                    // after receiving the row.
+                    // after receiving the row (like `limit 1`).
                     result = Some(DataChunk::from_rows(&[row], &data_types));
                 }
             }
@@ -83,5 +83,76 @@ impl Executor for MaxOneRowExecutor {
         if let Some(result) = result {
             yield result;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::StreamExt;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::catalog::schema_test_utils::ii;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::Datum;
+
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{Executor, MaxOneRowExecutor};
+
+    #[derive(Clone, Copy, Debug)]
+    enum ExpectedOutput {
+        Empty,
+        OneRow,
+        Error,
+    }
+
+    async fn test_case(input: MockExecutor, expected: ExpectedOutput) {
+        let executor = Box::new(MaxOneRowExecutor {
+            child: Box::new(input),
+            identity: "".to_owned(),
+        });
+
+        let outputs: Vec<_> = executor.execute().collect().await;
+
+        match (&outputs[..], expected) {
+            (&[], ExpectedOutput::Empty) => {}
+            (&[Ok(ref chunk)], ExpectedOutput::OneRow) => assert_eq!(chunk.cardinality(), 1),
+            (&[Err(_)], ExpectedOutput::Error) => {}
+            _ => panic!("expected {expected:?}, got {outputs:?}"),
+        }
+    }
+
+    fn row() -> impl Row {
+        [Datum::Some(114i32.into()), Datum::Some(514i32.into())]
+    }
+
+    #[tokio::test]
+    async fn test_empty() {
+        let input = MockExecutor::new(ii());
+
+        test_case(input, ExpectedOutput::Empty).await;
+    }
+
+    #[tokio::test]
+    async fn test_one_row() {
+        let mut input = MockExecutor::new(ii());
+        input.add(DataChunk::from_rows(&[row()], &ii().data_types()));
+
+        test_case(input, ExpectedOutput::OneRow).await;
+    }
+
+    #[tokio::test]
+    async fn test_error_1() {
+        let mut input = MockExecutor::new(ii());
+        input.add(DataChunk::from_rows(&[row(), row()], &ii().data_types()));
+
+        test_case(input, ExpectedOutput::Error).await;
+    }
+
+    #[tokio::test]
+    async fn test_error_2() {
+        let mut input = MockExecutor::new(ii());
+        input.add(DataChunk::from_rows(&[row()], &ii().data_types()));
+        input.add(DataChunk::from_rows(&[row()], &ii().data_types()));
+
+        test_case(input, ExpectedOutput::Error).await;
     }
 }
