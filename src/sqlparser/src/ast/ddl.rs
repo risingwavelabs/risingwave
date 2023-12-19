@@ -20,6 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::ConnectorSchema;
 use crate::ast::{display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName};
 use crate::tokenizer::Token;
 
@@ -117,6 +118,7 @@ pub enum AlterSourceOperation {
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
+    FormatEncode { connector_schema: ConnectorSchema },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -274,6 +276,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSourceOperation::FormatEncode { connector_schema } => {
+                write!(f, "{connector_schema}")
             }
         }
     }
