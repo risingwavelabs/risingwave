@@ -687,6 +687,18 @@ impl<S: StateStore> OverWindowExecutor<S> {
     }
 }
 
+/// A converter that helps convert [`StateKey`] to state table sub-PK and convert executor input/output
+/// row to [`StateKey`].
+///
+/// ## Notes
+///
+/// - [`StateKey`]: Over window range cache key type, containing order key and input pk.
+/// - State table sub-PK: State table PK = PK prefix (partition key) + sub-PK (order key + input pk).
+/// - Input/output row: Input schema is the prefix of output schema.
+///
+/// You can see that the content of [`StateKey`] is very similar to state table sub-PK. There's only
+/// one difference: the state table PK and sub-PK don't have duplicated columns, while in [`StateKey`],
+/// `order_key` and (input)`pk` may contain duplicated columns.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RowConverter<'a> {
     state_key_to_table_sub_pk_proj: &'a [usize],
@@ -697,13 +709,15 @@ pub(super) struct RowConverter<'a> {
 }
 
 impl<'a> RowConverter<'a> {
-    /// Calculate the indices needed for projection from state key to state table sub pk (used to do
+    /// Calculate the indices needed for projection from [`StateKey`] to state table sub-PK (used to do
     /// prefixed table scanning). Ideally this function should be called only once by each executor instance.
+    /// The projection indices vec is the *selected column indices* in [`StateKey`].`order_key.chain(input_pk)`.
     pub(super) fn calc_state_key_to_table_sub_pk_proj(
         partition_key_indices: &[usize],
         order_key_indices: &[usize],
         input_pk_indices: &'a [usize],
     ) -> Vec<usize> {
+        // This process is corresponding to `StreamOverWindow::infer_state_table`.
         let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
         let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
         for (proj_idx, key_idx) in order_key_indices
@@ -719,7 +733,7 @@ impl<'a> RowConverter<'a> {
         projection
     }
 
-    /// Convert [`StateKey`] to sub pk (pk without partition key) as [`OwnedRow`].
+    /// Convert [`StateKey`] to sub-PK (table PK without partition key) as [`OwnedRow`].
     pub(super) fn state_key_to_table_sub_pk(
         &self,
         key: &StateKey,
