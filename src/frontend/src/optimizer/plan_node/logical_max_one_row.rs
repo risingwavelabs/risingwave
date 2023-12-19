@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use super::generic::DistillUnit;
 use super::utils::Distill;
 use super::{
-    gen_filter_and_pushdown, generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchMaxOneRow, ColPrunable, ExprRewritable, Logical,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -99,7 +99,9 @@ impl PredicatePushdown for LogicalMaxOneRow {
 
 impl ToBatch for LogicalMaxOneRow {
     fn to_batch(&self) -> Result<PlanRef> {
-        todo!()
+        let input = self.input().to_batch()?;
+        let core = generic::MaxOneRow { input };
+        Ok(BatchMaxOneRow::new(core).into())
     }
 }
 
