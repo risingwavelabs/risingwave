@@ -54,10 +54,7 @@ impl PlanTreeNodeUnary for LogicalMaxOneRow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let core = generic::MaxOneRow {
-            input,
-            ..self.core.clone()
-        };
+        let core = generic::MaxOneRow { input };
         Self::new(core)
     }
 

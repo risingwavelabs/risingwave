@@ -43,9 +43,9 @@ enum CheckResult {
     MoreThanOneRow,
 }
 
-impl Into<Result<(), RwError>> for CheckResult {
-    fn into(self) -> Result<(), RwError> {
-        let msg = match self {
+impl From<CheckResult> for Result<(), RwError> {
+    fn from(val: CheckResult) -> Self {
+        let msg = match val {
             CheckResult::Ok => return Ok(()),
             CheckResult::CannotBeUnnested => "Subquery can not be unnested.",
             CheckResult::MoreThanOneRow => "Scalar subquery might produce more than one row.",
