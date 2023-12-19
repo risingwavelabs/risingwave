@@ -300,7 +300,7 @@ impl StreamSink {
             user_force_append_only,
         ) {
             (true, DefinedAppendOnly|NotDefined, _) => Ok(SinkType::AppendOnly),
-            (false, DefinedAppendOnly, true) => Ok(SinkType::ForceAppendOnly),
+            (false, DefinedAppendOnly|NotDefined, true) => Ok(SinkType::ForceAppendOnly),
             (_, NotDefined|DefinedNonAppendOnly, false) => Ok(SinkType::Upsert),
             (false, DefinedAppendOnly, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
@@ -309,7 +309,7 @@ impl StreamSink {
                 )))
                 .into())
             }
-            (_, DefinedNonAppendOnly|NotDefined, true) => {
+            (_, DefinedNonAppendOnly, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("Cannot force the sink to be append-only without \"{}\".", if from_format_clause {"type='append-only'"} else {"FORMAT PLAIN"}),
