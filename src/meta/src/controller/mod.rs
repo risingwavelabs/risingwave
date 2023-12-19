@@ -31,6 +31,7 @@ use crate::MetaError;
 pub mod catalog;
 pub mod cluster;
 pub mod fragment;
+pub mod id;
 pub mod rename;
 pub mod streaming_job;
 pub mod system_param;
@@ -128,7 +129,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             cleaned_by_watermark: value.0.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             create_type: PbCreateType::Foreground as _,
-            version: Some(value.0.version.0),
+            version: value.0.version.map(|v| v.into_inner()),
             optional_associated_source_id: value
                 .0
                 .optional_associated_source_id
@@ -195,7 +196,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
-            stream_job_status: PbStreamJobStatus::from(value.0.job_status) as _,
+            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
         }
     }
@@ -219,7 +220,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
-            stream_job_status: PbStreamJobStatus::from(value.0.job_status) as _,
+            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
         }
     }
 }

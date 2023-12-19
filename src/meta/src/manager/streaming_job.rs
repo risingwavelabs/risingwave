@@ -266,6 +266,20 @@ impl StreamingJob {
         }
     }
 
+    // TODO: record all objects instead.
+    pub fn dependent_relations(&self) -> Vec<u32> {
+        match self {
+            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
+            StreamingJob::Sink(sink) => sink.dependent_relations.clone(),
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Index(index, index_table) => {
+                assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
+                vec![]
+            }
+            StreamingJob::Source(_) => vec![],
+        }
+    }
+
     pub fn is_source_job(&self) -> bool {
         matches!(self, StreamingJob::Source(_))
     }

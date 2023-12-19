@@ -129,7 +129,7 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    async fn create_object(
+    pub(crate) async fn create_object(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
         owner_id: UserId,
@@ -1962,6 +1962,7 @@ impl CatalogControllerInner {
             )
             .all(&self.db)
             .await?;
+        // TODO: filter out inner connector source that are still under creating.
 
         Ok(source_objs
             .into_iter()

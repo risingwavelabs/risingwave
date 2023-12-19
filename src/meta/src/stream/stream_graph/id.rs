@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::controller::id::IdGeneratorManager as SqlIdGeneratorManager;
 use crate::manager::{IdCategory, IdCategoryType, IdGeneratorManager};
 use crate::MetaResult;
 
@@ -53,6 +54,14 @@ impl<const TYPE: IdCategoryType> GlobalIdGen<TYPE> {
             offset: offset as u32,
             len: len as u32,
         })
+    }
+
+    pub fn new_v2(id_gen: &SqlIdGeneratorManager, len: u64) -> Self {
+        let offset = id_gen.generate_interval::<TYPE>(len);
+        Self {
+            offset: offset as u32,
+            len: len as u32,
+        }
     }
 
     /// Convert local id to global id. Panics if `id >= len`.

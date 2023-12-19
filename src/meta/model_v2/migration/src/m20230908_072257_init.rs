@@ -563,7 +563,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Table::Description).string())
-                    .col(ColumnDef::new(Table::Version).json().not_null())
+                    .col(ColumnDef::new(Table::Version).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -621,7 +621,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFormatDesc).json())
-                    .col(ColumnDef::new(Sink::JobStatus).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_object_id")
@@ -670,7 +669,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexItems).json().not_null())
                     .col(ColumnDef::new(Index::OriginalColumns).json().not_null())
-                    .col(ColumnDef::new(Index::JobStatus).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_index_object_id")
@@ -1056,7 +1054,6 @@ enum Sink {
     DbName,
     SinkFromName,
     SinkFormatDesc,
-    JobStatus,
 }
 
 #[derive(DeriveIden)]
@@ -1086,7 +1083,6 @@ enum Index {
     PrimaryTableId,
     IndexItems,
     OriginalColumns,
-    JobStatus,
 }
 
 #[derive(DeriveIden)]

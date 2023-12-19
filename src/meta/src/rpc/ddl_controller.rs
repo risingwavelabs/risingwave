@@ -148,21 +148,21 @@ impl DdlCommand {
 
 #[derive(Clone)]
 pub struct DdlController {
-    env: MetaSrvEnv,
+    pub(crate) env: MetaSrvEnv,
 
-    metadata_manager: MetadataManager,
-    stream_manager: GlobalStreamManagerRef,
-    source_manager: SourceManagerRef,
+    pub(crate) metadata_manager: MetadataManager,
+    pub(crate) stream_manager: GlobalStreamManagerRef,
+    pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
 
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
-    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
+    pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
 
 #[derive(Clone)]
 pub struct CreatingStreamingJobPermit {
-    semaphore: Arc<Semaphore>,
+    pub(crate) semaphore: Arc<Semaphore>,
 }
 
 impl CreatingStreamingJobPermit {
@@ -602,7 +602,9 @@ impl DdlController {
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("support create streaming job in v2");
+            return self
+                .create_streaming_job_v2(stream_job, fragment_graph, create_type)
+                .await;
         };
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
@@ -645,8 +647,7 @@ impl DdlController {
 
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &stream_job)
-                .await?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &stream_job).await?;
         let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
@@ -744,7 +745,10 @@ impl DdlController {
     }
 
     // validate the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
-    async fn validate_cdc_table(table: &Table, table_fragments: &TableFragments) -> MetaResult<()> {
+    pub(crate) async fn validate_cdc_table(
+        table: &Table,
+        table_fragments: &TableFragments,
+    ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
@@ -910,7 +914,7 @@ impl DdlController {
     }
 
     /// `build_stream_job` builds a streaming job and returns the context and table fragments.
-    async fn build_stream_job(
+    pub(crate) async fn build_stream_job(
         &self,
         mgr: &MetadataManagerV1,
         env: StreamEnvironment,
@@ -963,7 +967,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(&self.env, stream_job)
             .await?;
         assert!(merge_updates.is_empty());
 
@@ -1234,8 +1238,7 @@ impl DdlController {
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
-                .await?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, stream_job).await?;
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
@@ -1314,7 +1317,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .generate_graph(&self.env, stream_job)
             .await?;
         assert!(dispatchers.is_empty());
 

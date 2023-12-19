@@ -31,7 +31,7 @@ use risingwave_pb::stream_plan::{
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -701,7 +701,7 @@ impl ActorGraphBuilder {
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
     pub async fn generate_graph(
         self,
-        id_gen_manager: IdGeneratorManagerRef,
+        env: &MetaSrvEnv,
         job: &StreamingJob,
     ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
@@ -710,7 +710,11 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
+        let id_gen = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref() {
+            GlobalActorIdGen::new_v2(&sql_id_gen, actor_len)
+        } else {
+            GlobalActorIdGen::new(env.id_gen_manager(), actor_len).await?
+        };
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {
