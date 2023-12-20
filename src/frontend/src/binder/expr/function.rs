@@ -507,26 +507,18 @@ impl Binder {
             };
             let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
-                    let convert_bound = |bound| match bound {
-                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
-                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                        WindowFrameBound::Preceding(Some(offset)) => {
-                            FrameBound::Preceding(offset as usize)
-                        }
-                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                        WindowFrameBound::Following(Some(offset)) => {
-                            FrameBound::Following(offset as usize)
-                        }
-                    };
-                    let start = convert_bound(frame.start_bound);
-                    let end = if let Some(end_bound) = frame.end_bound {
-                        convert_bound(end_bound)
-                    } else {
-                        FrameBound::CurrentRow
-                    };
+                    let (start, end) =
+                        self.bind_window_frame_usize_bounds(frame.start_bound, frame.end_bound)?;
                     FrameBounds::Rows(start, end)
                 }
-                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                WindowFrameUnits::Range => {
+                    let (start, end) = self
+                        .bind_window_frame_scalar_impl_bounds(frame.start_bound, frame.end_bound)?;
+                    println!("[rc] start: {:?}, end: {:?}", start, end);
+                    // TODO()
+                    FrameBounds::Rows(FrameBound::CurrentRow, FrameBound::CurrentRow)
+                }
+                WindowFrameUnits::Groups => {
                     bail_not_implemented!(
                         issue = 9124,
                         "window frame in `{}` mode is not supported yet",
@@ -545,6 +537,105 @@ impl Binder {
             None
         };
         Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
+    }
+
+    fn bind_window_frame_usize_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+    ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
+        let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
+            let offset = self
+                .bind_window_frame_bound_offset(offset, Some(DataType::Int64))?
+                .into_int64();
+            if offset < 0 {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "offset in window frame bounds must be non-negative"
+                ))
+                .into());
+            }
+            Ok(offset as usize)
+        };
+        let mut convert_bound = |bound| -> Result<FrameBound<usize>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => {
+                    FrameBound::Preceding(convert_offset(offset)?)
+                }
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => {
+                    FrameBound::Following(convert_offset(offset)?)
+                }
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_scalar_impl_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+    ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
+        let mut convert_bound = |bound| -> Result<FrameBound<_>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => {
+                    FrameBound::Preceding(self.bind_window_frame_bound_offset(offset, None)?)
+                }
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => {
+                    FrameBound::Following(self.bind_window_frame_bound_offset(offset, None)?)
+                }
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_bound_offset(
+        &mut self,
+        offset: Box<ast::Expr>,
+        cast_to: Option<DataType>,
+    ) -> Result<ScalarImpl> {
+        let mut offset = self.bind_expr(*offset)?;
+        if let Some(cast_to) = &cast_to {
+            if offset.cast_implicit_mut(cast_to.clone()).is_err() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "offset in window frame bounds must be castable to {}",
+                    cast_to.clone()
+                ))
+                .into());
+            }
+        };
+        let Some(Ok(offset)) = offset.try_fold_const() else {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "offset in window frame bounds must be constant{}",
+                cast_to
+                    .map(|t| format!(" and castable to {}", t))
+                    .unwrap_or_default()
+            ))
+            .into());
+        };
+        let Some(offset) = offset else {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "offset in window frame bounds must not be NULL"
+            ))
+            .into());
+        };
+        Ok(offset)
     }
 
     fn bind_builtin_scalar_function(

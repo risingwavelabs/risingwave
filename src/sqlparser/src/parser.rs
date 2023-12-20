@@ -915,7 +915,7 @@ impl Parser {
             let rows = if self.parse_keyword(Keyword::UNBOUNDED) {
                 None
             } else {
-                Some(self.parse_literal_uint()?)
+                Some(Box::new(self.parse_expr()?))
             };
             if self.parse_keyword(Keyword::PRECEDING) {
                 Ok(WindowFrameBound::Preceding(rows))
