@@ -951,7 +951,7 @@ impl MetaClient {
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
-            HummockVersion::from_protobuf(&resp.version.unwrap()),
+            HummockVersion::from_rpc_protobuf(&resp.version.unwrap()),
             resp.modified_compaction_groups,
         ))
     }
@@ -975,7 +975,7 @@ impl MetaClient {
             .unwrap()
             .version_deltas
             .iter()
-            .map(HummockVersionDelta::from_protobuf)
+            .map(HummockVersionDelta::from_rpc_protobuf)
             .collect())
     }
 
@@ -994,7 +994,7 @@ impl MetaClient {
 
     pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
         let req = DisableCommitEpochRequest {};
-        Ok(HummockVersion::from_protobuf(
+        Ok(HummockVersion::from_rpc_protobuf(
             &self
                 .inner
                 .disable_commit_epoch(req)
@@ -1294,7 +1294,7 @@ impl HummockMetaClient for MetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         let req = GetCurrentVersionRequest::default();
-        Ok(HummockVersion::from_protobuf(
+        Ok(HummockVersion::from_rpc_protobuf(
             &self
                 .inner
                 .get_current_version(req)

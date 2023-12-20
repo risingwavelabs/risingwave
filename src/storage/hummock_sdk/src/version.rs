@@ -35,7 +35,7 @@ pub struct HummockVersion {
 
 impl Default for HummockVersion {
     fn default() -> Self {
-        HummockVersion::from_protobuf(&PbHummockVersion::default())
+        HummockVersion::from_protobuf_inner(&PbHummockVersion::default())
     }
 }
 
@@ -54,12 +54,20 @@ impl<'de> serde::de::Deserialize<'de> for HummockVersion {
         D: Deserializer<'de>,
     {
         PbHummockVersion::deserialize(deserializer)
-            .map(|version| HummockVersion::from_protobuf(&version))
+            .map(|version| HummockVersion::from_persisted_protobuf(&version))
     }
 }
 
 impl HummockVersion {
-    pub fn from_protobuf(pb_version: &PbHummockVersion) -> Self {
+    pub fn from_rpc_protobuf(pb_version: &PbHummockVersion) -> Self {
+        Self::from_protobuf_inner(pb_version)
+    }
+
+    pub fn from_persisted_protobuf(pb_version: &PbHummockVersion) -> Self {
+        Self::from_protobuf_inner(pb_version)
+    }
+
+    fn from_protobuf_inner(pb_version: &PbHummockVersion) -> Self {
         Self {
             id: pb_version.id,
             levels: pb_version
@@ -121,7 +129,7 @@ pub struct HummockVersionDelta {
 
 impl Default for HummockVersionDelta {
     fn default() -> Self {
-        HummockVersionDelta::from_protobuf(&PbHummockVersionDelta::default())
+        HummockVersionDelta::from_protobuf_inner(&PbHummockVersionDelta::default())
     }
 }
 
@@ -140,12 +148,20 @@ impl<'de> serde::de::Deserialize<'de> for HummockVersionDelta {
         D: Deserializer<'de>,
     {
         PbHummockVersionDelta::deserialize(deserializer)
-            .map(|version| HummockVersionDelta::from_protobuf(&version))
+            .map(|version| HummockVersionDelta::from_persisted_protobuf(&version))
     }
 }
 
 impl HummockVersionDelta {
-    pub fn from_protobuf(delta: &PbHummockVersionDelta) -> Self {
+    pub fn from_persisted_protobuf(delta: &PbHummockVersionDelta) -> Self {
+        Self::from_protobuf_inner(delta)
+    }
+
+    pub fn from_rpc_protobuf(delta: &PbHummockVersionDelta) -> Self {
+        Self::from_protobuf_inner(delta)
+    }
+
+    fn from_protobuf_inner(delta: &PbHummockVersionDelta) -> Self {
         Self {
             id: delta.id,
             prev_id: delta.prev_id,

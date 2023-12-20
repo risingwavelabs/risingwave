@@ -51,7 +51,7 @@ pub async fn resume_version_checkpoint(context: &CtlContext) -> anyhow::Result<(
 /// added/removed for what reason (row deletion/compaction/etc.).
 pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let mut base_version = HummockVersion::from_protobuf(
+    let mut base_version = HummockVersion::from_rpc_protobuf(
         &meta_client
             .risectl_get_checkpoint_hummock_version()
             .await?

@@ -96,7 +96,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let (version, compaction_groups) = self
             .hummock_manager
-            .replay_version_delta(HummockVersionDelta::from_protobuf(
+            .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
                 &req.version_delta.unwrap(),
             ))
             .await?;

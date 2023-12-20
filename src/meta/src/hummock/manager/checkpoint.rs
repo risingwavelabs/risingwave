@@ -43,7 +43,7 @@ pub struct HummockVersionCheckpoint {
 impl HummockVersionCheckpoint {
     pub fn from_protobuf(checkpoint: &PbHummockVersionCheckpoint) -> Self {
         Self {
-            version: HummockVersion::from_protobuf(checkpoint.version.as_ref().unwrap()),
+            version: HummockVersion::from_persisted_protobuf(checkpoint.version.as_ref().unwrap()),
             stale_objects: checkpoint
                 .stale_objects
                 .iter()

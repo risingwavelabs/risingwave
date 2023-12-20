@@ -224,7 +224,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .risectl_get_checkpoint_hummock_version()
             .await
-            .map(|v| HummockVersion::from_protobuf(&v.checkpoint_version.unwrap()))
+            .map(|v| HummockVersion::from_rpc_protobuf(&v.checkpoint_version.unwrap()))
     }
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {

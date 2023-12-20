@@ -38,7 +38,7 @@ impl MetadataModel for HummockVersionDelta {
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        Self::from_protobuf(&prost)
+        Self::from_persisted_protobuf(&prost)
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {

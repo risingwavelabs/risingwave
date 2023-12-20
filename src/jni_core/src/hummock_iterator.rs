@@ -86,7 +86,7 @@ impl HummockJavaBindingIterator {
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
         let pin_version = PinnedVersion::new(
-            HummockVersion::from_protobuf(&read_plan.version.unwrap()),
+            HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
             unbounded_channel().0,
         );
         let table_id = read_plan.table_id.into();

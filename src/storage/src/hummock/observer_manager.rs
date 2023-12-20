@@ -76,7 +76,7 @@ impl ObserverState for HummockObserverNode {
                             hummock_version_deltas
                                 .version_deltas
                                 .iter()
-                                .map(HummockVersionDelta::from_protobuf)
+                                .map(HummockVersionDelta::from_rpc_protobuf)
                                 .collect(),
                         ),
                     ))
@@ -124,7 +124,7 @@ impl ObserverState for HummockObserverNode {
         let _ = self
             .version_update_sender
             .send(HummockEvent::VersionUpdate(
-                HummockVersionUpdate::PinnedVersion(HummockVersion::from_protobuf(
+                HummockVersionUpdate::PinnedVersion(HummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),

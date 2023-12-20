@@ -154,7 +154,8 @@ impl ClusterMetadata {
             .into_iter()
             .zip_eq_fast(default_cf_values.into_iter())
             .collect();
-        let hummock_version = HummockVersion::from_protobuf(&Self::decode_prost_message(&mut buf)?);
+        let hummock_version =
+            HummockVersion::from_persisted_protobuf(&Self::decode_prost_message(&mut buf)?);
         let version_stats = Self::decode_prost_message(&mut buf)?;
         let compaction_groups: Vec<CompactionGroup> = Self::decode_prost_message_list(&mut buf)?;
         let table_fragments: Vec<TableFragments> = Self::decode_prost_message_list(&mut buf)?;
