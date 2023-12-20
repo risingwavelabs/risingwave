@@ -231,28 +231,26 @@ impl StreamSink {
 
     fn user_defined_append_only(properties: &WithOptions) -> Result<UserDefinedAppendOnly> {
         if properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY) {
-            return Ok(UserDefinedAppendOnly::DefinedAppendOnly);
+            Ok(UserDefinedAppendOnly::DefinedAppendOnly)
         } else if properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_DEBEZIUM)
             || properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_UPSERT)
         {
             return Ok(UserDefinedAppendOnly::DefinedNonAppendOnly);
+        } else if properties.get(SINK_TYPE_OPTION).is_some() {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "`{}` must be {}, {}, or {}",
+                    SINK_TYPE_OPTION,
+                    SINK_TYPE_APPEND_ONLY,
+                    SINK_TYPE_DEBEZIUM,
+                    SINK_TYPE_UPSERT
+                ),
+            )))
+            .into());
         } else {
-            if properties.get(SINK_TYPE_OPTION).is_some() {
-                return Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "`{}` must be {}, {}, or {}",
-                        SINK_TYPE_OPTION,
-                        SINK_TYPE_APPEND_ONLY,
-                        SINK_TYPE_DEBEZIUM,
-                        SINK_TYPE_UPSERT
-                    ),
-                )))
-                .into());
-            } else {
-                return Ok(UserDefinedAppendOnly::NotDefined);
-            }
-        };
+            return Ok(UserDefinedAppendOnly::NotDefined);
+        }
     }
 
     fn is_user_force_append_only(properties: &WithOptions) -> Result<bool> {
