@@ -204,6 +204,8 @@ impl IndexCatalog {
             .iter()
             .map(|x| x.name())
             .collect_vec();
+        // TODO(Kexiang): Currently we simply map $x to the column name. Extra info like ":Int32" is still kept.
+        // We should find a better way to generate the definition for `ExprImpl`.
         replace_with_column_names(&column_names, &col)
     }
 
