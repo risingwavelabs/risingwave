@@ -2442,6 +2442,7 @@ impl Parser {
         } else {
             false
         };
+        let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
@@ -2494,7 +2495,22 @@ impl Parser {
             append_only,
             query,
             cdc_table_info,
+            include_column_options: include_options,
         })
+    }
+
+    pub fn parse_include_options(&mut self) -> Result<Vec<(Ident, Option<Ident>)>, ParserError> {
+        let mut options = vec![];
+        while self.parse_keyword(Keyword::INCLUDE) {
+            let add_column = self.parse_identifier()?;
+            if self.parse_keyword(Keyword::AS) {
+                let column_alias = self.parse_identifier()?;
+                options.push((add_column, Some(column_alias)));
+            } else {
+                options.push((add_column, None));
+            }
+        }
+        Ok(options)
     }
 
     pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
