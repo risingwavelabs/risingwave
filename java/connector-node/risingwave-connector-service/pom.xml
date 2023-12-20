@@ -28,6 +28,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>tracing</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>java-binding</artifactId>
         </dependency>
         <dependency>

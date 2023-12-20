@@ -154,6 +154,12 @@
             <groupId>com.risingwave</groupId>
             <artifactId>risingwave-connector-service</artifactId>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.risingwave</groupId>
+                    <artifactId>tracing</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>

@@ -55,6 +55,7 @@
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/risingwave-sink-mock-flink</module>
+        <module>connector-node/tracing</module>
     </modules>
 
     <properties>
@@ -82,14 +83,14 @@
         <flink.version>1.18.0</flink.version>
     </properties>
 
-    <dependencies>
+    <!-- <dependencies>
         <dependency>
             <groupId>org.spf4j</groupId>
             <artifactId>spf4j-slf4j-test</artifactId>
             <scope>test</scope>
             <version>LATEST</version>
         </dependency>
-    </dependencies>
+    </dependencies> -->
 
     <dependencyManagement>
         <dependencies>
@@ -232,6 +233,11 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>java-binding</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>tracing</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
