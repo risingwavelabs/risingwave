@@ -28,12 +28,12 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionCheckpoint,
-    HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
 use super::compaction::get_compression_algorithm;
 use super::compaction::selector::DynamicLevelSelectorCore;
+use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -369,7 +369,7 @@ pub fn trigger_gc_stat(
     checkpoint: &HummockVersionCheckpoint,
     min_pinned_version_id: HummockVersionId,
 ) {
-    let current_version_object_size_map = object_size_map(checkpoint.version.as_ref().unwrap());
+    let current_version_object_size_map = object_size_map(&checkpoint.version);
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
     let mut old_version_object_size = 0;

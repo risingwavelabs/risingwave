@@ -24,8 +24,8 @@ use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, HummockVersionDelta, Level, LevelType, OverlappingLevel, PbHummockVersion,
-    PbLevelType, PbTableWatermarks, SstableInfo,
+    GroupTableChange, HummockVersionDelta, Level, LevelType, OverlappingLevel, PbLevelType,
+    PbTableWatermarks, SstableInfo,
 };
 use tracing::warn;
 
@@ -1089,7 +1089,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     );
 }
 
-pub fn object_size_map(version: &PbHummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
     version
         .levels
         .values()

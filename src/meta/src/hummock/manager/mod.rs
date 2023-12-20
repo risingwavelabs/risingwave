@@ -55,8 +55,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionCheckpoint,
-    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, SstableInfo,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionDelta,
+    HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, SstableInfo,
     SubscribeCompactionEventRequest, TableOption, TableWatermarks,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -99,7 +99,7 @@ mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
 use versioning::*;
-mod checkpoint;
+pub(crate) mod checkpoint;
 mod compaction;
 mod worker;
 
@@ -502,7 +502,7 @@ impl HummockManager {
                 .insert(self.env.meta_store())
                 .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: Some(checkpoint_version.to_protobuf()),
+                version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
@@ -511,7 +511,7 @@ impl HummockManager {
         } else {
             // Read checkpoint from object store.
             versioning_guard.checkpoint = self.read_checkpoint().await?;
-            HummockVersion::from_protobuf(versioning_guard.checkpoint.version.as_ref().unwrap())
+            versioning_guard.checkpoint.version.clone()
         };
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
@@ -3224,6 +3224,7 @@ use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {

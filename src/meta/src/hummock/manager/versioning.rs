@@ -30,12 +30,13 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionCheckpoint,
-    HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionDelta,
+    HummockVersionStats, SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::error::Result;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};

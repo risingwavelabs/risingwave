@@ -460,7 +460,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
         let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
         Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
-            checkpoint_version: Some(checkpoint_version),
+            checkpoint_version: Some(checkpoint_version.to_protobuf()),
         }))
     }
 

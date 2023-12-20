@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_pb::hummock::HummockVersionCheckpoint;
+use risingwave_pb::hummock::PbHummockVersionCheckpoint;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
@@ -84,7 +84,7 @@ async fn restore_hummock_version(
         .await,
     );
     let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
-    let checkpoint = HummockVersionCheckpoint {
+    let checkpoint = PbHummockVersionCheckpoint {
         version: Some(hummock_version.to_protobuf()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
