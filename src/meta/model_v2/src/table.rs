@@ -108,7 +108,7 @@ pub struct Model {
     pub stream_key: I32Array,
     pub append_only: bool,
     pub properties: Property,
-    pub fragment_id: FragmentId,
+    pub fragment_id: Option<FragmentId>,
     pub vnode_col_index: Option<i32>,
     pub row_id_index: Option<i32>,
     pub value_indices: I32Array,

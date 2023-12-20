@@ -33,7 +33,7 @@ use sea_orm::sea_query::SimpleExpr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    QueryFilter, TransactionTrait,
+    NotSet, QueryFilter, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -190,15 +190,17 @@ impl CatalogController {
 
         // record object dependency.
         let dependent_relations = streaming_job.dependent_relations();
-        ObjectDependency::insert_many(dependent_relations.into_iter().map(|id| {
-            object_dependency::ActiveModel {
-                oid: Set(id as _),
-                used_by: Set(streaming_job.id() as _),
-                ..Default::default()
-            }
-        }))
-        .exec(&txn)
-        .await?;
+        if !dependent_relations.is_empty() {
+            ObjectDependency::insert_many(dependent_relations.into_iter().map(|id| {
+                object_dependency::ActiveModel {
+                    oid: Set(id as _),
+                    used_by: Set(streaming_job.id() as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
@@ -207,6 +209,7 @@ impl CatalogController {
 
     pub async fn create_internal_table_catalog(
         &self,
+        job_id: ObjectId,
         internal_tables: Vec<PbTable>,
     ) -> MetaResult<HashMap<u32, u32>> {
         let inner = self.inner.write().await;
@@ -225,6 +228,7 @@ impl CatalogController {
             table_id_map.insert(table.id, table_id as u32);
             let mut table: table::ActiveModel = table.into();
             table.table_id = Set(table_id as _);
+            table.belongs_to_job_id = Set(Some(job_id as _));
             table.insert(&txn).await?;
         }
         txn.commit().await?;
@@ -253,7 +257,8 @@ impl CatalogController {
             }
             for (_, actor_dispatchers) in actor_dispatchers {
                 for actor_dispatcher in actor_dispatchers {
-                    let actor_dispatcher = actor_dispatcher.into_active_model();
+                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
+                    actor_dispatcher.id = NotSet;
                     actor_dispatcher.insert(&txn).await?;
                 }
             }
@@ -275,7 +280,7 @@ impl CatalogController {
             | StreamingJob::Table(_, table, ..) => {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
-                    fragment_id: Set(table.fragment_id as _),
+                    fragment_id: Set(Some(table.fragment_id as _)),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -336,15 +341,19 @@ impl CatalogController {
         let mut actor_dispatchers = vec![];
         for (actor_id, dispatchers) in new_actor_dispatchers {
             for dispatcher in dispatchers {
-                actor_dispatchers.push(
+                let mut actor_dispatcher =
                     actor_dispatcher::Model::from((actor_id as u32, dispatcher))
-                        .into_active_model(),
-                );
+                        .into_active_model();
+                actor_dispatcher.id = NotSet;
+                actor_dispatchers.push(actor_dispatcher);
             }
         }
-        ActorDispatcher::insert_many(actor_dispatchers)
-            .exec(&txn)
-            .await?;
+
+        if !actor_dispatchers.is_empty() {
+            ActorDispatcher::insert_many(actor_dispatchers)
+                .exec(&txn)
+                .await?;
+        }
 
         let fragment_mapping = get_fragment_mappings(&txn, table_id.table_id as _).await?;
         txn.commit().await?;

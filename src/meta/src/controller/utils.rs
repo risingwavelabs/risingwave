@@ -151,7 +151,7 @@ pub struct FragmentDesc {
     pub distribution_type: DistributionType,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
-    pub parallelism: i32,
+    pub parallelism: i64,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.

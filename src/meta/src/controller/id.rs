@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use risingwave_meta_model_v2::prelude::{Actor, Fragment};
 use risingwave_meta_model_v2::{actor, fragment};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QuerySelect};
+use sea_orm::sea_query::{Expr, Func};
+use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect};
 
 use crate::manager::{IdCategory, IdCategoryType};
 use crate::MetaResult;
@@ -34,18 +35,24 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
             }
             IdCategory::Fragment => Fragment::find()
                 .select_only()
-                .column_as(fragment::Column::FragmentId.max().add(1), "available_id")
+                .expr(Func::if_null(
+                    Expr::col(fragment::Column::FragmentId).max().add(1),
+                    0,
+                ))
                 .into_tuple()
                 .one(conn)
                 .await?
-                .unwrap(),
+                .unwrap_or_default(),
             IdCategory::Actor => Actor::find()
                 .select_only()
-                .column_as(actor::Column::ActorId.max().add(1), "available_id")
+                .expr(Func::if_null(
+                    Expr::col(actor::Column::ActorId).max().add(1),
+                    0,
+                ))
                 .into_tuple()
                 .one(conn)
                 .await?
-                .unwrap(),
+                .unwrap_or_default(),
             _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
         };
 

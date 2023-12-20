@@ -659,8 +659,8 @@ impl ClusterControllerInner {
                     add_property.worker_node_parallelism as _,
                 ))),
                 is_streaming: Set(add_property.is_streaming),
-                is_serving: Set(add_property.is_streaming),
-                is_unschedulable: Set(add_property.is_streaming),
+                is_serving: Set(add_property.is_serving),
+                is_unschedulable: Set(add_property.is_unschedulable),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }

@@ -107,7 +107,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             append_only: value.0.append_only,
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
-            fragment_id: value.0.fragment_id as u32,
+            fragment_id: value.0.fragment_id.unwrap_or_default() as u32,
             vnode_col_index: value.0.vnode_col_index.map(|index| index as _),
             row_id_index: value.0.row_id_index.map(|index| index as _),
             value_indices: value.0.value_indices.0,

@@ -327,7 +327,7 @@ impl CatalogController {
             fragments: pb_fragments,
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
-            env,
+            env: Some(env.unwrap_or_default()),
         };
 
         Ok(table_fragments)

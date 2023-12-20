@@ -538,7 +538,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::StreamKey).json().not_null())
                     .col(ColumnDef::new(Table::AppendOnly).boolean().not_null())
                     .col(ColumnDef::new(Table::Properties).json().not_null())
-                    .col(ColumnDef::new(Table::FragmentId).integer().not_null())
+                    .col(ColumnDef::new(Table::FragmentId).integer())
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
                     .col(ColumnDef::new(Table::ValueIndices).json().not_null())
