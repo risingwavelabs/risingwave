@@ -18,6 +18,7 @@ import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import io.debezium.config.CommonConnectorConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -113,7 +114,8 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         // For backfill source, we need to wait for the streaming source to start before proceeding
         if (config.isBackfillSource()) {
             var databaseServerName =
-                    config.getResolvedDebeziumProps().getProperty("database.server.name");
+                    config.getResolvedDebeziumProps()
+                            .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
             startOk =
                     DbzSourceUtils.waitForStreamingRunning(
                             config.getSourceType(), databaseServerName);
