@@ -272,12 +272,13 @@ mod tests {
     use super::*;
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
-        let mut iter = store.list_for_test(prefix).await.unwrap();
-        let mut result = vec![];
-        while let Some(r) = iter.next().await {
-            result.push(r.unwrap());
-        }
-        result
+        store
+            .list_for_test(prefix)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
