@@ -9,7 +9,7 @@
       table.name='t1sink',
       type='upsert');
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    StreamSink { type: Upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
     └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
 - id: create_upsert_jdbc_sink_with_downstream_pk2
@@ -22,7 +22,7 @@
       table.name='t1sink',
       type='upsert');
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
+    StreamSink { type: Upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
     └─StreamExchange { dist: HashShard(t1.v3, t1.v5) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5] }
 - id: create_appendonly_jdbc_sink
@@ -35,7 +35,7 @@
       type='append-only',
       force_append_only='true');
   explain_output: |
-    StreamSink { type: append-only, columns: [v1, v2, v3, v5] }
+    StreamSink { type: ForceAppendOnly, columns: [v1, v2, v3, v5] }
     └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5] }
 - id: create_upsert_kafka_sink_with_downstream_pk1
   sql: |
@@ -47,7 +47,7 @@
       primary_key='v1,v2'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    StreamSink { type: Upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
     └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
 - id: downstream_pk_same_with_upstream
@@ -60,7 +60,7 @@
       primary_key='v2,v1'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v2, v1, count], pk: [t1.v1, t1.v2] }
+    StreamSink { type: Upsert, columns: [v2, v1, count], pk: [t1.v1, t1.v2] }
     └─StreamProject { exprs: [t1.v2, t1.v1, count] }
       └─StreamHashAgg { group_key: [t1.v1, t1.v2], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
@@ -70,6 +70,6 @@
     create table t2 (a int, b int, watermark for b as b - 4) append only;
     explain create sink sk1 from t2 emit on window close with (connector='blackhole');
   explain_output: |
-    StreamSink { type: append-only, columns: [a, b, t2._row_id(hidden)] }
+    StreamSink { type: AppendOnly, columns: [a, b, t2._row_id(hidden)] }
     └─StreamEowcSort { sort_column: t2.b }
       └─StreamTableScan { table: t2, columns: [a, b, _row_id] }
