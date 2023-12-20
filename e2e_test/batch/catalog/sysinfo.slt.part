@@ -12,3 +12,26 @@ query T
 select (SELECT pg_catalog.pg_get_userbyid(1));
 ----
 root
+
+statement ok
+create table tab(num int, name varchar);
+
+statement ok
+create index tab_idx on tab(num desc);
+
+query T
+select pg_get_indexdef('tab_idx'::regclass);
+----
+CREATE INDEX tab_idx ON tab(num DESC)
+
+query error Invalid parameter oid: index not found:
+select pg_get_indexdef('tab'::regclass);
+
+query error Invalid parameter name: class not found: tab_null
+select pg_get_indexdef('tab_null'::regclass);
+
+statement ok
+drop index tab_idx;
+
+statement ok
+drop table tab;

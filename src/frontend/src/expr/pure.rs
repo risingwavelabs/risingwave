@@ -241,6 +241,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleepUntil
             | expr_node::Type::ColDescription
             | expr_node::Type::CastRegclass
+            | expr_node::Type::PgGetIndexdef
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

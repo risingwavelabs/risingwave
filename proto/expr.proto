@@ -272,6 +272,8 @@ message ExprNode {
     // Adminitration functions
     COL_DESCRIPTION = 2100;
     CAST_REGCLASS = 2101;
+    // System information functions
+    PG_GET_INDEXDEF = 2400;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
