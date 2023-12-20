@@ -106,14 +106,18 @@ impl WorkerNodeManager {
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
         // update
+        let mut is_update = false;
         for w in &mut write_guard.worker_nodes {
             if w.id == node.id {
                 *w = node;
-                return;
+                is_update = true;
+                break;
             }
         }
         // insert
-        write_guard.worker_nodes.push(node);
+        if !is_update {
+            write_guard.worker_nodes.push(node);
+        }
 
         // Update `pu_to_worker`
         write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
