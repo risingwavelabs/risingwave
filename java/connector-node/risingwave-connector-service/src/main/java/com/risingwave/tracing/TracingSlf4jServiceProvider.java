@@ -15,7 +15,7 @@
 // Ported from https://github.com/MrFriendly-B-V/tracing-slf4j,
 // which is licensed under the Apache License, Version 2.0.
 
-package com.risingwave.connector.api.tracing;
+package com.risingwave.tracing;
 
 import org.slf4j.ILoggerFactory;
 import org.slf4j.IMarkerFactory;

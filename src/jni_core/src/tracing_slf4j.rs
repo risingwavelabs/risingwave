@@ -48,7 +48,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
         };
     }
 
-    // See `com.risingwave.connector.api.tracing.TracingSlf4jImpl`.
+    // See `com.risingwave.tracing.TracingSlf4jImpl`.
     match level {
         0 => event!(Level::ERROR),
         1 => event!(Level::WARN),
