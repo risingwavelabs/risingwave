@@ -430,9 +430,10 @@ pub async fn compact(
         );
     }
 
-    let _guard = scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
-        context.release_task_quota(parallelism as u32);
-    });
+    let _release_quota_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.release_task_quota(parallelism as u32);
+        });
 
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
@@ -487,6 +488,19 @@ pub async fn compact(
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
+    context
+        .compactor_metrics
+        .compact_task_pending_parallelism
+        .add(parallelism as _);
+    let _release_metrics_guard =
+        scopeguard::guard((parallelism, context.clone()), |(parallelism, context)| {
+            context.compactor_metrics.compact_task_pending_num.dec();
+            context
+                .compactor_metrics
+                .compact_task_pending_parallelism
+                .sub(parallelism as _);
+        });
+
     if optimize_by_copy_block {
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
@@ -519,7 +533,6 @@ pub async fn compact(
             }
         }
 
-        context.compactor_metrics.compact_task_pending_num.dec();
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
             compact_done(compact_task, context.clone(), output_ssts, task_status);
@@ -624,7 +637,6 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    context.compactor_metrics.compact_task_pending_num.dec();
     for level in &compact_task.input_ssts {
         for table in &level.table_infos {
             context.sstable_store.delete_cache(table.get_object_id());
