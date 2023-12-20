@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
+use risingwave_pb::hummock::{HummockVersionCheckpoint, PbHummockVersion};
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
@@ -120,7 +120,7 @@ impl HummockManager {
             );
         }
         let new_checkpoint = HummockVersionCheckpoint {
-            version: Some(current_version.clone()),
+            version: Some(current_version.to_protobuf()),
             stale_objects,
         };
         drop(versioning_guard);
@@ -189,7 +189,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn get_checkpoint_version(&self) -> HummockVersion {
+    pub async fn get_checkpoint_version(&self) -> PbHummockVersion {
         let versioning_guard = read_lock!(self, versioning).await;
         versioning_guard
             .checkpoint

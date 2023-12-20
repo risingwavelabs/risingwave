@@ -16,10 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
-use risingwave_pb::hummock::{
-    HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest, VacuumTask,
-};
+use risingwave_pb::hummock::{HummockSnapshot, SubscribeCompactionEventRequest, VacuumTask};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;

@@ -20,7 +20,6 @@ use std::time::Duration;
 use function_name::named;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;

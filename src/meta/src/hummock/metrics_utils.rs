@@ -18,18 +18,18 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
-use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo, HummockVersionExt,
+    object_size_map, BranchedSstInfo,
 };
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionCheckpoint,
+    HummockVersionStats, LevelType,
 };
 
 use super::compaction::get_compression_algorithm;
@@ -45,6 +45,7 @@ pub fn trigger_version_stat(
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
+    // TODO: this op may be costly
     metrics
         .version_size
         .set(current_version.encoded_len() as i64);

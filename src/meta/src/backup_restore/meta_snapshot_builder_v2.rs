@@ -20,9 +20,9 @@ use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model_v2 as model_v2;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::HummockVersionDelta;
 use sea_orm::{EntityTrait, QueryOrder, TransactionTrait};
 
 use crate::controller::SqlMetaStore;
@@ -42,10 +42,10 @@ impl MetaSnapshotV2Builder {
         }
     }
 
-    pub async fn build<D: Future<Output = HummockVersion>>(
+    pub async fn build(
         &mut self,
         id: MetaSnapshotId,
-        hummock_version_builder: D,
+        hummock_version_builder: impl Future<Output = HummockVersion>,
     ) -> BackupResult<()> {
         self.snapshot.format_version = VERSION;
         self.snapshot.id = id;

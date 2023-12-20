@@ -166,7 +166,7 @@ macro_rules! for_all_metadata_models {
         $macro! {
             // These items should be included in a meta snapshot.
             // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersion },
+            { risingwave_pb::hummock::PbHummockVersion },
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::CtlContext;
@@ -51,11 +51,13 @@ pub async fn resume_version_checkpoint(context: &CtlContext) -> anyhow::Result<(
 /// added/removed for what reason (row deletion/compaction/etc.).
 pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let mut base_version = meta_client
-        .risectl_get_checkpoint_hummock_version()
-        .await?
-        .checkpoint_version
-        .unwrap();
+    let mut base_version = HummockVersion::from_protobuf(
+        &meta_client
+            .risectl_get_checkpoint_hummock_version()
+            .await?
+            .checkpoint_version
+            .unwrap(),
+    );
     println!("replay starts");
     println!("base version {}", base_version.id);
     let delta_fetch_size = 100;

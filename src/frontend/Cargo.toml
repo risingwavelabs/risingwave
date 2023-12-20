@@ -56,6 +56,7 @@ risingwave_common = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_source = { workspace = true }

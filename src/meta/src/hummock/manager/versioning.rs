@@ -20,18 +20,18 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
-    HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionCheckpoint,
+    HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -399,12 +399,12 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
     use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersion, HummockVersionStats, KeyRange, Level,
-        OverlappingLevel, SstableInfo,
+        HummockPinnedVersion, HummockVersionStats, KeyRange, Level, OverlappingLevel, SstableInfo,
     };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

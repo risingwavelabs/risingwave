@@ -23,6 +23,7 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -32,7 +33,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
+    compact_task, CompactTask, HummockSnapshot, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, TableWatermarks, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};

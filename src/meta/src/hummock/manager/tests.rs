@@ -21,10 +21,11 @@ use prometheus::Registry;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ssts, BranchedSstInfo, HummockVersionExt,
+    get_compaction_group_ssts, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
     HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
@@ -33,8 +34,8 @@ use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
-    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    KeyRange, SstableInfo,
+    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    SstableInfo,
 };
 use risingwave_pb::meta::add_worker_node_request::Property;
 

@@ -36,6 +36,7 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -949,7 +950,10 @@ impl MetaClient {
             version_delta: Some(version_delta),
         };
         let resp = self.inner.replay_version_delta(req).await?;
-        Ok((resp.version.unwrap(), resp.modified_compaction_groups))
+        Ok((
+            HummockVersion::from_protobuf(&resp.version.unwrap()),
+            resp.modified_compaction_groups,
+        ))
     }
 
     pub async fn list_version_deltas(
@@ -986,12 +990,14 @@ impl MetaClient {
 
     pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
         let req = DisableCommitEpochRequest {};
-        Ok(self
-            .inner
-            .disable_commit_epoch(req)
-            .await?
-            .current_version
-            .unwrap())
+        Ok(HummockVersion::from_protobuf(
+            &self
+                .inner
+                .disable_commit_epoch(req)
+                .await?
+                .current_version
+                .unwrap(),
+        ))
     }
 
     pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
@@ -1284,12 +1290,14 @@ impl HummockMetaClient for MetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         let req = GetCurrentVersionRequest::default();
-        Ok(self
-            .inner
-            .get_current_version(req)
-            .await?
-            .current_version
-            .unwrap())
+        Ok(HummockVersion::from_protobuf(
+            &self
+                .inner
+                .get_current_version(req)
+                .await?
+                .current_version
+                .unwrap(),
+        ))
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {

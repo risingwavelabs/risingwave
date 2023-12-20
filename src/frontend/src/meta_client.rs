@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -22,7 +23,7 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot, HummockVersion, HummockVersionDelta,
+    HummockSnapshot, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -223,7 +224,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .risectl_get_checkpoint_hummock_version()
             .await
-            .map(|v| v.checkpoint_version.unwrap())
+            .map(|v| HummockVersion::from_protobuf(&v.checkpoint_version.unwrap()))
     }
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {

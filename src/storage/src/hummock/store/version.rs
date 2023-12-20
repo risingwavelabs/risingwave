@@ -57,9 +57,6 @@ use crate::monitor::{
 };
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
-// TODO: use a custom data structure to allow in-place update instead of proto
-// pub type CommittedVersion = HummockVersion;
-
 pub type CommittedVersion = PinnedVersion;
 
 /// Data not committed to Hummock. There are two types of staging data:

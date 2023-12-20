@@ -8712,6 +8712,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_expr_impl",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -8742,8 +8743,10 @@ dependencies = [
  "hex",
  "itertools 0.12.0",
  "parse-display",
+ "prost 0.12.1",
  "risingwave_common",
  "risingwave_pb",
+ "serde",
  "tracing",
  "workspace-hack",
 ]

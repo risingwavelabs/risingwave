@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
+    BranchedSstInfo, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
@@ -55,9 +55,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableWatermarks,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionCheckpoint,
+    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, SstableInfo,
+    SubscribeCompactionEventRequest, TableOption, TableWatermarks,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -502,7 +502,7 @@ impl HummockManager {
                 .insert(self.env.meta_store())
                 .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: Some(checkpoint_version.clone()),
+                version: Some(checkpoint_version.to_protobuf()),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
@@ -511,12 +511,7 @@ impl HummockManager {
         } else {
             // Read checkpoint from object store.
             versioning_guard.checkpoint = self.read_checkpoint().await?;
-            versioning_guard
-                .checkpoint
-                .version
-                .as_ref()
-                .cloned()
-                .unwrap()
+            HummockVersion::from_protobuf(versioning_guard.checkpoint.version.as_ref().unwrap())
         };
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
@@ -601,7 +596,7 @@ impl HummockManager {
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(versioning.current_version.clone());
+        let ret = Payload::PinnedVersion(versioning.current_version.to_protobuf());
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -2989,7 +2984,7 @@ impl HummockManager {
                 rewrite_cg_ids.push(*cg_id);
             }
 
-            if let Some(levels) = current_version.get_levels().get(cg_id) {
+            if let Some(levels) = current_version.levels.get(cg_id) {
                 if levels.member_table_ids.len() == 1 {
                     restore_cg_to_partition_vnode.insert(
                         *cg_id,
@@ -3224,6 +3219,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;

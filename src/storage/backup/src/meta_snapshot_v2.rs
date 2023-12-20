@@ -15,8 +15,8 @@
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model_v2 as model_v2;
-use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};

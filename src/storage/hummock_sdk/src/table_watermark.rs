@@ -236,9 +236,16 @@ impl WatermarkDirection {
             WatermarkDirection::Descending => key > watermark,
         }
     }
+
+    pub fn is_ascending(&self) -> bool {
+        match self {
+            WatermarkDirection::Ascending => true,
+            WatermarkDirection::Descending => false,
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VnodeWatermark {
     vnode_bitmap: Arc<Bitmap>,
     watermark: Bytes,
@@ -271,11 +278,11 @@ impl VnodeWatermark {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TableWatermarks {
     // later epoch at the back
-    watermarks: Vec<(HummockEpoch, Vec<VnodeWatermark>)>,
-    direction: WatermarkDirection,
+    pub(crate) watermarks: Vec<(HummockEpoch, Vec<VnodeWatermark>)>,
+    pub(crate) direction: WatermarkDirection,
 }
 
 impl TableWatermarks {
@@ -402,63 +409,76 @@ pub fn merge_multiple_new_table_watermarks(
         .collect()
 }
 
-#[easy_ext::ext(PbTableWatermarksExt)]
-impl PbTableWatermarks {
+impl TableWatermarks {
     pub fn apply_new_table_watermarks(&mut self, newly_added_watermarks: &PbTableWatermarks) {
-        assert_eq!(self.is_ascending, newly_added_watermarks.is_ascending);
-        assert!(self.epoch_watermarks.iter().map(|w| w.epoch).is_sorted());
+        assert_eq!(
+            self.direction.is_ascending(),
+            newly_added_watermarks.is_ascending
+        );
+        assert!(self.watermarks.iter().map(|(epoch, _)| epoch).is_sorted());
         assert!(newly_added_watermarks
             .epoch_watermarks
             .iter()
             .map(|w| w.epoch)
             .is_sorted());
         // ensure that the newly added watermarks have a later epoch than the previous latest epoch.
-        if let Some(prev_last_epoch_watermarks) = self.epoch_watermarks.last() && let Some(new_first_epoch_watermarks) = newly_added_watermarks.epoch_watermarks.first() {
-            assert!(prev_last_epoch_watermarks.epoch < new_first_epoch_watermarks.epoch);
+        if let Some((prev_last_epoch, _)) = self.watermarks.last() && let Some(new_first_epoch_watermarks) = newly_added_watermarks.epoch_watermarks.first() {
+            assert!(*prev_last_epoch < new_first_epoch_watermarks.epoch);
         }
-        self.epoch_watermarks
-            .extend(newly_added_watermarks.epoch_watermarks.clone());
+        self.watermarks
+            .extend(
+                newly_added_watermarks
+                    .epoch_watermarks
+                    .iter()
+                    .map(|epoch_new_watermarks| {
+                        (
+                            epoch_new_watermarks.epoch,
+                            epoch_new_watermarks
+                                .watermarks
+                                .iter()
+                                .map(VnodeWatermark::from_protobuf)
+                                .collect(),
+                        )
+                    }),
+            );
     }
 
     pub fn clear_stale_epoch_watermark(&mut self, safe_epoch: u64) {
-        match self.epoch_watermarks.first() {
+        match self.watermarks.first() {
             None => {
                 // return on empty watermark
                 return;
             }
-            Some(earliest_epoch_watermark) => {
-                if earliest_epoch_watermark.epoch >= safe_epoch {
+            Some((earliest_epoch, _)) => {
+                if *earliest_epoch >= safe_epoch {
                     // No stale epoch watermark needs to be cleared.
                     return;
                 }
             }
         }
         debug!("clear stale table watermark below epoch {}", safe_epoch);
-        let mut result_epoch_watermark = Vec::with_capacity(self.epoch_watermarks.len());
+        let mut result_epoch_watermark = Vec::with_capacity(self.watermarks.len());
         let mut unset_vnode: HashSet<VirtualNode> = (0..VirtualNode::COUNT)
             .map(VirtualNode::from_index)
             .collect();
-        while let Some(epoch_watermark) = self.epoch_watermarks.last() {
-            if epoch_watermark.epoch >= safe_epoch {
-                let epoch_watermark = self.epoch_watermarks.pop().expect("have check Some");
-                for watermark in &epoch_watermark.watermarks {
-                    for vnode in
-                        Bitmap::from(watermark.vnode_bitmap.as_ref().expect("should not be None"))
-                            .iter_vnodes()
-                    {
+        while let Some((epoch, _)) = self.watermarks.last() {
+            if *epoch >= safe_epoch {
+                let (epoch, watermarks) = self.watermarks.pop().expect("have check Some");
+                for watermark in &watermarks {
+                    for vnode in watermark.vnode_bitmap.iter_vnodes() {
                         unset_vnode.remove(&vnode);
                     }
                 }
-                result_epoch_watermark.push(epoch_watermark);
+                result_epoch_watermark.push((epoch, watermarks));
             } else {
                 break;
             }
         }
-        while !unset_vnode.is_empty() && let Some(epoch_watermark) = self.epoch_watermarks.pop() {
+        while !unset_vnode.is_empty() && let Some((_, watermarks)) = self.watermarks.pop() {
             let mut new_vnode_watermarks = Vec::new();
-            for vnode_watermark in &epoch_watermark.watermarks {
+            for vnode_watermark in watermarks {
                 let mut set_vnode = Vec::new();
-                for vnode in Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should not be None")).iter_vnodes() {
+                for vnode in vnode_watermark.vnode_bitmap.iter_vnodes() {
                     if unset_vnode.remove(&vnode) {
                         set_vnode.push(vnode);
                     }
@@ -468,36 +488,34 @@ impl PbTableWatermarks {
                     for vnode in set_vnode {
                         builder.set(vnode.to_index(), true);
                     }
-                    let bitmap = builder.finish();
-                    new_vnode_watermarks.push(PbVnodeWatermark {
-                        vnode_bitmap: Some(bitmap.to_protobuf()),
-                        watermark: vnode_watermark.watermark.clone(),
+                    let bitmap = Arc::new(builder.finish());
+                    new_vnode_watermarks.push(VnodeWatermark {
+                        vnode_bitmap: bitmap,
+                        watermark: vnode_watermark.watermark,
                     })
                 }
             }
             if !new_vnode_watermarks.is_empty() {
-                if let Some(last_epoch_watermark) = result_epoch_watermark.last_mut() && last_epoch_watermark.epoch == safe_epoch {
-                    last_epoch_watermark.watermarks.extend(new_vnode_watermarks);
+                if let Some((last_epoch, last_watermarks)) = result_epoch_watermark.last_mut() && *last_epoch == safe_epoch {
+                    last_watermarks.extend(new_vnode_watermarks);
                 } else {
-                    result_epoch_watermark.push(PbEpochNewWatermarks {
-                        watermarks: new_vnode_watermarks,
-                        // set epoch as safe epoch
-                        epoch: safe_epoch,
-                    })
+                    result_epoch_watermark.push((safe_epoch, new_vnode_watermarks));
                 }
             }
         }
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
-        assert!(result_epoch_watermark.is_sorted_by(|first, second| {
-            let ret = first.epoch.cmp(&second.epoch);
-            assert_ne!(ret, Ordering::Equal);
-            Some(ret)
-        }));
-        *self = PbTableWatermarks {
-            epoch_watermarks: result_epoch_watermark,
-            is_ascending: self.is_ascending,
+        assert!(
+            result_epoch_watermark.is_sorted_by(|(first_epoch, _), (second_epoch, _)| {
+                let ret = first_epoch.cmp(second_epoch);
+                assert_ne!(ret, Ordering::Equal);
+                Some(ret)
+            })
+        );
+        *self = TableWatermarks {
+            watermarks: result_epoch_watermark,
+            direction: self.direction,
         }
     }
 }
@@ -515,17 +533,17 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-    use risingwave_pb::hummock::{HummockVersion, PbTableWatermarks, PbVnodeWatermark};
+    use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 
-    use crate::compaction_group::hummock_version_ext::HummockVersionExt;
     use crate::key::{
         is_empty_key_range, map_table_key_range, prefix_slice_with_vnode,
         prefixed_range_with_vnode, TableKeyRange,
     };
     use crate::table_watermark::{
-        merge_multiple_new_table_watermarks, PbTableWatermarksExt, TableWatermarks,
-        TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+        merge_multiple_new_table_watermarks, TableWatermarks, TableWatermarksIndex, VnodeWatermark,
+        WatermarkDirection,
     };
+    use crate::version::HummockVersion;
 
     fn build_bitmap(vnodes: impl IntoIterator<Item = usize>) -> Arc<Bitmap> {
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
@@ -561,7 +579,7 @@ mod tests {
             direction,
         );
 
-        let mut pb_table_watermark = table_watermarks.to_protobuf();
+        let mut table_watermark_checkpoint = table_watermarks.clone();
 
         let epoch3 = epoch2 + 1;
         let mut second_table_watermark = TableWatermarks::single_epoch(
@@ -599,8 +617,9 @@ mod tests {
             direction,
         );
 
-        pb_table_watermark.apply_new_table_watermarks(&second_table_watermark.to_protobuf());
-        assert_eq!(table_watermarks.to_protobuf(), pb_table_watermark);
+        table_watermark_checkpoint
+            .apply_new_table_watermarks(&second_table_watermark.to_protobuf());
+        assert_eq!(table_watermarks, table_watermark_checkpoint);
     }
 
     #[test]
@@ -648,13 +667,13 @@ mod tests {
             direction,
         );
 
-        let mut pb_table_watermarks = table_watermarks.to_protobuf();
-        pb_table_watermarks.clear_stale_epoch_watermark(epoch1);
-        assert_eq!(pb_table_watermarks, table_watermarks.to_protobuf());
+        let mut table_watermarks_checkpoint = table_watermarks.clone();
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch1);
+        assert_eq!(table_watermarks_checkpoint, table_watermarks);
 
-        pb_table_watermarks.clear_stale_epoch_watermark(epoch2);
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch2);
         assert_eq!(
-            pb_table_watermarks,
+            table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
@@ -681,12 +700,11 @@ mod tests {
                 ],
                 direction,
             }
-            .to_protobuf()
         );
 
-        pb_table_watermarks.clear_stale_epoch_watermark(epoch3);
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch3);
         assert_eq!(
-            pb_table_watermarks,
+            table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
@@ -706,12 +724,11 @@ mod tests {
                 ],
                 direction,
             }
-            .to_protobuf()
         );
 
-        pb_table_watermarks.clear_stale_epoch_watermark(epoch4);
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch4);
         assert_eq!(
-            pb_table_watermarks,
+            table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![
                     (
@@ -731,12 +748,11 @@ mod tests {
                 ],
                 direction,
             }
-            .to_protobuf()
         );
 
-        pb_table_watermarks.clear_stale_epoch_watermark(epoch5);
+        table_watermarks_checkpoint.clear_stale_epoch_watermark(epoch5);
         assert_eq!(
-            pb_table_watermarks,
+            table_watermarks_checkpoint,
             TableWatermarks {
                 watermarks: vec![(
                     epoch5,
@@ -750,7 +766,6 @@ mod tests {
                 )],
                 direction,
             }
-            .to_protobuf()
         );
     }
 
@@ -998,16 +1013,16 @@ mod tests {
         };
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
-            test_table_id.table_id,
-            PbTableWatermarks {
-                epoch_watermarks: vec![PbEpochNewWatermarks {
-                    watermarks: vec![PbVnodeWatermark {
-                        watermark: watermark1.to_vec(),
-                        vnode_bitmap: Some(build_bitmap(0..VirtualNode::COUNT).to_protobuf()),
+            test_table_id,
+            TableWatermarks {
+                watermarks: vec![(
+                    EPOCH1,
+                    vec![VnodeWatermark {
+                        watermark: watermark1.clone(),
+                        vnode_bitmap: build_bitmap(0..VirtualNode::COUNT),
                     }],
-                    epoch: EPOCH1,
-                }],
-                is_ascending: true,
+                )],
+                direction: WatermarkDirection::Ascending,
             },
         );
         let committed_index = version

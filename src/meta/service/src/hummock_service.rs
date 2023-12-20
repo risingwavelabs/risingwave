@@ -83,7 +83,7 @@ impl HummockManagerService for HummockServiceImpl {
         let current_version = self.hummock_manager.get_current_version().await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version),
+            current_version: Some(current_version.to_protobuf()),
         }))
     }
 
@@ -97,7 +97,7 @@ impl HummockManagerService for HummockServiceImpl {
             .replay_version_delta(req.version_delta.unwrap())
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
-            version: Some(version),
+            version: Some(version.to_protobuf()),
             modified_compaction_groups: compaction_groups,
         }))
     }
@@ -119,7 +119,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<DisableCommitEpochResponse>, Status> {
         let version = self.hummock_manager.disable_commit_epoch().await;
         Ok(Response::new(DisableCommitEpochResponse {
-            current_version: Some(version),
+            current_version: Some(version.to_protobuf()),
         }))
     }
 
