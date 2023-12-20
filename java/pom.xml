@@ -82,6 +82,15 @@
         <flink.version>1.18.0</flink.version>
     </properties>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.spf4j</groupId>
+            <artifactId>spf4j-slf4j-test</artifactId>
+            <scope>test</scope>
+            <version>LATEST</version>
+        </dependency>
+    </dependencies>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
