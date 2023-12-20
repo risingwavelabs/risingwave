@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.risingwave</groupId>
@@ -72,7 +72,7 @@
         <commons.cli.version>1.5.0</commons.cli.version>
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
-        <debezium.version>1.9.7.Final</debezium.version>
+        <debezium.version>2.4.2.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
@@ -347,7 +347,7 @@
                             <style>AOSP</style>
                         </googleJavaFormat>
 
-                        <removeUnusedImports />
+                        <removeUnusedImports/>
                     </java>
                 </configuration>
                 <executions>

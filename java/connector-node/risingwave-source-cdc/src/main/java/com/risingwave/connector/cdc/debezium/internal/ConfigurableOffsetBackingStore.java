@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -194,5 +195,10 @@ public class ConfigurableOffsetBackingStore implements OffsetBackingStore {
                     }
                     return null;
                 });
+    }
+
+    @Override
+    public Set<Map<String, Object>> connectorPartitions(String connectorName) {
+        return null;
     }
 }
