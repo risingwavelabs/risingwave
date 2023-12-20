@@ -23,15 +23,15 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionDelta,
-    HummockVersionStats, SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+    SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 

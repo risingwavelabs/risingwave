@@ -24,8 +24,8 @@ use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, HummockVersionDelta, Level, LevelType, OverlappingLevel, PbLevelType,
-    PbTableWatermarks, SstableInfo,
+    GroupTableChange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
+    SstableInfo,
 };
 use tracing::warn;
 
@@ -34,7 +34,7 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
 use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
-use crate::version::HummockVersion;
+use crate::version::{HummockVersion, HummockVersionDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -592,15 +592,15 @@ impl HummockVersion {
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
         for table_id in &version_delta.removed_table_ids {
-            let _ = self.table_watermarks.remove(&TableId::from(table_id));
+            let _ = self.table_watermarks.remove(table_id);
         }
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
-            match self.table_watermarks.entry(TableId::from(*table_id)) {
+            match self.table_watermarks.entry(*table_id) {
                 Entry::Occupied(mut entry) => {
                     entry.get_mut().apply_new_table_watermarks(table_watermarks);
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableWatermarks::from_protobuf(table_watermarks));
+                    entry.insert(table_watermarks.clone());
                 }
             }
         }
@@ -1255,12 +1255,12 @@ mod tests {
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, HummockVersionDelta,
-        IntraLevelDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, Level,
+        LevelType, OverlappingLevel, SstableInfo,
     };
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
-    use crate::version::HummockVersion;
+    use crate::version::{HummockVersion, HummockVersionDelta};
 
     #[test]
     fn test_get_sst_object_ids() {

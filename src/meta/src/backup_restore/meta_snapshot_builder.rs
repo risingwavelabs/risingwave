@@ -19,11 +19,11 @@ use anyhow::anyhow;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
-use risingwave_pb::hummock::{HummockVersionDelta, HummockVersionStats};
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 

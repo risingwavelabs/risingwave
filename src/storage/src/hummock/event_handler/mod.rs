@@ -18,7 +18,6 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::PbHummockVersionDeltas;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -31,7 +30,7 @@ pub mod refiller;
 pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
 
@@ -44,7 +43,7 @@ pub struct BufferWriteRequest {
 
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
-    VersionDeltas(PbHummockVersionDeltas),
+    VersionDeltas(Vec<HummockVersionDelta>),
     PinnedVersion(HummockVersion),
 }
 

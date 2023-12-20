@@ -115,7 +115,7 @@ impl HummockManager {
             let mut tracked_object_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_object_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_object_ids.extend(delta.get_gc_object_ids());
+                tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
             }
             tracked_object_ids
         };

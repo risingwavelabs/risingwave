@@ -254,14 +254,7 @@ impl HummockTestEnv {
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
         self.meta_client
-            .commit_epoch_with_watermark(
-                epoch,
-                res.uncommitted_ssts,
-                res.table_watermarks
-                    .into_iter()
-                    .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
-                    .collect(),
-            )
+            .commit_epoch_with_watermark(epoch, res.uncommitted_ssts, res.table_watermarks)
             .await
             .unwrap();
 

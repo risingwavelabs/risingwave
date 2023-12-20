@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
@@ -22,9 +23,7 @@ use risingwave_meta_model_v2::{
     hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
     HummockVersionId, WorkerId,
 };
-use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionDelta,
-};
+use risingwave_pb::hummock::{CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;

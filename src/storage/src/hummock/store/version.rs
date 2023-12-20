@@ -28,8 +28,9 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, TableWatermarksIndex};
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
+use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
 use tracing::Instrument;
 

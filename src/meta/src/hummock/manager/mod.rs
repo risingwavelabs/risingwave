@@ -39,6 +39,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
     BranchedSstInfo, HummockLevelsExt,
 };
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
     HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
@@ -55,9 +56,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 };
 use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionDelta,
-    HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableWatermarks,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
+    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
+    TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -212,7 +213,6 @@ use risingwave_object_store::object::{build_remote_object_store, ObjectError, Ob
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -268,14 +268,14 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<u32, TableWatermarks>,
+    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<u32, TableWatermarks>,
+        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {
@@ -1780,7 +1780,7 @@ impl HummockManager {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = read_lock!(self, versioning).await;
         let version_deltas = versioning
             .hummock_version_deltas
@@ -1790,7 +1790,7 @@ impl HummockManager {
             .take(num_limit as _)
             .cloned()
             .collect();
-        Ok(HummockVersionDeltas { version_deltas })
+        Ok(version_deltas)
     }
 
     pub async fn init_metadata_for_version_replay(
@@ -2041,7 +2041,7 @@ impl HummockManager {
                         .last_key_value()
                         .unwrap()
                         .1
-                        .clone()],
+                        .to_protobuf()],
                 }),
             );
     }
@@ -3219,6 +3219,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 

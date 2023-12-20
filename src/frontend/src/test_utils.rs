@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -46,7 +46,7 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot, HummockVersionDelta,
+    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;

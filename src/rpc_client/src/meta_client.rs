@@ -36,7 +36,7 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -947,7 +947,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta),
+            version_delta: Some(version_delta.to_protobuf()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
@@ -961,7 +961,7 @@ impl MetaClient {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
             start_id,
             num_limit,
@@ -972,7 +972,11 @@ impl MetaClient {
             .list_version_deltas(req)
             .await?
             .version_deltas
-            .unwrap())
+            .unwrap()
+            .version_deltas
+            .iter()
+            .map(HummockVersionDelta::from_protobuf)
+            .collect())
     }
 
     pub async fn trigger_compaction_deterministic(

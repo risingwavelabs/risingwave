@@ -413,7 +413,7 @@ impl HummockEventHandler {
         let newly_pinned_version = match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version().clone();
-                for version_delta in &version_deltas.version_deltas {
+                for version_delta in &version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
                         sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);

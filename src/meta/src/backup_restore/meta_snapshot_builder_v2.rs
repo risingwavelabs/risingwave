@@ -20,9 +20,8 @@ use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_meta_model_v2 as model_v2;
-use risingwave_pb::hummock::HummockVersionDelta;
 use sea_orm::{EntityTrait, QueryOrder, TransactionTrait};
 
 use crate::controller::SqlMetaStore;

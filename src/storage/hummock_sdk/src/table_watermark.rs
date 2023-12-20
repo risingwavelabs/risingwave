@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
@@ -366,43 +367,40 @@ impl TableWatermarks {
 }
 
 pub fn merge_multiple_new_table_watermarks(
-    table_watermarks_list: impl IntoIterator<Item = HashMap<u32, PbTableWatermarks>>,
-) -> HashMap<u32, PbTableWatermarks> {
-    let mut ret: HashMap<u32, (bool, BTreeMap<u64, PbEpochNewWatermarks>)> = HashMap::new();
+    table_watermarks_list: impl IntoIterator<Item = HashMap<TableId, TableWatermarks>>,
+) -> HashMap<TableId, TableWatermarks> {
+    let mut ret: HashMap<TableId, (WatermarkDirection, BTreeMap<u64, Vec<VnodeWatermark>>)> =
+        HashMap::new();
     for table_watermarks in table_watermarks_list {
         for (table_id, new_table_watermarks) in table_watermarks {
             let epoch_watermarks = match ret.entry(table_id) {
                 Entry::Occupied(entry) => {
-                    let (is_ascending, epoch_watermarks) = entry.into_mut();
-                    assert_eq!(new_table_watermarks.is_ascending, *is_ascending);
+                    let (direction, epoch_watermarks) = entry.into_mut();
+                    assert_eq!(&new_table_watermarks.direction, direction);
                     epoch_watermarks
                 }
                 Entry::Vacant(entry) => {
                     let (_, epoch_watermarks) =
-                        entry.insert((new_table_watermarks.is_ascending, BTreeMap::new()));
+                        entry.insert((new_table_watermarks.direction, BTreeMap::new()));
                     epoch_watermarks
                 }
             };
-            for new_epoch_watermarks in new_table_watermarks.epoch_watermarks {
+            for (new_epoch, new_epoch_watermarks) in new_table_watermarks.watermarks {
                 epoch_watermarks
-                    .entry(new_epoch_watermarks.epoch)
-                    .or_insert_with(|| PbEpochNewWatermarks {
-                        watermarks: vec![],
-                        epoch: new_epoch_watermarks.epoch,
-                    })
-                    .watermarks
-                    .extend(new_epoch_watermarks.watermarks);
+                    .entry(new_epoch)
+                    .or_insert_with(Vec::new)
+                    .extend(new_epoch_watermarks);
             }
         }
     }
     ret.into_iter()
-        .map(|(table_id, (is_ascending, epoch_watermarks))| {
+        .map(|(table_id, (direction, epoch_watermarks))| {
             (
                 table_id,
-                PbTableWatermarks {
-                    is_ascending,
+                TableWatermarks {
+                    direction,
                     // ordered from earlier epoch to later epoch
-                    epoch_watermarks: epoch_watermarks.into_values().collect(),
+                    watermarks: epoch_watermarks.into_iter().collect(),
                 },
             )
         })
@@ -410,37 +408,25 @@ pub fn merge_multiple_new_table_watermarks(
 }
 
 impl TableWatermarks {
-    pub fn apply_new_table_watermarks(&mut self, newly_added_watermarks: &PbTableWatermarks) {
-        assert_eq!(
-            self.direction.is_ascending(),
-            newly_added_watermarks.is_ascending
-        );
+    pub fn apply_new_table_watermarks(&mut self, newly_added_watermarks: &TableWatermarks) {
+        assert_eq!(self.direction, newly_added_watermarks.direction);
         assert!(self.watermarks.iter().map(|(epoch, _)| epoch).is_sorted());
         assert!(newly_added_watermarks
-            .epoch_watermarks
+            .watermarks
             .iter()
-            .map(|w| w.epoch)
+            .map(|(epoch, _)| epoch)
             .is_sorted());
         // ensure that the newly added watermarks have a later epoch than the previous latest epoch.
-        if let Some((prev_last_epoch, _)) = self.watermarks.last() && let Some(new_first_epoch_watermarks) = newly_added_watermarks.epoch_watermarks.first() {
-            assert!(*prev_last_epoch < new_first_epoch_watermarks.epoch);
+        if let Some((prev_last_epoch, _)) = self.watermarks.last()
+            && let Some((new_first_epoch, _)) = newly_added_watermarks.watermarks.first() {
+            assert!(prev_last_epoch < new_first_epoch);
         }
-        self.watermarks
-            .extend(
-                newly_added_watermarks
-                    .epoch_watermarks
-                    .iter()
-                    .map(|epoch_new_watermarks| {
-                        (
-                            epoch_new_watermarks.epoch,
-                            epoch_new_watermarks
-                                .watermarks
-                                .iter()
-                                .map(VnodeWatermark::from_protobuf)
-                                .collect(),
-                        )
-                    }),
-            );
+        self.watermarks.extend(
+            newly_added_watermarks
+                .watermarks
+                .iter()
+                .map(|(epoch, new_watermarks)| (*epoch, new_watermarks.clone())),
+        );
     }
 
     pub fn clear_stale_epoch_watermark(&mut self, safe_epoch: u64) {
@@ -532,8 +518,6 @@ mod tests {
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-    use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 
     use crate::key::{
         is_empty_key_range, map_table_key_range, prefix_slice_with_vnode,
@@ -617,8 +601,7 @@ mod tests {
             direction,
         );
 
-        table_watermark_checkpoint
-            .apply_new_table_watermarks(&second_table_watermark.to_protobuf());
+        table_watermark_checkpoint.apply_new_table_watermarks(&second_table_watermark);
         assert_eq!(table_watermarks, table_watermark_checkpoint);
     }
 
@@ -771,29 +754,29 @@ mod tests {
 
     #[test]
     fn test_merge_multiple_new_table_watermarks() {
-        fn epoch_new_watermark(epoch: u64, bitmaps: Vec<&Bitmap>) -> PbEpochNewWatermarks {
-            PbEpochNewWatermarks {
-                watermarks: bitmaps
+        fn epoch_new_watermark(epoch: u64, bitmaps: Vec<&Bitmap>) -> (u64, Vec<VnodeWatermark>) {
+            (
+                epoch,
+                bitmaps
                     .into_iter()
-                    .map(|bitmap| PbVnodeWatermark {
-                        watermark: vec![1, 2, epoch as _],
-                        vnode_bitmap: Some(bitmap.to_protobuf()),
+                    .map(|bitmap| VnodeWatermark {
+                        watermark: Bytes::from(vec![1, 2, epoch as _]),
+                        vnode_bitmap: Arc::new(bitmap.clone()),
                     })
                     .collect(),
-                epoch: epoch as _,
-            }
+            )
         }
         fn build_table_watermark(
             vnodes: impl IntoIterator<Item = usize>,
             epochs: impl IntoIterator<Item = u64>,
-        ) -> PbTableWatermarks {
+        ) -> TableWatermarks {
             let bitmap = build_bitmap(vnodes);
-            PbTableWatermarks {
-                epoch_watermarks: epochs
+            TableWatermarks {
+                watermarks: epochs
                     .into_iter()
                     .map(|epoch: u64| epoch_new_watermark(epoch, vec![&bitmap]))
                     .collect(),
-                is_ascending: true,
+                direction: WatermarkDirection::Ascending,
             }
         }
         let table1_watermark1 = build_table_watermark(0..3, vec![1, 2, 4]);
@@ -801,27 +784,27 @@ mod tests {
         let table2_watermark = build_table_watermark(0..4, 1..3);
         let table3_watermark = build_table_watermark(0..4, 3..5);
         let mut first = HashMap::new();
-        first.insert(1, table1_watermark1);
-        first.insert(2, table2_watermark.clone());
+        first.insert(TableId::new(1), table1_watermark1);
+        first.insert(TableId::new(2), table2_watermark.clone());
         let mut second = HashMap::new();
-        second.insert(1, table1_watermark2);
-        second.insert(3, table3_watermark.clone());
+        second.insert(TableId::new(1), table1_watermark2);
+        second.insert(TableId::new(3), table3_watermark.clone());
         let result = merge_multiple_new_table_watermarks(vec![first, second]);
         let mut expected = HashMap::new();
         expected.insert(
-            1,
-            PbTableWatermarks {
-                epoch_watermarks: vec![
+            TableId::new(1),
+            TableWatermarks {
+                watermarks: vec![
                     epoch_new_watermark(1, vec![&build_bitmap(0..3), &build_bitmap(4..6)]),
                     epoch_new_watermark(2, vec![&build_bitmap(0..3), &build_bitmap(4..6)]),
                     epoch_new_watermark(4, vec![&build_bitmap(0..3)]),
                     epoch_new_watermark(5, vec![&build_bitmap(4..6)]),
                 ],
-                is_ascending: true,
+                direction: WatermarkDirection::Ascending,
             },
         );
-        expected.insert(2, table2_watermark);
-        expected.insert(3, table3_watermark);
+        expected.insert(TableId::new(2), table2_watermark);
+        expected.insert(TableId::new(3), table3_watermark);
         assert_eq!(result, expected);
     }
 

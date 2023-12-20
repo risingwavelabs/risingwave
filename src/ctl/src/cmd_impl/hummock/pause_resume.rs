@@ -67,10 +67,10 @@ pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
             .list_version_deltas(current_delta_id, delta_fetch_size, HummockEpoch::MAX)
             .await
             .unwrap();
-        if deltas.version_deltas.is_empty() {
+        if deltas.is_empty() {
             break;
         }
-        for delta in deltas.version_deltas {
+        for delta in deltas {
             if delta.prev_id != base_version.id {
                 eprintln!("missing delta log for version {}", base_version.id);
                 break;

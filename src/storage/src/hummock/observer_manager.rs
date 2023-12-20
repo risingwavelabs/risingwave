@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -72,7 +72,13 @@ impl ObserverState for HummockObserverNode {
                 let _ = self
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
-                        HummockVersionUpdate::VersionDeltas(hummock_version_deltas),
+                        HummockVersionUpdate::VersionDeltas(
+                            hummock_version_deltas
+                                .version_deltas
+                                .iter()
+                                .map(HummockVersionDelta::from_protobuf)
+                                .collect(),
+                        ),
                     ))
                     .inspect_err(|e| {
                         tracing::error!("unable to send version delta: {:?}", e);
