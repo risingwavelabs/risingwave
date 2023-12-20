@@ -20,7 +20,7 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-/// Monitor metrics for expressions.
+/// Monitor metrics for UDF.
 #[derive(Debug, Clone)]
 pub struct Metrics {
     /// Number of successful UDF calls.
@@ -31,36 +31,53 @@ pub struct Metrics {
     pub udf_input_chunk_rows: Histogram,
     /// The latency of UDF calls in seconds.
     pub udf_latency: Histogram,
+    /// Total number of input rows of UDF calls.
+    pub udf_input_rows: IntCounter,
+    /// Total number of input bytes of UDF calls.
+    pub udf_input_bytes: IntCounter,
 }
 
-pub static GLOBAL_EXPR_METRICS: LazyLock<Metrics> =
+/// Global UDF metrics.
+pub static GLOBAL_METRICS: LazyLock<Metrics> =
     LazyLock::new(|| Metrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl Metrics {
     fn new(registry: &Registry) -> Self {
         let udf_success_count = register_int_counter_with_registry!(
-            "expr_udf_success_count",
+            "udf_success_count",
             "Total number of successful UDF calls",
             registry
         )
         .unwrap();
         let udf_failure_count = register_int_counter_with_registry!(
-            "expr_udf_failure_count",
+            "udf_failure_count",
             "Total number of failed UDF calls",
             registry
         )
         .unwrap();
         let udf_input_chunk_rows = register_histogram_with_registry!(
-            "expr_udf_input_chunk_rows",
+            "udf_input_chunk_rows",
             "Input chunk rows of UDF calls",
             exponential_buckets(1.0, 2.0, 10).unwrap(), // 1 to 1024
             registry
         )
         .unwrap();
         let udf_latency = register_histogram_with_registry!(
-            "expr_udf_latency",
+            "udf_latency",
             "The latency(s) of UDF calls",
             exponential_buckets(0.000001, 2.0, 30).unwrap(), // 1us to 1000s
+            registry
+        )
+        .unwrap();
+        let udf_input_rows = register_int_counter_with_registry!(
+            "udf_input_rows",
+            "Total number of input rows of UDF calls",
+            registry
+        )
+        .unwrap();
+        let udf_input_bytes = register_int_counter_with_registry!(
+            "udf_input_bytes",
+            "Total number of input bytes of UDF calls",
             registry
         )
         .unwrap();
@@ -70,6 +87,8 @@ impl Metrics {
             udf_failure_count,
             udf_input_chunk_rows,
             udf_latency,
+            udf_input_rows,
+            udf_input_bytes,
         }
     }
 }

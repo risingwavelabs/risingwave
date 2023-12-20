@@ -3862,22 +3862,22 @@ def section_network_connection(outer_panels):
     ]
 
 
-def section_expression(outer_panels):
+def section_udf(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Expression",
+            "User Defined Function",
             [
                 panels.timeseries_count(
                     "UDF Count",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('expr_udf_success_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_success_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('expr_udf_failure_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                     ],
@@ -3887,7 +3887,7 @@ def section_expression(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('expr_udf_input_chunk_rows_sum')}[$__rate_interval])) / sum(irate({metric('expr_udf_input_chunk_rows_count')}[$__rate_interval]))",
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval]))",
                             "udf_input_chunk_rows_avg",
                         ),
                     ],
@@ -3897,20 +3897,40 @@ def section_expression(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"histogram_quantile(0.50, sum(irate({metric('expr_udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            f"histogram_quantile(0.50, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                             "udf_latency_p50 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"histogram_quantile(0.90, sum(irate({metric('expr_udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            f"histogram_quantile(0.90, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                             "udf_latency_p90 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('expr_udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('expr_udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('expr_udf_latency_count')}[$__rate_interval]))",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval]))",
                             "udf_latency_avg",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "UDF Throughput (rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_throughput_rows - {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "UDF Throughput (bytes)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / (1024*1024)",
+                            "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -4098,6 +4118,6 @@ dashboard = Dashboard(
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
-        *section_expression(panels),
+        *section_udf(panels),
     ],
 ).auto_panel_ids()

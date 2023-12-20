@@ -26,6 +26,7 @@ use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use thiserror_ext::AsReport;
 use tonic::transport::Channel;
 
+use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
 /// Client for external function service based on Arrow Flight.
@@ -101,6 +102,28 @@ impl ArrowFlightUdfClient {
 
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+        let metrics = &*GLOBAL_METRICS;
+        metrics
+            .udf_input_chunk_rows
+            .observe(input.num_rows() as f64);
+        metrics.udf_input_rows.inc_by(input.num_rows() as u64);
+        metrics
+            .udf_input_bytes
+            .inc_by(input.get_array_memory_size() as u64);
+        let timer = metrics.udf_latency.start_timer();
+
+        let result = self.call_internal(id, input).await;
+
+        timer.stop_and_record();
+        if result.is_ok() {
+            metrics.udf_success_count.inc();
+        } else {
+            metrics.udf_failure_count.inc();
+        }
+        result
+    }
+
+    async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
         // TODO: support no output
         let head = output_stream
