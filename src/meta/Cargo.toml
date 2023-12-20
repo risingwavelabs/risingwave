@@ -22,7 +22,9 @@ aws-config = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 base64-url = { version = "2.0.0" }
 bytes = { version = "1", features = ["serde"] }
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
+comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
 either = "1"
@@ -31,6 +33,7 @@ etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { workspace = true }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.12"

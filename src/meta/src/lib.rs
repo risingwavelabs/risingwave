@@ -32,6 +32,8 @@
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(type_name_of_val)]
+#![feature(stmt_expr_attributes)]
+#![feature(proc_macro_hygiene)]
 
 pub mod backup_restore;
 pub mod barrier;
