@@ -29,7 +29,6 @@ use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::anyhow_error;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{
     EncodingProperties, ParserConfig, ProtocolProperties, SpecificParserConfig,
@@ -150,9 +149,10 @@ impl ThroughputMetric {
     }
 
     pub fn get_throughput(&self) -> Vec<u64> {
+        #[allow(clippy::disallowed_methods)]
         self.chunk_size_list
             .iter()
-            .zip_eq_fast(self.chunk_size_list.iter().skip(1))
+            .zip(self.chunk_size_list.iter().skip(1))
             .map(|(current, next)| {
                 (next.0 - current.0) * 1000 / (next.1.duration_since(current.1).as_millis() as u64)
             })
