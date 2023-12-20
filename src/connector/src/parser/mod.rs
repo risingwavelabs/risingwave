@@ -50,6 +50,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::unified::AccessError;
+use crate::parser::util::extreact_timestamp_from_meta;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -340,10 +341,17 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(), // handled all match cases in internal match, unwrap is safe
                     ));
                 }
+                (_, &AdditionalColumnType::Timestamp) => {
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
+                            .unwrap(),
+                    ))
+                }
                 (
                     _,
-                    &AdditionalColumnType::Timestamp
-                    | &AdditionalColumnType::Partition
+                    &AdditionalColumnType::Partition
                     | &AdditionalColumnType::Filename
                     | &AdditionalColumnType::Offset
                     | &AdditionalColumnType::Header,

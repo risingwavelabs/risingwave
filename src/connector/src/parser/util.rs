@@ -20,9 +20,11 @@ use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::{Datum, Scalar};
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
+use crate::source::SourceMeta;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -142,4 +144,18 @@ pub(super) async fn read_schema_from_s3(url: &Url, config: &AwsAuthProps) -> Res
     let schema_bytes = body_bytes.into_bytes().to_vec();
     String::from_utf8(schema_bytes)
         .map_err(|e| RwError::from(InternalError(format!("Avro schema not valid utf8 {}", e))))
+}
+
+pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta
+            .timestamp
+            .map(|ts| {
+                risingwave_common::cast::i64_to_timestamptz(ts)
+                    .unwrap()
+                    .to_scalar_value()
+            })
+            .into(),
+        _ => None,
+    }
 }
