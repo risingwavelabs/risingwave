@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
-use futures_async_stream::for_await;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
@@ -615,7 +615,7 @@ impl GlobalBarrierManager {
 
         let mut node_actors = self.fragment_manager.all_node_actors(false).await;
 
-        let res = info.actor_map.iter().map(|(node_id, actors)| {
+        info.actor_map.iter().map(|(node_id, actors)| {
             let new_actors = node_actors.remove(node_id).unwrap_or_default();
             let node = info.node_map.get(node_id).unwrap();
             let actor_infos = actor_infos.clone();
@@ -639,12 +639,7 @@ impl GlobalBarrierManager {
 
                 Ok(()) as MetaResult<()>
             }
-        }).collect::<FuturesUnordered<_>>();
-
-        #[for_await]
-        for r in res {
-            r?;
-        }
+        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
 
         Ok(())
     }
@@ -656,8 +651,7 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        let res = info
-            .actor_map
+        info.actor_map
             .iter()
             .map(|(node_id, actors)| async move {
                 let actors = actors.clone();
@@ -671,14 +665,13 @@ impl GlobalBarrierManager {
                         request_id,
                         actor_id: actors,
                     })
-                    .await
-            })
-            .collect::<FuturesUnordered<_>>();
+                    .await?;
 
-        #[for_await]
-        for r in res {
-            r?;
-        }
+                Ok(()) as MetaResult<_>
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_collect::<()>()
+            .await?;
 
         Ok(())
     }

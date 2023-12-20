@@ -8884,7 +8884,6 @@ dependencies = [
  "fail",
  "function_name",
  "futures",
- "futures-async-stream",
  "hex",
  "hyper",
  "itertools 0.12.0",
