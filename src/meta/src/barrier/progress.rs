@@ -197,11 +197,7 @@ impl TrackingJob {
                         .mark_table_fragments_created(table_fragments.table_id())
                         .await?;
                 }
-                MetadataManager::V2(mgr) => {
-                    mgr.catalog_controller
-                        .finish_streaming_job(table_fragments.table_id().table_id as _)
-                        .await?;
-                }
+                MetadataManager::V2(_) => {}
             }
         }
         Ok(())

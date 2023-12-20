@@ -820,25 +820,37 @@ impl CommandContext {
                 init_split_assignment,
                 ..
             } => {
-                let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                    unimplemented!("implement post collect logic for v2");
-                };
-                let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
-                for (table_id, actors) in upstream_mview_actors {
-                    let downstream_actors = dispatchers
-                        .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(&k, v)| (k, v.clone()))
-                        .collect();
-                    dependent_table_actors.push((*table_id, downstream_actors));
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        let mut dependent_table_actors =
+                            Vec::with_capacity(upstream_mview_actors.len());
+                        for (table_id, actors) in upstream_mview_actors {
+                            let downstream_actors = dispatchers
+                                .iter()
+                                .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                                .map(|(&k, v)| (k, v.clone()))
+                                .collect();
+                            dependent_table_actors.push((*table_id, downstream_actors));
+                        }
+                        mgr.fragment_manager
+                            .post_create_table_fragments(
+                                &table_fragments.table_id(),
+                                dependent_table_actors,
+                                init_split_assignment.clone(),
+                            )
+                            .await?;
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .post_collect_table_fragments(
+                                &table_fragments.table_id(),
+                                table_fragments.actor_ids(),
+                                dispatchers.clone(),
+                                init_split_assignment,
+                            )
+                            .await?;
+                    }
                 }
-                mgr.fragment_manager
-                    .post_create_table_fragments(
-                        &table_fragments.table_id(),
-                        dependent_table_actors,
-                        init_split_assignment.clone(),
-                    )
-                    .await?;
 
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();

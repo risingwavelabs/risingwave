@@ -14,8 +14,11 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::{ObjectDependency, Table};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, ObjectDependency, Table};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
     table, ActorId, DatabaseId, JobStatus, ObjectId, SchemaId, UserId,
@@ -23,15 +26,23 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
+use risingwave_pb::meta::subscribe_response::Operation as NotificationOperation;
+use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
+use risingwave_pb::stream_plan::Dispatcher;
+use sea_orm::sea_query::SimpleExpr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, TransactionTrait,
+    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    QueryFilter, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::controller::utils::{check_relation_name_duplicate, ensure_object_id, ensure_user_id};
+use crate::controller::utils::{
+    check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_mappings,
+};
 use crate::manager::StreamingJob;
 use crate::model::StreamEnvironment;
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 impl CatalogController {
@@ -282,6 +293,64 @@ impl CatalogController {
             .await?;
         }
         txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn post_collect_table_fragments(
+        &self,
+        table_id: &TableId,
+        actor_ids: Vec<crate::model::ActorId>,
+        new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<Dispatcher>>,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        Actor::update_many()
+            .col_expr(
+                actor::Column::Status,
+                SimpleExpr::from(ActorStatus::Running.into_value()),
+            )
+            .filter(
+                actor::Column::ActorId
+                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
+            )
+            .exec(&txn)
+            .await?;
+
+        for (_, splits) in split_assignment {
+            for (actor_id, splits) in splits {
+                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+                let connector_splits = PbConnectorSplits { splits };
+                actor::ActiveModel {
+                    actor_id: Set(*actor_id as _),
+                    splits: Set(Some(connector_splits.into())),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+            }
+        }
+
+        let mut actor_dispatchers = vec![];
+        for (actor_id, dispatchers) in new_actor_dispatchers {
+            for dispatcher in dispatchers {
+                actor_dispatchers.push(
+                    actor_dispatcher::Model::from((actor_id as u32, dispatcher))
+                        .into_active_model(),
+                );
+            }
+        }
+        ActorDispatcher::insert_many(actor_dispatchers)
+            .exec(&txn)
+            .await?;
+
+        let fragment_mapping = get_fragment_mappings(&txn, table_id.table_id as _).await?;
+        txn.commit().await?;
+
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
 
         Ok(())
     }

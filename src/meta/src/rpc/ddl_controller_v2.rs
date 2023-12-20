@@ -20,10 +20,10 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
 use crate::controller::catalog::CatalogController;
-use crate::manager::{MetadataManager, MetadataManagerV2, NotificationVersion, StreamingJob};
-use crate::model::{MetadataModel, StreamEnvironment, TableFragments};
+use crate::manager::{MetadataManager, NotificationVersion, StreamingJob};
+use crate::model::{MetadataModel, StreamEnvironment};
 use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController};
-use crate::stream::{validate_sink, CreateStreamingJobContext, StreamFragmentGraph};
+use crate::stream::{validate_sink, StreamFragmentGraph};
 use crate::MetaResult;
 
 impl DdlController {
@@ -91,8 +91,9 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = stream_job.id(), "building stream job");
-        let (ctx, table_fragments) =
-            self.build_stream_job_v2(mgr, env, &stream_job, fragment_graph)?;
+        let (ctx, table_fragments) = self
+            .build_stream_job(env, &stream_job, fragment_graph)
+            .await?;
 
         match &stream_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
@@ -139,15 +140,5 @@ impl DdlController {
         tracing::debug!(id = stream_job.id(), "finished stream job");
 
         Ok(version)
-    }
-
-    pub(crate) fn build_stream_job_v2(
-        &self,
-        _mgr: &MetadataManagerV2,
-        _env: StreamEnvironment,
-        _stream_job: &StreamingJob,
-        _fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
-        todo!()
     }
 }

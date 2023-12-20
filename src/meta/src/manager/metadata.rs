@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::PbStreamActor;
 
 use crate::controller::catalog::CatalogControllerRef;
@@ -160,6 +162,36 @@ impl MetadataManager {
                 .await),
             MetadataManager::V2(mgr) => {
                 mgr.cluster_controller.list_active_streaming_workers().await
+            }
+        }
+    }
+
+    pub async fn get_upstream_root_fragments(
+        &self,
+        upstream_table_ids: &HashSet<TableId>,
+        table_job_type: Option<TableJobType>,
+    ) -> MetaResult<HashMap<TableId, Fragment>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_upstream_root_fragments(upstream_table_ids, table_job_type)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                let upstream_root_fragments = mgr
+                    .catalog_controller
+                    .get_upstream_root_fragments(
+                        upstream_table_ids
+                            .iter()
+                            .map(|id| id.table_id as _)
+                            .collect(),
+                        table_job_type,
+                    )
+                    .await?;
+                Ok(upstream_root_fragments
+                    .into_iter()
+                    .map(|(id, fragment)| ((id as u32).into(), fragment))
+                    .collect())
             }
         }
     }

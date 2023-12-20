@@ -665,7 +665,7 @@ impl DdlController {
         let result = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
-                .build_stream_job(mgr, env, &stream_job, fragment_graph)
+                .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
 
             // Add table fragments to meta store with state: `State::Initial`.
@@ -916,7 +916,6 @@ impl DdlController {
     /// `build_stream_job` builds a streaming job and returns the context and table fragments.
     pub(crate) async fn build_stream_job(
         &self,
-        mgr: &MetadataManagerV1,
         env: StreamEnvironment,
         stream_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
@@ -928,8 +927,8 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        let upstream_root_fragments = mgr
-            .fragment_manager
+        let upstream_root_fragments = self
+            .metadata_manager
             .get_upstream_root_fragments(
                 fragment_graph.dependent_table_ids(),
                 stream_job.table_job_type(),
@@ -953,7 +952,7 @@ impl DdlController {
         )?;
 
         // 2. Build the actor graph.
-        let cluster_info = mgr.cluster_manager.get_streaming_cluster_info().await;
+        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
         let default_parallelism =
             self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
 
@@ -997,9 +996,11 @@ impl DdlController {
             .chain(stream_job.table().cloned())
             .collect_vec();
 
-        mgr.catalog_manager
-            .mark_creating_tables(&creating_tables)
-            .await;
+        if let MetadataManager::V1(mgr) = &self.metadata_manager {
+            mgr.catalog_manager
+                .mark_creating_tables(&creating_tables)
+                .await;
+        }
 
         Ok((ctx, table_fragments))
     }

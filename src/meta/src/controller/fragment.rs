@@ -29,7 +29,7 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Operation as NotificationOperation, Operation,
+    Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
@@ -101,7 +101,7 @@ impl CatalogController {
 
         // update serving vnode mappings.
         match operation {
-            Operation::Add | Operation::Update => {
+            NotificationOperation::Add | NotificationOperation::Update => {
                 self.env
                     .notification_manager()
                     .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
@@ -109,7 +109,7 @@ impl CatalogController {
                     ))
                     .await;
             }
-            Operation::Delete => {
+            NotificationOperation::Delete => {
                 self.env
                     .notification_manager()
                     .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
