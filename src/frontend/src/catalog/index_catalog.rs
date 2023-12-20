@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -188,6 +189,24 @@ impl IndexCatalog {
         }
     }
 
+    pub fn get_column_def(&self, column_no: usize) -> String {
+        if let Some(col) = self.index_table.columns.get(column_no) {
+            if col.is_hidden {
+                return String::new();
+            }
+        } else {
+            return String::new();
+        }
+        let col = format!("{:?}", self.index_item[column_no]);
+        let column_names = self
+            .primary_table
+            .columns
+            .iter()
+            .map(|x| x.name())
+            .collect_vec();
+        replace_with_column_names(&column_names, &col)
+    }
+
     pub fn display(&self) -> IndexDisplay {
         let index_table = self.index_table.clone();
         let index_columns_with_ordering = index_table
@@ -238,5 +257,51 @@ pub struct IndexDisplay {
 impl OwnedByUserCatalog for IndexCatalog {
     fn owner(&self) -> UserId {
         self.index_table.owner
+    }
+}
+
+fn replace_with_column_names(v: &[&str], s: &str) -> String {
+    let re = Regex::new(r"\$(\d+)").unwrap();
+    let mut result = String::new();
+
+    let mut last_end = 0;
+    for cap in re.captures_iter(s) {
+        let start = cap.get(0).unwrap().start();
+        let end = cap.get(0).unwrap().end();
+        let index: usize = cap[1].parse().unwrap();
+
+        result.push_str(&s[last_end..start]);
+
+        match v.get(index) {
+            Some(value) => result.push_str(value),
+            None => result.push_str(&s[start..end]),
+        }
+
+        last_end = end;
+    }
+
+    result.push_str(&s[last_end..]);
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_replace_with_column_names() {
+        {
+            let v = vec!["a", "b", "c"];
+            let s = "select * from $0, $4 where $1 = $2";
+            let result = replace_with_column_names(&v, s);
+            assert_eq!(result, "select * from a, $4 where b = c");
+        }
+        {
+            let v = vec!["a", "b", "c"];
+            let s = "$0";
+            let result = replace_with_column_names(&v, s);
+            assert_eq!(result, "a");
+        }
     }
 }

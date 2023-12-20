@@ -22,7 +22,17 @@ use crate::catalog::CatalogReader;
 
 #[function("pg_get_indexdef(int4) -> varchar")]
 fn pg_get_indexdef(oid: i32, writer: &mut impl Write) -> Result<()> {
-    pg_get_indexdef_impl_captured(oid, writer)
+    pg_get_indexdef_impl_captured(oid, 0, writer)
+}
+
+#[function("pg_get_indexdef(int4, int4, boolean) -> varchar")]
+fn pg_get_indexdef_col(
+    oid: i32,
+    column_no: i32,
+    _pretty_bool: bool,
+    writer: &mut impl Write,
+) -> Result<()> {
+    pg_get_indexdef_impl_captured(oid, column_no, writer)
 }
 
 #[capture_context(CATALOG_READER, DB_NAME)]
@@ -30,20 +40,29 @@ fn pg_get_indexdef_impl(
     catalog: &CatalogReader,
     db_name: &str,
     oid: i32,
+    column_no: i32,
     writer: &mut impl Write,
 ) -> Result<()> {
-    write!(
-        writer,
-        "{}",
+    let ans = if column_no == 0 {
         catalog
             .read_guard()
-            .get_table_by_index_id(db_name, oid as u32)
+            .get_index_by_id(db_name, oid as u32)
             .map_err(|e| ExprError::InvalidParam {
                 name: "oid",
                 reason: e.to_report_string().into(),
             })?
+            .index_table
             .create_sql()
-    )
-    .unwrap();
+    } else {
+        catalog
+            .read_guard()
+            .get_index_by_id(db_name, oid as u32)
+            .map_err(|e| ExprError::InvalidParam {
+                name: "oid",
+                reason: e.to_report_string().into(),
+            })?
+            .get_column_def(column_no as usize - 1)
+    };
+    write!(writer, "{}", ans).unwrap();
     Ok(())
 }

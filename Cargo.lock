@@ -8707,6 +8707,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "rand",
+ "regex",
  "risingwave_batch",
  "risingwave_common",
  "risingwave_common_service",
