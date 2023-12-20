@@ -165,7 +165,6 @@ fn interval_to_char(
     writer: &mut impl Write,
 ) -> Result<()> {
     for iter in pattern.borrow_dependent() {
-        println!("iter: {:?}", iter);
         format_inner(writer, interval, iter)?;
     }
     Ok(())
