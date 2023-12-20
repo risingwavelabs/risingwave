@@ -16,6 +16,7 @@ use jsonbb::ValueRef;
 use risingwave_common::types::{JsonbRef, JsonbVal};
 use risingwave_expr::{function, ExprError, Result};
 use sql_json_path::{EvalError, JsonPath, ParseError};
+use thiserror_ext::AsReport;
 
 #[function(
     "jsonb_path_exists(jsonb, varchar) -> boolean",
@@ -313,12 +314,12 @@ fn jsonb_path_query_first4(
 }
 
 fn parse_error(e: ParseError) -> ExprError {
-    ExprError::Parse(e.to_string().into())
+    ExprError::Parse(e.to_report_string().into())
 }
 
 fn eval_error(e: EvalError) -> ExprError {
     ExprError::InvalidParam {
         name: "jsonpath",
-        reason: e.to_string().into(),
+        reason: e.to_report_string().into(),
     }
 }

@@ -63,7 +63,6 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
-
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -216,7 +215,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
+        storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,
@@ -435,13 +434,10 @@ impl NormalState {
             .get(
                 TableKey(Bytes::copy_from_slice(key)),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -462,13 +458,12 @@ impl NormalState {
                     Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -494,13 +489,12 @@ impl CheckState for NormalState {
                         Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
                     ),
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await

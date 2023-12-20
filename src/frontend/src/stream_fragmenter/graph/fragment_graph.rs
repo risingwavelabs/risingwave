@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, FragmentTypeFlag, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
+use thiserror_ext::AsReport;
 
 pub type LocalFragmentId = u32;
 
@@ -156,7 +157,9 @@ impl StreamFragmentGraph {
             .map_err(|e| {
                 format!(
                     "edge between {} and {} already exists: {}",
-                    upstream_id, downstream_id, e
+                    upstream_id,
+                    downstream_id,
+                    e.to_report_string()
                 )
             })
     }

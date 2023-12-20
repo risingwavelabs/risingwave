@@ -609,7 +609,7 @@ profile:
       - use: meta-node
       - use: opendal
         engine: fs
-        bucket: ""
+        bucket: "/tmp/rw_ci"
       - use: compute-node
         port: 5687
         exporter-port: 1222
