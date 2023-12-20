@@ -882,6 +882,7 @@ mod tests {
         // This test shows the signature of all native methods
         let expected = expect_test::expect![[r#"
             [
+                tracingSlf4jEvent                        (Ljava/lang/String;ILjava/lang/String;)V,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,
