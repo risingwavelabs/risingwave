@@ -16,9 +16,8 @@ use std::error::Error;
 
 use bytes::BytesMut;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
-use risingwave_common::types::JsonbRef;
 
-use crate::types::ScalarRefImpl;
+use crate::types::{JsonbRef, ScalarRefImpl};
 
 impl ToSql for ScalarRefImpl<'_> {
     to_sql_checked!();
