@@ -1,3 +1,19 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::borrow::Cow;
+
 use jni::objects::JString;
 use jni::sys::jint;
 use tracing::Level;
@@ -14,19 +30,19 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
     let Ok(class_name) = env.get_string(&class_name) else {
         return;
     };
-    let class_name: String = class_name.into();
+    let class_name: Cow<'_, str> = (&class_name).into();
 
     let Ok(message) = env.get_string(&message) else {
         return;
     };
-    let message: String = message.into();
+    let message: Cow<'_, str> = (&message).into();
 
     macro_rules! event {
         ($lvl:expr) => {
             tracing::event!(
                 target: "risingwave_connector_node",
                 $lvl,
-                class = class_name,
+                class = class_name.as_ref(),
                 "{message}",
             )
         };
