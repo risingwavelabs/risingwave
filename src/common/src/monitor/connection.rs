@@ -27,19 +27,17 @@ use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
 use hyper::service::Service;
 use pin_project_lite::pin_project;
-use prometheus::Registry;
+use prometheus::{
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
+    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tracing::{info, warn};
 
-use crate::metrics::{
-    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
-    LabelGuardedIntGaugeVec,
-};
+use crate::metrics::LabelGuardedIntCounterVec;
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{
-    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
-};
+use crate::register_guarded_int_counter_vec_with_registry;
 
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
@@ -276,15 +274,15 @@ where
 
 #[derive(Clone)]
 pub struct ConnectionMetrics {
-    connection_count: LabelGuardedIntGaugeVec<2>,
-    connection_create_rate: LabelGuardedIntCounterVec<2>,
-    connection_err_rate: LabelGuardedIntCounterVec<2>,
+    connection_count: IntGaugeVec,
+    connection_create_rate: IntCounterVec,
+    connection_err_rate: IntCounterVec,
 
-    read_rate: LabelGuardedIntCounterVec<2>,
-    reader_count: LabelGuardedIntGaugeVec<2>,
+    read_rate: IntCounterVec,
+    reader_count: IntGaugeVec,
 
-    write_rate: LabelGuardedIntCounterVec<2>,
-    writer_count: LabelGuardedIntGaugeVec<2>,
+    write_rate: IntCounterVec,
+    writer_count: IntGaugeVec,
 
     io_err_rate: LabelGuardedIntCounterVec<4>,
 }
@@ -295,7 +293,7 @@ pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
 impl ConnectionMetrics {
     pub fn new(registry: &Registry) -> Self {
         let labels = ["connection_type", "uri"];
-        let connection_count = register_guarded_int_gauge_vec_with_registry!(
+        let connection_count = register_int_gauge_vec_with_registry!(
             "connection_count",
             "The number of current existing connection",
             &labels,
@@ -303,7 +301,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let connection_create_rate = register_guarded_int_counter_vec_with_registry!(
+        let connection_create_rate = register_int_counter_vec_with_registry!(
             "connection_create_rate",
             "Rate on creating new connection",
             &labels,
@@ -311,7 +309,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let connection_err_rate = register_guarded_int_counter_vec_with_registry!(
+        let connection_err_rate = register_int_counter_vec_with_registry!(
             "connection_err_rate",
             "Error rate on creating new connection",
             &labels,
@@ -319,7 +317,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let read_rate = register_guarded_int_counter_vec_with_registry!(
+        let read_rate = register_int_counter_vec_with_registry!(
             "connection_read_rate",
             "Read rate of a connection",
             &labels,
@@ -327,7 +325,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let reader_count = register_guarded_int_gauge_vec_with_registry!(
+        let reader_count = register_int_gauge_vec_with_registry!(
             "connection_reader_count",
             "The number of current existing reader",
             &labels,
@@ -335,7 +333,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let write_rate = register_guarded_int_counter_vec_with_registry!(
+        let write_rate = register_int_counter_vec_with_registry!(
             "connection_write_rate",
             "Write rate of a connection",
             &labels,
@@ -343,7 +341,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let writer_count = register_guarded_int_gauge_vec_with_registry!(
+        let writer_count = register_int_gauge_vec_with_registry!(
             "connection_writer_count",
             "The number of current existing writer",
             &labels,
@@ -566,27 +564,27 @@ pub struct MonitorAsyncReadWriteImpl {
     connection_type: String,
 
     unreported_read_rate: u64,
-    read_rate: LabelGuardedIntCounter<2>,
-    reader_count_guard: LabelGuardedIntGauge<2>,
+    read_rate: IntCounter,
+    reader_count_guard: IntGauge,
     is_eof: bool,
 
     unreported_write_rate: u64,
-    write_rate: LabelGuardedIntCounter<2>,
-    writer_count_guard: LabelGuardedIntGauge<2>,
+    write_rate: IntCounter,
+    writer_count_guard: IntGauge,
     is_shutdown: bool,
 
-    connection_count_guard: LabelGuardedIntGauge<2>,
+    connection_count_guard: IntGauge,
 }
 
 impl MonitorAsyncReadWriteImpl {
     pub fn new(
         endpoint: String,
         connection_type: String,
-        read_rate: LabelGuardedIntCounter<2>,
-        reader_count: LabelGuardedIntGauge<2>,
-        write_rate: LabelGuardedIntCounter<2>,
-        writer_count: LabelGuardedIntGauge<2>,
-        connection_count: LabelGuardedIntGauge<2>,
+        read_rate: IntCounter,
+        reader_count: IntGauge,
+        write_rate: IntCounter,
+        writer_count: IntGauge,
+        connection_count: IntGauge,
     ) -> Self {
         reader_count.inc();
         writer_count.inc();
@@ -644,9 +642,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "read",
@@ -673,9 +673,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "write",

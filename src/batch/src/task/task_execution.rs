@@ -27,10 +27,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_expr::captured_execution_context_scope;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::CapturedExecutionContext;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use risingwave_pb::PbFieldNotFound;
@@ -428,7 +428,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
-        captured_execution_context: CapturedExecutionContext,
+        expr_context: ExprContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -437,8 +437,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = captured_execution_context_scope!(
-            captured_execution_context.clone(),
+        let exec = expr_context_scope(
+            expr_context.clone(),
             ExecutorBuilder::new(
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
@@ -446,7 +446,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 self.epoch.clone(),
                 self.shutdown_rx.clone(),
             )
-            .build()
+            .build(),
         )
         .await?;
 
@@ -479,9 +479,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                captured_execution_context_scope!(
-                    captured_execution_context,
-                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span)
+                expr_context_scope(
+                    expr_context,
+                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span),
                 )
                 .await;
             };
@@ -494,31 +494,23 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &batch_metrics.task_labels();
-                let task_metrics = batch_metrics.get_task_metrics();
-                task_metrics
+                batch_metrics
                     .task_first_poll_delay
-                    .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_fast_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_idle_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_scheduled_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
-                task_metrics
+                batch_metrics
                     .task_slow_poll_duration
-                    .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
                 .rw_catch_unwind()

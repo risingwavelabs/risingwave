@@ -22,7 +22,7 @@ use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -35,7 +35,7 @@ use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, SyncedData, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -595,6 +595,7 @@ impl HummockEventHandler {
                 let pinned_version = self.pinned_version.load();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
+                        table_id,
                         (**pinned_version).clone(),
                         is_replicated,
                     ),
@@ -602,10 +603,9 @@ impl HummockEventHandler {
 
                 let instance_id = self.generate_instance_id();
 
-                info_in_release!(
+                debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
 
                 {
@@ -639,10 +639,9 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
-                info_in_release!(
+                debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
@@ -682,21 +681,22 @@ fn send_sync_result(
     });
 }
 
-fn to_sync_result(
-    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
-) -> HummockResult<SyncResult> {
-    match staging_sstable_infos {
-        Ok(staging_sstable_infos) => {
-            let sync_size = staging_sstable_infos
+fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResult> {
+    match result {
+        Ok(sync_data) => {
+            let sync_size = sync_data
+                .staging_ssts
                 .iter()
                 .map(StagingSstableInfo::imm_size)
                 .sum();
             Ok(SyncResult {
                 sync_size,
-                uncommitted_ssts: staging_sstable_infos
+                uncommitted_ssts: sync_data
+                    .staging_ssts
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
+                table_watermarks: sync_data.table_watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

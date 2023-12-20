@@ -66,6 +66,26 @@ ClickHouseConfig:
   - name: r#type
     field_type: String
     required: true
+DeltaLakeConfig:
+  fields:
+  - name: s3.access.key
+    field_type: String
+    required: false
+  - name: s3.secret.key
+    field_type: String
+    required: false
+  - name: location
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: false
+  - name: s3.endpoint
+    field_type: String
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 DorisConfig:
   fields:
   - name: doris.url
@@ -149,6 +169,9 @@ KafkaConfig:
   - name: properties.security.protocol
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
     required: false
   - name: properties.ssl.ca.location
     field_type: String

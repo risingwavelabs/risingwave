@@ -154,6 +154,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     // TODO: use a new type for bind error
+    // TODO(error-handling): should prefer use error types than strings.
     #[error("Bind error: {0}")]
     BindError(String),
     // TODO: only keep this one

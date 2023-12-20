@@ -35,6 +35,7 @@ pub const RW_META_SNAPSHOT: BuiltinTable = BuiltinTable {
         (DataType::Int64, "max_committed_epoch"),
         // human-readable timestamp of max_committed_epoch
         (DataType::Timestamp, "max_committed_epoch_ts"),
+        (DataType::Varchar, "remarks"),
     ],
     pk: &[],
 };
@@ -66,6 +67,7 @@ impl SysCatalogReaderImpl {
                     try_get_date_time(s.safe_epoch),
                     Some(ScalarImpl::Int64(s.max_committed_epoch as i64)),
                     try_get_date_time(s.max_committed_epoch),
+                    s.remarks.map(|r| ScalarImpl::Utf8(r.into())),
                 ])
             })
             .collect_vec();

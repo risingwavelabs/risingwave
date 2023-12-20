@@ -142,6 +142,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
                     vars.buffer_changed = true;
+                    this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     if vars.buffer_changed {
