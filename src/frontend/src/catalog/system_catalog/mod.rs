@@ -333,7 +333,6 @@ macro_rules! prepare_sys_catalog {
         paste::paste! {
             $(
                 #[ctor::ctor]
-                #[allow(non_snake_case)]
                 unsafe fn [<register_${index()}>]() {
                     _register((${index()} + 1) as u32, $builtin_catalog);
                 }

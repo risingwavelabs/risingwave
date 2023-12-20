@@ -49,6 +49,12 @@ pub async fn barrier_align(
 ) {
     let actor_id = actor_id.to_string();
     let fragment_id = fragment_id.to_string();
+    let left_join_barrier_align_duration = metrics
+        .join_barrier_align_duration
+        .with_label_values(&[&actor_id, &fragment_id, "left"]);
+    let right_join_barrier_align_duration = metrics
+        .join_barrier_align_duration
+        .with_label_values(&[&actor_id, &fragment_id, "right"]);
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -107,9 +113,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, &fragment_id, "right"])
+                            right_join_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -133,9 +137,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, &fragment_id, "left"])
+                            left_join_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }

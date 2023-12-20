@@ -12,22 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge};
-use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
-use crate::optimizer::plan_visitor::PlanVisitor;
-
-pub struct HasMaxOneRowApply();
-
-impl PlanVisitor for HasMaxOneRowApply {
-    type Result = bool;
-
-    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
-
-    fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|a, b| a | b)
-    }
-
-    fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
-        plan.max_one_row() | self.visit(plan.left()) | self.visit(plan.right())
-    }
-}
+pub mod monitored_base_file_writer;
+pub mod monitored_partition_writer;
+pub mod monitored_position_delete_writer;
+pub mod monitored_write_writer;

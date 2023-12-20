@@ -18,6 +18,7 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod encoder;
@@ -39,6 +40,7 @@ pub mod writer;
 use std::collections::HashMap;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -84,6 +86,7 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { DeltaLakeRust, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::table::TableSink }
@@ -236,8 +239,11 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
-    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_write_latency: LabelGuardedHistogram<2>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
 }
 
 impl SinkMetrics {
@@ -250,8 +256,11 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_file_appender_write_qps: LabelGuardedIntCounter::test_int_counter(),
-            iceberg_file_appender_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
+            iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_position_delete_cache_num: LabelGuardedIntGauge::test_int_gauge(),
+            iceberg_partition_num: LabelGuardedIntGauge::test_int_gauge(),
         }
     }
 }
@@ -449,6 +458,12 @@ pub enum SinkError {
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Pulsar error: {0}")]
@@ -486,6 +501,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow_error!("{}", value))
     }
 }
 

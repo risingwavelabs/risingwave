@@ -45,7 +45,11 @@ pub struct JsonAccessBuilder {
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
-        self.value = Some(payload);
+        if payload.is_empty() {
+            self.value = Some("{}".into());
+        } else {
+            self.value = Some(payload);
+        }
         let value = simd_json::to_borrowed_value(
             &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
         )
@@ -141,12 +145,11 @@ impl JsonParser {
 
 pub async fn schema_to_columns(
     schema_location: &str,
-    use_schema_registry: bool,
+    schema_registry_auth: Option<SchemaRegistryAuth>,
     props: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
     let url = handle_sr_list(schema_location)?;
-    let schema_content = if use_schema_registry {
-        let schema_registry_auth = SchemaRegistryAuth::from(props);
+    let schema_content = if let Some(schema_registry_auth) = schema_registry_auth {
         let client = Client::new(url, &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
         let resolver = ConfluentSchemaResolver::new(client);
@@ -206,6 +209,7 @@ mod tests {
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use risingwave_pb::plan_common::AdditionalColumnType;
 
     use super::JsonParser;
     use crate::parser::upsert_parser::UpsertParser;
@@ -213,6 +217,7 @@ mod tests {
         EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
+    use crate::source::SourceColumnType;
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![
@@ -574,9 +579,19 @@ mod tests {
             (r#"{"a":2}"#, r#""#),
         ]
         .to_vec();
+        let key_column_desc = SourceColumnDesc {
+            name: "rw_key".into(),
+            data_type: DataType::Bytea,
+            column_id: 2.into(),
+            fields: vec![],
+            column_type: SourceColumnType::Normal,
+            is_pk: true,
+            additional_column_type: AdditionalColumnType::Key,
+        };
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
+            key_column_desc,
         ];
         let props = SpecificParserConfig {
             key_encoding_config: None,
@@ -590,7 +605,7 @@ mod tests {
             .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in items {
-            let test = parser
+            parser
                 .parse_inner(
                     Some(item.0.as_bytes().to_vec()),
                     if !item.1.is_empty() {
@@ -600,13 +615,21 @@ mod tests {
                     },
                     builder.row_writer(),
                 )
-                .await;
-            println!("{:?}", test);
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();
-        let mut rows = chunk.rows();
 
+        // expected chunk
+        // +---+---+---+------------------+
+        // | + | 1 | 2 | \x7b2261223a317d |
+        // | + | 1 | 3 | \x7b2261223a317d |
+        // | + | 2 | 2 | \x7b2261223a327d |
+        // | - |   |   | \x7b2261223a327d |
+        // +---+---+---+------------------+
+
+        let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
@@ -635,10 +658,7 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Delete);
-            assert_eq!(
-                row.datum_at(0).to_owned_datum(),
-                (Some(ScalarImpl::Int32(2)))
-            );
+            assert_eq!(row.datum_at(0).to_owned_datum(), (None));
         }
     }
 }
