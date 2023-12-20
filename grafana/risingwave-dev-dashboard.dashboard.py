@@ -3869,7 +3869,7 @@ def section_udf(outer_panels):
             "User Defined Function",
             [
                 panels.timeseries_count(
-                    "UDF Count",
+                    "UDF Calls Count",
                     "",
                     [
                         panels.target(
