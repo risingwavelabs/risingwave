@@ -22,6 +22,9 @@ select * from person_rw order by id;
 1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
 1003 张三 kedmrpz@xiauh.com 5536 1959 5460 2096 北京
 1004 李四 egpemle@lrhcg.com 0052 8113 1582 4430 上海
+1100 noris ypl@qbxfg.com 1864 2539 enne
+1101 white myc@xpmpe.com 8157 6974 se
+1102 spencer wip@dkaap.com 9481 6270 angeles
 
 
 query ITTTTT

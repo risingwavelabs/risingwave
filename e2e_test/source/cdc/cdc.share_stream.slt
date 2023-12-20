@@ -213,9 +213,11 @@ SELECT * from person_new_cnt
 6
 
 query ITTTT
-SELECT * from person_new order by id limit 3
+SELECT * from person_new order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
 1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
 1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
-
+1100 noris ypl@qbxfg.com 1864 2539 enne
+1101 white myc@xpmpe.com 8157 6974 se
+1102 spencer wip@dkaap.com 9481 6270 angeles
