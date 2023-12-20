@@ -304,11 +304,12 @@ pub fn start_compactor(
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let pull_task_ack = Arc::new(AtomicBool::new(true));
+    const MAX_PULL_TASK_COUNT: u32 = 4;
     let max_pull_task_count = std::cmp::min(
         compactor_context
             .max_task_parallelism
             .load(Ordering::SeqCst),
-        4,
+        MAX_PULL_TASK_COUNT,
     );
 
     assert_ge!(
