@@ -153,6 +153,7 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {
     LogicalApply,
+    LogicalMaxOneRow,
     LogicalOverWindow,
     LogicalScan,
     LogicalSource,

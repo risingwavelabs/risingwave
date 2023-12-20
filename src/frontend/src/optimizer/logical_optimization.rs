@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::error::Result;
 
 use super::plan_node::RewriteExprsRecursive;
+use super::plan_visitor::has_logical_max_one_row;
 use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
@@ -550,6 +552,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
+        if has_logical_max_one_row(plan.clone()) {
+            // `MaxOneRow` is currently only used for the runtime check of
+            // scalar subqueries, while it's not supported in streaming mode, so
+            // we raise a precise error here.
+            bail!("Scalar subquery might produce more than one row.");
+        }
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);

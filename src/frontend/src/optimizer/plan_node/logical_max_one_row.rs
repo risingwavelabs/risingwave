@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::bail;
 use risingwave_common::error::Result;
 
 use super::generic::DistillUnit;
@@ -107,10 +106,8 @@ impl ToBatch for LogicalMaxOneRow {
 
 impl ToStream for LogicalMaxOneRow {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        // `MaxOneRow` is currently only used for the runtime check of
-        // scalar subqueries, while it's not supported in streaming mode, so
-        // we raise a precise error here.
-        bail!("Scalar subquery might produce more than one row.");
+        // Check `LogicalOptimizer::gen_optimized_logical_plan_for_stream`.
+        unreachable!("should already bail out after subquery unnesting")
     }
 
     fn logical_rewrite_for_stream(
