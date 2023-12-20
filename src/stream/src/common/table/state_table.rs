@@ -1582,7 +1582,7 @@ mod tests {
             vec![Op::Insert],
             DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
         );
-        let i2o_mapping = ColIndexMapping::new(vec![Some(2), None, Some(0)], 2);
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
         let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
         check(
             filled_chunk,
