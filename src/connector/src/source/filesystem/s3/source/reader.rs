@@ -124,9 +124,9 @@ impl S3FileReader {
                     .partition_input_bytes
                     .with_label_values(&[&actor_id, &source_id, &split_id])
                     .inc_by(batch_size as u64);
+                let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
-                yield batch.clone();
-                batch.clear();
+                yield yield_batch;
             }
         }
         if !batch.is_empty() {
