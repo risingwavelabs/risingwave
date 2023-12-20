@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
+use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
@@ -105,20 +106,20 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        // update
-        let mut is_update = false;
-        for w in &mut write_guard.worker_nodes {
-            if w.id == node.id {
+        match write_guard
+            .worker_nodes
+            .iter_mut()
+            .find_or_first(|w| w.id == node.id)
+        {
+            None => {
+                // insert
+                write_guard.worker_nodes.push(node);
+            }
+            Some(w) => {
+                // update
                 *w = node;
-                is_update = true;
-                break;
             }
         }
-        // insert
-        if !is_update {
-            write_guard.worker_nodes.push(node);
-        }
-
         // Update `pu_to_worker`
         write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
     }
