@@ -29,6 +29,7 @@ use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
+use crate::metrics::GLOBAL_EXPR_METRICS;
 use crate::{bail, Result};
 
 #[derive(Debug)]
@@ -88,6 +89,8 @@ impl UdfExpression {
         columns: Vec<ArrayRef>,
         vis: &risingwave_common::buffer::Bitmap,
     ) -> Result<ArrayRef> {
+        let metrics = &*GLOBAL_EXPR_METRICS;
+
         let chunk = DataChunk::new(columns, vis.clone());
         let compacted_chunk = chunk.compact_cow();
         let compacted_columns: Vec<arrow_array::ArrayRef> = compacted_chunk
@@ -99,16 +102,20 @@ impl UdfExpression {
                     .expect("failed covert ArrayRef to arrow_array::ArrayRef")
             })
             .collect();
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.count_ones()));
+        let opts = arrow_array::RecordBatchOptions::default()
+            .with_row_count(Some(compacted_chunk.capacity()));
         let input = arrow_array::RecordBatch::try_new_with_options(
             self.arg_schema.clone(),
             compacted_columns,
             &opts,
         )
         .expect("failed to build record batch");
+        metrics
+            .udf_input_chunk_rows
+            .observe(compacted_chunk.capacity() as f64);
 
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+        let timer = metrics.udf_latency.start_timer();
         let result = if disable_retry_count != 0 {
             self.client
                 .call(&self.identifier, input)
@@ -120,6 +127,12 @@ impl UdfExpression {
                 .instrument_await(self.span.clone())
                 .await
         };
+        timer.stop_and_record();
+        if result.is_ok() {
+            metrics.udf_success_count.inc();
+        } else {
+            metrics.udf_failure_count.inc();
+        }
         let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
         let connection_error = matches!(&result, Err(e) if e.is_connection_error());
         if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
