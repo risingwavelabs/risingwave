@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
-use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
@@ -109,7 +108,7 @@ impl WorkerNodeManager {
         match write_guard
             .worker_nodes
             .iter_mut()
-            .find_or_first(|w| w.id == node.id)
+            .find(|w| w.id == node.id)
         {
             None => {
                 // insert
