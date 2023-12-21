@@ -26,6 +26,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -47,9 +48,9 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
 
 type RewindBackoffPolicy = impl Iterator<Item = Duration>;
-const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
-const REWIND_BACKOFF_FACTOR: u64 = 2;
-const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
+pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
+pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
+pub(crate) const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
 
 fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
     tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
@@ -61,13 +62,17 @@ fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
+    rewind_count: LabelGuardedIntCounter<3>,
+    rewind_delay: LabelGuardedHistogram<3>,
 }
 
 impl RewindDelay {
-    fn new() -> Self {
+    fn new(metrics: &KvLogStoreMetrics) -> Self {
         Self {
             last_rewind_truncate_offset: None,
             backoff_policy: initial_rewind_backoff_policy(),
+            rewind_count: metrics.rewind_count.clone(),
+            rewind_delay: metrics.rewind_delay.clone(),
         }
     }
 
@@ -86,7 +91,9 @@ impl RewindDelay {
             }
             _ => {}
         };
+        self.rewind_count.inc();
         if let Some(delay) = self.backoff_policy.next() {
+            self.rewind_delay.observe(delay.as_secs_f64());
             sleep(delay).await;
         }
     }
@@ -138,6 +145,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         is_paused: watch::Receiver<bool>,
         identity: String,
     ) -> Self {
+        let rewind_delay = RewindDelay::new(&metrics);
         Self {
             table_id,
             state_store,
@@ -151,7 +159,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             metrics,
             is_paused,
             identity,
-            rewind_delay: RewindDelay::new(),
+            rewind_delay,
         }
     }
 
