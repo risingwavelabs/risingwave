@@ -59,7 +59,7 @@ impl LoggerSettings {
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             stderr: false,
-            with_thread_name: true, // TODO: false
+            with_thread_name: false,
             targets: vec![],
             default_level: None,
         }
