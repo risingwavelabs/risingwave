@@ -241,10 +241,7 @@ impl StreamSink {
                 ErrorKind::InvalidInput,
                 format!(
                     "`{}` must be {}, {}, or {}",
-                    SINK_TYPE_OPTION,
-                    SINK_TYPE_APPEND_ONLY,
-                    SINK_TYPE_DEBEZIUM,
-                    SINK_TYPE_UPSERT
+                    SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_UPSERT
                 ),
             )))
             .into());
