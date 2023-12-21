@@ -88,6 +88,7 @@ services:
       - message_queue
       - elasticsearch
       - clickhouse-server
+      - redis-server
       - pulsar
     volumes:
       - ..:/risingwave
@@ -152,6 +153,17 @@ services:
       - "9004:9004"
     expose:
       - 9009
+  redis-server:
+    image: 'redis:latest'
+    expose:
+      - 6379
+    ports:
+      - 6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
 
 # Temporary workaround for json schema registry test since redpanda only supports
 # protobuf/avro schema registry. Should be removed after the support.
