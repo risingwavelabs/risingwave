@@ -488,14 +488,23 @@ impl ScaleController {
         );
 
         if options.resolve_no_shuffle_upstream {
-            Self::resolve_no_shuffle_upstream(
+            Self::resolve_no_shuffle_upstream_fragments(
                 reschedule,
                 &fragment_map,
                 &no_shuffle_source_fragment_ids,
                 &no_shuffle_target_fragment_ids,
-                &fragment_to_table,
-                table_parallelisms,
             )?;
+
+            if let Some(table_parallelisms) = table_parallelisms {
+                Self::resolve_no_shuffle_upstream_tables(
+                    reschedule.keys().cloned().collect(),
+                    &fragment_map,
+                    &no_shuffle_source_fragment_ids,
+                    &no_shuffle_target_fragment_ids,
+                    &fragment_to_table,
+                    table_parallelisms,
+                )?;
+            }
         }
 
         let mut fragment_dispatcher_map = HashMap::new();
@@ -1923,13 +1932,11 @@ impl ScaleController {
             })
             .collect();
 
-        Self::resolve_no_shuffle_upstream(
+        Self::resolve_no_shuffle_upstream_fragments(
             &mut fragment_worker_changes,
             &fragment_map,
             &no_shuffle_source_fragment_ids,
             &no_shuffle_target_fragment_ids,
-            &Default::default(),
-            None,
         )?;
 
         for (
@@ -2232,13 +2239,81 @@ impl ScaleController {
         }
     }
 
-    pub fn resolve_no_shuffle_upstream<T>(
-        reschedule: &mut HashMap<FragmentId, T>,
+    pub fn resolve_no_shuffle_upstream_tables(
+        fragment_ids: HashSet<FragmentId>,
         fragment_map: &HashMap<FragmentId, Fragment>,
         no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
         fragment_to_table: &HashMap<FragmentId, TableId>,
-        mut table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
+        table_parallelisms: &mut HashMap<TableId, TableParallelism>,
+    ) -> MetaResult<()> {
+        let mut queue: VecDeque<FragmentId> = fragment_ids.iter().cloned().collect();
+
+        let mut fragment_ids = fragment_ids;
+
+        // We trace the upstreams of each downstream under the hierarchy until we reach the top
+        // for every no_shuffle relation.
+        while let Some(fragment_id) = queue.pop_front() {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
+                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
+            {
+                continue;
+            }
+
+            // for upstream
+            for upstream_fragment_id in &fragment_map
+                .get(&fragment_id)
+                .unwrap()
+                .upstream_fragment_ids
+            {
+                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
+                    continue;
+                }
+
+                let table_id = fragment_to_table.get(&fragment_id).unwrap();
+                let upstream_table_id = fragment_to_table.get(upstream_fragment_id).unwrap();
+
+                // Only custom parallelism will be propagated to the no shuffle upstream.
+                if let Some(TableParallelism::Custom) = table_parallelisms.get(table_id) {
+                    if let Some(upstream_table_parallelism) =
+                        table_parallelisms.get(upstream_table_id)
+                    {
+                        if upstream_table_parallelism != &TableParallelism::Custom {
+                            bail!(
+                                "Cannot change upstream table {} from {:?} to {:?}",
+                                upstream_table_id,
+                                upstream_table_parallelism,
+                                TableParallelism::Custom
+                            )
+                        }
+                    } else {
+                        table_parallelisms.insert(*upstream_table_id, TableParallelism::Custom);
+                    }
+                }
+
+                fragment_ids.insert(*upstream_fragment_id);
+                queue.push_back(*upstream_fragment_id);
+            }
+        }
+
+        let downstream_fragment_ids = fragment_ids
+            .iter()
+            .filter(|fragment_id| no_shuffle_target_fragment_ids.contains(fragment_id));
+
+        let downstream_table_ids = downstream_fragment_ids
+            .map(|fragment_id| fragment_to_table.get(fragment_id).unwrap())
+            .collect::<HashSet<_>>();
+
+        table_parallelisms.retain(|table_id, _| !downstream_table_ids.contains(table_id));
+
+        Ok(())
+    }
+
+    pub fn resolve_no_shuffle_upstream_fragments<T>(
+        reschedule: &mut HashMap<FragmentId, T>,
+        fragment_map: &HashMap<FragmentId, Fragment>,
+        no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
+        no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
     ) -> MetaResult<()>
     where
         T: Clone + Eq,
@@ -2276,42 +2351,8 @@ impl ScaleController {
 
                 reschedule.insert(*upstream_fragment_id, reschedule_plan.clone());
 
-                if let Some(table_parallelisms) = table_parallelisms.as_deref_mut() {
-                    let table_id = fragment_to_table.get(&fragment_id).unwrap();
-                    let upstream_table_id = fragment_to_table.get(upstream_fragment_id).unwrap();
-
-                    if let Some(TableParallelism::Custom) = table_parallelisms.get(table_id) {
-                        if let Some(upstream_table_parallelism) =
-                            table_parallelisms.get(upstream_table_id)
-                        {
-                            if upstream_table_parallelism != &TableParallelism::Custom {
-                                bail!(
-                                    "Cannot change upstream table {} from {:?} to {:?}",
-                                    upstream_table_id,
-                                    upstream_table_parallelism,
-                                    TableParallelism::Custom
-                                )
-                            }
-                        } else {
-                            table_parallelisms.insert(*upstream_table_id, TableParallelism::Custom);
-                        }
-                    }
-                }
-
                 queue.push_back(*upstream_fragment_id);
             }
-        }
-
-        if let Some(table_parallelisms) = table_parallelisms {
-            let downstream_fragment_ids = reschedule
-                .keys()
-                .filter(|fragment_id| no_shuffle_target_fragment_ids.contains(fragment_id));
-
-            let downstream_table_ids = downstream_fragment_ids
-                .map(|fragment_id| fragment_to_table.get(fragment_id).unwrap())
-                .collect::<HashSet<_>>();
-
-            table_parallelisms.retain(|table_id, _| !downstream_table_ids.contains(table_id))
         }
 
         reschedule.retain(|fragment_id, _| !no_shuffle_target_fragment_ids.contains(fragment_id));

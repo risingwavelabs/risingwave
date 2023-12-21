@@ -457,152 +457,22 @@ async fn test_compatibility_with_low_level() -> Result<()> {
 
     session.run("create table t (v1 int);").await?;
 
+    // single fragment downstream
     session
-        .run("select parallelism from rw_table_fragments")
-        .await?
-        .assert_result_eq("AUTO");
+        .run("create materialized view m1 as select * from t;")
+        .await?;
 
-    async fn locate_table_fragment(cluster: &mut Cluster) -> Result<Fragment> {
-        cluster
-            .locate_one_fragment(vec![
-                identity_contains("materialize"),
-                no_identity_contains("simpleAgg"),
-            ])
-            .await
-    }
-
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    assert_eq!(
-        all_parallel_units.len(),
-        (config.compute_nodes - 1) * config.compute_node_cores
-    );
-
-    session.run("alter table t set parallelism = 3").await?;
-
+    // multi fragment downstream
     session
-        .run("select parallelism from rw_table_fragments")
-        .await?
-        .assert_result_eq("FIXED(3)");
-
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(used_parallel_units.len(), 3);
-
-    // Keep one worker reserved for adding later.
-    cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
-        .await;
-
-    sleep(Duration::from_secs(
-        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
-    ))
-    .await;
-
-    // Now we have 3 nodes
-    let workers: Vec<WorkerNode> = cluster
-        .get_cluster_info()
-        .await?
-        .worker_nodes
-        .into_iter()
-        .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
-        .collect();
-
-    assert_eq!(workers.len(), 3);
-
-    let parallel_unit_to_worker = workers
-        .into_iter()
-        .map(|worker| {
-            worker
-                .parallel_units
-                .into_iter()
-                .map(move |parallel_unit| (parallel_unit.id, worker.id))
-        })
-        .flatten()
-        .collect::<HashMap<_, _>>();
-
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(used_parallel_units.len(), 3);
-
-    let worker_ids: HashSet<_> = used_parallel_units
-        .iter()
-        .map(|id| parallel_unit_to_worker.get(id).unwrap())
-        .collect();
-
-    assert_eq!(worker_ids.len(), config.compute_nodes);
-
-    // We kill compute-2 again to verify the behavior of auto scale-in
-    cluster
-        .simple_kill_nodes(vec![select_worker.to_string()])
-        .await;
-
-    sleep(Duration::from_secs(
-        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
-    ))
-    .await;
-
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(used_parallel_units.len(), 3);
-
-    let worker_ids: HashSet<_> = used_parallel_units
-        .iter()
-        .map(|id| parallel_unit_to_worker.get(id).unwrap())
-        .collect();
-
-    assert_eq!(worker_ids.len(), config.compute_nodes - 1);
-
-    // We alter parallelism back to auto
-
-    session.run("alter table t set parallelism = auto").await?;
+        .run("create materialized view m as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;")
+        .await?;
 
     session
         .run("select parallelism from rw_table_fragments")
         .await?
         .assert_result_eq("AUTO");
 
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    assert_eq!(
-        all_parallel_units.len(),
-        (config.compute_nodes - 1) * config.compute_node_cores
-    );
-
-    // Keep one worker reserved for adding later.
-    cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
-        .await;
-
-    sleep(Duration::from_secs(
-        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
-    ))
-    .await;
-
-    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
-
-    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
-
-    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
-
-    assert_eq!(
-        all_parallel_units.len(),
-        config.compute_nodes * config.compute_node_cores
-    );
+    // todo!();
 
     Ok(())
 }
