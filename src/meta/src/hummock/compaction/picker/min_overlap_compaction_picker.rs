@@ -20,10 +20,7 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
-use super::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic,
-    MAX_COMPACT_LEVEL_COUNT,
-};
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -96,8 +93,7 @@ impl MinOverlappingPicker {
                 }
                 select_file_size += select_tables[*idx].file_size;
                 if range.end > target_level_overlap_range.end {
-                    for other in &target_tables[target_level_overlap_range.end..range.end]
-                    {
+                    for other in &target_tables[target_level_overlap_range.end..range.end] {
                         total_file_size += other.file_size;
                     }
                     target_level_overlap_range.end = range.end;
