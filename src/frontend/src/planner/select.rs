@@ -74,7 +74,7 @@ impl Planner {
                 && let Some(order_expr) = order_iter.next()
             {
                 match distinct_on_exprs.get_mut(order_expr) {
-                    Some(has_been_covered   ) => {
+                    Some(has_been_covered) => {
                         if !*has_been_covered {
                             *has_been_covered = true;
                             uncovered_distinct_on_exprs_cnt -= 1;
