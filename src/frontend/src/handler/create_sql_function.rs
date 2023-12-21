@@ -29,7 +29,7 @@ use super::*;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
-pub async fn handle_create_function(
+pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
@@ -41,34 +41,41 @@ pub async fn handle_create_function(
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
     }
+
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
-    // e.g., `language [ python / java / ...etc]`
-    let language = match params.language {
-        Some(lang) => {
-            let lang = lang.real_value().to_lowercase();
-            match &*lang {
-                "python" | "java" => lang,
-                _ => {
-                    return Err(ErrorCode::InvalidParameterValue(format!(
-                        "language {} is not supported",
-                        lang
-                    ))
-                    .into())
-                }
-            }
-        }
-        // Empty language is acceptable since we only require the external server implements the
-        // correct protocol.
-        None => "".to_string(),
-    };
-    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
+
+    let language = "sql".to_string();
+    // Just a basic sanity check for language
+    if let Some(lang) = params.language {
+        let lang = lang.real_value().to_lowercase();
+        debug_assert!(lang == "sql", "`language` for sql udf function must be sql");
+    }
+
+    // SQL udf function supports both single quote (i.e., as 'select $1 + $2')
+    // and double dollar (i.e., as $$select $1 + $2$$) for as clause
+    let mut identifier = "".to_string();
+    if let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_.clone() {
+        identifier = id;
+    }
+    if let Some(FunctionDefinition::DoubleDollarDef(id)) = params.as_ {
+        identifier = id;
+    }
+    if identifier.is_empty() {
         return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
+    }
+
+    // Sanity check for link, this must be none with sql udf function
+    let link = "".to_string();
+    if let Some(CreateFunctionUsing::Link(_)) = params.using {
+        return Err(ErrorCode::InvalidParameterValue(
+            "USING must NOT be specified with sql udf function".to_string(),
+        )
+        .into());
     };
-    let Some(CreateFunctionUsing::Link(link)) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
+
+    // Get return type for the current sql udf function
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -126,31 +133,31 @@ pub async fn handle_create_function(
     }
 
     // check the service
-    let client = ArrowFlightUdfClient::connect(&link)
-        .await
-        .map_err(|e| anyhow!(e))?;
-    /// A helper function to create a unnamed field from data type.
-    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-        arrow_schema::Field::new("", data_type, true)
-    }
-    let args = arrow_schema::Schema::new(
-        arg_types
-            .iter()
-            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-            .try_collect::<_, Fields, _>()?,
-    );
-    let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
-        Kind::Table(_) => vec![
-            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-            to_field(return_type.clone().try_into()?),
-        ],
-        _ => unreachable!(),
-    });
-    client
-        .check(&identifier, &args, &returns)
-        .await
-        .map_err(|e| anyhow!(e))?;
+    // let client = ArrowFlightUdfClient::connect(&link)
+    //     .await
+    //     .map_err(|e| anyhow!(e))?;
+    // /// A helper function to create a unnamed field from data type.
+    // fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
+    //     arrow_schema::Field::new("", data_type, true)
+    // }
+    // let args = arrow_schema::Schema::new(
+    //     arg_types
+    //         .iter()
+    //         .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+    //         .try_collect::<_, Fields, _>()?,
+    // );
+    // let returns = arrow_schema::Schema::new(match kind {
+    //     Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
+    //     Kind::Table(_) => vec![
+    //         arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+    //         to_field(return_type.clone().try_into()?),
+    //     ],
+    //     _ => unreachable!(),
+    // });
+    // client
+    //     .check(&identifier, &args, &returns)
+    //     .await
+    //     .map_err(|e| anyhow!(e))?;
 
     let function = Function {
         id: FunctionId::placeholder().0,

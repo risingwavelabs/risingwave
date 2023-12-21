@@ -768,6 +768,30 @@ fn parse_create_function() {
         }
     );
 
+    // Note that there should NOT exist blank space between
+    // function definition and double dollar signs
+    let sql = "CREATE FUNCTION sub(INT, INT) RETURNS INT LANGUAGE SQL AS $$select $1 - $2;$$";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("sub")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                as_: Some(FunctionDefinition::DoubleDollarDef(
+                    "select $1 - $2;".into()
+                )),
+                ..Default::default()
+            }
+        },
+    );
+
     let sql = "CREATE OR REPLACE FUNCTION add(a INT, IN b INT = 1) RETURNS INT LANGUAGE SQL IMMUTABLE RETURN a + b";
     assert_eq!(
         verified_stmt(sql),

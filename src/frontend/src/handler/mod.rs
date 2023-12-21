@@ -52,6 +52,7 @@ pub mod create_mv;
 pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
+pub mod create_sql_function;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -204,16 +205,35 @@ pub async fn handle(
             returns,
             params,
         } => {
-            create_function::handle_create_function(
-                handler_args,
-                or_replace,
-                temporary,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            if let Some(_) = params.using {
+                // User defined function with external source (e.g., language [ python / java ])
+                create_function::handle_create_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            } else {
+                // SQL user defined function, the logic is mostly inlined
+                debug_assert!(
+                    params.using.is_none(),
+                    "`params.using` must be none for sql udf function"
+                );
+                create_sql_function::handle_create_sql_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
         }
         Statement::CreateTable {
             name,

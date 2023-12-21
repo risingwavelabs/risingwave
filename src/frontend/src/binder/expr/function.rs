@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
+use maplit::hashmap;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -30,7 +31,8 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
+    self, BinaryOperator, Expr as ast_expr, Function, FunctionArg, FunctionArgExpr, Ident, Query,
+    SelectItem, SetExpr, Statement, Value as ast_value, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
 use thiserror_ext::AsReport;
@@ -53,8 +55,64 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_timestamp",
 ];
 
+/// Evaluate the value of expression from
+/// sql user defined function
+/// NOTE: the current implementation is very simple and
+/// acts as a prototype to illustrate the overall logic
+fn sql_udf_expr_evaluate(
+    query: Query,
+    param_index_mapping: &HashMap<String, usize>,
+    input: &Vec<FunctionArg>,
+) -> Result<ExprImpl> {
+    let SetExpr::Select(select) = query.body else {
+        panic!("Invalid syntax");
+    };
+    let projection = select.projection;
+    let SelectItem::UnnamedExpr(expr) = projection
+        .into_iter()
+        .exactly_one()
+        .expect("`projection` should contain only one `SelectItem`")
+    else {
+        unreachable!("`projection` should contain only one `SelectItem`");
+    };
+    println!("Current expr: {:#?}", expr);
+
+    /// Currently only support i32, just as a simple prototype
+    fn expr_inner(
+        expression: ast_expr,
+        map: &HashMap<String, usize>,
+        input: &Vec<FunctionArg>,
+    ) -> i32 {
+        if let ast_expr::Identifier(id) = expression {
+            let value = id.real_value();
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(ast_expr::Value(ast_value::Number(
+                number,
+            )))) = input[*map.get(&value).unwrap()].clone()
+            else {
+                panic!("Invalid syntax");
+            };
+            return number.parse::<i32>().unwrap();
+        }
+        let ast_expr::BinaryOp { left, op, right } = expression else {
+            panic!("Only `BinaryOp` is currently supported");
+        };
+        match op {
+            BinaryOperator::Plus => expr_inner(*left, map, input) + expr_inner(*right, map, input),
+            BinaryOperator::Minus => expr_inner(*left, map, input) - expr_inner(*right, map, input),
+            _ => panic!("Not supported!"),
+        }
+    }
+
+    Ok(ExprImpl::Literal(Box::new(Literal::new(
+        Some(expr_inner(expr, param_index_mapping, input).into()),
+        DataType::Int32,
+    ))))
+}
+
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
+        println!("Current function: {:#?}", f);
+
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
@@ -117,6 +175,9 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
+        // Used later in sql udf expression evaluation
+        let args = f.args.clone();
+
         let inputs = f
             .args
             .into_iter()
@@ -158,6 +219,30 @@ impl Binder {
             )
         {
             use crate::catalog::function_catalog::FunctionKind::*;
+            println!("Current function kind: {:#?}", func.kind);
+            println!("Current function catalog: {:#?}", func);
+            let ast = risingwave_sqlparser::parser::Parser::parse_sql(&func.identifier.as_str()).unwrap();
+            println!("Current ast[0]: {:#?}", ast[0]);
+            let Statement::Query(query) = ast
+                .into_iter()
+                .exactly_one()
+                .expect("sql udf should contain only one statement")
+            else {
+                unreachable!("sql udf should contain a query statement");
+            };
+            println!("Current query: {:#?}", query);
+            if func.link.is_empty() {
+                // This represents the current user defined function is `language sql`
+
+                // Note that the map here is just simulate the mapping index of parameter definitions
+                // e.g., sub(1, 2, 3) <=> sub(a, b, c)
+                let map = hashmap! {
+                    "a".to_string() => 0,
+                    "b".to_string() => 1,
+                    "c".to_string() => 2,
+                };
+                return sql_udf_expr_evaluate(*query, &map, &args);
+            }
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
                 Table { .. } => {
@@ -1220,7 +1305,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            // TODO: Also hint other functinos, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
