@@ -54,7 +54,7 @@ impl ChronoPattern {
     /// Compile the pg pattern to chrono pattern.
     // TODO: Chrono can not fully support the pg format, so consider using other implementations
     // later.
-    pub fn compile(tmpl: &str, is_interval: bool) -> ChronoPattern {
+    pub fn compile(tmpl: &str) -> ChronoPattern {
         // mapping from pg pattern to chrono pattern
         // pg pattern: https://www.postgresql.org/docs/current/functions-formatting.html
         // chrono pattern: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
@@ -107,16 +107,73 @@ impl ChronoPattern {
                 .expect("failed to build an Aho-Corasick automaton")
         });
 
+        ChronoPattern::compile_inner(tmpl, PATTERNS, &AC)
+    }
+
+    pub fn compile_for_interval(tmpl: &str) -> ChronoPattern {
+        // mapping from pg pattern to chrono pattern
+        // pg pattern: https://www.postgresql.org/docs/current/functions-formatting.html
+        // chrono pattern: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+        const PATTERNS: &[(&str, &str)] = &[
+            ("HH24", "%H"),
+            ("hh24", "%H"),
+            ("HH12", "%I"),
+            ("hh12", "%I"),
+            ("HH", "%I"),
+            ("hh", "%I"),
+            ("AM", "%p"),
+            ("PM", "%p"),
+            ("am", "%P"),
+            ("pm", "%P"),
+            ("MI", "%M"),
+            ("mi", "%M"),
+            ("SS", "%S"),
+            ("ss", "%S"),
+            ("YYYY", "%Y"),
+            ("yyyy", "%Y"),
+            ("YY", "%y"),
+            ("yy", "%y"),
+            ("IYYY", "%G"),
+            ("iyyy", "%G"),
+            ("IY", "%g"),
+            ("iy", "%g"),
+            ("MM", "%m"),
+            ("mm", "%m"),
+            ("Month", "%B"),
+            ("Mon", "%b"),
+            ("DD", "%d"),
+            ("dd", "%d"),
+            ("US", "%.6f"), /* "%6f" and "%3f" are converted to private data structures in chrono, so we use "%.6f" and "%.3f" instead. */
+            ("us", "%.6f"),
+            ("MS", "%.3f"),
+            ("ms", "%.3f"),
+            ("TZH:TZM", "%:z"),
+            ("tzh:tzm", "%:z"),
+            ("TZHTZM", "%z"),
+            ("tzhtzm", "%z"),
+            ("TZH", "%#z"),
+            ("tzh", "%#z"),
+        ];
+        // build an Aho-Corasick automaton for fast matching
+        static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
+            AhoCorasickBuilder::new()
+                .ascii_case_insensitive(false)
+                .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+                .build(PATTERNS.iter().map(|(k, _)| k))
+                .expect("failed to build an Aho-Corasick automaton")
+        });
+        ChronoPattern::compile_inner(tmpl, PATTERNS, &AC)
+    }
+
+    fn compile_inner(
+        tmpl: &str,
+        patterns: &[(&str, &str)],
+        ac: &LazyLock<AhoCorasick>,
+    ) -> ChronoPattern {
         // replace all pg patterns with chrono patterns
         let mut chrono_tmpl = String::new();
-        AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
-            if is_interval && PATTERNS[mat.pattern()].1 == "%6f" {
-                dst.push_str("%.6f");
-            } else if is_interval && PATTERNS[mat.pattern()].1 == "%3f" {
-                dst.push_str("%.3f");
-            } else {
-                dst.push_str(PATTERNS[mat.pattern()].1);
-            }
+        ac.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
+            dst.push_str(patterns[mat.pattern()].1);
             true
         });
         tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
@@ -128,7 +185,7 @@ impl ChronoPattern {
 
 #[function(
     "to_char(timestamp, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1, false)"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
@@ -140,7 +197,7 @@ fn _timestamptz_to_char() {}
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1, false)"
+    prebuild = "ChronoPattern::compile($1)"
 )]
 fn timestamptz_to_char3(
     data: Timestamptz,
@@ -157,7 +214,7 @@ fn timestamptz_to_char3(
 
 #[function(
     "to_char(interval, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1, true)"
+    prebuild = "ChronoPattern::compile_for_interval($1)"
 )]
 fn interval_to_char(
     interval: Interval,
