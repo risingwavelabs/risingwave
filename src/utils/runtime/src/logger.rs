@@ -38,6 +38,8 @@ pub struct LoggerSettings {
     colorful: bool,
     /// Output to `stderr` instead of `stdout`.
     stderr: bool,
+    /// Whether to include thread name in the log.
+    with_thread_name: bool,
     /// Override target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
     /// Override the default level.
@@ -57,6 +59,7 @@ impl LoggerSettings {
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             stderr: false,
+            with_thread_name: true, // TODO: false
             targets: vec![],
             default_level: None,
         }
@@ -71,6 +74,12 @@ impl LoggerSettings {
     /// Output to `stderr` instead of `stdout`.
     pub fn stderr(mut self, enabled: bool) -> Self {
         self.stderr = enabled;
+        self
+    }
+
+    /// Whether to include thread name in the log.
+    pub fn with_thread_name(mut self, enabled: bool) -> Self {
+        self.with_thread_name = enabled;
         self
     }
 
@@ -210,6 +219,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_thread_names(settings.with_thread_name)
             .with_timer(default_timer.clone())
             .with_ansi(settings.colorful)
             .with_writer(move || {
@@ -359,7 +369,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let otel_tracer = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
-                .thread_name("risingwave-otel")
+                .thread_name("rw-otel")
                 .worker_threads(2)
                 .build()
                 .unwrap();

@@ -310,6 +310,10 @@ macro_rules! cast_jvalue {
         let obj = $value.l().expect("should be object");
         unsafe { jni::objects::JByteArray::from_raw(obj.into_raw()) }
     }};
+    ({ String }, $value:expr) => {{
+        let obj = $value.l().expect("should be object");
+        jni::objects::JString::from(obj)
+    }};
     ({ $($class:tt)+ }, $value:expr) => {{
         $value.l().expect("should be object")
     }};
@@ -442,7 +446,7 @@ macro_rules! for_all_plain_native_methods {
     ($macro:path $(,$args:tt)*) => {
         $macro! {
             {
-                public static native void tracingSlf4jEvent(String name, int level, String string);
+                public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
 
                 public static native int vnodeCount();
 
