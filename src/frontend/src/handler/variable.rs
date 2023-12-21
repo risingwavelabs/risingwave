@@ -49,9 +49,11 @@ pub fn handle_set(
     let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
+    let mut notices = vec![];
 
     struct Reporter<'a> {
         status: &'a mut ParameterStatus,
+        notices: &'a mut Vec<String>,
     }
 
     impl<'a> ConfigReporter for Reporter<'a> {
@@ -59,6 +61,10 @@ pub fn handle_set(
             if key == "APPLICATION_NAME" {
                 self.status.application_name = Some(new_val);
             }
+        }
+
+        fn report_notice(&mut self, msg: impl Into<String>) {
+            self.notices.push(msg.into());
         }
     }
 
@@ -70,11 +76,13 @@ pub fn handle_set(
         string_val,
         Reporter {
             status: &mut status,
+            notices: &mut notices,
         },
     )?;
 
     Ok(PgResponse::builder(StatementType::SET_VARIABLE)
         .status(status)
+        .notices(notices)
         .into())
 }
 
