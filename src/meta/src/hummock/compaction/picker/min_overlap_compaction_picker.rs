@@ -52,7 +52,6 @@ impl MinOverlappingPicker {
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let mut scores = vec![];
         let mut select_file_ranges = vec![];
         for (idx, sst) in select_tables.iter().enumerate() {
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
@@ -77,6 +76,11 @@ impl MinOverlappingPicker {
             }
             !pending_compact
         });
+
+        let mut min_score = u64::MAX;
+        let mut min_score_select_range = 0..0;
+        let mut min_score_target_range = 0..0;
+        let mut min_score_select_file_size = 0;
         for left in 0..select_file_ranges.len() {
             let mut select_file_size = 0;
             let mut target_level_overlap_range = select_file_ranges[left].1.clone();
@@ -98,24 +102,26 @@ impl MinOverlappingPicker {
                     }
                     target_level_overlap_range.end = range.end;
                 }
-                scores.push((total_file_size * 100 / select_file_size, (left_idx, *idx)));
+                let score = if select_file_size == 0 {
+                    total_file_size
+                } else {
+                    total_file_size * 100 / select_file_size
+                };
+                if score < min_score
+                    || (score == min_score && select_file_size < min_score_select_file_size)
+                {
+                    min_score = score;
+                    min_score_select_range = left_idx..(*idx + 1);
+                    min_score_target_range = target_level_overlap_range.clone();
+                    min_score_select_file_size = select_file_size;
+                }
             }
         }
-        if scores.is_empty() {
+        if min_score == u64::MAX {
             return (vec![], vec![]);
         }
-        let (_, (left, right)) = scores
-            .iter()
-            .min_by(|(score1, x), (score2, y)| {
-                score1
-                    .cmp(score2)
-                    .then_with(|| (x.1 - x.0).cmp(&(y.1 - y.0)))
-            })
-            .unwrap();
-        let select_input_ssts = select_tables[*left..(*right + 1)].to_vec();
-        let target_input_ssts = self
-            .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, target_tables);
+        let select_input_ssts = select_tables[min_score_select_range].to_vec();
+        let target_input_ssts = target_tables[min_score_target_range].to_vec();
         (select_input_ssts, target_input_ssts)
     }
 }
