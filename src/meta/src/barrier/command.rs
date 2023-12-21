@@ -23,12 +23,14 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, Dispatchers, FragmentTypeFlag, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
+    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -73,6 +75,15 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplaceTablePlan {
+    pub old_table_fragments: TableFragments,
+    pub new_table_fragments: TableFragments,
+    pub merge_updates: Vec<MergeUpdate>,
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub init_split_assignment: SplitAssignment,
+}
+
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
 /// we'll build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
@@ -100,6 +111,8 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
+    /// The TableIds here are the ids for the stream job.
+    /// It does not include internal table ids.
     DropStreamingJobs(HashSet<TableId>),
 
     /// `DropStreamingJobsV2` command generates a `Stop` barrier by the given actor info.
@@ -126,6 +139,7 @@ pub enum Command {
         init_split_assignment: SplitAssignment,
         definition: String,
         ddl_type: DdlType,
+        replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -148,13 +162,7 @@ pub enum Command {
     ///
     /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
     /// of the Merge executors are changed additionally.
-    ReplaceTable {
-        old_table_fragments: TableFragments,
-        new_table_fragments: TableFragments,
-        merge_updates: Vec<MergeUpdate>,
-        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-        init_split_assignment: SplitAssignment,
-    },
+    ReplaceTable(ReplaceTablePlan),
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
@@ -185,6 +193,25 @@ impl Command {
             Command::Pause(_) => CommandChanges::None,
             Command::Resume(_) => CommandChanges::None,
             Command::CreateStreamingJob {
+                table_fragments,
+                replace_table:
+                    Some(ReplaceTablePlan {
+                        old_table_fragments,
+                        new_table_fragments,
+                        ..
+                    }),
+                ..
+            } => {
+                let to_add = new_table_fragments.actor_ids().into_iter().collect();
+                let to_remove = old_table_fragments.actor_ids().into_iter().collect();
+
+                CommandChanges::CreateSinkIntoTable {
+                    sink_id: table_fragments.table_id(),
+                    to_add,
+                    to_remove,
+                }
+            }
+            Command::CreateStreamingJob {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
             Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
@@ -205,11 +232,11 @@ impl Command {
                     .collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments,
                 ..
-            } => {
+            }) => {
                 let to_add = new_table_fragments.actor_ids().into_iter().collect();
                 let to_remove = old_table_fragments.actor_ids().into_iter().collect();
                 CommandChanges::Actor { to_add, to_remove }
@@ -376,6 +403,7 @@ impl CommandContext {
                 table_fragments,
                 dispatchers,
                 init_split_assignment: split_assignment,
+                replace_table,
                 ..
             } => {
                 let actor_dispatchers = dispatchers
@@ -394,13 +422,39 @@ impl CommandContext {
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
-                Some(Mutation::Add(AddMutation {
+                let add = Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
                     added_actors,
                     actor_splits,
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: self.current_paused_reason.is_some(),
-                }))
+                }));
+
+                if let Some(ReplaceTablePlan {
+                    old_table_fragments,
+                    new_table_fragments: _,
+                    merge_updates,
+                    dispatchers,
+                    init_split_assignment,
+                }) = replace_table
+                {
+                    // TODO: support in v2.
+                    let update = Self::generate_update_mutation_for_replace_table(
+                        old_table_fragments,
+                        merge_updates,
+                        dispatchers,
+                        init_split_assignment,
+                    );
+
+                    Some(Mutation::Combined(CombinedMutation {
+                        mutations: vec![
+                            BarrierMutation { mutation: add },
+                            BarrierMutation { mutation: update },
+                        ],
+                    }))
+                } else {
+                    add
+                }
             }
 
             Command::CancelStreamingJob(table_fragments) => {
@@ -408,40 +462,18 @@ impl CommandContext {
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
                 ..
-            } => {
-                let dropped_actors = old_table_fragments.actor_ids();
-
-                let actor_new_dispatchers = dispatchers
-                    .iter()
-                    .map(|(&actor_id, dispatchers)| {
-                        (
-                            actor_id,
-                            Dispatchers {
-                                dispatchers: dispatchers.clone(),
-                            },
-                        )
-                    })
-                    .collect();
-
-                let actor_splits = init_split_assignment
-                    .values()
-                    .flat_map(build_actor_connector_splits)
-                    .collect();
-
-                Some(Mutation::Update(UpdateMutation {
-                    actor_new_dispatchers,
-                    merge_update: merge_updates.clone(),
-                    dropped_actors,
-                    actor_splits,
-                    ..Default::default()
-                }))
-            }
+            }) => Self::generate_update_mutation_for_replace_table(
+                old_table_fragments,
+                merge_updates,
+                dispatchers,
+                init_split_assignment,
+            ),
 
             Command::RescheduleFragment { reschedules, .. } => {
                 let MetadataManager::V1(mgr) = &self.metadata_manager else {
@@ -578,6 +610,40 @@ impl CommandContext {
         };
 
         Ok(mutation)
+    }
+
+    fn generate_update_mutation_for_replace_table(
+        old_table_fragments: &TableFragments,
+        merge_updates: &[MergeUpdate],
+        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        init_split_assignment: &SplitAssignment,
+    ) -> Option<Mutation> {
+        let dropped_actors = old_table_fragments.actor_ids();
+
+        let actor_new_dispatchers = dispatchers
+            .iter()
+            .map(|(&actor_id, dispatchers)| {
+                (
+                    actor_id,
+                    Dispatchers {
+                        dispatchers: dispatchers.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let actor_splits = init_split_assignment
+            .values()
+            .flat_map(build_actor_connector_splits)
+            .collect();
+
+        Some(Mutation::Update(UpdateMutation {
+            actor_new_dispatchers,
+            merge_update: merge_updates.to_owned(),
+            dropped_actors,
+            actor_splits,
+            ..Default::default()
+        }))
     }
 
     /// Returns the paused reason after executing the current command.
@@ -818,6 +884,8 @@ impl CommandContext {
                 dispatchers,
                 upstream_mview_actors,
                 init_split_assignment,
+                definition: _,
+                replace_table,
                 ..
             } => {
                 match &self.metadata_manager {
@@ -839,6 +907,32 @@ impl CommandContext {
                                 init_split_assignment.clone(),
                             )
                             .await?;
+
+                        if let Some(ReplaceTablePlan {
+                            old_table_fragments,
+                            new_table_fragments,
+                            merge_updates,
+                            dispatchers,
+                            init_split_assignment: _,
+                        }) = replace_table
+                        {
+                            let table_ids =
+                                HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
+                            // Tell compute nodes to drop actors.
+                            let node_actors =
+                                mgr.fragment_manager.table_node_actors(&table_ids).await?;
+                            self.clean_up(node_actors).await?;
+
+                            // Drop fragment info in meta store.
+                            mgr.fragment_manager
+                                .post_replace_table(
+                                    old_table_fragments,
+                                    new_table_fragments,
+                                    merge_updates,
+                                    dispatchers,
+                                )
+                                .await?;
+                        }
                     }
                     MetadataManager::V2(mgr) => {
                         mgr.catalog_controller
@@ -874,13 +968,13 @@ impl CommandContext {
                 self.clean_up(node_dropped_actors).await?;
             }
 
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
                 ..
-            } => {
+            }) => {
                 let MetadataManager::V1(mgr) = &self.metadata_manager else {
                     unimplemented!("implement replace funcs in v2");
                 };

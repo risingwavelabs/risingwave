@@ -44,8 +44,8 @@ pub enum CdcTableType {
 }
 
 impl CdcTableType {
-    pub fn from_properties(properties: &HashMap<String, String>) -> Self {
-        let connector = properties
+    pub fn from_properties(with_properties: &HashMap<String, String>) -> Self {
+        let connector = with_properties
             .get("connector")
             .map(|c| c.to_ascii_lowercase())
             .unwrap_or_default();
@@ -63,12 +63,12 @@ impl CdcTableType {
 
     pub async fn create_table_reader(
         &self,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         schema: Schema,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(properties, schema).await?,
+                MySqlExternalTableReader::new(with_properties, schema).await?,
             )),
             _ => bail!(ConnectorError::Config(anyhow!(
                 "invalid external table type: {:?}",
@@ -291,13 +291,13 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub async fn new(
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         rw_schema: Schema,
     ) -> ConnectorResult<Self> {
         tracing::debug!(?rw_schema, "create mysql external table reader");
 
         let config = serde_json::from_value::<ExternalTableConfig>(
-            serde_json::to_value(properties).unwrap(),
+            serde_json::to_value(with_properties).unwrap(),
         )
         .map_err(|e| {
             ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
@@ -314,7 +314,7 @@ impl MySqlExternalTableReader {
             .fields
             .iter()
             .filter(|f| f.name != OFFSET_COLUMN_NAME)
-            .map(|f| format!("`{}`", f.name.as_str()))
+            .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
         Ok(Self {
@@ -332,7 +332,10 @@ impl MySqlExternalTableReader {
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
     ) {
-        let order_key = primary_keys.iter().join(",");
+        let order_key = primary_keys
+            .iter()
+            .map(|col| Self::quote_column(col))
+            .join(",");
         let sql = if start_pk_row.is_none() {
             format!(
                 "SELECT {} FROM {} ORDER BY {}",
@@ -363,8 +366,7 @@ impl MySqlExternalTableReader {
                 let row_stream = rs_stream.map(|row| {
                     // convert mysql row into OwnedRow
                     let mut row = row?;
-                    let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                    Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                    Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
                 });
 
                 pin_mut!(row_stream);
@@ -425,8 +427,7 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                let datums = mysql_row_to_datums(&mut row, &self.rw_schema);
-                Ok::<_, ConnectorError>(OwnedRow::new(datums))
+                Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
             });
 
             pin_mut!(row_stream);
@@ -440,23 +441,31 @@ impl MySqlExternalTableReader {
 
     // mysql cannot leverage the given key to narrow down the range of scan,
     // we need to rewrite the comparison conditions by our own.
-    // (a, b) > (x, y) => ('a' > x) OR (('a' = x) AND ('b' > y))
+    // (a, b) > (x, y) => (`a` > x) OR ((`a` = x) AND (`b` > y))
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!("({} > :{})", columns[0], columns[0]));
+        conditions.push(format!(
+            "({} > :{})",
+            Self::quote_column(&columns[0]),
+            columns[0]
+        ));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
-            for (j, item) in columns.iter().enumerate().take(i - 1) {
+            for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!("({} = :{})", item, item));
+                    condition.push_str(&format!("({} = :{})", Self::quote_column(col), col));
                 } else {
-                    condition.push_str(&format!(" AND ({} = :{})", item, item));
+                    condition.push_str(&format!(" AND ({} = :{})", Self::quote_column(col), col));
                 }
             }
             // '>' condition
-            condition.push_str(&format!(" AND ({} > :{})", columns[i - 1], columns[i - 1]));
+            condition.push_str(&format!(
+                " AND ({} > :{})",
+                Self::quote_column(&columns[i - 1]),
+                columns[i - 1]
+            ));
             conditions.push(format!("({})", condition));
         }
         if columns.len() > 1 {
@@ -464,6 +473,10 @@ impl MySqlExternalTableReader {
         } else {
             conditions.join("")
         }
+    }
+
+    fn quote_column(column: &str) -> String {
+        format!("`{}`", column)
     }
 }
 
@@ -544,13 +557,13 @@ mod tests {
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(id > :id)");
+        assert_eq!(expr, "(`id` > :id)");
 
         let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(aa > :aa) OR ((aa = :aa) AND (bb > :bb)) OR ((aa = :aa) AND (bb = :bb) AND (cc > :cc))"
+            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
         );
     }
 
@@ -592,6 +605,7 @@ mod tests {
             format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
+            target_table: None,
         };
 
         let rw_schema = param.schema();

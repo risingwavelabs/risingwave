@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use thiserror_ext::AsReport;
+
 use super::super::super::plan_node::*;
 use super::super::Rule;
 use crate::optimizer::rule::BoxedRule;
@@ -36,7 +38,7 @@ impl Rule for BushyTreeJoinOrderingRule {
             match join.as_bushy_tree_join() {
                 Ok(plan) => Some(plan),
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!("{}", e.as_report());
                     None
                 }
             }

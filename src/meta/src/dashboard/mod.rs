@@ -35,6 +35,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
+use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
 
 #[derive(Clone)]
@@ -45,6 +46,7 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
+    pub diagnose_command: DiagnoseCommandRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -350,6 +352,10 @@ pub(super) mod handlers {
 
         response.map_err(err)
     }
+
+    pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
+        Ok(srv.diagnose_command.report().await)
+    }
 }
 
 impl DashboardService {
@@ -386,6 +392,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

@@ -877,9 +877,9 @@ dependencies = ["prepare"]
 condition = { env_set = [
   "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*.java",
+  "./java/connector-node/**/*",
 ], output = [
-  "./java/connector-node/assembly/target/*",
+  "./java/connector-node/assembly/target/**/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
@@ -965,7 +965,6 @@ set -e
 
 cargo nextest run \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  --features fail/failpoints \
   -p risingwave_simulation \
   "$@"
 """
@@ -981,7 +980,6 @@ set -e
 
 cargo nextest archive \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  --features fail/failpoints \
   -p risingwave_simulation \
   --archive-file simulation-it-test.tar.zst \
   "$@"

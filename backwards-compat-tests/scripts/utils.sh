@@ -129,44 +129,58 @@ version_lt() {
 
 ################################### Entry Points
 
-# Get $OLD_VERSION and $NEW_VERSION for Risingwave
-get_rw_versions() {
-  # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
-  # against the Nth latest release candidate, where N > 1. N can be larger,
-  # in case some old cluster did not upgrade.
-  local VERSION_OFFSET=4
+get_old_version() {
+   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
+   # against the Nth latest release candidate, where N > 1. N can be larger,
+   # in case some old cluster did not upgrade.
+   if [[ -z $VERSION_OFFSET ]]
+   then
+       local VERSION_OFFSET=1
+   fi
 
-  # First we obtain a list of versions from git branch names.
-  # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
-  echo "--- git branch origin output"
-  git branch -r | grep origin
+   # First we obtain a list of versions from git branch names.
+   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
+   echo "--- git branch origin output"
+   git branch -r | grep origin
 
-  # Extract X.Y.Z tags
-  echo "--- VERSION BRANCHES"
-  local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
-  echo "$tags"
+   # Extract X.Y.Z tags
+   echo "--- VERSION BRANCHES"
+   local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
+   echo "$tags"
 
-  # Then we sort them in descending order.
-  echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
-  echo "$sorted_versions"
+   # Then we sort them in descending order.
+   echo "--- VERSIONS"
+   local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
+   echo "$sorted_versions"
 
-  # Then we take the Nth latest version.
-  # We set $OLD_VERSION to this.
-  OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+   # Then we take the Nth latest version.
+   # We set $OLD_VERSION to this.
+   OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+}
 
+get_new_version() {
   # Next, for $NEW_VERSION we just scrape it from `workspace.package.version`.
   NEW_VERSION=$(cat Cargo.toml | grep "\[workspace\.package\]" -A 5 | sed -n 's/version = \"\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' | tr -d ' ')
+}
 
-  # Then we assert that `$OLD_VERSION` < `$NEW_VERSION`.
-  if version_lt "$OLD_VERSION" "$NEW_VERSION"
-  then
-    echo "OLD_VERSION: $OLD_VERSION"
-    echo "NEW_VERSION: $NEW_VERSION"
-  else
-    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
-    exit 1
-  fi
+# Get $OLD_VERSION and $NEW_VERSION for Risingwave
+get_rw_versions() {
+  get_old_version
+  get_new_version
+
+  # FIXME(kwannoel): This check does not always hold.
+  # The new/current version may not be up-to-date.
+  # The new version is derived from Cargo.toml, which may not be up-to-date.
+  # The old version are derived from git tags, which are up-to-date.
+  # Then we assert that `$OLD_VERSION` <= `$NEW_VERSION`.
+  #  if version_le "$OLD_VERSION" "$NEW_VERSION"
+  #  then
+  #    echo "OLD_VERSION: $OLD_VERSION"
+  #    echo "NEW_VERSION: $NEW_VERSION"
+  #  else
+  #    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
+  #    exit 1
+  #  fi
 }
 
 # Setup table and materialized view.

@@ -204,7 +204,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
             metrics
                 .executor_metrics()
                 .exchange_recv_row_number
-                .with_label_values(&[
+                .with_guarded_label_values(&[
                     source_id.query_id.as_str(),
                     format!("{}", source_id.stage_id).as_str(),
                     format!("{}", source_id.task_id).as_str(),

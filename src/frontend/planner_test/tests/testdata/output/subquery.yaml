@@ -461,8 +461,16 @@
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
     See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
-    SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
-  batch_error: 'internal error: Scalar subquery might produce more than one row.'
+    SELECT 1 a, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g')) b
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [1:Int32, RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalMaxOneRow
+        └─LogicalProject { exprs: [RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
+          └─LogicalProjectSet { select_list: [RegexpMatches('barbeque barbeque':Varchar, '(bar)(beque)':Varchar, 'g':Varchar)] }
+            └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t1 (a int, b int);
     select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
@@ -875,3 +883,14 @@
       └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
         ├─BatchValues { rows: [[]] }
         └─BatchValues { rows: [[1:Int32]] }
+- name: array subquery
+  sql: |
+    select Array(select 1 union select 2);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchSimpleAgg { aggs: [array_agg(1:Int32)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+            └─BatchValues { rows: [[1:Int32], [2:Int32]] }

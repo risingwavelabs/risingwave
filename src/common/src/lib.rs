@@ -45,6 +45,9 @@
 #![feature(bound_map)]
 #![feature(array_methods)]
 
+#[cfg_attr(not(test), expect(unused_extern_crates))]
+extern crate self as risingwave_common;
+
 #[macro_use]
 pub mod jemalloc;
 #[macro_use]
@@ -53,6 +56,7 @@ pub mod error;
 pub mod array;
 #[macro_use]
 pub mod util;
+pub mod acl;
 pub mod buffer;
 pub mod cache;
 pub mod cast;
@@ -62,17 +66,16 @@ pub mod constants;
 pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
+pub mod log;
 pub mod memory;
+pub mod metrics;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
-pub mod transaction;
-
-pub mod acl;
-pub mod metrics;
 pub mod test_utils;
+pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
 

@@ -35,6 +35,26 @@ where
     visit_inner(stream_node, &mut f)
 }
 
+/// A utility for to accessing the [`StreamNode`]. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont<F>(stream_node: &mut StreamNode, mut f: F)
+where
+    F: FnMut(&mut StreamNode) -> bool,
+{
+    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
+    where
+        F: FnMut(&mut StreamNode) -> bool,
+    {
+        if !f(stream_node) {
+            return;
+        }
+        for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(stream_node, &mut f)
+}
+
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
 pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
@@ -88,7 +108,12 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.right_degree_table, "HashJoinDegreeRight");
             }
             NodeBody::DynamicFilter(node) => {
-                always!(node.left_table, "DynamicFilterLeft");
+                if node.condition_always_relax {
+                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
+                } else {
+                    always!(node.left_table, "DynamicFilterLeft");
+                }
+
                 always!(node.right_table, "DynamicFilterRight");
             }
 

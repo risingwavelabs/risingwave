@@ -406,10 +406,12 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
+        affected_table_change: Option<ReplaceTablePlan>,
     ) -> Result<CatalogVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
+            affected_table_change,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -502,10 +504,12 @@ impl MetaClient {
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
-            source,
-            table: Some(table),
-            fragment_graph: Some(graph),
-            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+            plan: Some(ReplaceTablePlan {
+                source,
+                table: Some(table),
+                fragment_graph: Some(graph),
+                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+            }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here
@@ -563,8 +567,17 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<CatalogVersion> {
-        let request = DropSinkRequest { sink_id, cascade };
+    pub async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<CatalogVersion> {
+        let request = DropSinkRequest {
+            sink_id,
+            cascade,
+            affected_table_change,
+        };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
@@ -1020,8 +1033,8 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn backup_meta(&self) -> Result<u64> {
-        let req = BackupMetaRequest {};
+    pub async fn backup_meta(&self, remarks: Option<String>) -> Result<u64> {
+        let req = BackupMetaRequest { remarks };
         let resp = self.inner.backup_meta(req).await?;
         Ok(resp.job_id)
     }

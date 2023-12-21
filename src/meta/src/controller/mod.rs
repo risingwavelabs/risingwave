@@ -135,6 +135,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: value.0.description,
+            // TODO: fix it for model v2.
+            incoming_sinks: vec![],
         }
     }
 }
@@ -149,7 +151,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             row_id_index: value.0.row_id_index.map(|id| id as _),
             columns: value.0.columns.0,
             pk_column_ids: value.0.pk_column_ids.0,
-            properties: value.0.properties.0,
+            with_properties: value.0.with_properties.0,
             owner: value.1.owner_id as _,
             info: value.0.source_info.map(|info| info.0),
             watermark_descs: value.0.watermark_descs.0,
@@ -198,6 +200,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
+            // todo: fix this for model v2
+            target_table: None,
         }
     }
 }

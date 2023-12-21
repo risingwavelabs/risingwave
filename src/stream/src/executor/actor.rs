@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -21,9 +21,12 @@ use futures::future::join_all;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_expr::ExprError;
+use risingwave_pb::plan_common::ExprContext;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
@@ -82,7 +85,10 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!(identity, error = %err.as_report(), "failed to evaluate expression");
+        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
+        }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         let mut err_str = err.to_report_string();
@@ -129,6 +135,7 @@ pub struct Actor<C> {
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     actor_context: ActorContextRef,
+    expr_context: ExprContext,
 }
 
 impl<C> Actor<C>
@@ -141,6 +148,7 @@ where
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
+        expr_context: ExprContext,
     ) -> Self {
         Self {
             consumer,
@@ -148,17 +156,21 @@ where
             context,
             _metrics: metrics,
             actor_context,
+            expr_context,
         }
     }
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        tokio::join!(
-            // Drive the subtasks concurrently.
-            join_all(std::mem::take(&mut self.subtasks)),
-            self.run_consumer(),
-        )
-        .1
+        expr_context_scope(self.expr_context.clone(), async move {
+            tokio::join!(
+                // Drive the subtasks concurrently.
+                join_all(std::mem::take(&mut self.subtasks)),
+                self.run_consumer(),
+            )
+            .1
+        })
+        .await
     }
 
     async fn run_consumer(self) -> StreamResult<()> {

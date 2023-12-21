@@ -47,6 +47,9 @@ pub trait TopNExecutorBase: Send + 'static {
         epoch: EpochPair,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
+    /// Flush the buffered chunk to the storage backend.
+    fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
+
     fn info(&self) -> &ExecutorInfo;
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
@@ -125,7 +128,10 @@ where
                         yield Message::Watermark(output_watermark);
                     }
                 }
-                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    self.inner.try_flush_data().await?;
+                }
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
 

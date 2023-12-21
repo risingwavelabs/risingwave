@@ -41,7 +41,7 @@ use crate::controller::utils::{
     check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_mappings,
 };
 use crate::manager::StreamingJob;
-use crate::model::StreamEnvironment;
+use crate::model::StreamContext;
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
@@ -53,14 +53,14 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
-        env: &StreamEnvironment,
+        ctx: &StreamContext,
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
             job_id: Set(obj.oid),
             job_status: Set(JobStatus::Creating),
             create_type: Set(create_type.into()),
-            timezone: Set(env.timezone.clone()),
+            timezone: Set(ctx.timezone.clone()),
         };
         job.insert(txn).await?;
 
@@ -71,7 +71,7 @@ impl CatalogController {
         &self,
         streaming_job: &mut StreamingJob,
         create_type: PbCreateType,
-        env: &StreamEnvironment,
+        ctx: &StreamContext,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -95,14 +95,14 @@ impl CatalogController {
                     Some(table.database_id as _),
                     Some(table.schema_id as _),
                     create_type,
-                    env,
+                    ctx,
                 )
                 .await?;
                 table.id = job_id as _;
                 let table: table::ActiveModel = table.clone().into();
                 table.insert(&txn).await?;
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, _) => {
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Sink,
@@ -110,7 +110,7 @@ impl CatalogController {
                     Some(sink.database_id as _),
                     Some(sink.schema_id as _),
                     create_type,
-                    env,
+                    ctx,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -125,7 +125,7 @@ impl CatalogController {
                     Some(table.database_id as _),
                     Some(table.schema_id as _),
                     create_type,
-                    env,
+                    ctx,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -159,7 +159,7 @@ impl CatalogController {
                     Some(index.database_id as _),
                     Some(index.schema_id as _),
                     create_type,
-                    env,
+                    ctx,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -179,7 +179,7 @@ impl CatalogController {
                     Some(src.database_id as _),
                     Some(src.schema_id as _),
                     create_type,
-                    env,
+                    ctx,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -324,7 +324,7 @@ impl CatalogController {
             .exec(&txn)
             .await?;
 
-        for (_, splits) in split_assignment {
+        for splits in split_assignment.values() {
             for (actor_id, splits) in splits {
                 let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
                 let connector_splits = PbConnectorSplits { splits };
@@ -342,8 +342,7 @@ impl CatalogController {
         for (actor_id, dispatchers) in new_actor_dispatchers {
             for dispatcher in dispatchers {
                 let mut actor_dispatcher =
-                    actor_dispatcher::Model::from((actor_id as u32, dispatcher))
-                        .into_active_model();
+                    actor_dispatcher::Model::from((actor_id, dispatcher)).into_active_model();
                 actor_dispatcher.id = NotSet;
                 actor_dispatchers.push(actor_dispatcher);
             }

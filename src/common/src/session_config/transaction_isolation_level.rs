@@ -39,10 +39,10 @@ impl FromStr for IsolationLevel {
 impl std::fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ReadCommitted => write!(f, "READ_COMMITTED"),
-            Self::ReadUncommitted => write!(f, "READ_UNCOMMITTED"),
-            Self::RepeatableRead => write!(f, "REPEATABLE_READ"),
-            Self::Serializable => write!(f, "SERIALIZABLE"),
+            Self::ReadCommitted => write!(f, "read committed"),
+            Self::ReadUncommitted => write!(f, "read uncommitted"),
+            Self::RepeatableRead => write!(f, "repeatable read"),
+            Self::Serializable => write!(f, "serializable"),
         }
     }
 }

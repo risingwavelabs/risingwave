@@ -14,11 +14,11 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -26,7 +26,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, create_connection_request, PbTableJobType,
+    alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
+    PbTableJobType, ReplaceTablePlan,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -108,7 +109,12 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
-    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()>;
+    async fn create_sink(
+        &self,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        affected_table_change: Option<PbReplaceTablePlan>,
+    ) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
@@ -136,7 +142,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        affected_table_change: Option<PbReplaceTablePlan>,
+    ) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
@@ -291,8 +302,16 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
-        let version = self.meta_client.create_sink(sink, graph).await?;
+    async fn create_sink(
+        &self,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_sink(sink, graph, affected_table_change)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -358,8 +377,16 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
-        let version = self.meta_client.drop_sink(sink_id, cascade).await?;
+    async fn drop_sink(
+        &self,
+        sink_id: u32,
+        cascade: bool,
+        affected_table_change: Option<ReplaceTablePlan>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_sink(sink_id, cascade, affected_table_change)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -476,9 +503,7 @@ impl CatalogWriterImpl {
     async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
         let mut rx = self.catalog_updated_rx.clone();
         while *rx.borrow_and_update() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+            rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         Ok(())
     }

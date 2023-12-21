@@ -445,7 +445,10 @@ enum MetaCommands {
         resolve_no_shuffle: bool,
     },
     /// backup meta by taking a meta snapshot
-    BackupMeta,
+    BackupMeta {
+        #[clap(long)]
+        remarks: Option<String>,
+    },
     /// restore meta by recovering from a meta snapshot
     RestoreMeta {
         #[command(flatten)]
@@ -676,7 +679,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::reschedule(context, plan, revision, from, dry_run, resolve_no_shuffle)
                 .await?
         }
-        Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::BackupMeta { remarks }) => {
+            cmd_impl::meta::backup_meta(context, remarks).await?
+        }
         Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
             risingwave_meta::backup_restore::restore(opts).await?
         }

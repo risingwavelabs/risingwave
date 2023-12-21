@@ -155,6 +155,12 @@ impl LogStoreBufferInner {
             );
         }
     }
+
+    fn rewind(&mut self) {
+        while let Some((epoch, item)) = self.consumed_queue.pop_front() {
+            self.unconsumed_queue.push_back((epoch, item))
+        }
+    }
 }
 
 struct SharedMutex<T>(Arc<Mutex<T>>);
@@ -390,6 +396,10 @@ impl LogStoreBufferReceiver {
                 inner.truncation_list.push_back((epoch, seq_id));
             }
         }
+    }
+
+    pub(crate) fn rewind(&self) {
+        self.buffer.inner().rewind()
     }
 }
 

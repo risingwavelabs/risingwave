@@ -22,7 +22,9 @@ aws-config = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 base64-url = { version = "2.0.0" }
 bytes = { version = "1", features = ["serde"] }
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
+comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
 either = "1"
@@ -40,7 +42,7 @@ num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 prometheus = "0.13"
-prometheus-http-query = "0.7"
+prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = "0.8"
 reqwest = "0.11"

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
@@ -181,6 +182,7 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
+            incoming_sinks: vec![],
         }
     }
 

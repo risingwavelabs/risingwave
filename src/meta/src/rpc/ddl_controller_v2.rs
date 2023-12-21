@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
 use crate::controller::catalog::CatalogController;
 use crate::manager::{MetadataManager, NotificationVersion, StreamingJob};
-use crate::model::{MetadataModel, StreamEnvironment};
+use crate::model::{MetadataModel, StreamContext};
 use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController};
 use crate::stream::{validate_sink, StreamFragmentGraph};
 use crate::MetaResult;
@@ -39,9 +39,9 @@ impl DdlController {
 
         // TODO: add revert function to clean metadata from db if failed.
         // create catalogs for streaming jobs.
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut stream_job, create_type, &env)
+            .create_job_catalog(&mut stream_job, create_type, &ctx)
             .await?;
 
         match &mut stream_job {
@@ -92,7 +92,7 @@ impl DdlController {
         // create fragment and actor catalogs.
         tracing::debug!(id = stream_job.id(), "building stream job");
         let (ctx, table_fragments) = self
-            .build_stream_job(env, &stream_job, fragment_graph)
+            .build_stream_job(ctx, &stream_job, fragment_graph, None)
             .await?;
 
         match &stream_job {
@@ -103,7 +103,10 @@ impl DdlController {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, target_table) => {
+                if target_table.is_some() {
+                    unimplemented!("support create sink into table in v2");
+                }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
             }
