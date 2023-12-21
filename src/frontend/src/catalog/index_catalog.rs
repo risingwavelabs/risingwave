@@ -189,13 +189,13 @@ impl IndexCatalog {
         }
     }
 
-    pub fn get_column_def(&self, column_no: usize) -> String {
+    pub fn get_column_def(&self, column_no: usize) -> Option<String> {
         if let Some(col) = self.index_table.columns.get(column_no) {
             if col.is_hidden {
-                return String::new();
+                return None;
             }
         } else {
-            return String::new();
+            return None;
         }
         let col = format!("{:?}", self.index_item[column_no]);
         let column_names = self
@@ -206,7 +206,7 @@ impl IndexCatalog {
             .collect_vec();
         // TODO(Kexiang): Currently we simply map $x to the column name. Extra info like ":Int32" is still kept.
         // We should find a better way to generate the definition for `ExprImpl`.
-        replace_with_column_names(&column_names, &col)
+        Some(replace_with_column_names(&column_names, &col))
     }
 
     pub fn display(&self) -> IndexDisplay {

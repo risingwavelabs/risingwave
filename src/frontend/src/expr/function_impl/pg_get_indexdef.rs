@@ -62,6 +62,7 @@ fn pg_get_indexdef_impl(
                 reason: e.to_report_string().into(),
             })?
             .get_column_def(column_no as usize - 1)
+            .unwrap_or_default()
     };
     write!(writer, "{}", ans).unwrap();
     Ok(())
