@@ -43,8 +43,8 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
                 tracing::event!(
                     target: "risingwave_connector_node",
                     $lvl,
-                    thread = thread_name.as_ref(),
-                    class = class_name.as_ref(),
+                    thread = &*thread_name,
+                    class = &*class_name,
                     "{message}",
                 )
             };
