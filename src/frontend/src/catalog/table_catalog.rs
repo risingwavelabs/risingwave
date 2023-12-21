@@ -588,7 +588,9 @@ mod tests {
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
-    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+    use risingwave_pb::plan_common::{
+        AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    };
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -681,6 +683,8 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
+                            additional_column_type: AdditionalColumnType::Normal,
+                            version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
                     }

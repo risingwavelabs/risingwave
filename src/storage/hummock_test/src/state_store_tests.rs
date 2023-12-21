@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use futures::{pin_mut, TryStreamExt};
-use futures_async_stream::for_await;
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -1427,20 +1426,15 @@ async fn test_replicated_local_hummock_storage() {
     {
         assert!(local_hummock_storage.read_version().read().is_replicated());
 
-        let s = risingwave_storage::store::LocalStateStore::iter(
+        let actual = risingwave_storage::store::LocalStateStore::iter(
             &local_hummock_storage,
             (Unbounded, Unbounded),
             read_options.clone(),
         )
         .await
-        .unwrap();
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in s {
-            actual.push(v)
-        }
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await;
 
         let expected = expect![[r#"
             [
@@ -1496,18 +1490,12 @@ async fn test_replicated_local_hummock_storage() {
 
     // Test Global State Store iter, epoch2
     {
-        let iter = hummock_storage
+        let actual = hummock_storage
             .iter((Unbounded, Unbounded), epoch2, read_options.clone())
             .await
-            .unwrap();
-        pin_mut!(iter);
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in iter {
-            actual.push(v);
-        }
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
 
         let expected = expect![[r#"
             [
@@ -1530,18 +1518,12 @@ async fn test_replicated_local_hummock_storage() {
 
     // Test Global State Store iter, epoch1
     {
-        let iter = hummock_storage
+        let actual = hummock_storage
             .iter((Unbounded, Unbounded), epoch1, read_options)
             .await
-            .unwrap();
-        pin_mut!(iter);
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in iter {
-            actual.push(v);
-        }
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
 
         let expected = expect![[r#"
             []

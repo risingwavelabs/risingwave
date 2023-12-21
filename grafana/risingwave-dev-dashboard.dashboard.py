@@ -3724,6 +3724,26 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Kv Log Store Rewind Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_rewind_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Rewind delay (second)",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(1.0, sum(rate({metric('kv_log_store_rewind_delay_bucket')}[$__rate_interval])) by (le, executor_id, connector, sink_id))",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
