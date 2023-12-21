@@ -310,10 +310,6 @@ macro_rules! cast_jvalue {
         let obj = $value.l().expect("should be object");
         unsafe { jni::objects::JByteArray::from_raw(obj.into_raw()) }
     }};
-    ({ String }, $value:expr) => {{
-        let obj = $value.l().expect("should be object");
-        jni::objects::JString::from(obj)
-    }};
     ({ $($class:tt)+ }, $value:expr) => {{
         $value.l().expect("should be object")
     }};
@@ -886,7 +882,7 @@ mod tests {
         // This test shows the signature of all native methods
         let expected = expect_test::expect![[r#"
             [
-                tracingSlf4jEvent                        (Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,
