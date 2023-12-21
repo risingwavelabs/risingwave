@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, KillOpts};
 use tokio::time::sleep;
 
 use crate::sink::utils::{
@@ -26,34 +25,8 @@ use crate::sink::utils::{
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-async fn kill_and_check(
-    cluster: &mut Cluster,
-    test_sink: &SimulationTestSink,
-    target: usize,
-) -> anyhow::Result<()> {
-    let mut prev_count = 0;
-    sleep(Duration::from_secs(2)).await;
-    for i in 0..5 {
-        let curr_count = test_sink.store.id_count();
-        if curr_count == target {
-            assert!(i > 0, "test finish without kill");
-            break;
-        }
-        assert!(
-            curr_count > prev_count,
-            "not make progress between kill. Prev count {}, curr count {}, i {}",
-            prev_count,
-            curr_count,
-            i
-        );
-        prev_count = curr_count;
-        cluster.kill_node(&KillOpts::ALL).await;
-        sleep(Duration::from_secs(10)).await;
-    }
-    Ok(())
-}
-
-async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
+#[tokio::test]
+async fn test_sink_decouple_err_isolation() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
@@ -64,41 +37,30 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
-    if is_decouple {
-        session.run("set sink_decouple = true").await?;
-    } else {
-        session.run("set sink_decouple = false").await?;
-    }
+    session.run("set sink_decouple = true").await?;
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
     assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
 
-    let count = test_source.id_list.len();
+    test_sink.set_err_rate(0.002);
 
-    kill_and_check(&mut cluster, &test_sink, count).await?;
+    test_sink
+        .store
+        .wait_for_count(test_source.id_list.len())
+        .await?;
 
-    test_sink.store.wait_for_count(count).await?;
-
-    let mut session = cluster.start_session();
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
 
-    assert!(source_parallelism < test_source.create_stream_count.load(Relaxed));
-    assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    // Due to sink failure isolation, source stream should not be recreated
+    assert_eq!(
+        source_parallelism,
+        test_source.create_stream_count.load(Relaxed)
+    );
 
+    assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
 
     Ok(())
-}
-
-#[tokio::test]
-async fn test_sink_recovery() -> Result<()> {
-    recovery_test_inner(false).await
-}
-
-#[tokio::test]
-async fn test_sink_decouple_recovery() -> Result<()> {
-    recovery_test_inner(true).await
 }

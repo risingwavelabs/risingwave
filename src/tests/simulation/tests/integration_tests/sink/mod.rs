@@ -20,6 +20,8 @@ mod recovery;
 mod scale;
 #[cfg(madsim)]
 mod utils;
+#[cfg(madsim)]
+mod err_isolation;
 
 #[macro_export]
 macro_rules! assert_with_err_returned {
