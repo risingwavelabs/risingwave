@@ -245,7 +245,7 @@ pub fn gen_sink_plan(
             || sink_catalog.sink_type == SinkType::ForceAppendOnly)
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys.".to_string(),
+                "Only append-only sinks can sink to a table without primary keys. Please try to add \"FORMAT PLAIN ENCODE NATIVE\"".to_string(),
             )));
         }
 
@@ -581,7 +581,8 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes) => {
+        E::Native => SinkEncode::Native,
+        e @ (E::Csv | E::Bytes) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -625,6 +626,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 RedisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json,Encode::Template],
                     Format::Upsert => vec![Encode::Json,Encode::Template],
+                ),
+                "table" => hashmap!(
+                    Format::Plain => vec![Encode::Native],
+                    Format::Upsert => vec![Encode::Native],
                 ),
         ))
     });
