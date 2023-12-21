@@ -19,7 +19,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
-use serde::{Deserializer, Serializer};
 
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
@@ -36,25 +35,6 @@ pub struct HummockVersion {
 impl Default for HummockVersion {
     fn default() -> Self {
         HummockVersion::from_protobuf_inner(&PbHummockVersion::default())
-    }
-}
-
-impl serde::ser::Serialize for HummockVersion {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.to_protobuf().serialize(serializer)
-    }
-}
-
-impl<'de> serde::de::Deserialize<'de> for HummockVersion {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        PbHummockVersion::deserialize(deserializer)
-            .map(|version| HummockVersion::from_persisted_protobuf(&version))
     }
 }
 
@@ -130,25 +110,6 @@ pub struct HummockVersionDelta {
 impl Default for HummockVersionDelta {
     fn default() -> Self {
         HummockVersionDelta::from_protobuf_inner(&PbHummockVersionDelta::default())
-    }
-}
-
-impl serde::ser::Serialize for HummockVersionDelta {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.to_protobuf().serialize(serializer)
-    }
-}
-
-impl<'de> serde::de::Deserialize<'de> for HummockVersionDelta {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        PbHummockVersionDelta::deserialize(deserializer)
-            .map(|version| HummockVersionDelta::from_persisted_protobuf(&version))
     }
 }
 

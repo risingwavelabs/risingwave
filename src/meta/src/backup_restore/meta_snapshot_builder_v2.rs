@@ -22,6 +22,7 @@ use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_meta_model_v2 as model_v2;
+use risingwave_pb::hummock::PbHummockVersionDelta;
 use sea_orm::{EntityTrait, QueryOrder, TransactionTrait};
 
 use crate::controller::SqlMetaStore;
@@ -67,7 +68,8 @@ impl MetaSnapshotV2Builder {
             .await
             .map_err(|e| BackupError::MetaStorage(e.into()))?
             .into_iter()
-            .map_into::<HummockVersionDelta>();
+            .map_into::<PbHummockVersionDelta>()
+            .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
         let hummock_version = {
             let mut redo_state = hummock_version;
             let mut max_log_id = None;
