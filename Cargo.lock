@@ -8670,6 +8670,8 @@ dependencies = [
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
+ "prometheus",
+ "risingwave_common",
  "static_assertions",
  "thiserror",
  "thiserror-ext",
