@@ -488,6 +488,8 @@ impl ScaleController {
         );
 
         if options.resolve_no_shuffle_upstream {
+            let original_reschedule_keys = reschedule.keys().cloned().collect();
+
             Self::resolve_no_shuffle_upstream_fragments(
                 reschedule,
                 &fragment_map,
@@ -496,8 +498,9 @@ impl ScaleController {
             )?;
 
             if let Some(table_parallelisms) = table_parallelisms {
+                // We need to reiterate through the NO_SHUFFLE dependencies in order to ascertain which downstream table the custom modifications of the table have been propagated from.
                 Self::resolve_no_shuffle_upstream_tables(
-                    reschedule.keys().cloned().collect(),
+                    original_reschedule_keys,
                     &fragment_map,
                     &no_shuffle_source_fragment_ids,
                     &no_shuffle_target_fragment_ids,
@@ -1721,6 +1724,7 @@ impl ScaleController {
             let fragment_map = table_fragment_map.remove(&table_id).unwrap();
 
             for (fragment_id, fragment) in fragment_map {
+                //
                 if no_shuffle_target_fragment_ids.contains(&fragment_id) {
                     continue;
                 }
@@ -1815,7 +1819,9 @@ impl ScaleController {
                                 ),
                             );
                         }
-                        TableParallelism::Custom => unreachable!(),
+                        TableParallelism::Custom => {
+                            // skipping for custom
+                        }
                     },
                 }
             }

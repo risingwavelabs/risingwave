@@ -17,9 +17,12 @@ use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{
+    extract_parallelism_from_table_state, BuiltinTable, SysCatalogReaderImpl,
+};
 
 pub const RW_TABLE_FRAGMENTS: BuiltinTable = BuiltinTable {
     name: "rw_table_fragments",
@@ -39,18 +42,7 @@ impl SysCatalogReaderImpl {
         Ok(states
             .into_iter()
             .map(|state| {
-                let parallelism = match state
-                    .parallelism
-                    .as_ref()
-                    .and_then(|parallelism| parallelism.parallelism.as_ref())
-                {
-                    None => "none".to_string(),
-                    Some(PbParallelism::Auto(_)) => "auto".to_string(),
-                    Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
-                        format!("fixed({parallelism})")
-                    }
-                    Some(PbParallelism::Custom(_)) => "custom".to_string(),
-                };
+                let parallelism = extract_parallelism_from_table_state(&state);
 
                 OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(state.table_id as i32)),
