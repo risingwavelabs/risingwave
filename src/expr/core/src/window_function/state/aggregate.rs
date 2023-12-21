@@ -41,7 +41,7 @@ pub struct AggregateState {
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> Result<Self> {
-        if !call.frame.bounds.validate().is_ok() {
+        if call.frame.bounds.validate().is_err() {
             bail!("the window frame must be valid");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
