@@ -55,10 +55,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
-    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
-    TableOption,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -212,7 +211,6 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -580,10 +578,7 @@ impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     #[named]
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<version_update_payload::Payload> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -596,7 +591,7 @@ impl HummockManager {
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(versioning.current_version.to_protobuf());
+        let ret = versioning.current_version.clone();
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {

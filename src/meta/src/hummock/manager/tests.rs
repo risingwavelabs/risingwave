@@ -32,7 +32,6 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
     CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
     SstableInfo,
@@ -532,14 +531,9 @@ async fn test_hummock_manager_basic() {
         );
 
         // should pin latest because u64::MAX
-        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_1).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         assert_eq!(
@@ -554,14 +548,9 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_2).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         // pinned by context_id_1

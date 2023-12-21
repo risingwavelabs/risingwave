@@ -22,7 +22,6 @@ use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -424,15 +423,10 @@ impl HummockManagerService for HummockServiceImpl {
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let payload = self.hummock_manager.pin_version(req.context_id).await?;
-        match payload {
-            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
-                pinned_version: Some(version),
-            })),
-            Payload::VersionDeltas(_) => {
-                unreachable!("pin_version should not return version delta")
-            }
-        }
+        let version = self.hummock_manager.pin_version(req.context_id).await?;
+        Ok(Response::new(PinVersionResponse {
+            pinned_version: Some(version.to_protobuf()),
+        }))
     }
 
     async fn split_compaction_group(
