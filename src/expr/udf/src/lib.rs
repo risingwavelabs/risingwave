@@ -13,9 +13,11 @@
 // limitations under the License.
 
 #![feature(error_generic_member_access)]
+#![feature(lazy_cell)]
 
 mod error;
 mod external;
+mod metrics;
 
 pub use error::{Error, Result};
 pub use external::ArrowFlightUdfClient;
