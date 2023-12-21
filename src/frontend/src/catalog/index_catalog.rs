@@ -207,6 +207,8 @@ impl IndexCatalog {
             ),
         };
 
+        // TODO(Kexiang): Currently, extra info like ":Int32" introduced by `ExprDisplay` is kept for simplity.
+        // We'd better remove it in the future.
         Some(expr_display.to_string())
     }
 
