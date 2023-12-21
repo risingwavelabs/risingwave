@@ -22,7 +22,6 @@ parse-display = "0.8"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
-serde = "1"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

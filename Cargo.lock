@@ -8746,7 +8746,6 @@ dependencies = [
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_pb",
- "serde",
  "tracing",
  "workspace-hack",
 ]
