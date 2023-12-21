@@ -9420,6 +9420,7 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tokio-metrics",
+ "tokio-retry",
  "tokio-stream",
  "tracing",
  "tracing-test",

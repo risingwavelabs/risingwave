@@ -33,6 +33,10 @@ use risingwave_common::{
 };
 use risingwave_connector::sink::SinkMetrics;
 
+use crate::common::log_store_impl::kv_log_store::{
+    REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
+};
+
 #[derive(Clone)]
 pub struct StreamingMetrics {
     pub level: MetricLevel,
@@ -154,6 +158,8 @@ pub struct StreamingMetrics {
     pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<3>,
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
@@ -876,6 +882,39 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let kv_log_store_rewind_count = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_rewind_count",
+            "Kv log store rewind rate",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_rewind_delay_opts = {
+            assert_eq!(2, REWIND_BACKOFF_FACTOR);
+            let bucket_count = (REWIND_MAX_DELAY.as_secs_f64().log2()
+                - REWIND_BASE_DELAY.as_secs_f64().log2())
+            .ceil() as usize;
+            let buckets = exponential_buckets(
+                REWIND_BASE_DELAY.as_secs_f64(),
+                REWIND_BACKOFF_FACTOR as _,
+                bucket_count,
+            )
+            .unwrap();
+            histogram_opts!(
+                "kv_log_store_rewind_delay",
+                "Kv log store rewind delay",
+                buckets,
+            )
+        };
+
+        let kv_log_store_rewind_delay = register_guarded_histogram_vec_with_registry!(
+            kv_log_store_rewind_delay_opts,
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -1084,6 +1123,8 @@ impl StreamingMetrics {
             log_store_read_rows,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
+            kv_log_store_rewind_count,
+            kv_log_store_rewind_delay,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
             iceberg_write_qps,
