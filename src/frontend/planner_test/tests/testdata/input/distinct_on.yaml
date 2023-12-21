@@ -35,6 +35,17 @@
   expected_outputs:
     - batch_plan
 - sql: |
+    CREATE TABLE secret_one (
+      field_one character varying,
+      field_two timestamp with time zone,
+      field_three character varying,
+      field_four double precision,
+      field_five boolean
+    );
+    SELECT DISTINCT ON (window_start) * FROM  TUMBLE(secret_one, field_two, INTERVAL '1' minute);
+  expected_outputs:
+    - batch_plan
+- sql: |
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   expected_outputs:

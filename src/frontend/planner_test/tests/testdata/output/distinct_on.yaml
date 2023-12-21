@@ -86,6 +86,22 @@
           └─BatchExchange { order: [], dist: HashShard(t1.k) }
             └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.k], distribution: SomeShard }
 - sql: |
+    CREATE TABLE secret_one (
+      field_one character varying,
+      field_two timestamp with time zone,
+      field_three character varying,
+      field_four double precision,
+      field_five boolean
+    );
+    SELECT DISTINCT ON (window_start) * FROM  TUMBLE(secret_one, field_two, INTERVAL '1' minute);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [$expr1] }
+      └─BatchExchange { order: [], dist: HashShard($expr1) }
+        └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, $expr1, AddWithTimeZone($expr1, '00:01:00':Interval, 'UTC':Varchar) as $expr2] }
+          └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, TumbleStart(secret_one.field_two, '00:01:00':Interval) as $expr1] }
+            └─BatchScan { table: secret_one, columns: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five], distribution: SomeShard }
+- sql: |
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   binder_error: 'Invalid input syntax: Invalid ordinal number in DISTINCT ON: 4'
