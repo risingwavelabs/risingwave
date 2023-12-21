@@ -68,6 +68,7 @@ mod repeat;
 mod replace;
 mod round;
 mod sha;
+mod similar_to_escape;
 mod split_part;
 mod string;
 mod string_to_array;
