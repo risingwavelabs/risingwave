@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::executor::block_on;
+use futures::future;
+use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
 use pgwire::pg_server::SessionId;
@@ -415,12 +417,14 @@ impl QueryRunner {
     }
 
     async fn all_children_scheduled(&self, stage_id: &StageId) -> bool {
-        for child in self.query.stage_graph.get_child_stages_unchecked(stage_id) {
-            if !self.stage_executions[child].is_scheduled().await {
-                return false;
-            }
-        }
-        true
+        self.query
+            .stage_graph
+            .get_child_stages_unchecked(stage_id)
+            .iter()
+            .map(|child| self.stage_executions[child].is_scheduled())
+            .collect::<FuturesUnordered<_>>()
+            .all(future::ready)
+            .await
     }
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
@@ -450,10 +454,15 @@ impl QueryRunner {
 
         tracing::trace!("Cleaning stages in query [{:?}]", self.query.query_id);
         // Stop all running stages.
-        for stage_execution in self.stage_executions.values() {
-            // The stop is return immediately so no need to spawn tasks.
-            stage_execution.stop(error_msg.clone()).await;
-        }
+        self.stage_executions
+            .values()
+            .map(|stage_execution| {
+                // The stop is return immediately so no need to spawn tasks.
+                stage_execution.stop(error_msg.clone())
+            })
+            .collect::<FuturesUnordered<_>>()
+            .collect::<()>()
+            .await;
     }
 }
 
