@@ -255,61 +255,61 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                 Year => {
                     let year = interval.years_field();
                     if year < 0 {
-                        write!(w, "{:+05}", year).unwrap()
+                        write!(w, "{:+05}", year).unwrap();
                     } else {
-                        write!(w, "{:04}", year).unwrap()
+                        write!(w, "{:04}", year).unwrap();
                     }
                 }
                 YearMod100 => {
                     let year = interval.years_field();
                     if year % 100 < 0 {
                         let year = -((-year) % 100);
-                        write!(w, "{:+03}", year).unwrap()
+                        write!(w, "{:+03}", year).unwrap();
                     } else {
                         let year = year % 100;
-                        write!(w, "{:02}", year).unwrap()
+                        write!(w, "{:02}", year).unwrap();
                     }
                 }
                 IsoYear => {
                     let iso_year = adjust_to_iso_year(interval)?;
                     if interval.years_field() < 0 {
-                        write!(w, "{:+05}", iso_year).unwrap()
+                        write!(w, "{:+05}", iso_year).unwrap();
                     } else {
-                        write!(w, "{:04}", iso_year).unwrap()
+                        write!(w, "{:04}", iso_year).unwrap();
                     }
                 }
                 IsoYearMod100 => {
                     let iso_year = adjust_to_iso_year(interval)?;
                     if interval.years_field() % 100 < 0 {
                         let iso_year = -((-iso_year) % 100);
-                        write!(w, "{:+03}", iso_year).unwrap()
+                        write!(w, "{:+03}", iso_year).unwrap();
                     } else {
                         let iso_year = iso_year % 100;
-                        write!(w, "{:02}", iso_year).unwrap()
+                        write!(w, "{:02}", iso_year).unwrap();
                     }
                 }
                 Month => {
                     let month = interval.months_field();
                     if month < 0 {
-                        write!(w, "{:+03}", month).unwrap()
+                        write!(w, "{:+03}", month).unwrap();
                     } else {
-                        write!(w, "{:02}", month).unwrap()
+                        write!(w, "{:02}", month).unwrap();
                     }
                 }
                 Day => {
                     let day = interval.days_field();
                     if day < 0 {
-                        write!(w, "{:+02}", day).unwrap()
+                        write!(w, "{:+02}", day).unwrap();
                     } else {
-                        write!(w, "{:02}", day).unwrap()
+                        write!(w, "{:02}", day).unwrap();
                     }
                 }
                 Hour => {
                     let hour = interval.hours_field();
                     if hour < 0 {
-                        write!(w, "{:+03}", hour).unwrap()
+                        write!(w, "{:+03}", hour).unwrap();
                     } else {
-                        write!(w, "{:02}", hour).unwrap()
+                        write!(w, "{:02}", hour).unwrap();
                     }
                 }
                 Hour12 => {
@@ -318,40 +318,40 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                         // here to align with postgres, we format -0 as 012.
                         let hour = -(-hour) % 12;
                         if hour == 0 {
-                            write!(w, "012").unwrap()
+                            w.write_str("012").unwrap();
                         } else {
-                            write!(w, "{:+03}", hour).unwrap()
+                            write!(w, "{:+03}", hour).unwrap();
                         }
                     } else {
                         let hour = if hour % 12 == 0 { 12 } else { hour % 12 };
-                        write!(w, "{:02}", hour).unwrap()
+                        write!(w, "{:02}", hour).unwrap();
                     }
                 }
                 Minute => {
                     let minute = interval.usecs() / 1_000_000 / 60;
                     if minute % 60 < 0 {
                         let minute = -((-minute) % 60);
-                        write!(w, "{:+03}", minute).unwrap()
+                        write!(w, "{:+03}", minute).unwrap();
                     } else {
                         let minute = minute % 60;
-                        write!(w, "{:02}", minute).unwrap()
+                        write!(w, "{:02}", minute).unwrap();
                     }
                 }
                 Second => {
                     let second = interval.usecs() / 1_000_000;
                     if second % 60 < 0 {
                         let second = -((-second) % 60);
-                        write!(w, "{:+03}", second).unwrap()
+                        write!(w, "{:+03}", second).unwrap();
                     } else {
                         let second = second % 60;
-                        write!(w, "{:02}", second).unwrap()
+                        write!(w, "{:02}", second).unwrap();
                     }
                 }
                 Nanosecond | Ordinal | WeekdayFromMon | NumDaysFromSun | IsoWeek | WeekFromSun
                 | WeekFromMon | IsoYearDiv100 | Timestamp | YearDiv100 | Internal(_) => {
                     unreachable!()
                 }
-            };
+            }
             Ok(())
         }
         Item::Fixed(ref spec) => {
