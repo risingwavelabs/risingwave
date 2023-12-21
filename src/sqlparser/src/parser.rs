@@ -4260,7 +4260,14 @@ impl Parser {
     }
 
     pub fn parse_cancel_job(&mut self) -> Result<Statement, ParserError> {
-        self.expect_keyword(Keyword::JOBS)?;
+        // CANCEL [JOBS|JOB] job_ids
+        match self.peek_token().token {
+            Token::Word(w) if Keyword::JOBS == w.keyword || Keyword::JOB == w.keyword => {
+                self.next_token();
+            }
+            _ => return self.expected("JOBS or JOB after CANCEL", self.peek_token()),
+        }
+
         let mut job_ids = vec![];
         loop {
             job_ids.push(self.parse_literal_uint()? as u32);

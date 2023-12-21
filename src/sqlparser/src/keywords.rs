@@ -278,6 +278,7 @@ define_keywords!(
     IS,
     ISNULL,
     ISOLATION,
+    JOB,
     JOBS,
     JOIN,
     JSON,

@@ -38,6 +38,7 @@ pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::deltalake::DeltaTableError;
@@ -60,7 +61,7 @@ pub use tracing;
 use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-use crate::sink::log_store::LogReader;
+use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::table::TABLE_SINK;
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
@@ -303,9 +304,40 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
+pub trait SinkLogReader: Send + Sized + 'static {
+    /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
+
+    /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
+    /// from the current offset.
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+}
+
+impl<R: LogReader> SinkLogReader for R {
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        <Self as LogReader>::next_item(self)
+    }
+
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <Self as LogReader>::truncate(self, offset)
+    }
+}
+
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
 }
 
 #[async_trait]

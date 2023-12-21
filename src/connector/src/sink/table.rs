@@ -14,9 +14,10 @@
 
 use async_trait::async_trait;
 
-use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
+use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkParam, SinkWriterParam,
+    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
+    SinkWriterParam,
 };
 
 pub const TABLE_SINK: &str = "table";
@@ -54,8 +55,7 @@ impl Sink for TableSink {
 
 #[async_trait]
 impl LogSinker for TableSink {
-    async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
-        log_reader.init().await?;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
