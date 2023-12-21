@@ -22,7 +22,7 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use regex::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
@@ -191,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
 
     let data_dir = PathBuf::from_str(manifest).unwrap().join("data");
 
-    let mut st = ReadDirStream::new(fs::read_dir(data_dir).await?)
+    ReadDirStream::new(fs::read_dir(data_dir).await?)
         .map(|path| async {
             let path = path?.path();
             let content = tokio::fs::read_to_string(&path).await?;
@@ -226,11 +226,9 @@ async fn main() -> anyhow::Result<()> {
 
             Ok::<_, anyhow::Error>(())
         })
-        .buffer_unordered(16);
-
-    while let Some(res) = st.next().await {
-        res?;
-    }
+        .buffer_unordered(16)
+        .try_collect::<()>()
+        .await?;
 
     Ok(())
 }

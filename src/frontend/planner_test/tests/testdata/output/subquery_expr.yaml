@@ -13,14 +13,20 @@
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
-    select (select x from t), 1 from t;
+    select (select x from t) a, 1 b from t;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
     select (select x from t limit 1), 1 from t;
@@ -55,7 +61,7 @@
         └─LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
-    select (select x from t order by x fetch next 1 rows with ties), 1 from t;
+    select (select x from t order by x fetch next 1 rows with ties) a, 1 b from t;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -63,20 +69,33 @@
       └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
+          └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
-    select (select x from t) + 1 from t;
+    select (select x from t) + 1 a from t;
   logical_plan: |-
     LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalMaxOneRow
+        └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
-    select (select x from t), (select 1);
+    select (select x from t) a, (select 1) b;
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
@@ -86,7 +105,14 @@
       │   └─LogicalScan { table: t, columns: [t.x, t._row_id] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+    ├─LogicalJoin { type: LeftOuter, on: true, output: all }
+    │ ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    │ └─LogicalMaxOneRow
+    │   └─LogicalScan { table: t, columns: [t.x] }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
@@ -99,7 +125,17 @@
           ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
           └─LogicalProject { exprs: [t.x] }
             └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [(t.x + $expr1) as $expr2] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [t.x] }
+      └─LogicalMaxOneRow
+        └─LogicalProject { exprs: [(t.x + t.x) as $expr1] }
+          └─LogicalJoin { type: LeftOuter, on: true, output: all }
+            ├─LogicalScan { table: t, columns: [t.x] }
+            └─LogicalMaxOneRow
+              └─LogicalScan { table: t, columns: [t.x] }
+  stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
