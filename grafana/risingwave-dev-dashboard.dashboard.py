@@ -3880,6 +3880,14 @@ def section_udf(outer_panels):
                             f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
+                        panels.target(
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name)",
+                            "udf_success_count - {{link}} {{name}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name)",
+                            "udf_failure_count - {{link}} {{name}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -3887,8 +3895,8 @@ def section_udf(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval]))",
-                            "udf_input_chunk_rows_avg",
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name)",
+                            "udf_input_chunk_rows_avg - {{link}} {{name}}",
                         ),
                     ],
                 ),
@@ -3909,8 +3917,8 @@ def section_udf(outer_panels):
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval]))",
-                            "udf_latency_avg",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_latency_avg - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -3922,6 +3930,10 @@ def section_udf(outer_panels):
                             f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_throughput_rows - {{%s}}" % NODE_LABEL,
                         ),
+                        panels.target(
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name)",
+                            "udf_throughput_rows - {{link}} {{name}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_bytesps(
@@ -3931,6 +3943,10 @@ def section_udf(outer_panels):
                         panels.target(
                             f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / (1024*1024)",
                             "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name) / (1024*1024)",
+                            "udf_throughput_bytes - {{link}} {{name}}",
                         ),
                     ],
                 ),

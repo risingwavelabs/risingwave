@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    exponential_buckets, register_histogram_with_registry, register_int_counter_with_registry,
-    Histogram, IntCounter, Registry,
+    exponential_buckets, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, HistogramVec, IntCounterVec, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -24,17 +24,17 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 #[derive(Debug, Clone)]
 pub struct Metrics {
     /// Number of successful UDF calls.
-    pub udf_success_count: IntCounter,
+    pub udf_success_count: IntCounterVec,
     /// Number of failed UDF calls.
-    pub udf_failure_count: IntCounter,
+    pub udf_failure_count: IntCounterVec,
     /// Input chunk rows of UDF calls.
-    pub udf_input_chunk_rows: Histogram,
+    pub udf_input_chunk_rows: HistogramVec,
     /// The latency of UDF calls in seconds.
-    pub udf_latency: Histogram,
+    pub udf_latency: HistogramVec,
     /// Total number of input rows of UDF calls.
-    pub udf_input_rows: IntCounter,
+    pub udf_input_rows: IntCounterVec,
     /// Total number of input bytes of UDF calls.
-    pub udf_input_bytes: IntCounter,
+    pub udf_input_bytes: IntCounterVec,
 }
 
 /// Global UDF metrics.
@@ -43,41 +43,48 @@ pub static GLOBAL_METRICS: LazyLock<Metrics> =
 
 impl Metrics {
     fn new(registry: &Registry) -> Self {
-        let udf_success_count = register_int_counter_with_registry!(
+        let labels = &["link", "name"];
+        let udf_success_count = register_int_counter_vec_with_registry!(
             "udf_success_count",
             "Total number of successful UDF calls",
+            labels,
             registry
         )
         .unwrap();
-        let udf_failure_count = register_int_counter_with_registry!(
+        let udf_failure_count = register_int_counter_vec_with_registry!(
             "udf_failure_count",
             "Total number of failed UDF calls",
+            labels,
             registry
         )
         .unwrap();
-        let udf_input_chunk_rows = register_histogram_with_registry!(
+        let udf_input_chunk_rows = register_histogram_vec_with_registry!(
             "udf_input_chunk_rows",
             "Input chunk rows of UDF calls",
+            labels,
             exponential_buckets(1.0, 2.0, 10).unwrap(), // 1 to 1024
             registry
         )
         .unwrap();
-        let udf_latency = register_histogram_with_registry!(
+        let udf_latency = register_histogram_vec_with_registry!(
             "udf_latency",
             "The latency(s) of UDF calls",
+            labels,
             exponential_buckets(0.000001, 2.0, 30).unwrap(), // 1us to 1000s
             registry
         )
         .unwrap();
-        let udf_input_rows = register_int_counter_with_registry!(
+        let udf_input_rows = register_int_counter_vec_with_registry!(
             "udf_input_rows",
             "Total number of input rows of UDF calls",
+            labels,
             registry
         )
         .unwrap();
-        let udf_input_bytes = register_int_counter_with_registry!(
+        let udf_input_bytes = register_int_counter_vec_with_registry!(
             "udf_input_bytes",
             "Total number of input bytes of UDF calls",
+            labels,
             registry
         )
         .unwrap();
