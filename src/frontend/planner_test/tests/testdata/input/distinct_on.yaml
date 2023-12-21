@@ -23,6 +23,18 @@
     - stream_plan
     - batch_plan
 - sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (a) * from t2 join t1 on t1.k = t2.k;
+  expected_outputs:
+    - batch_plan
+- sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (3) * from t2 join t1 on t1.k = t2.k;
+  expected_outputs:
+    - batch_plan
+- sql: |
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   expected_outputs:
