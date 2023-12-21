@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
 
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
@@ -22,21 +23,25 @@ use crate::optimizer::PlanRef;
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
 /// Before:
+/// ```text
 /// `LogicalFilter`
 ///  now() or others
 ///        |
 ///      Input
+/// ```
 ///
 /// After:
+/// ```text
 ///         `LogicalUnionAll`
-///       /                  \
-/// `LogicalFilter`       `LogicalFilter`
-/// now() & !others           others
-///     |                     |
-///     \                    /
+///         /              \
+/// `LogicalFilter`     `LogicalFilter`
+/// now() & !others        others
+///         |               |
+///         \              /
 ///         `LogicalShare`
 ///               |
 ///             Input
+/// ```text
 pub struct SplitNowOrRule {}
 impl Rule for SplitNowOrRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -49,38 +54,60 @@ impl Rule for SplitNowOrRule {
 
         let disjunctions = filter.predicate().conjunctions[0].as_or_disjunctions()?;
 
-        // TODO: handle disjuctions with arms more than 2
-        if disjunctions.len() != 2 {
+        if disjunctions.len() < 2 {
             return None;
         }
 
-        let cnt1 = disjunctions[0].count_nows();
-        let cnt2 = disjunctions[1].count_nows();
+        let (now, others): (Vec<ExprImpl>, Vec<ExprImpl>) =
+            disjunctions.into_iter().partition(|x| x.count_nows() != 0);
 
-        let (now_part, others) = if cnt1 == 1 && cnt2 == 0 {
-            (disjunctions[0].clone(), disjunctions[1].clone())
-        } else if cnt1 == 0 && cnt2 == 1 {
-            (disjunctions[1].clone(), disjunctions[0].clone())
-        } else {
+        if now.len() != 1 {
             return None;
-        };
+        }
+
+        // Put the now at the first position
+        let predicates = now.into_iter().chain(others).collect_vec();
+
+        // A or B
+        // =>
+        // + A & !B
+        // + B
+        //
+        // A or B or C
+        // =>
+        // + A & !B & !C
+        // + B & !C
+        // + C
+
+        let len = predicates.len();
+        let mut new_arms = Vec::with_capacity(len);
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..len {
+            let mut arm = predicates[i].clone();
+            for j in (i + 1)..len {
+                let others = predicates[j].clone();
+                let not_others: ExprImpl = FunctionCall::new_unchecked(
+                    ExprType::Not,
+                    vec![others.clone()],
+                    DataType::Boolean,
+                )
+                .into();
+                arm = FunctionCall::new_unchecked(
+                    ExprType::And,
+                    vec![arm, not_others],
+                    DataType::Boolean,
+                )
+                .into();
+            }
+            new_arms.push(arm)
+        }
 
         let share = LogicalShare::create(input);
-
-        let not_others: ExprImpl =
-            FunctionCall::new_unchecked(ExprType::Not, vec![others.clone()], DataType::Boolean)
-                .into();
-        let now_and_not_others = FunctionCall::new_unchecked(
-            ExprType::And,
-            vec![now_part, not_others],
-            DataType::Boolean,
-        )
-        .into();
-        let filter_with_now = LogicalFilter::create_with_expr(share.clone(), now_and_not_others);
-        let filter_without_now = LogicalFilter::create_with_expr(share, others);
-
-        let union_all = LogicalUnion::create(true, vec![filter_with_now, filter_without_now]);
-
+        let filters = new_arms
+            .into_iter()
+            .map(|x| LogicalFilter::create_with_expr(share.clone(), x))
+            .collect_vec();
+        let union_all = LogicalUnion::create(true, filters);
         Some(union_all)
     }
 }
