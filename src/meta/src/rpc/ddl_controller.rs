@@ -1053,7 +1053,7 @@ impl DdlController {
             match stream_job.create_type() {
                 CreateType::Background => {
                     tracing::error!(id = job_id, error = ?e, "finish stream job failed");
-                    if let Err(err) = self.fragment_manager.select_table_fragments_by_table_id(&job_id.into()).await
+                    if let Err(err) = mgr.fragment_manager.select_table_fragments_by_table_id(&job_id.into()).await
                         && err.is_fragment_not_found() {
                         // If the table fragments are not found, it means that the stream job has not been created.
                         // We need to cancel the stream job.
