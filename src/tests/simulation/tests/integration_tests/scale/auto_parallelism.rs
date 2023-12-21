@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use risingwave_common::range::RangeBoundsExt;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
@@ -383,13 +382,12 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let parallel_unit_to_worker = workers
         .into_iter()
-        .map(|worker| {
+        .flat_map(|worker| {
             worker
                 .parallel_units
                 .into_iter()
                 .map(move |parallel_unit| (parallel_unit.id, worker.id))
         })
-        .flatten()
         .collect::<HashMap<_, _>>();
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;

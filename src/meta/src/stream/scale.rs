@@ -1724,7 +1724,7 @@ impl ScaleController {
             let fragment_map = table_fragment_map.remove(&table_id).unwrap();
 
             for (fragment_id, fragment) in fragment_map {
-                //
+                // Currently, all of our NO_SHUFFLE relation propagations are only transmitted from upstream to downstream.
                 if no_shuffle_target_fragment_ids.contains(&fragment_id) {
                     continue;
                 }
@@ -2190,9 +2190,7 @@ impl ScaleController {
         match policy {
             Policy::StableResizePolicy(resize) => {
                 self.generate_stable_resize_plan(resize, None).await
-            } /* Policy::TableResizePolicy(table_resize) => {
-               *     todo!()
-               * } */
+            }
         }
     }
 
@@ -2367,10 +2365,13 @@ impl ScaleController {
     }
 }
 
+// At present, for table level scaling, we use the strategy TableResizePolicy.
+// Currently, this is used as an internal interface, so it won’t be included in Protobuf for the time being.
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
 }
+
 impl GlobalStreamManager {
     pub async fn reschedule_actors(
         &self,
@@ -2587,6 +2588,9 @@ impl GlobalStreamManager {
     }
 }
 
+// We redistribute parallel units (which will be ensembles in the future) through a simple consistent hashing ring.
+// Note that we have added some simple logic here to ensure the consistency of the ratio between each slot,
+// especially when equal division is needed.
 fn rebalance_units(
     slots: BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,

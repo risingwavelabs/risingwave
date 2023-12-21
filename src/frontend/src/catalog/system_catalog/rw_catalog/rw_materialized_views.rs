@@ -60,7 +60,7 @@ impl SysCatalogReaderImpl {
                 schema.iter_mv().map(|table| {
                     let table_state = states.get(&table.id.table_id);
                     let parallelism = table_state
-                        .map(|state| extract_parallelism_from_table_state(state))
+                        .map(extract_parallelism_from_table_state)
                         .unwrap_or("unknown".to_string());
 
                     OwnedRow::new(vec![

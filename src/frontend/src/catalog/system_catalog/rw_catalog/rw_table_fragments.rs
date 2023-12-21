@@ -17,8 +17,6 @@ use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
-use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 
 use crate::catalog::system_catalog::{
     extract_parallelism_from_table_state, BuiltinTable, SysCatalogReaderImpl,
