@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
@@ -468,6 +468,8 @@ impl Binder {
         Ok((vec![], args, order_by))
     }
 
+    /// Bind window function calls according to PostgreSQL syntax.
+    /// See https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS for syntax detail.
     pub(super) fn bind_window_function(
         &mut self,
         kind: WindowFuncKind,
@@ -512,8 +514,48 @@ impl Binder {
                     FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range => {
-                    let (start, end) = self
-                        .bind_window_frame_scalar_impl_bounds(frame.start_bound, frame.end_bound)?;
+                    let ordering_data_type = order_by
+                        .sort_exprs
+                        .iter()
+                        // for `RANGE` frame, there should be exactly one `ORDER BY` column
+                        .exactly_one()
+                        .map_err(|_| {
+                            ErrorCode::InvalidInputSyntax(
+                                "there should be exactly one ordering column for `RANGE` frame"
+                                    .to_string(),
+                            )
+                        })?
+                        .expr
+                        .return_type();
+
+                    let offset_data_type = match ordering_data_type {
+                        // for numeric ordering columns, `offset` should be the same type
+                        // NOTE: actually in PG it can be a larger type, but we don't support this here
+                        t @ data_types::numeric!() => t,
+                        // for datetime ordering columns, `offset` should be interval
+                        DataType::Date
+                        | DataType::Time
+                        | DataType::Timestamp
+                        | DataType::Timestamptz
+                        | DataType::Interval => DataType::Interval,
+                        // other types are not supported
+                        t => {
+                            return Err(ErrorCode::NotSupported(
+                                format!(
+                                    "`RANGE` frame with offset of `{}` type is not supported",
+                                    t
+                                ),
+                                "Please re-consider the `ORDER BY` column".to_string(),
+                            )
+                            .into())
+                        }
+                    };
+
+                    let (start, end) = self.bind_window_frame_scalar_impl_bounds(
+                        frame.start_bound,
+                        frame.end_bound,
+                        offset_data_type,
+                    )?;
                     println!("[rc] start: {:?}, end: {:?}", start, end);
                     // TODO()
                     FrameBounds::Rows(FrameBound::CurrentRow, FrameBound::CurrentRow)
@@ -546,7 +588,7 @@ impl Binder {
     ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
         let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
             let offset = self
-                .bind_window_frame_bound_offset(offset, Some(DataType::Int64))?
+                .bind_window_frame_bound_offset(offset, DataType::Int64)?
                 .into_int64();
             if offset < 0 {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -582,18 +624,19 @@ impl Binder {
         &mut self,
         start: WindowFrameBound,
         end: Option<WindowFrameBound>,
+        offset_data_type: DataType,
     ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
         let mut convert_bound = |bound| -> Result<FrameBound<_>> {
             Ok(match bound {
                 WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
                 WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                WindowFrameBound::Preceding(Some(offset)) => {
-                    FrameBound::Preceding(self.bind_window_frame_bound_offset(offset, None)?)
-                }
+                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
+                    self.bind_window_frame_bound_offset(offset, offset_data_type.clone())?,
+                ),
                 WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                WindowFrameBound::Following(Some(offset)) => {
-                    FrameBound::Following(self.bind_window_frame_bound_offset(offset, None)?)
-                }
+                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
+                    self.bind_window_frame_bound_offset(offset, offset_data_type.clone())?,
+                ),
             })
         };
         let start = convert_bound(start)?;
@@ -608,27 +651,23 @@ impl Binder {
     fn bind_window_frame_bound_offset(
         &mut self,
         offset: Box<ast::Expr>,
-        cast_to: Option<DataType>,
+        cast_to: DataType,
     ) -> Result<ScalarImpl> {
         let mut offset = self.bind_expr(*offset)?;
-        if let Some(cast_to) = &cast_to {
-            if offset.cast_implicit_mut(cast_to.clone()).is_err() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "offset in window frame bounds must be castable to {}",
-                    cast_to.clone()
-                ))
-                .into());
-            }
-        };
-        let Some(Ok(offset)) = offset.try_fold_const() else {
+        if !offset.is_const() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "offset in window frame bounds must be constant".to_string(),
+            )
+            .into());
+        }
+        if offset.cast_implicit_mut(cast_to.clone()).is_err() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "offset in window frame bounds must be constant{}",
+                "offset in window frame bounds must be castable to {}",
                 cast_to
-                    .map(|t| format!(" and castable to {}", t))
-                    .unwrap_or_default()
             ))
             .into());
-        };
+        }
+        let offset = offset.fold_const()?;
         let Some(offset) = offset else {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "offset in window frame bounds must not be NULL"
