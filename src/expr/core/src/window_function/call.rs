@@ -170,7 +170,13 @@ impl<T> FrameBound<T> {
         match (start, end) {
             (_, UnboundedPreceding) => bail!("frame end cannot be UNBOUNDED PRECEDING"),
             (UnboundedFollowing, _) => bail!("frame start cannot be UNBOUNDED FOLLOWING"),
-            _ => (),
+            (Following(_), CurrentRow) | (Following(_), Preceding(_)) => {
+                bail!("frame starting from following row cannot have preceding rows")
+            }
+            (CurrentRow, Preceding(_)) => {
+                bail!("frame starting from current row cannot have preceding rows")
+            }
+            _ => {}
         }
         Ok(())
     }
