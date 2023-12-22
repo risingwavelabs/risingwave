@@ -1,15 +1,16 @@
+statement ok
 CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamp, v9 boolean);
 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK bhv_starrocks_sink_1
+CREATE SINK s6
 FROM
     mv6 WITH (
     connector = 'starrocks',
     type = 'upsert',
-    starrocks.host = '127.0.0.1',
+    starrocks.host = 'starrocks-fe-server',
     starrocks.mysqlport = '9030',
     starrocks.httpport = '8030',
     starrocks.user = 'users',

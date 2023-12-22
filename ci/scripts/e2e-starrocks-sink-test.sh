@@ -29,9 +29,9 @@ sleep 1
 
 
 echo "--- create starrocks table"
-apt-get install -y mysql-client
+apt-get update -y && apt-get install -y mysql-client
 sleep 2
-mysql -uroot -P9030 -h127.0.0.1 -e "CREATE database demo;use demo;
+mysql -uroot -P 9030 -h starrocks-fe-server -e "CREATE database demo;use demo;
 CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean) ENGINE=OLAP
 PRIMARY KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) properties(\"replication_num\" = \"1\");
@@ -42,7 +42,7 @@ sleep 2
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/starrocks_sink.slt'
 sleep 1
-mysql -uroot -P9030 -h127.0.0.1 -e "select * from demo.demo_bhv_table" > ./query_result.csv
+mysql -uroot -P 9030 -h starrocks-fe-server -e "select * from demo.demo_bhv_table" > ./query_result.csv
 
 
 if cat ./query_result.csv | sed '1d; s/\t/,/g' | awk -F "," '{

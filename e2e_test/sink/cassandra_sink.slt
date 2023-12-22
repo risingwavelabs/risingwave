@@ -5,13 +5,13 @@ statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK bhv_cassandra_sink_1
+CREATE SINK s6
 FROM
     mv6 WITH (
     connector = 'cassandra',
     type = 'append-only',
     force_append_only='true',
-    cassandra.url = '127.0.0.1:9042',
+    cassandra.url = 'cassandra-server:9042',
     cassandra.keyspace  = 'demo',
     cassandra.table = 'demo_bhv_table',
     cassandra.datacenter = 'datacenter1',

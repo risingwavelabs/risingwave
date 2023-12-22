@@ -5,21 +5,21 @@ statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK bhv_redis_sink_1
+CREATE SINK s61
 FROM
     mv6 WITH (
     primary_key = 'v1',
     connector = 'redis',
-    redis.url= 'redis://127.0.0.1:6379/',
+    redis.url= 'redis://redis-server:6379/',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 statement ok
-CREATE SINK bhv_redis_sink_2
+CREATE SINK s62
 FROM
     mv6 WITH (
     primary_key = 'v1',
     connector = 'redis',
-    redis.url= 'redis://127.0.0.1:6379/',
+    redis.url= 'redis://redis-server:6379/',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'V1:{v1}', value_format = 'V2:{v2},V3:{v3}');
 
 statement ok
@@ -29,7 +29,10 @@ statement ok
 FLUSH;
 
 statement ok
-DROP SINK s6;
+DROP SINK s61;
+
+statement ok
+DROP SINK s62;
 
 statement ok
 DROP MATERIALIZED VIEW mv6;

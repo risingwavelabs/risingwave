@@ -38,15 +38,19 @@ sleep 1
 echo "--- create cassandra table"
 curl https://downloads.apache.org/cassandra/4.1.3/apache-cassandra-4.1.3-bin.tar.gz  --output apache-cassandra-4.1.3-bin.tar.gz
 tar xfvz apache-cassandra-4.1.3-bin.tar.gz
+cd apache-cassandra-4.1.3/bin
+export CQLSH_HOST=cassandra-server
+export CQLSH_PORT=9042
 ./cqlsh -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;
 CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
 echo "--- testing sinks"
+cd ../../
 sqllogictest -p 4566 -d dev './e2e_test/sink/cassandra_sink.slt'
 sleep 1
-./cqlsh -e "COPY demo.demo_bhv_table TO './query_result.csv' WITH HEADER = false;"
+cd apache-cassandra-4.1.3/bin
+./cqlsh -e "COPY demo.demo_bhv_table TO './query_result.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
 
-AND ENCODING = 'UTF-8';
 if cat ./query_result.csv | awk -F "," '{
     exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01.000+0000" && $9 == "False\r"); }'; then
   echo "Cassandra sink check passed"
@@ -56,4 +60,5 @@ else
 fi
 
 echo "--- Kill cluster"
+cd ../../
 cargo make ci-kill
