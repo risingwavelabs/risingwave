@@ -15,8 +15,8 @@
 use std::ops::Bound;
 
 use futures::stream::BoxStream;
-use futures::{Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures::{Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
@@ -68,12 +68,11 @@ pub(crate) struct LocalReplayIter {
 
 impl LocalReplayIter {
     pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
-        let mut inner: Vec<_> = Vec::new();
-        #[for_await]
-        for value in stream {
-            let value = value.unwrap();
-            inner.push((value.0.user_key.table_key.0.into(), value.1.into()));
-        }
+        let inner = stream
+            .map_ok(|value| (value.0.user_key.table_key.0.into(), value.1.into()))
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
         Self { inner }
     }
 

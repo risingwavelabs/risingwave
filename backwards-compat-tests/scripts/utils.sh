@@ -168,15 +168,19 @@ get_rw_versions() {
   get_old_version
   get_new_version
 
+  # FIXME(kwannoel): This check does not always hold.
+  # The new/current version may not be up-to-date.
+  # The new version is derived from Cargo.toml, which may not be up-to-date.
+  # The old version are derived from git tags, which are up-to-date.
   # Then we assert that `$OLD_VERSION` <= `$NEW_VERSION`.
-  if version_le "$OLD_VERSION" "$NEW_VERSION"
-  then
-    echo "OLD_VERSION: $OLD_VERSION"
-    echo "NEW_VERSION: $NEW_VERSION"
-  else
-    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
-    exit 1
-  fi
+  #  if version_le "$OLD_VERSION" "$NEW_VERSION"
+  #  then
+  #    echo "OLD_VERSION: $OLD_VERSION"
+  #    echo "NEW_VERSION: $NEW_VERSION"
+  #  else
+  #    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
+  #    exit 1
+  #  fi
 }
 
 # Setup table and materialized view.

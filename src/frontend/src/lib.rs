@@ -158,7 +158,7 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, Some(TlsConfig::new_default()))
+        pg_serve(&listen_addr, session_mgr, TlsConfig::new_default())
             .await
             .unwrap();
     })
