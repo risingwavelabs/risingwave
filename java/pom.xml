@@ -50,9 +50,9 @@
         <module>connector-node/risingwave-sink-cassandra</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
-        <module>connector-node/risingwave-source-test</module>
         <module>connector-node/risingwave-connector-test</module>
         <module>connector-node/risingwave-connector-service</module>
+        <module>connector-node/risingwave-source-test</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/risingwave-sink-mock-flink</module>
@@ -80,6 +80,7 @@
         <elasticsearch.version>7.17.14</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
+        <testcontainers.version>1.17.6</testcontainers.version>
     </properties>
 
     <dependencyManagement>
@@ -299,6 +300,24 @@
                 <groupId>org.apache.spark</groupId>
                 <artifactId>spark-sql_2.12</artifactId>
                 <version>${spark_sql.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>mysql</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${testcontainers.version}</version>
                 <scope>test</scope>
             </dependency>
         </dependencies>
