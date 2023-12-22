@@ -346,7 +346,7 @@ impl fmt::Debug for StreamChunk {
         if f.alternate() {
             write!(
                 f,
-                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                "StreamChunk {{ cardinality: {}, capacity: {}, data:\n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
                 self.to_pretty()

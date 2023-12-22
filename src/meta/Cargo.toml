@@ -33,7 +33,6 @@ etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { workspace = true }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.12"

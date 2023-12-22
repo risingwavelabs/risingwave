@@ -828,15 +828,14 @@ impl Binder {
                                     .into())
                                 }
                                 _ => {
-                                    InputRef::new(*index, select_items[*index].return_type()).into()
+                                    select_items[*index].clone()
                                 }
                             }
                         }
                         Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                             Ok(index) if 1 <= index && index <= select_items.len() => {
                                 let idx_from_0 = index - 1;
-                                InputRef::new(idx_from_0, select_items[idx_from_0].return_type())
-                                    .into()
+                                select_items[idx_from_0].clone()
                             }
                             _ => {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
