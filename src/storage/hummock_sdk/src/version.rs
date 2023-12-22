@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::mem::size_of;
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
@@ -88,9 +89,19 @@ impl HummockVersion {
         }
     }
 
-    pub fn encoded_len(&self) -> usize {
-        // TODO: this is costly when doing the conversion. May implement it by ourselves
-        self.to_protobuf().encoded_len()
+    pub fn estimated_encode_len(&self) -> usize {
+        self.levels.len() * size_of::<CompactionGroupId>()
+            + self
+                .levels
+                .values()
+                .map(|level| level.encoded_len())
+                .sum::<usize>()
+            + self.table_watermarks.len() * size_of::<u32>()
+            + self
+                .table_watermarks
+                .values()
+                .map(|table_watermark| table_watermark.estimated_encode_len())
+                .sum::<usize>()
     }
 }
 

@@ -15,12 +15,14 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
+use std::mem::size_of;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
@@ -246,7 +248,7 @@ impl WatermarkDirection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, EstimateSize)]
 pub struct VnodeWatermark {
     vnode_bitmap: Arc<Bitmap>,
     watermark: Bytes,
@@ -313,6 +315,21 @@ impl TableWatermarks {
                 WatermarkDirection::Descending => false,
             },
         }
+    }
+
+    pub fn estimated_encode_len(&self) -> usize {
+        self.watermarks.len() * size_of::<HummockEpoch>()
+            + self
+                .watermarks
+                .iter()
+                .map(|(_, watermarks)| {
+                    watermarks
+                        .iter()
+                        .map(|watermark| watermark.estimated_size())
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+            + size_of::<bool>() // for direction
     }
 
     pub fn add_new_epoch_watermarks(

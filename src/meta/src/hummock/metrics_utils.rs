@@ -45,10 +45,9 @@ pub fn trigger_version_stat(
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
-    // TODO: this op may be costly
     metrics
         .version_size
-        .set(current_version.encoded_len() as i64);
+        .set(current_version.estimated_encode_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
     metrics.version_stats.reset();
