@@ -22,6 +22,7 @@ use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -41,8 +42,9 @@ use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
+use crate::controller::catalog::ReleaseContext;
 use crate::manager::{MetadataManager, WorkerId};
-use crate::model::{BarrierManagerState, MigrationPlan};
+use crate::model::{ActorId, BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
@@ -105,8 +107,30 @@ impl GlobalBarrierManager {
                     .drop_source_fragments(&to_drop_table_fragments)
                     .await;
             }
-            MetadataManager::V2(_) => {
-                unimplemented!("support clean dirty streaming jobs in v2");
+            MetadataManager::V2(mgr) => {
+                let ReleaseContext {
+                    state_table_ids,
+                    source_ids,
+                    ..
+                } = mgr
+                    .catalog_controller
+                    .clean_foreground_creating_jobs()
+                    .await?;
+
+                // unregister compaction group for cleaned state tables.
+                self.hummock_manager
+                    .unregister_table_ids_fail_fast(
+                        &state_table_ids
+                            .into_iter()
+                            .map(|id| id as StateTableId)
+                            .collect_vec(),
+                    )
+                    .await;
+
+                // unregister cleaned sources.
+                self.source_manager
+                    .unregister_sources(source_ids.into_iter().map(|id| id as u32).collect())
+                    .await;
             }
         }
 
@@ -116,7 +140,7 @@ impl GlobalBarrierManager {
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
-            MetadataManager::V2(_) => self.recover_background_mv_progress_v2(),
+            MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
     }
 
@@ -215,8 +239,86 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
-    fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
-        unimplemented!("support recover background mv progress in v2");
+    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
+            unreachable!()
+        };
+        let mviews = mgr
+            .catalog_controller
+            .list_background_creating_mviews()
+            .await?;
+
+        let mut senders = HashMap::new();
+        let mut receivers = Vec::new();
+        let mut table_fragment_map = HashMap::new();
+        let mut mview_definitions = HashMap::new();
+        let mut upstream_mv_counts = HashMap::new();
+        for mview in &mviews {
+            let (finished_tx, finished_rx) = oneshot::channel();
+            let table_id = TableId::new(mview.table_id as _);
+            senders.insert(
+                table_id,
+                Notifier {
+                    finished: Some(finished_tx),
+                    ..Default::default()
+                },
+            );
+
+            let table_fragments = mgr
+                .catalog_controller
+                .get_job_fragments_by_id(mview.table_id)
+                .await?;
+            let table_fragments = TableFragments::from_protobuf(table_fragments);
+            upstream_mv_counts.insert(table_id, table_fragments.dependent_table_ids());
+            table_fragment_map.insert(table_id, table_fragments);
+            mview_definitions.insert(table_id, mview.definition.clone());
+            receivers.push((mview.table_id, finished_rx));
+        }
+
+        let table_map: HashMap<TableId, HashSet<ActorId>> = table_fragment_map
+            .iter()
+            .map(|(id, tf)| (*id, tf.actor_ids().into_iter().collect()))
+            .collect();
+        let version_stats = self.hummock_manager.get_version_stats().await;
+        // If failed, enter recovery mode.
+        {
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
+                table_map.into(),
+                upstream_mv_counts.into(),
+                mview_definitions.into(),
+                version_stats,
+                senders.into(),
+                table_fragment_map.into(),
+                self.metadata_manager.clone(),
+            );
+        }
+        for (id, finished) in receivers {
+            let catalog_controller = mgr.catalog_controller.clone();
+            tokio::spawn(async move {
+                let res: MetaResult<()> = try {
+                    tracing::debug!("recovering stream job {}", id);
+                    finished
+                        .await
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+                    tracing::debug!("finished stream job {}", id);
+                    catalog_controller.finish_streaming_job(id).await?;
+                };
+                if let Err(e) = &res {
+                    tracing::error!(
+                        "stream job {} interrupted, will retry after recovery: {e:?}",
+                        id
+                    );
+                    // NOTE(kwannoel): We should not cleanup stream jobs,
+                    // we don't know if it's just due to CN killed,
+                    // or the job has actually failed.
+                    // Users have to manually cancel the stream jobs,
+                    // if they want to clean it.
+                }
+            });
+        }
+
+        Ok(())
     }
 
     /// Recovery the whole cluster from the latest epoch.
@@ -389,12 +491,89 @@ impl GlobalBarrierManager {
     async fn migrate_actors(&self) -> MetaResult<BarrierActorInfo> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.migrate_actors_v1().await,
-            MetadataManager::V2(_) => self.migrate_actors_v2(),
+            MetadataManager::V2(_) => self.migrate_actors_v2().await,
         }
     }
 
-    fn migrate_actors_v2(&self) -> MetaResult<BarrierActorInfo> {
-        unimplemented!("support migrate actors in v2");
+    async fn migrate_actors_v2(&self) -> MetaResult<BarrierActorInfo> {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
+            unreachable!()
+        };
+
+        let all_inuse_parallel_units: HashSet<_> = mgr
+            .catalog_controller
+            .all_inuse_parallel_units()
+            .await?
+            .into_iter()
+            .collect();
+        let active_parallel_units: HashSet<_> = mgr
+            .cluster_controller
+            .list_active_parallel_units()
+            .await?
+            .into_iter()
+            .map(|pu| pu.id as i32)
+            .collect();
+
+        let expired_parallel_units: BTreeSet<_> = all_inuse_parallel_units
+            .difference(&active_parallel_units)
+            .cloned()
+            .collect();
+        if expired_parallel_units.is_empty() {
+            debug!("no expired parallel units, skipping.");
+            let info = self.resolve_actor_info_for_recovery().await;
+            return Ok(info);
+        }
+
+        debug!("start migrate actors.");
+        let mut to_migrate_parallel_units = expired_parallel_units.into_iter().rev().collect_vec();
+        debug!(
+            "got to migrate parallel units {:#?}",
+            to_migrate_parallel_units
+        );
+        let mut inuse_parallel_units: HashSet<_> = all_inuse_parallel_units
+            .intersection(&active_parallel_units)
+            .cloned()
+            .collect();
+
+        let start = Instant::now();
+        let mut plan = HashMap::new();
+        'discovery: while !to_migrate_parallel_units.is_empty() {
+            let new_parallel_units = mgr
+                .cluster_controller
+                .list_active_parallel_units()
+                .await?
+                .into_iter()
+                .map(|pu| pu.id as i32)
+                .filter(|pu| !inuse_parallel_units.contains(pu))
+                .collect_vec();
+            if !new_parallel_units.is_empty() {
+                debug!("new parallel units found: {:#?}", new_parallel_units);
+                for target_parallel_unit in new_parallel_units {
+                    if let Some(from) = to_migrate_parallel_units.pop() {
+                        debug!(
+                            "plan to migrate from parallel unit {} to {}",
+                            from, target_parallel_unit
+                        );
+                        inuse_parallel_units.insert(target_parallel_unit);
+                        plan.insert(from, target_parallel_unit);
+                    } else {
+                        break 'discovery;
+                    }
+                }
+            }
+            warn!(
+                "waiting for new workers to join, elapsed: {}s",
+                start.elapsed().as_secs()
+            );
+            // wait to get newly joined CN
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        mgr.catalog_controller.migrate_actors(plan).await?;
+
+        debug!("migrate actors succeed.");
+        let info = self.resolve_actor_info_for_recovery().await;
+        Ok(info)
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
