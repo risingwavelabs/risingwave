@@ -164,6 +164,27 @@ services:
       interval: 5s
       timeout: 30s
       retries: 50
+  doris-fe:
+    image: apache/doris:2.0.0_alpha-fe-x86_64
+    hostname: fe
+    environment:
+     - FE_SERVERS=fe1:127.0.0.1:9010
+     - FE_ID=1
+    network_mode: host
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+  doris-be:
+    image: apache/doris:2.0.0_alpha-be-x86_64
+    hostname: be
+    environment:
+     - FE_SERVERS=fe1:127.0.0.1:9010
+     - BE_ADDR=127.0.0.1:9050
+    depends_on:
+      - fe
+    ports:
+      - "9050:9050"
+    network_mode: host
 
 # Temporary workaround for json schema registry test since redpanda only supports
 # protobuf/avro schema registry. Should be removed after the support.

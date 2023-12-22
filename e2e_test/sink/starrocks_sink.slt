@@ -1,24 +1,23 @@
-statement ok
 CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamp, v9 boolean);
 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK bhv_doris_sink_1
+CREATE SINK bhv_starrocks_sink_1
 FROM
     mv6 WITH (
-    connector = 'doris',
-    type = 'append-only',
-    doris.url = 'http://127.0.0.1:8030',
-    doris.user = 'users',
-    doris.password = '123456',
-    doris.database = 'demo',
-    doris.table='demo_bhv_table',
-    force_append_only='true'
+    connector = 'starrocks',
+    type = 'upsert',
+    starrocks.host = '127.0.0.1',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'demo_bhv_table',
+    primary_key = 'v1'
 );
-
-statement ok
 
 statement ok
 INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false);

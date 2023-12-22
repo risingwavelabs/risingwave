@@ -30,26 +30,26 @@ services:
     container_name: starrocks-be
     depends_on:
       - starrocks-fe
-  risingwave-standalone:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: risingwave-standalone
-  etcd-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: etcd-0
-  grafana-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: grafana-0
-  minio-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: minio-0
-  prometheus-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: prometheus-0
+  # risingwave-standalone:
+  #   extends:
+  #     file: ../../docker/docker-compose.yml
+  #     service: risingwave-standalone
+  # etcd-0:
+  #   extends:
+  #     file: ../../docker/docker-compose.yml
+  #     service: etcd-0
+  # grafana-0:
+  #   extends:
+  #     file: ../../docker/docker-compose.yml
+  #     service: grafana-0
+  # minio-0:
+  #   extends:
+  #     file: ../../docker/docker-compose.yml
+  #     service: minio-0
+  # prometheus-0:
+  #   extends:
+  #     file: ../../docker/docker-compose.yml
+  #     service: prometheus-0
 volumes:
   risingwave-standalone:
     external: false
