@@ -532,12 +532,7 @@ impl Binder {
                     );
                 }
             };
-            if !bounds.is_valid() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame bounds `{bounds}` is not valid",
-                ))
-                .into());
-            }
+            bounds.validate()?;
             Some(Frame { bounds, exclusion })
         } else {
             None
