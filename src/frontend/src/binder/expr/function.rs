@@ -323,18 +323,12 @@ impl Binder {
             ))
         })?;
 
-        let mut direct_args = {
-            let args: Vec<_> = f
-                .args
-                .into_iter()
-                .map(|arg| self.bind_function_arg(arg))
-                .flatten_ok()
-                .try_collect()?;
-            if args.iter().any(|arg| arg.as_literal().is_none()) {
-                bail_not_implemented!("non-constant direct arguments for ordered-set aggregation is not supported now");
-            }
-            args
-        };
+        let mut direct_args: Vec<_> = f
+            .args
+            .into_iter()
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
         let mut args =
             self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
@@ -342,26 +336,30 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
-                    && let Ok(casted) = fraction.fold_const()
-                {
-                    if let Some(ref casted) = casted
-                        && !(0.0..=1.0).contains(&casted.as_float64().0)
-                    {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "direct arg in `{}` must between 0.0 and 1.0",
-                            kind
-                        ))
-                        .into());
-                    }
-                    *fraction = Literal::new(casted, DataType::Float64).into();
-                } else {
+                if fraction.cast_implicit_mut(DataType::Float64).is_err() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must be castable to float64",
                         kind
                     ))
                     .into());
                 }
+
+                let Some(Ok(fraction_datum)) = fraction.try_fold_const() else {
+                    bail_not_implemented!(
+                        issue = 14079,
+                        "variable as direct argument of ordered-set aggregate",
+                    );
+                };
+
+                if let Some(ref fraction_value) = fraction_datum && !(0.0..=1.0).contains(&fraction_value.as_float64().0) {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "direct arg in `{}` must between 0.0 and 1.0",
+                        kind
+                    ))
+                    .into());
+                }
+                // note that the fraction can be NULL
+                *fraction = Literal::new(fraction_datum, DataType::Float64).into();
 
                 if kind == AggKind::PercentileCont {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {

@@ -73,6 +73,7 @@ message ExprNode {
     LENGTH = 203;
     LIKE = 204;
     I_LIKE = 279;
+    SIMILAR_TO_ESCAPE = 284;
     UPPER = 205;
     LOWER = 206;
     TRIM = 207;

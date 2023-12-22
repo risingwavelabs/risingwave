@@ -308,7 +308,7 @@ impl Stream for InMemObjectIter {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use futures::StreamExt;
+    use futures::TryStreamExt;
     use itertools::enumerate;
 
     use super::*;
@@ -376,12 +376,13 @@ mod tests {
     }
 
     async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
-        let mut iter = store.list(prefix).await.unwrap();
-        let mut result = vec![];
-        while let Some(r) = iter.next().await {
-            result.push(r.unwrap());
-        }
-        result
+        store
+            .list(prefix)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
