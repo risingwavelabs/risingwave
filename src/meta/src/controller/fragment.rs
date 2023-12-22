@@ -1051,7 +1051,10 @@ impl CatalogController {
                 f.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0
             }
             // MV on MV, and other kinds of table job
-            None | Some(PbTableJobType::General) | Some(PbTableJobType::Unspecified) => {
+            None
+            | Some(PbTableJobType::General)
+            | Some(PbTableJobType::Unspecified)
+            | Some(PbTableJobType::ArrangementBackfill) => {
                 f.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0
             }
         });

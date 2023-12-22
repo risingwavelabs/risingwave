@@ -1364,7 +1364,10 @@ impl FragmentManager {
                     }
                 }
                 // MV on MV, and other kinds of table job
-                None | Some(TableJobType::General) | Some(TableJobType::Unspecified) => {
+                None
+                | Some(TableJobType::General)
+                | Some(TableJobType::Unspecified)
+                | Some(TableJobType::ArrangementBackfill) => {
                     if let Some(fragment) = table_fragments.mview_fragment() {
                         fragments.insert(table_id, fragment);
                     }
