@@ -1338,7 +1338,7 @@ pub mod default {
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
-            1
+            16
         }
 
         pub fn stream_exchange_concurrent_dispatchers() -> usize {
