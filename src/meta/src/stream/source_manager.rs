@@ -39,8 +39,8 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -214,7 +214,7 @@ impl ConnectorSourceWorkerHandle {
 }
 
 pub struct SourceManagerCore {
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
 
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -229,7 +229,7 @@ pub struct SourceManagerCore {
 
 impl SourceManagerCore {
     fn new(
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -242,7 +242,7 @@ impl SourceManagerCore {
         }
 
         Self {
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             fragment_sources,
@@ -264,8 +264,8 @@ impl SourceManagerCore {
             if let Some(discovered_splits) = handle.discovered_splits().await {
                 for fragment_id in fragment_ids {
                     let actor_ids = match self
-                        .fragment_manager
-                        .get_running_actors_of_fragment(*fragment_id)
+                        .metadata_manager
+                        .get_running_actors_by_fragment(*fragment_id)
                         .await
                     {
                         Ok(actor_ids) => actor_ids,
@@ -507,13 +507,12 @@ impl SourceManager {
     pub async fn new(
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = catalog_manager.list_sources().await;
+            let sources = metadata_manager.list_sources().await?;
             for source in sources {
                 Self::create_source_worker_async(
                     env.connector_client(),
@@ -526,18 +525,32 @@ impl SourceManager {
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-        {
-            source_fragments.extend(table_fragments.stream_source_fragments());
-            actor_splits.extend(table_fragments.actor_splits.clone());
+
+        match &metadata_manager {
+            MetadataManager::V1(mgr) => {
+                for table_fragments in mgr
+                    .fragment_manager
+                    .get_fragment_read_guard()
+                    .await
+                    .table_fragments()
+                    .values()
+                {
+                    source_fragments.extend(table_fragments.stream_source_fragments());
+                    actor_splits.extend(table_fragments.actor_splits.clone());
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                // TODO: optimize it.
+                for (_, pb_table_fragments) in mgr.catalog_controller.table_fragments().await? {
+                    let table_fragments = TableFragments::from_protobuf(pb_table_fragments);
+                    source_fragments.extend(table_fragments.stream_source_fragments());
+                    actor_splits.extend(table_fragments.actor_splits);
+                }
+            }
         }
 
         let core = Mutex::new(SourceManagerCore::new(
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             actor_splits,
@@ -629,8 +642,8 @@ impl SourceManager {
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
-            .fragment_manager
-            .select_table_fragments_by_table_id(table_id)
+            .metadata_manager
+            .get_job_fragments_by_id(table_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();

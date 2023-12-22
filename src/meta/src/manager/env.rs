@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
@@ -350,6 +351,13 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub async fn system_params_reader(&self) -> SystemParamsReader {
+        if let Some(system_ctl) = &self.system_params_controller {
+            return system_ctl.get_params().await;
+        }
+        self.system_params_manager.get_params().await
     }
 
     pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {

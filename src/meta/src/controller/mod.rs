@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code, reason = "WIP")]
-
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{

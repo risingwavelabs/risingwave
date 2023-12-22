@@ -158,7 +158,7 @@ impl MetaClient {
         schema_id: u32,
         owner_id: u32,
         req: create_connection_request::Payload,
-    ) -> Result<(ConnectionId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateConnectionRequest {
             name: connection_name,
             database_id,
@@ -167,7 +167,7 @@ impl MetaClient {
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
-        Ok((resp.connection_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
@@ -271,12 +271,12 @@ impl MetaClient {
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
-        let worker_node = add_worker_resp
-            .node
-            .expect("AddWorkerNodeResponse::node is empty");
+        let worker_id = add_worker_resp
+            .node_id
+            .expect("AddWorkerNodeResponse::node_id is empty");
 
         let meta_client = Self {
-            worker_id: worker_node.id,
+            worker_id,
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
@@ -300,6 +300,7 @@ impl MetaClient {
     pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
+            node_id: self.worker_id,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
             Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),
@@ -333,34 +334,34 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: PbDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<CatalogVersion> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.database_id, resp.version))
+        Ok(resp.version)
     }
 
-    pub async fn create_schema(&self, schema: PbSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<CatalogVersion> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.schema_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_materialized_view(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn drop_materialized_view(
@@ -377,28 +378,28 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&self, source: PbSource) -> Result<CatalogVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: None,
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok((resp.source_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_source_with_graph(
         &self,
         source: PbSource,
         graph: StreamFragmentGraph,
-    ) -> Result<(u32, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok((resp.source_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_sink(
@@ -406,7 +407,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
-    ) -> Result<(u32, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
@@ -414,18 +415,15 @@ impl MetaClient {
         };
 
         let resp = self.inner.create_sink(request).await?;
-        Ok((resp.sink_id, resp.version))
+        Ok(resp.version)
     }
 
-    pub async fn create_function(
-        &self,
-        function: PbFunction,
-    ) -> Result<(FunctionId, CatalogVersion)> {
+    pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
         };
         let resp = self.inner.create_function(request).await?;
-        Ok((resp.function_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_table(
@@ -434,7 +432,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
@@ -443,7 +441,7 @@ impl MetaClient {
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
@@ -518,11 +516,11 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.view_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_index(
@@ -530,7 +528,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
@@ -538,7 +536,7 @@ impl MetaClient {
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.index_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn drop_table(
@@ -601,13 +599,13 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
         let request = DropDatabaseRequest { database_id };
         let resp = self.inner.drop_database(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
         let request = DropSchemaRequest { schema_id };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp.version)
