@@ -25,7 +25,8 @@ use crate::sink::utils::{
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-async fn basic_test_inner(is_decouple: bool) -> Result<()> {
+#[tokio::test]
+async fn test_sink_decouple_err_isolation() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
@@ -36,14 +37,12 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
-    if is_decouple {
-        session.run("set sink_decouple = true").await?;
-    } else {
-        session.run("set sink_decouple = false").await?;
-    }
+    session.run("set sink_decouple = true").await?;
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
     assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+
+    test_sink.set_err_rate(0.002);
 
     test_sink
         .store
@@ -53,6 +52,7 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
 
+    // Due to sink failure isolation, source stream should not be recreated
     assert_eq!(
         source_parallelism,
         test_source.create_stream_count.load(Relaxed)
@@ -61,43 +61,6 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_sink_basic() -> Result<()> {
-    basic_test_inner(false).await
-}
-
-#[tokio::test]
-async fn test_sink_decouple_basic() -> Result<()> {
-    basic_test_inner(true).await
-}
-
-#[tokio::test]
-async fn test_sink_decouple_blackhole() -> Result<()> {
-    let mut cluster = start_sink_test_cluster().await?;
-
-    let source_parallelism = 6;
-    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
-
-    let mut session = cluster.start_session();
-
-    session.run("set streaming_parallelism = 6").await?;
-    session.run("set sink_decouple = true").await?;
-    session.run(CREATE_SOURCE).await?;
-    session
-        .run("create sink test_sink from test_source with (connector = 'blackhole')")
-        .await?;
-
-    session.run(DROP_SINK).await?;
-    session.run(DROP_SOURCE).await?;
-
-    assert_eq!(
-        source_parallelism,
-        test_source.create_stream_count.load(Relaxed)
-    );
 
     Ok(())
 }
