@@ -1,0 +1,276 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# "nao" means non append only
+# "npk" means no primary key
+
+statement ok
+create table t_nao_npk (k int, v1 int, v2 int);
+
+statement ok
+create table t_ao_npk (k int, v1 int, v2 int) APPEND ONLY;
+
+statement ok
+create table t_nao_pk (k int, v1 int, v2 int, primary key(k));
+
+statement ok
+create table t_ao_source (k int, v1 int, v2 int) APPEND ONLY;
+
+statement ok
+create table t_nao_source (k int, v1 int, v2 int);
+
+# sinks to t_nao_npk
+statement ok
+create sink s1_to_t_nao_npk into t_nao_npk
+as select k, v1, v2 
+from t_ao_source 
+FORMAT PLAIN ENCODE NATIVE;
+
+statement error Only append-only sinks can sink to a table without primary keys.
+create sink s2_to_t_nao_npk into t_nao_npk
+as select k, v1, v2 
+from t_nao_source 
+FORMAT UPSERT ENCODE NATIVE;
+
+statement ok
+create sink s2_to_t_nao_npk into t_nao_npk
+as select k, v1, v2 
+from t_nao_source 
+FORMAT PLAIN ENCODE NATIVE(
+    force_append_only='true'
+);
+
+# sinks to t_ao_npk
+statement ok
+create sink s1_to_t_ao_npk into t_ao_npk
+as select k, v1, v2 
+from t_ao_source
+FORMAT PLAIN ENCODE NATIVE;
+
+statement error Only append-only sinks can sink to a table without primary keys.
+create sink s2_to_t_ao_npk into t_ao_npk
+as select k, v1, v2 
+from t_nao_source
+FORMAT UPSERT ENCODE NATIVE;
+
+statement ok
+create sink s2_to_t_ao_npk into t_ao_npk
+as select k, v1, v2 
+from t_nao_source
+FORMAT PLAIN ENCODE NATIVE(
+    force_append_only='true'
+);
+
+# sinks to t_nao_pk
+statement ok
+create sink s1_to_t_nao_pk into t_nao_pk
+as select k, v1, v2 
+from t_ao_source
+FORMAT PLAIN ENCODE NATIVE;
+
+statement ok
+create sink s2_to_t_nao_pk into t_nao_pk
+as select k*10 as k, v1, v2 
+from t_nao_source
+FORMAT UPSERT ENCODE NATIVE;
+
+statement ok
+create sink s3_to_t_nao_pk into t_nao_pk
+as select k*100 as k, v1, v2 
+from t_nao_source
+FORMAT PLAIN ENCODE NATIVE(
+    force_append_only='true'
+);
+
+statement ok
+insert into t_ao_source values (1, 10, 100);
+
+
+query ??? rowsort
+SELECT * FROM t_nao_npk;
+----
+1	10	100
+
+query ??? rowsort
+SELECT * FROM t_ao_npk;
+----
+1	10	100
+
+query ??? rowsort
+SELECT * FROM t_nao_pk;
+----
+1	10	100
+
+
+statement ok
+insert into t_nao_source values (2, 20, 200);
+
+
+query ??? rowsort
+SELECT * FROM t_nao_npk;
+----
+1	10	100
+2	20	200
+
+query ??? rowsort
+SELECT * FROM t_ao_npk;
+----
+1	10	100
+2	20	200
+
+query ??? rowsort
+SELECT * FROM t_nao_pk;
+----
+1	10	100
+20	20	200
+200	20	200
+
+
+statement error
+update t_nao_source set v2 = 1000 where v1 = 20;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: gRPC request failed: Unknown error
+  3: transport error
+  4: connection error
+  5: connection reset
+
+
+
+query error
+SELECT * FROM t_nao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Scheduler error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+query error
+SELECT * FROM t_ao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Scheduler error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+query error
+SELECT * FROM t_nao_pk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Scheduler error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+
+statement error
+drop sink s3_to_t_nao_pk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+statement error
+drop sink s2_to_t_nao_pk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: table is in altering procedure
+
+
+statement error
+drop sink s1_to_t_nao_pk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: table is in altering procedure
+
+
+statement error
+drop sink s2_to_t_ao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+statement error
+drop sink s1_to_t_ao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: table is in altering procedure
+
+
+statement error
+drop sink s2_to_t_nao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: gRPC request failed: The service is currently unavailable
+  3: transport error
+  4: error trying to connect
+  5: tcp connect error
+  6: Connection refused (os error 111)
+
+
+statement error
+drop sink s1_to_t_nao_npk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: table is in altering procedure
+
+
+statement ok
+drop table t_ao_source
+
+statement ok
+drop table t_nao_npk
+
+statement ok
+drop table t_ao_npk
+

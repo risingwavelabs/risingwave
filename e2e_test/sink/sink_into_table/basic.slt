@@ -70,17 +70,74 @@ FORMAT PLAIN ENCODE NATIVE;
 
 statement ok
 create sink s2_to_t_nao_pk into t_nao_pk
-as select k, v1, v2 
+as select k*10 as k, v1, v2 
 from t_nao_source
 FORMAT UPSERT ENCODE NATIVE;
 
 statement ok
 create sink s3_to_t_nao_pk into t_nao_pk
-as select k, v1, v2 
+as select k*100 as k, v1, v2 
 from t_nao_source
 FORMAT PLAIN ENCODE NATIVE(
     force_append_only='true'
 );
+
+statement ok
+insert into t_ao_source values (1, 10, 100);
+
+
+query ??? rowsort
+SELECT * FROM t_nao_npk;
+----
+1	10	100
+
+query ??? rowsort
+SELECT * FROM t_ao_npk;
+----
+1	10	100
+
+query ??? rowsort
+SELECT * FROM t_nao_pk;
+----
+1	10	100
+
+
+statement ok
+insert into t_nao_source values (2, 20, 200);
+
+
+query ??? rowsort
+SELECT * FROM t_nao_npk;
+----
+1	10	100
+2	20	200
+
+query ??? rowsort
+SELECT * FROM t_ao_npk;
+----
+1	10	100
+2	20	200
+
+query ??? rowsort
+SELECT * FROM t_nao_pk;
+----
+1	10	100
+20	20	200
+200	20	200
+
+statement ok
+update t_nao_source set v2 = 1000 where v1 = 20;
+
+query ??? rowsort
+SELECT * FROM t_nao_npk;
+
+query ??? rowsort
+SELECT * FROM t_ao_npk;
+
+query ??? rowsort
+SELECT * FROM t_nao_pk;
+ 
+
 
 statement ok
 drop sink s3_to_t_nao_pk;
