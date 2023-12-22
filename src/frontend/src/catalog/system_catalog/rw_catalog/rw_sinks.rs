@@ -21,7 +21,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
-
 use crate::catalog::system_catalog::{
     extract_parallelism_from_table_state, get_acl_items, BuiltinTable, SysCatalogReaderImpl,
 };

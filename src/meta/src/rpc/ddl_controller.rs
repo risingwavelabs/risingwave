@@ -58,9 +58,7 @@ use crate::manager::{
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{
-    FragmentId, StreamContext, StreamEnvironment, TableFragments, TableParallelism,
-};
+use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,

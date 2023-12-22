@@ -26,7 +26,7 @@ use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
 };
-use risingwave_pb::meta::{PbTableFragments, PbTableParallelism, TableParallelism};
+use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -161,7 +161,7 @@ impl MetadataModel for TableFragments {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
 
         let default_parallelism = PbTableParallelism {
-            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
+            parallelism: Some(Parallelism::Auto(PbAutoParallelism {})),
         };
 
         Self {

@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_sqlparser::ast::{
-    ObjectName, SetVariableValue, SetVariableValueSingle, Value,
-};
+use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
