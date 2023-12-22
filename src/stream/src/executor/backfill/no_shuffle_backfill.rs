@@ -338,6 +338,17 @@ where
                                     break;
                                 }
                                 Some(chunk) => {
+                                    if chunk.cardinality() == 0 {
+                                        tracing::warn!("barrier_snapshot_read chunk is empty");
+                                    }
+
+                                    let row = chunk.rows().next().unwrap();
+                                    let rows = [row];
+                                    let chunk = StreamChunk::from_rows(
+                                        rows.as_ref(),
+                                        &self.upstream_table.schema().data_types(),
+                                    );
+
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
