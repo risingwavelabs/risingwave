@@ -3785,9 +3785,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caed9c227536e3b6fb92aea800c44de7516ecc339a11eb01544549dd6f43cb69"
+checksum = "2c96977361c34221e9cd77c1334a194e0f2a169f0b56f84229cca034bf8b483c"
 dependencies = [
  "foyer-common 0.2.0",
  "foyer-intrusive",
@@ -3847,9 +3847,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cb8ea9451a80e457cfc15e1d26c8bb27ccb620b20cb0414d7e8bf74704c0506"
+checksum = "b99c687e5c1ae5198e1a2bc4fb729518e588e1ce90cc58f1f1871f7aadbd127e"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
