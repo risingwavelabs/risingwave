@@ -33,7 +33,7 @@ fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Resu
         match node {
             FormatterNode::Literal(literal) => writer.write_str(literal).unwrap(),
             FormatterNode::Specifier(sp) => {
-                let arg = args.next().context("too few arguments")?;
+                let arg = args.next().context("too few arguments for format()")?;
                 match sp.ty {
                     SpecifierType::SimpleString => {
                         if let Some(scalar) = arg {

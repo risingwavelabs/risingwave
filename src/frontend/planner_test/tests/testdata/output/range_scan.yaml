@@ -36,7 +36,7 @@
     Expr error
 
     Caused by:
-      Division by zero
+      division by zero
 - before:
   - create_table_and_mv
   sql: |
@@ -45,7 +45,7 @@
     Expr error
 
     Caused by:
-      Numeric out of range
+      numeric out of range
 - before:
   - create_table_and_mv
   sql: |
@@ -54,7 +54,7 @@
     Expr error
 
     Caused by:
-      Parse error: bigint invalid digit found in string
+      invalid input syntax for type bigint: "a"
 - before:
   - create_table_and_mv
   sql: |
@@ -63,7 +63,7 @@
     Expr error
 
     Caused by:
-      Parse error: bigint invalid digit found in string
+      invalid input syntax for type bigint: "a"
 - before:
   - create_table_and_mv
   sql: |
@@ -149,7 +149,7 @@
     Expr error
 
     Caused by:
-      Parse error: bigint invalid digit found in string
+      invalid input syntax for type bigint: "43.0"
 - before:
   - create_table_and_mv
   sql: |

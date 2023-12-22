@@ -593,7 +593,7 @@
     Expr error
 
     Caused by:
-      Division by zero
+      division by zero
 - sql: |
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'

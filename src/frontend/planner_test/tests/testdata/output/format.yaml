@@ -29,14 +29,14 @@
     Expr error
 
     Caused by:
-      Parse error: unterminated format() type specifier
+      unterminated format() type specifier
 - sql: |
     SELECT format('Testing %s, %f, %d, %', 'one', 'two', 'three');
   batch_error: |
     Expr error
 
     Caused by:
-      Parse error: unrecognized format() type specifier "f"
+      unrecognized format() type specifier "f"
 - sql: |
     SELECT format();
   binder_error: |

@@ -41,10 +41,12 @@ pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
 {
-    elem.trim()
-        .parse()
-        .ok()
-        .with_context(|| format!("failed to parse {}", ctx.return_type))
+    elem.trim().parse().ok().with_context(|| {
+        format!(
+            "invalid input syntax for type {}: \"{}\"",
+            ctx.return_type, elem
+        )
+    })
 }
 
 // TODO: introduce `FromBinary` and support all types
