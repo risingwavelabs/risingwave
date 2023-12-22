@@ -881,13 +881,8 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let AlterParallelismRequest {
-            table_id,
-            parallelism: Some(parallelism),
-        } = req
-        else {
-            panic!("123e");
-        };
+        let table_id = req.get_table_id();
+        let parallelism = req.get_parallelism()?.clone();
 
         self.ddl_controller
             .alter_parallelism(table_id, parallelism)

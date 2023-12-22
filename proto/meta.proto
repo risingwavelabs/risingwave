@@ -472,7 +472,7 @@ message TableParallelism {
 
   message CustomParallelism {}
 
-  oneof Parallelism {
+  oneof parallelism {
     FixedParallelism fixed = 1;
     AutoParallelism auto = 2;
     CustomParallelism custom = 3;
