@@ -20,7 +20,7 @@ use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
 use serde_derive::{Deserialize, Serialize};
@@ -89,26 +89,14 @@ impl ExternalTableReader for PostgresExternalTableReader {
         let mut client = self.client.lock().await;
         // start a transaction to read current lsn and txid
         let trxn = client.transaction().await?;
-        let row = {
-            let rs = trxn.query("SELECT pg_current_wal_lsn()", &[]).await?;
-            rs.into_iter()
-                .exactly_one()
-                .map_err(|e| anyhow!("fail to get current lsn: {}", e))?
-        };
-
+        let row = trxn.query_one("SELECT pg_current_wal_lsn()", &[]).await?;
         let mut pg_offset = PostgresOffset::default();
         let pg_lsn = row.get::<_, PgLsn>(0);
         tracing::debug!("current lsn: {}", pg_lsn);
         pg_offset.lsn = pg_lsn.into();
 
-        let row = {
-            let rs = trxn.query("SELECT txid_current()", &[]).await?;
-            rs.into_iter()
-                .exactly_one()
-                .map_err(|e| anyhow!("fail to get current txid: {}", e))?
-        };
-
-        let txid: i64 = row.get::<_, i64>(0);
+        let txid_row = trxn.query_one("SELECT txid_current()", &[]).await?;
+        let txid: i64 = txid_row.get::<_, i64>(0);
         pg_offset.txid = txid;
 
         // commit the transaction
@@ -166,8 +154,7 @@ impl PostgresExternalTableReader {
         let field_names = rw_schema
             .fields
             .iter()
-            .filter(|f| f.name != OFFSET_COLUMN_NAME)
-            .map(|f| format!("\"{}\"", f.name.as_str()))
+            .map(|f| format!("{}", Self::quote_column(&f.name)))
             .join(",");
 
         Ok(Self {
@@ -186,25 +173,27 @@ impl PostgresExternalTableReader {
         primary_keys: Vec<String>,
     ) {
         let order_key = primary_keys.iter().join(",");
-        let sql = if start_pk_row.is_none() {
-            format!(
+        let client = self.client.lock().await;
+        let stmt = if start_pk_row.is_none() {
+            let sql = format!(
                 "SELECT {} FROM {} ORDER BY {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 order_key
-            )
+            );
+            client.prepare(&sql).await?
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
-            format!(
+            let sql = format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key
-            )
+            );
+            client.prepare(&sql).await?
         };
 
-        let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
         let params: Vec<DatumRef<'_>> = match start_pk_row {
@@ -212,7 +201,7 @@ impl PostgresExternalTableReader {
             None => Vec::new(),
         };
 
-        let stream = client.query_raw(&sql, &params).await?;
+        let stream = client.query_raw(&stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
             postgres_row_to_owned_row(row, &self.rw_schema)
