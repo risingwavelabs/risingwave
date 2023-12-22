@@ -230,6 +230,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             cdc_table_info,
+            include_column_options,
         } => {
             if or_replace {
                 bail_not_implemented!("CREATE OR REPLACE TABLE");
@@ -259,6 +260,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
             )
             .await
         }

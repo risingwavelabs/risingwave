@@ -1,10 +1,8 @@
 import subprocess
 import sys
-from time import sleep
 
-sleep(30)
 
-relations = ['default.demo_test']
+relations = ['default.demo_test', 'default.ck_types']
 
 failed_cases = []
 for rel in relations:

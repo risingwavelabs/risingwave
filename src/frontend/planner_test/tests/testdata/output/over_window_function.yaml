@@ -242,8 +242,9 @@
   binder_error: |
     Failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
 
-    Caused by:
-      Invalid input syntax: window frame bounds `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: frame start cannot be UNBOUNDED FOLLOWING
 - id: aggregate with over clause, invalid frame definition case 2
   sql: |
     create table t(x int, y int);
@@ -251,8 +252,9 @@
   binder_error: |
     Failed to bind expression: min(x) OVER (PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING)
 
-    Caused by:
-      Invalid input syntax: window frame bounds `ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING` is not valid
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: frame starting from following row cannot have preceding rows
 - id: aggregate with over clause, range frame definition with implicit current row
   sql: |
     create table t(x int, y int);
@@ -1050,3 +1052,66 @@
   optimized_logical_plan_for_stream: |-
     LogicalOverWindow { window_functions: [first_value(t.rule) OVER(PARTITION BY t.cat ORDER BY t.at ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
     └─LogicalScan { table: t, columns: [t.cat, t.rule, t.at], predicate: (t.rule = 'B':Varchar) AND IsNotNull(t.cat) AND (t.at = '2023-11-23 12:00:42+00:00':Timestamptz) }
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 preceding and 10 preceding)
+    from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.b ASC ROWS BETWEEN 1 PRECEDING AND 10 PRECEDING)] }
+      └─LogicalProject { exprs: [t.b, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.b] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.b ASC ROWS BETWEEN 1 PRECEDING AND 10 PRECEDING)] }
+      └─LogicalProject { exprs: [t.b, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.b] }
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and current row)
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY b ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW)
+
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: frame starting from following row cannot have preceding rows
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and 1 preceding)
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY b ROWS BETWEEN 1 FOLLOWING AND 1 PRECEDING)
+
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: frame starting from following row cannot have preceding rows
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between current row and 1 preceding)
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY b ROWS BETWEEN CURRENT ROW AND 1 PRECEDING)
+
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: frame starting from current row cannot have preceding rows
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 10 following and 1 following)
+    from t;
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.b ASC ROWS BETWEEN 10 FOLLOWING AND 1 FOLLOWING)] }
+      └─LogicalProject { exprs: [t.b, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.b] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.b ASC ROWS BETWEEN 10 FOLLOWING AND 1 FOLLOWING)] }
+      └─LogicalProject { exprs: [t.b, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.b] }

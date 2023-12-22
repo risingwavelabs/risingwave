@@ -1521,15 +1521,17 @@ impl Parser {
                         self.expected("Expected Token::Word after AT", tok)
                     }
                 }
-                Keyword::NOT | Keyword::IN | Keyword::BETWEEN => {
+                Keyword::NOT | Keyword::IN | Keyword::BETWEEN | Keyword::SIMILAR => {
                     self.prev_token();
                     let negated = self.parse_keyword(Keyword::NOT);
                     if self.parse_keyword(Keyword::IN) {
                         self.parse_in(expr, negated)
                     } else if self.parse_keyword(Keyword::BETWEEN) {
                         self.parse_between(expr, negated)
+                    } else if self.parse_keywords(&[Keyword::SIMILAR, Keyword::TO]) {
+                        self.parse_similar_to(expr, negated)
                     } else {
-                        self.expected("IN or BETWEEN after NOT", self.peek_token())
+                        self.expected("IN, BETWEEN or SIMILAR TO after NOT", self.peek_token())
                     }
                 }
                 // Can only happen if `get_next_precedence` got out of sync with this function
@@ -1682,6 +1684,23 @@ impl Parser {
             negated,
             low: Box::new(low),
             high: Box::new(high),
+        })
+    }
+
+    /// Parses `SIMILAR TO <pat> [ ESCAPE <esc_text> ]`
+    pub fn parse_similar_to(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
+        let pat = self.parse_subexpr(Precedence::Between)?;
+        let esc_text = if self.parse_keyword(Keyword::ESCAPE) {
+            Some(Box::new(self.parse_subexpr(Precedence::Between)?))
+        } else {
+            None
+        };
+
+        Ok(Expr::SimilarTo {
+            expr: Box::new(expr),
+            negated,
+            pat: Box::new(pat),
+            esc_text,
         })
     }
 
@@ -2442,6 +2461,7 @@ impl Parser {
         } else {
             false
         };
+        let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
@@ -2494,7 +2514,22 @@ impl Parser {
             append_only,
             query,
             cdc_table_info,
+            include_column_options: include_options,
         })
+    }
+
+    pub fn parse_include_options(&mut self) -> Result<Vec<(Ident, Option<Ident>)>, ParserError> {
+        let mut options = vec![];
+        while self.parse_keyword(Keyword::INCLUDE) {
+            let add_column = self.parse_identifier()?;
+            if self.parse_keyword(Keyword::AS) {
+                let column_alias = self.parse_identifier()?;
+                options.push((add_column, Some(column_alias)));
+            } else {
+                options.push((add_column, None));
+            }
+        }
+        Ok(options)
     }
 
     pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
@@ -4228,7 +4263,14 @@ impl Parser {
     }
 
     pub fn parse_cancel_job(&mut self) -> Result<Statement, ParserError> {
-        self.expect_keyword(Keyword::JOBS)?;
+        // CANCEL [JOBS|JOB] job_ids
+        match self.peek_token().token {
+            Token::Word(w) if Keyword::JOBS == w.keyword || Keyword::JOB == w.keyword => {
+                self.next_token();
+            }
+            _ => return self.expected("JOBS or JOB after CANCEL", self.peek_token()),
+        }
+
         let mut job_ids = vec![];
         loop {
             job_ids.push(self.parse_literal_uint()? as u32);

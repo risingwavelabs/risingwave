@@ -214,19 +214,6 @@ impl ConcatSstableIterator {
         self.sstable_iter.as_mut().unwrap()
     }
 
-    pub fn estimate_key_count(&self, uncompressed_block_size: u64) -> (u64, u64) {
-        let total_size = self.sstables[self.cur_idx].uncompressed_file_size;
-        if total_size == 0 {
-            return (0, 0);
-        }
-        // use ratio to avoid multiply overflow
-        let ratio = uncompressed_block_size * 10000 / total_size;
-        (
-            self.sstables[self.cur_idx].stale_key_count * ratio / 10000,
-            self.sstables[self.cur_idx].total_key_count * ratio / 10000,
-        )
-    }
-
     pub async fn init_block_iter(&mut self) -> HummockResult<()> {
         if let Some(sstable) = self.sstable_iter.as_mut() {
             if sstable.iter.is_some() {
