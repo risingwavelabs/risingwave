@@ -498,6 +498,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_source_format_encode(&self, source: PbSource) -> Result<CatalogVersion> {
+        let request = AlterSourceRequest {
+            source: Some(source),
+        };
+        let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
