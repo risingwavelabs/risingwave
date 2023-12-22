@@ -157,11 +157,6 @@
 
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-source-cdc</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-connector-service</artifactId>
             <scope>test</scope>
         </dependency>
