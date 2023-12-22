@@ -321,13 +321,14 @@ impl FunctionAttr {
         ) #await_ };
         // handle error if the function returns `Result`
         // wrap a `Some` if the function doesn't return `Option`
+        let error_context = format!("in function \"{}\"", self.name);
         output = match user_fn.return_type_kind {
             // XXX: we don't support void type yet. return null::int for now.
             _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
-            ReturnTypeKind::Result => quote! { Some(#output?) },
-            ReturnTypeKind::ResultOption => quote! { #output? },
+            ReturnTypeKind::Result => quote! { Some(#output.context(#error_context)?) },
+            ReturnTypeKind::ResultOption => quote! { #output.context(#error_context)? },
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
@@ -458,6 +459,7 @@ impl FunctionAttr {
                 -> risingwave_expr::Result<risingwave_expr::expr::BoxedExpression>
             {
                 use std::sync::Arc;
+                use anyhow::Context as _;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
@@ -700,11 +702,12 @@ impl FunctionAttr {
                 }
             }
         };
+        let error_context = format!("in function \"{}\"", self.name);
         next_state = match user_fn.accumulate().return_type_kind {
             ReturnTypeKind::T => quote! { Some(#next_state) },
             ReturnTypeKind::Option => next_state,
-            ReturnTypeKind::Result => quote! { Some(#next_state?) },
-            ReturnTypeKind::ResultOption => quote! { #next_state? },
+            ReturnTypeKind::Result => quote! { Some(#next_state.context(#error_context)?) },
+            ReturnTypeKind::ResultOption => quote! { #next_state.context(#error_context)? },
         };
         if !user_fn.accumulate().arg_option {
             match self.args.len() {
@@ -797,12 +800,12 @@ impl FunctionAttr {
             |agg| {
                 use std::collections::HashSet;
                 use std::ops::Range;
+                use anyhow::Context as _;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
-
                 use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;
                 use risingwave_expr::aggregate::AggregateState;
@@ -1003,12 +1006,13 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
+        let error_context = format!("in function \"{}\"", self.name);
         let iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { iter },
             ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
-            ReturnTypeKind::Result => quote! { iter? },
+            ReturnTypeKind::Result => quote! { iter.context(#error_context)? },
             ReturnTypeKind::ResultOption => {
-                quote! { if let Some(it) = iter? { it } else { continue; } }
+                quote! { if let Some(it) = iter.context(#error_context)? { it } else { continue; } }
             }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
@@ -1020,12 +1024,13 @@ impl FunctionAttr {
         let output = match iterator_item_type {
             ReturnTypeKind::T => quote! { Some(output) },
             ReturnTypeKind::Option => quote! { output },
-            ReturnTypeKind::Result => quote! { Some(output?) },
-            ReturnTypeKind::ResultOption => quote! { output? },
+            ReturnTypeKind::Result => quote! { Some(output.context(#error_context)?) },
+            ReturnTypeKind::ResultOption => quote! { output.context(#error_context)? },
         };
 
         Ok(quote! {
             |return_type, chunk_size, children| {
+                use anyhow::Context as _;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
