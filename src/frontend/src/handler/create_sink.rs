@@ -173,13 +173,23 @@ pub fn gen_sink_plan(
         }
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
-                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
-                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+            Some(t) => {
+                if !allow_old_sink_type_syntax(&connector) {
+                    return Err(ErrorCode::BindError(format!(
+                        "connector {} does not support `type = '...'`, please use syntax `FORMAT ... ENCODE ...` instead.",
+                        connector
+                    ))
+                    .into());
+                } else {
+                    SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
+                        session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                        if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                              f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+                        }
+                        f
+                    })
                 }
-                f
-            }),
+            }
             // Case C: no format + encode required
             None => None,
         },
@@ -633,6 +643,13 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
         ))
     });
+
+pub fn allow_old_sink_type_syntax(connector: &str) -> bool {
+    match connector {
+        "table" => false,
+        _ => true,
+    }
+}
 
 pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
