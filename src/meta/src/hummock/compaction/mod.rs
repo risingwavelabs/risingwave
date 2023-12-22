@@ -159,20 +159,6 @@ impl CompactStatus {
             return false;
         }
 
-        const MAX_TRIVIAL_MOVE_FILE_SIZE: u64 = 256 * 1024 * 1024; // 256MB.
-
-        // do not trivial move a large file because it may cause large write amplification in next compact.
-        if !task.gc_delete_keys
-            && task.input_ssts.iter().any(|input| {
-                input
-                    .table_infos
-                    .iter()
-                    .any(|sst| sst.file_size > MAX_TRIVIAL_MOVE_FILE_SIZE && input.level_idx > 0)
-            })
-        {
-            return false;
-        }
-
         if task.input_ssts.len() == 1 {
             return task.input_ssts[0].level_idx == 0
                 && can_concat(&task.input_ssts[0].table_infos);
