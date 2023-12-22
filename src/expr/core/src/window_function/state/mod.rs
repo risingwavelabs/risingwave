@@ -109,7 +109,7 @@ pub trait WindowState: EstimateSize {
 }
 
 pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send + Sync>> {
-    assert!(call.frame.bounds.is_valid());
+    assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;
     Ok(match call.kind {

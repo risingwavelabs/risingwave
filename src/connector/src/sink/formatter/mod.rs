@@ -150,6 +150,7 @@ impl SinkFormatterImpl {
                             AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
                         ))
                     }
+                    SinkEncode::Native => err_unsupported(),
                 }
             }
             SinkFormat::Debezium => {
@@ -251,6 +252,7 @@ impl SinkFormatterImpl {
                         Ok(SinkFormatterImpl::UpsertAvro(formatter))
                     }
                     SinkEncode::Protobuf => err_unsupported(),
+                    SinkEncode::Native => err_unsupported(),
                 }
             }
         }
