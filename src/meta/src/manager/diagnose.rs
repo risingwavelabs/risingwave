@@ -30,7 +30,7 @@ use serde_json::json;
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::event_log::EventLogMangerRef;
-use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetadataManager};
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
@@ -46,23 +46,22 @@ pub struct DiagnoseCommand {
 
 impl DiagnoseCommand {
     pub fn new(
-        metadata_manager: &MetadataManager,
+        cluster_manager: ClusterManagerRef,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
         hummock_manger: HummockManagerRef,
         event_log_manager: EventLogMangerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
     ) -> Self {
-        match metadata_manager {
-            MetadataManager::V1(mgr) => Self {
-                cluster_manager: mgr.cluster_manager.clone(),
-                catalog_manager: mgr.catalog_manager.clone(),
-                fragment_manager: mgr.fragment_manager.clone(),
-                hummock_manger,
-                event_log_manager,
-                prometheus_client,
-                prometheus_selector,
-            },
-            MetadataManager::V2(_mgr) => unimplemented!("support diagnose in v2"),
+        Self {
+            cluster_manager,
+            catalog_manager,
+            fragment_manager,
+            hummock_manger,
+            event_log_manager,
+            prometheus_client,
+            prometheus_selector,
         }
     }
 

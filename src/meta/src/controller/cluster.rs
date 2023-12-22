@@ -261,6 +261,7 @@ impl ClusterController {
                     .column(worker::Column::WorkerType)
                     .column(worker::Column::Host)
                     .column(worker::Column::Port)
+                    .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
                     .into_tuple::<(WorkerType, String, i32)>()
                     .all(&inner.db)
                     .await

@@ -395,6 +395,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
+                    .col(ColumnDef::new(Actor::ExprContext).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")
@@ -965,6 +966,7 @@ enum Actor {
     ParallelUnitId,
     UpstreamActorIds,
     VnodeBitmap,
+    ExprContext,
 }
 
 #[derive(DeriveIden)]

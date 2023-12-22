@@ -46,7 +46,7 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    pub diagnose_command: DiagnoseCommandRef,
+    pub diagnose_command: Option<DiagnoseCommandRef>,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -354,7 +354,13 @@ pub(super) mod handlers {
     }
 
     pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
-        Ok(srv.diagnose_command.report().await)
+        let report = if let Some(cmd) = &srv.diagnose_command {
+            cmd.report().await
+        } else {
+            "Not supported in sql-backend".to_string()
+        };
+
+        Ok(report)
     }
 }
 
