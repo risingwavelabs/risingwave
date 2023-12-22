@@ -88,9 +88,11 @@ impl MinOverlappingPicker {
             for other in &target_tables[target_level_overlap_range.clone()] {
                 total_file_size += other.file_size;
             }
-            let left_idx = select_file_ranges[left].0;
+            let start_idx = select_file_ranges[left].0;
+            let mut end_idx = start_idx + 1;
             for (idx, range) in select_file_ranges.iter().skip(left) {
                 if select_file_size > self.max_select_bytes
+                    || *idx > end_idx
                     || range.start >= target_level_overlap_range.end
                 {
                     break;
@@ -107,11 +109,12 @@ impl MinOverlappingPicker {
                 } else {
                     total_file_size * 100 / select_file_size
                 };
+                end_idx = idx + 1;
                 if score < min_score
                     || (score == min_score && select_file_size < min_score_select_file_size)
                 {
                     min_score = score;
-                    min_score_select_range = left_idx..(*idx + 1);
+                    min_score_select_range = start_idx..end_idx;
                     min_score_target_range = target_level_overlap_range.clone();
                     min_score_select_file_size = select_file_size;
                 }
