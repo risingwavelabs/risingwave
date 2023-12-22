@@ -645,10 +645,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     });
 
 pub fn allow_old_sink_type_syntax(connector: &str) -> bool {
-    match connector {
-        "table" => false,
-        _ => true,
-    }
+    !matches!(connector, "table")
 }
 
 pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
