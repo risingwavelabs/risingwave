@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use risingwave_common::types::Int256;
-use risingwave_expr::ExprError::Parse;
-use risingwave_expr::{function, Result};
-use thiserror_ext::AsReport;
+use risingwave_expr::function;
+
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 
 /// Returns the integer value of the hexadecimal string.
@@ -30,27 +30,22 @@ const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 /// ```
 #[function("hex_to_int256(varchar) -> int256")]
 pub fn hex_to_int256(s: &str) -> Result<Int256> {
-    Int256::from_str_hex(s).map_err(|e| {
-        Parse(
-            if s.len() <= MAX_AVAILABLE_HEX_STR_LEN {
-                format!("failed to parse hex '{}', {}", s, e.as_report())
-            } else {
-                format!(
-                    "failed to parse hex '{}...'(truncated, total {} bytes), {}",
-                    &s[..MAX_AVAILABLE_HEX_STR_LEN],
-                    s.len(),
-                    e.as_report()
-                )
-            }
-            .into(),
-        )
+    Int256::from_str_hex(s).with_context(|| {
+        if s.len() <= MAX_AVAILABLE_HEX_STR_LEN {
+            format!("failed to parse hex '{s}'")
+        } else {
+            format!(
+                "failed to parse hex '{}...'(truncated, total {} bytes)",
+                &s[..MAX_AVAILABLE_HEX_STR_LEN],
+                s.len(),
+            )
+        }
     })
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::Int256;
-    use risingwave_expr::ExprError::Parse;
 
     use crate::scalar::int256::hex_to_int256;
 
@@ -93,6 +88,5 @@ mod tests {
     fn test_failed() {
         let failed_result = hex_to_int256("0xggggggg");
         assert!(failed_result.is_err());
-        assert!(matches!(failed_result.as_ref().err(), Some(Parse(_))));
     }
 }

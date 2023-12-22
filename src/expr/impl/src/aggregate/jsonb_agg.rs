@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, JsonbVal};
+use risingwave_expr::aggregate;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{aggregate, ExprError, Result};
 
 use crate::scalar::ToJsonb;
 
@@ -43,7 +44,7 @@ fn jsonb_object_agg(
     value: Option<impl ToJsonb>,
     ctx: &Context,
 ) -> Result<()> {
-    let key = key.ok_or(ExprError::FieldNameNull)?;
+    let key = key.context("field name must not be null")?;
     state.0.add_string(key);
     value.add_to(&ctx.arg_types[1], &mut state.0)?;
     Ok(())

@@ -14,8 +14,9 @@
 
 use std::fmt::Write;
 
+use anyhow::{bail, Context as _, Result};
 use risingwave_common::array::ListRef;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Returns the length of an array.
 ///
@@ -62,10 +63,7 @@ use risingwave_expr::{function, ExprError, Result};
 #[function("array_length(anyarray) -> int4")]
 #[function("array_length(anyarray) -> int8", deprecated)]
 fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T> {
-    array
-        .len()
-        .try_into()
-        .map_err(|_| ExprError::NumericOverflow)
+    array.len().try_into().ok().context("array length overflow")
 }
 
 /// Returns the length of the requested array dimension.
@@ -132,10 +130,7 @@ fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>> {
     match d {
         ..=0 => Ok(None),
         1 => array_length(array).map(Some),
-        2.. => Err(ExprError::InvalidParam {
-            name: "dimension",
-            reason: "array_length for dimensions greater than 1 not supported".into(),
-        }),
+        2.. => bail!("array_length for dimensions greater than 1 not supported"),
     }
 }
 

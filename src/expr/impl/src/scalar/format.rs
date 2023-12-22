@@ -15,17 +15,17 @@
 use std::fmt::Write;
 use std::str::FromStr;
 
+use anyhow::{anyhow, bail, Context as _, Result};
 use risingwave_common::row::Row;
 use risingwave_common::types::{ScalarRefImpl, ToText};
-use risingwave_expr::{function, ExprError, Result};
-use thiserror_ext::AsReport;
+use risingwave_expr::function;
 
 use super::string::quote_ident;
 
 /// Formats arguments according to a format string.
 #[function(
     "format(varchar, ...) -> varchar",
-    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
+    prebuild = "Formatter::from_str($0).map_err(|e| anyhow!(\"{e}\"))?"
 )]
 fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Result<()> {
     let mut args = row.iter();
@@ -33,7 +33,7 @@ fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Resu
         match node {
             FormatterNode::Literal(literal) => writer.write_str(literal).unwrap(),
             FormatterNode::Specifier(sp) => {
-                let arg = args.next().ok_or(ExprError::TooFewArguments)?;
+                let arg = args.next().context("too few arguments")?;
                 match sp.ty {
                     SpecifierType::SimpleString => {
                         if let Some(scalar) = arg {
@@ -42,17 +42,9 @@ fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Resu
                     }
                     SpecifierType::SqlIdentifier => match arg {
                         Some(ScalarRefImpl::Utf8(arg)) => quote_ident(arg, writer),
-                        _ => {
-                            return Err(ExprError::UnsupportedFunction(
-                                "unsupported data for specifier type 'I'".to_string(),
-                            ))
-                        }
+                        _ => bail!("unsupported data for specifier type 'I'"),
                     },
-                    SpecifierType::SqlLiteral => {
-                        return Err(ExprError::UnsupportedFunction(
-                            "unsupported specifier type 'L'".to_string(),
-                        ))
-                    }
+                    SpecifierType::SqlLiteral => bail!("unsupported specifier type 'L'"),
                 }
             }
         }

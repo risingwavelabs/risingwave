@@ -15,12 +15,13 @@
 use std::convert::TryInto;
 use std::fmt::Debug;
 
+use anyhow::{anyhow, bail, ensure, Context as _, Result};
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
     CheckedAdd, Date, Decimal, FloatExt, Interval, IsNegative, Time, Timestamp, F64,
 };
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 use rust_decimal::MathematicalOps;
 
 #[function("add(*int, *int) -> auto")]
@@ -35,7 +36,7 @@ where
     T3: CheckedAdd<Output = T3>,
 {
     general_atm(l, r, |a, b| {
-        a.checked_add(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_add(b).context("numeric out of range")
     })
 }
 
@@ -51,7 +52,7 @@ where
     T3: CheckedSub,
 {
     general_atm(l, r, |a, b| {
-        a.checked_sub(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_sub(&b).context("numeric out of range")
     })
 }
 
@@ -66,7 +67,7 @@ where
     T3: CheckedMul,
 {
     general_atm(l, r, |a, b| {
-        a.checked_mul(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_mul(&b).context("numeric out of range")
     })
 }
 
@@ -83,11 +84,11 @@ where
     T3: CheckedDiv + Zero,
 {
     general_atm(l, r, |a, b| {
-        a.checked_div(&b).ok_or_else(|| {
+        a.checked_div(&b).with_context(|| {
             if b.is_zero() {
-                ExprError::DivisionByZero
+                "division by zero"
             } else {
-                ExprError::NumericOutOfRange
+                "numeric out of range"
             }
         })
     })
@@ -103,7 +104,7 @@ where
     T3: CheckedRem,
 {
     general_atm(l, r, |a, b| {
-        a.checked_rem(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_rem(&b).context("numeric out of range")
     })
 }
 
@@ -111,7 +112,7 @@ where
 #[function("neg(*float) -> auto")]
 #[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
-    expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
+    expr.checked_neg().context("numeric out of range")
 }
 
 #[function("neg(int256) -> int256")]
@@ -120,9 +121,7 @@ where
     TRef: Into<T> + Debug,
     T: CheckedNeg + Debug,
 {
-    expr.into()
-        .checked_neg()
-        .ok_or(ExprError::NumericOutOfRange)
+    expr.into().checked_neg().context("numeric out of range")
 }
 
 #[function("abs(*int) -> auto")]
@@ -158,17 +157,11 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
 }
 
-fn err_pow_zero_negative() -> ExprError {
-    ExprError::InvalidParam {
-        name: "rhs",
-        reason: "zero raised to a negative power is undefined".into(),
-    }
+fn err_pow_zero_negative() -> anyhow::Error {
+    anyhow!("zero raised to a negative power is undefined")
 }
-fn err_pow_negative_fract() -> ExprError {
-    ExprError::InvalidParam {
-        name: "rhs",
-        reason: "a negative number raised to a non-integer power yields a complex result".into(),
-    }
+fn err_pow_negative_fract() -> anyhow::Error {
+    anyhow!("a negative number raised to a non-integer power yields a complex result")
 }
 
 #[function("pow(float8, float8) -> float8")]
@@ -181,12 +174,11 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
     }
     let res = l.powf(r);
     if res.is_infinite() && l.is_finite() && r.is_finite() {
-        return Err(ExprError::NumericOverflow);
+        return Err(anyhow!("numeric overflow"));
     }
     if res.is_zero() && l.is_finite() && r.is_finite() && !l.is_zero() {
-        return Err(ExprError::NumericUnderflow);
+        return Err(anyhow!("numeric underflow"));
     }
-
     Ok(res)
 }
 
@@ -197,7 +189,7 @@ pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
     l.checked_powd(&r).map_err(|e| match e {
         PowError::ZeroNegative => err_pow_zero_negative(),
         PowError::NegativeFract => err_pow_negative_fract(),
-        PowError::Overflow => ExprError::NumericOverflow,
+        PowError::Overflow => anyhow!("numeric overflow"),
     })
 }
 
@@ -217,7 +209,7 @@ pub fn timestamp_timestamp_sub(l: Timestamp, r: Timestamp) -> Result<Interval> {
     let days = tmp.num_days();
     let usecs = (tmp - Duration::days(tmp.num_days()))
         .num_microseconds()
-        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+        .context("numeric out of range")?;
     Ok(Interval::from_month_day_usec(0, days as i32, usecs))
 }
 
@@ -228,7 +220,7 @@ pub fn date_date_sub(l: Date, r: Date) -> Result<i32> {
 
 #[function("add(interval, timestamp) -> timestamp")]
 pub fn interval_timestamp_add(l: Interval, r: Timestamp) -> Result<Timestamp> {
-    r.checked_add(l).ok_or(ExprError::NumericOutOfRange)
+    r.checked_add(l).context("numeric out of range")
 }
 
 #[function("add(interval, date) -> timestamp")]
@@ -250,7 +242,7 @@ pub fn date_interval_add(l: Date, r: Interval) -> Result<Timestamp> {
 pub fn date_interval_sub(l: Date, r: Interval) -> Result<Timestamp> {
     // TODO: implement `checked_sub` for `Timestamp` to handle the edge case of negation
     // overflowing.
-    interval_date_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
+    interval_date_add(r.checked_neg().context("numeric out of range")?, l)
 }
 
 #[function("add(date, int4) -> date")]
@@ -260,7 +252,7 @@ pub fn date_int_add(l: Date, r: i32) -> Result<Date> {
         .checked_add_signed(chrono::Duration::days(r as i64))
         .map(Date::new);
 
-    date_wrapper.ok_or(ExprError::NumericOutOfRange)
+    date_wrapper.context("numeric out of range")
 }
 
 #[function("add(int4, date) -> date")]
@@ -275,7 +267,7 @@ pub fn date_int_sub(l: Date, r: i32) -> Result<Date> {
         .checked_sub_signed(chrono::Duration::days(r as i64))
         .map(Date::new);
 
-    date_wrapper.ok_or(ExprError::NumericOutOfRange)
+    date_wrapper.context("numeric out of range")
 }
 
 #[function("add(timestamp, interval) -> timestamp")]
@@ -285,12 +277,12 @@ pub fn timestamp_interval_add(l: Timestamp, r: Interval) -> Result<Timestamp> {
 
 #[function("subtract(timestamp, interval) -> timestamp")]
 pub fn timestamp_interval_sub(l: Timestamp, r: Interval) -> Result<Timestamp> {
-    interval_timestamp_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
+    interval_timestamp_add(r.checked_neg().context("numeric out of range")?, l)
 }
 
 #[function("multiply(interval, *int) -> interval")]
 pub fn interval_int_mul(l: Interval, r: impl TryInto<i32> + Debug) -> Result<Interval> {
-    l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)
+    l.checked_mul_int(r).context("numeric out of range")
 }
 
 #[function("multiply(*int, interval) -> interval")]
@@ -311,9 +303,7 @@ pub fn time_date_add(l: Time, r: Date) -> Result<Timestamp> {
 #[function("subtract(time, time) -> interval")]
 pub fn time_time_sub(l: Time, r: Time) -> Result<Interval> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
-    let usecs = tmp
-        .num_microseconds()
-        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    let usecs = tmp.num_microseconds().context("numeric out of range")?;
     Ok(Interval::from_month_day_usec(0, 0, usecs))
 }
 
@@ -324,7 +314,7 @@ pub fn time_interval_sub(l: Time, r: Interval) -> Result<Time> {
     if ignored == 0 {
         Ok(Time::new(new_time))
     } else {
-        Err(ExprError::NumericOutOfRange)
+        Err(anyhow!("numeric out of range"))
     }
 }
 
@@ -335,7 +325,7 @@ pub fn time_interval_add(l: Time, r: Interval) -> Result<Time> {
     if ignored == 0 {
         Ok(Time::new(new_time))
     } else {
-        Err(ExprError::NumericOutOfRange)
+        Err(anyhow!("numeric out of range"))
     }
 }
 
@@ -346,7 +336,7 @@ pub fn interval_float_div<T2>(l: Interval, r: T2) -> Result<Interval>
 where
     T2: TryInto<F64> + Debug,
 {
-    l.div_float(r).ok_or(ExprError::NumericOutOfRange)
+    l.div_float(r).context("numeric out of range")
 }
 
 #[function("multiply(interval, float4) -> interval")]
@@ -356,7 +346,7 @@ pub fn interval_float_mul<T2>(l: Interval, r: T2) -> Result<Interval>
 where
     T2: TryInto<F64> + Debug,
 {
-    l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
+    l.mul_float(r).context("numeric out of range")
 }
 
 #[function("multiply(float4, interval) -> interval")]
@@ -366,17 +356,12 @@ pub fn float_interval_mul<T1>(l: T1, r: Interval) -> Result<Interval>
 where
     T1: TryInto<F64> + Debug,
 {
-    r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
+    r.mul_float(l).context("numeric out of range")
 }
 
 #[function("sqrt(float8) -> float8")]
 pub fn sqrt_f64(expr: F64) -> Result<F64> {
-    if expr < F64::from(0.0) {
-        return Err(ExprError::InvalidParam {
-            name: "sqrt input",
-            reason: "input cannot be negative value".into(),
-        });
-    }
+    ensure!(expr >= F64::from(0.0), "input cannot be negative value");
     // Edge cases: nan, inf, negative zero should return itself.
     match expr.is_nan() || expr == f64::INFINITY || expr == -0.0 {
         true => Ok(expr),
@@ -390,15 +375,9 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
         Decimal::NaN | Decimal::PositiveInf => Ok(expr),
         Decimal::Normalized(value) => match value.sqrt() {
             Some(res) => Ok(Decimal::from(res)),
-            None => Err(ExprError::InvalidParam {
-                name: "sqrt input",
-                reason: "input cannot be negative value".into(),
-            }),
+            None => bail!("input cannot be negative value"),
         },
-        Decimal::NegativeInf => Err(ExprError::InvalidParam {
-            name: "sqrt input",
-            reason: "input cannot be negative value".into(),
-        }),
+        Decimal::NegativeInf => bail!("input cannot be negative value"),
     }
 }
 

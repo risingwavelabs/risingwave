@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use risingwave_common::types::{Decimal, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[function("round_digit(decimal, int4) -> decimal")]
 pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
     if digits < 0 {
         input
             .round_left_ties_away(digits.unsigned_abs())
-            .ok_or(ExprError::NumericOverflow)
+            .context("numeric overflow")
     } else {
         // rust_decimal can only handle up to 28 digits of scale
         Ok(input.round_dp_ties_away((digits as u32).min(Decimal::MAX_PRECISION.into())))

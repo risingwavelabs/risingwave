@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{anyhow, bail, Context as _, Result};
 use num_traits::Zero;
 use risingwave_common::types::{Decimal, FloatExt, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
-fn err_logarithm_input() -> ExprError {
-    ExprError::InvalidParam {
-        name: "input",
-        reason: "cannot take logarithm of zero or a negative number".into(),
-    }
+fn err_logarithm_input() -> anyhow::Error {
+    anyhow!("cannot take logarithm of zero or a negative number")
 }
 
 #[function("exp(float8) -> float8")]
@@ -42,9 +40,9 @@ pub fn exp_f64(input: F64) -> Result<F64> {
         // means that the operation had an overflow or an underflow, and the appropriate
         // error should be returned.
         if res.is_infinite() {
-            Err(ExprError::NumericOverflow)
+            bail!("numeric overflow")
         } else if res.is_zero() {
-            Err(ExprError::NumericUnderflow)
+            bail!("numeric underflow")
         } else {
             Ok(res)
         }
@@ -69,7 +67,7 @@ pub fn log10_f64(input: F64) -> Result<F64> {
 
 #[function("exp(decimal) -> decimal")]
 pub fn exp_decimal(input: Decimal) -> Result<Decimal> {
-    input.checked_exp().ok_or(ExprError::NumericOverflow)
+    input.checked_exp().context("numeric overflow")
 }
 
 #[function("ln(decimal) -> decimal")]
@@ -85,7 +83,6 @@ pub fn log10_decimal(input: Decimal) -> Result<Decimal> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::F64;
-    use risingwave_expr::ExprError;
 
     use super::exp_f64;
 
@@ -98,19 +95,13 @@ mod tests {
     #[test]
     fn underflow() {
         let res = exp_f64((-1000.0).into()).unwrap_err();
-        match res {
-            ExprError::NumericUnderflow => (),
-            _ => panic!("Expected ExprError::FloatUnderflow"),
-        }
+        assert!(res.to_string().contains("numeric underflow"));
     }
 
     #[test]
     fn overflow() {
         let res = exp_f64(1000.0.into()).unwrap_err();
-        match res {
-            ExprError::NumericOverflow => (),
-            _ => panic!("Expected ExprError::FloatUnderflow"),
-        }
+        assert!(res.to_string().contains("numeric overflow"));
     }
 
     #[test]

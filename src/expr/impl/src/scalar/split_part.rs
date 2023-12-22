@@ -14,7 +14,8 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use anyhow::{ensure, Result};
+use risingwave_expr::function;
 
 #[function("split_part(varchar, varchar, int4) -> varchar")]
 pub fn split_part(
@@ -23,12 +24,7 @@ pub fn split_part(
     nth_expr: i32,
     writer: &mut impl Write,
 ) -> Result<()> {
-    if nth_expr == 0 {
-        return Err(ExprError::InvalidParam {
-            name: "data",
-            reason: "can't be zero".into(),
-        });
-    };
+    ensure!(nth_expr != 0, "field position must not be zero");
 
     let mut split = string_expr.split(delimiter_expr);
     let nth_val = if string_expr.is_empty() {

@@ -16,6 +16,7 @@ use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
@@ -24,9 +25,8 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 use risingwave_pb::expr::expr_node::PbType;
-use thiserror_ext::AsReport;
 
 #[function("cast(varchar) -> *int")]
 #[function("cast(varchar) -> decimal")]
@@ -40,32 +40,35 @@ use thiserror_ext::AsReport;
 pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
-    <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.trim().parse().map_err(|err: <T as FromStr>::Err| {
-        ExprError::Parse(format!("{} {}", ctx.return_type, err).into())
-    })
+    elem.trim()
+        .parse()
+        .ok()
+        .with_context(|| format!("failed to parse {}", ctx.return_type))
 }
 
 // TODO: introduce `FromBinary` and support all types
 #[function("pgwire_recv(bytea) -> int8")]
 pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
-    let fixed_length =
-        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
+    let fixed_length = <[u8; 8]>::try_from(elem).context("expect 8 bytes")?;
     Ok(i64::from_be_bytes(fixed_length))
 }
 
 #[function("cast(int2) -> int256")]
 #[function("cast(int4) -> int256")]
 #[function("cast(int8) -> int256")]
-pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
+pub fn to_int256<T>(elem: T) -> Result<Int256>
+where
+    T: TryInto<Int256>,
+{
     elem.try_into()
-        .map_err(|_| ExprError::CastOutOfRange("int256"))
+        .ok()
+        .context("cast to rw_int256 out of range")
 }
 
 #[function("cast(jsonb) -> boolean")]
 pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
-    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+    v.as_bool().map_err(|e| anyhow!("{e}"))
 }
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
@@ -78,10 +81,11 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> float8")]
 pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
     v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))?
+        .map_err(|e| anyhow!("{e}"))?
         .into_ordered()
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .ok()
+        .context("numeric out of range")
 }
 
 #[function("cast(int4) -> int2")]
@@ -106,7 +110,8 @@ where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
 {
     elem.try_into()
-        .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
+        .ok()
+        .with_context(|| format!("cast to {} out of range", std::any::type_name::<T2>()))
 }
 
 #[function("cast(boolean) -> int4")]
@@ -139,7 +144,7 @@ where
 
 #[function("cast(varchar) -> boolean")]
 pub fn str_to_bool(input: &str) -> Result<bool> {
-    cast::str_to_bool(input).map_err(|err| ExprError::Parse(err.into()))
+    cast::str_to_bool(input).map_err(|e| anyhow!("{e}"))
 }
 
 #[function("cast(int4) -> boolean")]
@@ -186,12 +191,12 @@ pub fn bool_out(input: bool, writer: &mut impl Write) {
 
 #[function("cast(varchar) -> bytea")]
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
+    cast::str_to_bytea(elem).map_err(|e| anyhow!("{e}"))
 }
 
 #[function("cast(varchar) -> anyarray", type_infer = "panic")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
-    ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
+    ListValue::from_str(input, &ctx.return_type).map_err(|e| anyhow!("{e}"))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.

@@ -16,6 +16,7 @@
 
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use num_traits::CheckedSub;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -26,7 +27,6 @@ use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::{build_from_prost, BoxedExpression, Result};
-use crate::ExprError;
 
 pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> ExprNode {
     ExprNode {
@@ -97,13 +97,8 @@ pub fn make_hop_window_expression(
     let units = window_size
         .exact_div(&window_slide)
         .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-        .ok_or_else(|| ExprError::InvalidParam {
-            name: "window",
-            reason: format!(
-                "window_size {} cannot be divided by window_slide {}",
-                window_size, window_slide
-            )
-            .into(),
+        .ok_or_else(|| {
+            anyhow!("window_size {window_size} cannot be divided by window_slide {window_slide}")
         })?
         .get();
 
@@ -119,13 +114,8 @@ pub fn make_hop_window_expression(
     // Let's pre calculate (`window_size` - `window_slide`).
     let window_size_sub_slide = window_size
         .checked_sub(&window_slide)
-        .ok_or_else(|| ExprError::InvalidParam {
-            name: "window",
-            reason: format!(
-                "window_size {} cannot be subtracted by window_slide {}",
-                window_size, window_slide
-            )
-            .into(),
+        .ok_or_else(|| {
+            anyhow!("window_size {window_size} cannot be subtracted by window_slide {window_slide}")
         })
         .unwrap();
 
@@ -146,28 +136,12 @@ pub fn make_hop_window_expression(
     let mut window_start_exprs = Vec::with_capacity(units);
     let mut window_end_exprs = Vec::with_capacity(units);
     for i in 0..units {
-        let window_start_offset =
-            window_slide
-                .checked_mul_int(i)
-                .ok_or_else(|| ExprError::InvalidParam {
-                    name: "window",
-                    reason: format!(
-                        "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
-                    )
-                    .into(),
-                })?;
-        let window_end_offset =
-            window_slide
-                .checked_mul_int(i + units)
-                .ok_or_else(|| ExprError::InvalidParam {
-                    name: "window",
-                    reason: format!(
-                        "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
-                    )
-                    .into(),
-                })?;
+        let window_start_offset = window_slide
+            .checked_mul_int(i)
+            .ok_or_else(|| anyhow!("window_slide {window_slide} cannot be multiplied by {i}"))?;
+        let window_end_offset = window_slide
+            .checked_mul_int(i + units)
+            .ok_or_else(|| anyhow!("window_slide {window_slide} cannot be multiplied by {i}"))?;
         let window_start_expr = make_func_call(
             expr_node::Type::Add,
             output_type,

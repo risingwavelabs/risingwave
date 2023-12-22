@@ -14,7 +14,8 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use anyhow::{bail, Result};
+use risingwave_expr::function;
 
 #[function("substr(varchar, int4) -> varchar")]
 pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> {
@@ -37,10 +38,7 @@ pub fn substr_start_bytea(s: &[u8], start: i32) -> Box<[u8]> {
 
 fn convert_args(start: i32, count: i32) -> Result<(usize, usize)> {
     if count < 0 {
-        return Err(ExprError::InvalidParam {
-            name: "length",
-            reason: "negative substring length not allowed".into(),
-        });
+        bail!("negative substring length not allowed");
     }
 
     let skip = start.saturating_sub(1).max(0) as usize;

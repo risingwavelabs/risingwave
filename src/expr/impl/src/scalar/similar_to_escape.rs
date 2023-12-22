@@ -14,7 +14,8 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use anyhow::{bail, Result};
+use risingwave_expr::function;
 
 // escape `similar-to` pattern to POSIX regex pattern
 // Adapted from:
@@ -23,7 +24,7 @@ fn similar_escape_internal(
     pat: &str,
     esc_text: Option<char>,
     writer: &mut impl Write,
-) -> std::result::Result<(), ExprError> {
+) -> Result<()> {
     macro_rules! write_ {
         ($s:expr) => {
             write!(writer, "{}", $s).unwrap()
@@ -43,12 +44,7 @@ fn similar_escape_internal(
                     match nquotes {
                         0 => write_!("){1,1}?("),
                         1 => write_!("){1,1}(?:"),
-                        _ => {
-                            return Err(ExprError::InvalidParam {
-                                name: "pat",
-                                reason: "SQL regular expression may not contain more than two escape-double-quote separators".into()
-                            });
-                        }
+                        _ => bail!("SQL regular expression may not contain more than two escape-double-quote separators"),
                     }
                     nquotes += 1;
                 } else {
@@ -118,16 +114,8 @@ fn similar_to_escape_with_escape_text(
     writer: &mut impl Write,
 ) -> Result<()> {
     if esc_text.chars().nth(1).is_some() {
-        return Err(ExprError::InvalidParam {
-            name: "escape string",
-            reason: format!(
-                "Invalid escape string: `{}`, must be empty or one character",
-                esc_text
-            )
-            .into(),
-        });
+        bail!("Invalid escape string: `{esc_text}`, must be empty or one character");
     }
-
     similar_escape_internal(pat, esc_text.chars().next(), writer)
 }
 

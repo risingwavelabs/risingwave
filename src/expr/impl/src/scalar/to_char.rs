@@ -16,10 +16,11 @@ use std::fmt::{Debug, Write};
 use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
+use anyhow::{anyhow, Result};
 use chrono::format::{Item, StrftimeItems};
 use chrono::{Datelike, NaiveDate};
 use risingwave_common::types::{Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 use super::timestamptz::time_zone_err;
 use crate::scalar::arithmetic_op::timestamp_interval_add;
@@ -27,11 +28,8 @@ use crate::scalar::arithmetic_op::timestamp_interval_add;
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
 #[inline(always)]
-fn invalid_pattern_err() -> ExprError {
-    ExprError::InvalidParam {
-        name: "pattern",
-        reason: "invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.".into(),
-    }
+fn invalid_pattern_err() -> anyhow::Error {
+    anyhow!("invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.")
 }
 
 self_cell::self_cell! {

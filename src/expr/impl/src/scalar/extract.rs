@@ -14,9 +14,10 @@
 
 use std::str::FromStr;
 
+use anyhow::{anyhow, Context as _, Result};
 use chrono::{Datelike, NaiveTime, Timelike};
 use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 use self::Unit::*;
 use crate::scalar::timestamptz::time_zone_err;
@@ -181,7 +182,7 @@ fn date_part_from_date(date: Date, unit: &Unit) -> Result<F64> {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/catalog/system_functions.sql#L123
     extract_from_timestamp(date.into(), unit)
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 #[function(
@@ -191,7 +192,7 @@ fn date_part_from_date(date: Date, unit: &Unit) -> Result<F64> {
 fn date_part_from_time(time: Time, unit: &Unit) -> Result<F64> {
     extract_from_time(time, unit)
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 #[function(
@@ -201,7 +202,7 @@ fn date_part_from_time(time: Time, unit: &Unit) -> Result<F64> {
 fn date_part_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Result<F64> {
     extract_from_timestamp(timestamp, unit)
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 #[function(
@@ -211,7 +212,7 @@ fn date_part_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Result<F64> {
 fn date_part_from_timestamptz(input: Timestamptz, unit: &Unit) -> Result<F64> {
     extract_from_timestamptz(input, unit)
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 #[function(
@@ -225,7 +226,7 @@ fn date_part_from_timestamptz_at_timezone(
 ) -> Result<F64> {
     extract_from_timestamptz_at_timezone(input, timezone, unit)?
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 #[function(
@@ -235,7 +236,7 @@ fn date_part_from_timestamptz_at_timezone(
 fn date_part_from_interval(interval: Interval, unit: &Unit) -> Result<F64> {
     extract_from_interval(interval, unit)
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .context("numeric out of range")
 }
 
 /// Define an enum and its `FromStr` impl.
@@ -248,7 +249,7 @@ macro_rules! define_unit {
         }
 
         impl FromStr for $name {
-            type Err = ExprError;
+            type Err = anyhow::Error;
 
             fn from_str(s: &str) -> Result<Self> {
                 $(
@@ -390,18 +391,12 @@ impl Unit {
     }
 }
 
-fn invalid_unit(unit: &str) -> ExprError {
-    ExprError::InvalidParam {
-        name: "unit",
-        reason: format!("unit \"{unit}\" not recognized").into(),
-    }
+fn invalid_unit(unit: &str) -> anyhow::Error {
+    anyhow!("unit \"{unit}\" not recognized")
 }
 
-fn unsupported_unit(unit: Unit, type_: &str) -> ExprError {
-    ExprError::InvalidParam {
-        name: "unit",
-        reason: format!("unit \"{unit:?}\" not supported for type {type_}").into(),
-    }
+fn unsupported_unit(unit: Unit, type_: &str) -> anyhow::Error {
+    anyhow!("unit \"{unit:?}\" not supported for type {type_}")
 }
 
 #[cfg(test)]

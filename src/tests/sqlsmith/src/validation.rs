@@ -13,11 +13,10 @@
 // limitations under the License.
 
 //! Provides validation logic for expected errors.
-use risingwave_expr::ExprError;
 
 /// Ignore errors related to `0`.
 fn is_zero_err(db_error: &str) -> bool {
-    db_error.contains(&ExprError::DivisionByZero.to_string()) || db_error.contains("can't be zero")
+    db_error.contains("division by zero") || db_error.contains("can't be zero")
 }
 
 /// `Casting to u32 out of range` occurs when we have functions
@@ -26,8 +25,7 @@ fn is_zero_err(db_error: &str) -> bool {
 // NOTE: If this error occurs too often, perhaps it is better to
 // wrap call sites with `abs(rhs)`, e.g. 222 << abs(-1);
 fn is_numeric_out_of_range_err(db_error: &str) -> bool {
-    db_error.contains(&ExprError::NumericOutOfRange.to_string())
-        || db_error.contains("Casting to u32 out of range")
+    db_error.contains("numeric out of range") || db_error.contains("Casting to u32 out of range")
 }
 
 fn is_parse_err(db_error: &str) -> bool {

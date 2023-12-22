@@ -21,6 +21,7 @@
 
 risingwave_expr_impl::enable!();
 
+use anyhow::bail;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
@@ -29,7 +30,6 @@ use risingwave_common::types::*;
 use risingwave_expr::aggregate::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
-use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 
@@ -562,7 +562,7 @@ fn bench_raw(c: &mut Criterion) {
                 overflow |= (c ^ a) & (c ^ b) < 0;
             }
             if overflow {
-                return Err(ExprError::NumericOverflow);
+                bail!("numeric overflow");
             }
             c.set_bitmap(a.null_bitmap() & b.null_bitmap());
             Ok(c)

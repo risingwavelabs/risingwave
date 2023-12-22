@@ -14,7 +14,8 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use anyhow::{bail, Context as _, Result};
+use risingwave_expr::function;
 
 /// Replaces a substring of the given string with a new substring.
 ///
@@ -30,7 +31,7 @@ pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) 
         .chars()
         .count()
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)?;
+        .context("numeric out of range")?;
     overlay_for(s, new_sub_str, start, sub_len, writer)
 }
 
@@ -89,10 +90,7 @@ pub fn overlay_for(
     writer: &mut impl Write,
 ) -> Result<()> {
     if start <= 0 {
-        return Err(ExprError::InvalidParam {
-            name: "start",
-            reason: format!("{start} is not positive").into(),
-        });
+        bail!("{start} is not positive");
     }
 
     let mut chars = s.char_indices().skip(start as usize - 1).peekable();
@@ -109,9 +107,7 @@ pub fn overlay_for(
 
     let Ok(count) = count.try_into() else {
         // For negative `count`, which is rare in practice, we hand over to `substr`
-        let start_right = start
-            .checked_add(count)
-            .ok_or(ExprError::NumericOutOfRange)?;
+        let start_right = start.checked_add(count).context("numeric out of range")?;
         return super::substr::substr_start(s, start_right, writer);
     };
 

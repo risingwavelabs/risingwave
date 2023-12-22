@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Get the processing time in Timestamptz scalar from the task-local epoch.
 #[function("proctime() -> timestamptz", volatile)]
 fn proctime() -> Result<Timestamptz> {
-    let epoch = epoch::task_local::curr_epoch().ok_or(ExprError::Context("EPOCH"))?;
+    let epoch = epoch::task_local::curr_epoch().context("no context: EPOCH")?;
     Ok(epoch.as_timestamptz())
 }
 

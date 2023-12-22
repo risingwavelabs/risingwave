@@ -14,6 +14,7 @@
 
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -103,13 +104,10 @@ impl HopWindowExecutor {
         let units = window_size
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-            .ok_or_else(|| ExprError::InvalidParam {
-                name: "window",
-                reason: format!(
-                    "window_size {} cannot be divided by window_slide {}",
-                    window_size, window_slide
-                )
-                .into(),
+            .ok_or_else(|| {
+                ExprError::from(anyhow!(
+                    "window_size {window_size} cannot be divided by window_slide {window_slide}",
+                ))
             })?
             .get();
 

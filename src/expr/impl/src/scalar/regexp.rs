@@ -16,10 +16,10 @@
 
 use std::str::FromStr;
 
+use anyhow::{bail, Result};
 use fancy_regex::{Regex, RegexBuilder};
 use risingwave_common::array::{ArrayBuilder, ListValue, Utf8Array, Utf8ArrayBuilder};
-use risingwave_expr::{bail, function, ExprError, Result};
-use thiserror_ext::AsReport;
+use risingwave_expr::function;
 
 #[derive(Debug)]
 pub struct RegexpContext {
@@ -39,9 +39,7 @@ impl RegexpContext {
         };
 
         Ok(Self {
-            regex: RegexBuilder::new(&origin)
-                .build()
-                .map_err(|e| ExprError::Parse(e.to_report_string().into()))?,
+            regex: RegexBuilder::new(&origin).build()?,
             global: options.global,
             replacement: make_replacement(replacement),
         })
@@ -113,7 +111,7 @@ struct RegexpOptions {
 }
 
 impl FromStr for RegexpOptions {
-    type Err = ExprError;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
         let mut opts = Self::default();
@@ -125,9 +123,7 @@ impl FromStr for RegexpOptions {
                 'i' => opts.case_insensitive = true,
                 // Global matching here
                 'g' => opts.global = true,
-                _ => {
-                    bail!("invalid regular expression option: \"{c}\"");
-                }
+                _ => bail!("invalid regular expression option: \"{c}\""),
             }
         }
         Ok(opts)
@@ -188,12 +184,7 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
     let start = match start {
-        ..=0 => {
-            return Err(ExprError::InvalidParam {
-                name: "start",
-                reason: start.to_string().into(),
-            })
-        }
+        ..=0 => bail!("invalid value for parameter \"start\": {start}"),
         _ => start as usize - 1,
     };
 
@@ -272,12 +263,7 @@ fn regexp_replace(
 ) -> Result<Box<str>> {
     // The start position to begin the search
     let start = match start {
-        ..=0 => {
-            return Err(ExprError::InvalidParam {
-                name: "start",
-                reason: start.to_string().into(),
-            })
-        }
+        ..=0 => bail!("invalid value for parameter \"start\": {start}"),
         _ => start as usize - 1,
     };
 
