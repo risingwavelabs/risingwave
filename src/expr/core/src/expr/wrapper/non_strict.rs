@@ -152,3 +152,87 @@ where
         self.inner.input_ref_index()
     }
 }
+
+/// Similar to [`NonStrict`] wrapper, but does not fallback to row-based evaluation when an error occurs.
+pub(crate) struct NonStrictNoFallback<E, R> {
+    inner: E,
+    report: R,
+}
+
+impl<E, R> std::fmt::Debug for NonStrictNoFallback<E, R>
+where
+    E: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NonStrictNoFallback")
+            .field("inner", &self.inner)
+            .field("report", &std::any::type_name::<R>())
+            .finish()
+    }
+}
+
+impl<E, R> NonStrictNoFallback<E, R>
+where
+    E: Expression,
+    R: EvalErrorReport,
+{
+    pub fn new(inner: E, report: R) -> Self {
+        Self { inner, report }
+    }
+}
+
+// TODO: avoid the overhead of extra boxing.
+#[async_trait]
+impl<E, R> Expression for NonStrictNoFallback<E, R>
+where
+    E: Expression,
+    R: EvalErrorReport,
+{
+    fn return_type(&self) -> DataType {
+        self.inner.return_type()
+    }
+
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        Ok(match self.inner.eval(input).await {
+            Ok(array) => array,
+            Err(error) => {
+                self.report.report(error);
+                // no fallback and return NULL for each row
+                let mut builder = self.return_type().create_array_builder(input.capacity());
+                builder.append_n_null(input.capacity());
+                builder.finish().into()
+            }
+        })
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        Ok(match self.inner.eval_v2(input).await {
+            Ok(value) => value,
+            Err(error) => {
+                self.report.report(error);
+                ValueImpl::Scalar {
+                    value: None,
+                    capacity: input.capacity(),
+                }
+            }
+        })
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        Ok(match self.inner.eval_row(input).await {
+            Ok(datum) => datum,
+            Err(error) => {
+                self.report.report(error);
+                None // NULL
+            }
+        })
+    }
+
+    fn eval_const(&self) -> Result<Datum> {
+        self.inner.eval_const() // do not handle error
+    }
+
+    fn input_ref_index(&self) -> Option<usize> {
+        self.inner.input_ref_index()
+    }
+}
