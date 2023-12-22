@@ -33,5 +33,5 @@ select array_sort(array[3, 2, NULL, 1, NULL]);
 ----
 {1,2,3,NULL,NULL}
 
-query error invalid digit found in string
+query error invalid input syntax for type integer: "a"
 select array_sort(array[3, 2, 1, 'a']);

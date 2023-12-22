@@ -55,7 +55,7 @@ impl RegexpContext {
 
     pub fn from_pattern_flags_for_count(pattern: &str, flags: &str) -> Result<Self> {
         if flags.contains('g') {
-            bail!("regexp_count() does not support the global option");
+            bail!("regexp_count() does not support the \"global\" option");
         }
         Self::new(pattern, flags, "")
     }
