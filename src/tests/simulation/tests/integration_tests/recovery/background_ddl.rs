@@ -300,7 +300,7 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
     // With 10 rate limit, and amplification factor of 1000,
     // We should expect 10,000 rows / s.
     // That should be enough to cause barrier latency to spike.
-    session.run("SET STREAMING_RATE_LIMIT=10").await?;
+    session.run("SET STREAMING_RATE_LIMIT=40").await?;
 
     tracing::info!("seeded base tables");
 
