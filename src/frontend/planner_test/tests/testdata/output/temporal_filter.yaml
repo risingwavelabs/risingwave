@@ -383,19 +383,13 @@
       │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
       │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts)) }
       │     │   └─StreamShare { id: 2 }
-      │     │     └─StreamFilter { predicate: ((Not(IsNull(t1.ts)) AND (Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz))) OR IsNull(t1.ts)) }
+      │     │     └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
       │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
-      ├─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
-      │ └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
-      │   └─StreamFilter { predicate: (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) AND Not(IsNull(t1.ts)) }
-      │     └─StreamShare { id: 2 }
-      │       └─StreamFilter { predicate: ((Not(IsNull(t1.ts)) AND (Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz))) OR IsNull(t1.ts)) }
-      │         └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t1._row_id, 2:Int32) }
-        └─StreamProject { exprs: [t1.ts, t1._row_id, 2:Int32] }
-          └─StreamFilter { predicate: IsNull(t1.ts) }
+      └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
+          └─StreamFilter { predicate: ((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts)) }
             └─StreamShare { id: 2 }
-              └─StreamFilter { predicate: ((Not(IsNull(t1.ts)) AND (Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz))) OR IsNull(t1.ts)) }
+              └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
                 └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

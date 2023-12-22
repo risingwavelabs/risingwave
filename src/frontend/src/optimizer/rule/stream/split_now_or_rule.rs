@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::types::DataType;
 
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
@@ -58,56 +57,40 @@ impl Rule for SplitNowOrRule {
             return None;
         }
 
-        let (now, others): (Vec<ExprImpl>, Vec<ExprImpl>) =
+        let (mut now, others): (Vec<ExprImpl>, Vec<ExprImpl>) =
             disjunctions.into_iter().partition(|x| x.count_nows() != 0);
 
+        // Only support now in one arm of disjunctions
         if now.len() != 1 {
             return None;
         }
 
-        // Put the now at the first position
-        let predicates = now.into_iter().chain(others).collect_vec();
-
-        // A or B
+        // A or B or C ... or Z
         // =>
-        // + A & !B
-        // + B
-        //
-        // A or B or C
-        // =>
-        // + A & !B & !C
-        // + B & !C
-        // + C
+        // + A & !B & !C ... &!Z
+        // + B | C ... | Z
 
-        let len = predicates.len();
-        let mut new_arms = Vec::with_capacity(len);
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..len {
-            let mut arm = predicates[i].clone();
-            for j in (i + 1)..len {
-                let others = predicates[j].clone();
-                let not_others: ExprImpl = FunctionCall::new_unchecked(
-                    ExprType::Not,
-                    vec![others.clone()],
-                    DataType::Boolean,
-                )
-                .into();
-                arm = FunctionCall::new_unchecked(
-                    ExprType::And,
-                    vec![arm, not_others],
-                    DataType::Boolean,
-                )
-                .into();
-            }
-            new_arms.push(arm)
+        let mut arm1 = now.pop().unwrap();
+        for pred in &others {
+            let not_pred: ExprImpl =
+                FunctionCall::new_unchecked(ExprType::Not, vec![pred.clone()], DataType::Boolean)
+                    .into();
+            arm1 =
+                FunctionCall::new_unchecked(ExprType::And, vec![arm1, not_pred], DataType::Boolean)
+                    .into();
         }
 
-        let share = LogicalShare::create(input);
-        let filters = new_arms
+        let arm2 = others
             .into_iter()
-            .map(|x| LogicalFilter::create_with_expr(share.clone(), x))
-            .collect_vec();
-        let union_all = LogicalUnion::create(true, filters);
+            .reduce(|a, b| {
+                FunctionCall::new_unchecked(ExprType::Or, vec![a, b], DataType::Boolean).into()
+            })
+            .unwrap();
+
+        let share = LogicalShare::create(input);
+        let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
+        let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
+        let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
         Some(union_all)
     }
 }
