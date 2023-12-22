@@ -463,7 +463,6 @@ message RescheduleResponse {
   uint64 revision = 2;
 }
 
-
 message TableParallelism {
   message FixedParallelism {
     uint32 parallelism = 1;
@@ -494,18 +493,11 @@ message GetReschedulePlanRequest {
     map<uint32, WorkerChanges> fragment_worker_changes = 1;
   }
 
-//  message TableResizePolicy {
-//    repeated uint32 worker_ids = 10;
-//    map<uint32, TableParallelism> table_parallelisms = 2;
-//  }
-
   oneof policy {
     // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
     // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
     // Multiple repeated calls may yield different ReschedulePlan results.
     StableResizePolicy stable_resize_policy = 2;
-
-//    TableResizePolicy table_resize_policy = 3;
   }
 }
 
