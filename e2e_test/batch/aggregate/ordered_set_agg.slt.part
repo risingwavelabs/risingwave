@@ -27,7 +27,15 @@ from (values(1::float8),(3),(5),(7)) t(a);
 query RR
 select
   percentile_cont(0.25) within group (order by a),
-  percentile_disc(0.5) within group (order by a)
+  percentile_disc(0.2 + 0.3) within group (order by a)
 from (values(1::float8),(3),(5),(7)) t(a);
 ----
 2.5 3
+
+query RR
+select
+  percentile_cont(NULL) within group (order by a),
+  percentile_cont(0.3 + NULL) within group (order by a)
+from (values(1::float8),(3),(5),(7)) t(a);
+----
+NULL NULL

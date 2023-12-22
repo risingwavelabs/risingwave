@@ -16,6 +16,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{Access, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
+use crate::source::SourceColumnDesc;
 
 pub const MAXWELL_INSERT_OP: &str = "insert";
 pub const MAXWELL_UPDATE_OP: &str = "update";
@@ -48,8 +49,8 @@ where
         })
     }
 
-    fn access_field(&self, name: &str, type_expected: &DataType) -> super::AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         const DATA: &str = "data";
-        self.0.access(&[DATA, name], Some(type_expected))
+        self.0.access(&[DATA, &desc.name], Some(&desc.data_type))
     }
 }

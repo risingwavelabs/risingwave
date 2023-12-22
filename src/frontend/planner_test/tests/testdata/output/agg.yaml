@@ -1526,8 +1526,8 @@
     Failed to bind expression: percentile_cont(x)
 
     Caused by:
-      Feature is not yet implemented: non-constant direct arguments for ordered-set aggregation is not supported now
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+      Feature is not yet implemented: variable as direct argument of ordered-set aggregate
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/14079
 - sql: |
     create table t (x int, y int);
     select percentile_cont('abc') within group (order by y) from t;
@@ -1535,7 +1535,8 @@
     Failed to bind expression: percentile_cont('abc')
 
     Caused by:
-      Invalid input syntax: direct arg in `percentile_cont` must be castable to float64
+      Feature is not yet implemented: variable as direct argument of ordered-set aggregate
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/14079
 - sql: |
     create table t (x int, y int);
     select percentile_cont(1.3) within group (order by y) from t;
@@ -1568,6 +1569,47 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
         └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(null) within group (order by y) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [percentile_cont($expr1 order_by(t.y ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
+        └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + 0.3) within group (order by y) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [percentile_cont($expr1 order_by(t.y ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
+        └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + null) within group (order by y) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [percentile_cont($expr1 order_by(t.y ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
+        └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.8 + 0.8) within group (order by y) from t;
+  binder_error: |
+    Failed to bind expression: percentile_cont(0.8 + 0.8)
+
+    Caused by:
+      Invalid input syntax: direct arg in `percentile_cont` must between 0.0 and 1.0
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + x) within group (order by y) from t group by x;
+  binder_error: |
+    Failed to bind expression: percentile_cont(0.2 + x)
+
+    Caused by:
+      Feature is not yet implemented: variable as direct argument of ordered-set aggregate
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/14079
 - sql: |
     create table t (x int, y varchar);
     select percentile_disc(1) within group (order by y desc) from t;

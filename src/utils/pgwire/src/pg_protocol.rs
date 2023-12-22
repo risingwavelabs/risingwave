@@ -15,7 +15,6 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::{Arc, LazyLock, Weak};
@@ -107,24 +106,17 @@ where
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     /// The path to the TLS certificate.
-    pub cert: PathBuf,
+    pub cert: String,
     /// The path to the TLS key.
-    pub key: PathBuf,
+    pub key: String,
 }
 
 impl TlsConfig {
-    pub fn new_default() -> Self {
-        let cert = PathBuf::new().join("tests/ssl/demo.crt");
-        let key = PathBuf::new().join("tests/ssl/demo.key");
-        let path_to_cur_proj = PathBuf::new().join("src/utils/pgwire");
-
-        Self {
-            // Now the demo crt and key are hard code generated via simple self-signed CA.
-            // In future it should change to configure by user.
-            // The path is mounted from project root.
-            cert: path_to_cur_proj.join(cert),
-            key: path_to_cur_proj.join(key),
-        }
+    pub fn new_default() -> Option<Self> {
+        let cert = std::env::var("RW_SSL_CERT").ok()?;
+        let key = std::env::var("RW_SSL_KEY").ok()?;
+        tracing::info!("RW_SSL_CERT={}, RW_SSL_KEY={}", cert, key);
+        Some(Self { cert, key })
     }
 }
 

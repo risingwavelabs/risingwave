@@ -327,6 +327,13 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    SimilarTo {
+        expr: Box<Expr>,
+        negated: bool,
+        pat: Box<Expr>,
+        esc_text: Option<Box<Expr>>,
+    },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
         left: Box<Expr>,
@@ -526,6 +533,24 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => {
+                write!(
+                    f,
+                    "{} {}SIMILAR TO {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pat,
+                )?;
+                if let Some(et) = esc_text {
+                    write!(f, "ESCAPE {}", et)?;
+                }
+                Ok(())
+            }
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -1104,6 +1129,8 @@ pub enum Statement {
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
+        /// `INCLUDE a AS b INCLUDE c`
+        include_column_options: Vec<(Ident, Option<Ident>)>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1589,6 +1616,7 @@ impl fmt::Display for Statement {
                 append_only,
                 query,
                 cdc_table_info,
+                include_column_options,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1613,6 +1641,17 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
+                    write!(f, " INCLUDE {}", display_comma_separated(
+                        include_column_options.iter().map(|(a, b)| {
+                            if let Some(b) = b {
+                                format!("{} AS {}", a, b)
+                            } else {
+                                a.to_string()
+                            }
+                        }).collect_vec().as_slice()
+                    ))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
