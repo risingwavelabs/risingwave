@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_pb::catalog::PbSource;
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerType};
 use risingwave_pb::ddl_service::TableJobType;
@@ -163,6 +164,13 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 mgr.cluster_controller.list_active_streaming_workers().await
             }
+        }
+    }
+
+    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.list_sources().await),
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await,
         }
     }
 

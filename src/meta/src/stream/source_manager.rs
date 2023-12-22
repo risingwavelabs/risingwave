@@ -512,10 +512,7 @@ impl SourceManager {
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = match &metadata_manager {
-                MetadataManager::V1(mgr) => mgr.catalog_manager.list_sources().await,
-                MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await?,
-            };
+            let sources = metadata_manager.list_sources().await?;
             for source in sources {
                 Self::create_source_worker_async(
                     env.connector_client(),

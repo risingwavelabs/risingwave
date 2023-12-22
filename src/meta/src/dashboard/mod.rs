@@ -148,10 +148,7 @@ pub(super) mod handlers {
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
-        let sources = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sources().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await.map_err(err)?,
-        };
+        let sources = srv.metadata_manager.list_sources().await.map_err(err)?;
 
         Ok(Json(sources))
     }

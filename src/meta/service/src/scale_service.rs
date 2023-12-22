@@ -118,11 +118,7 @@ impl ScaleService for ScaleServiceImpl {
             })
             .collect();
 
-        let sources = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.catalog_manager.list_sources().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_sources().await?,
-        };
-
+        let sources = self.metadata_manager.list_sources().await?;
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
         let revision = self.get_revision().await.inner();
