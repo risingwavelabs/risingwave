@@ -25,9 +25,10 @@ use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{StreamChunk, ArrayImpl, JsonbArrayBuilder};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_common::util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
@@ -47,6 +48,7 @@ use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
     DEFAULT_BUFFER_SIZE,
 };
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
 use tokio::task::spawn_blocking;
@@ -62,6 +64,8 @@ use crate::sink::{
     SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
 use crate::ConnectorParams;
+
+use super::encoder::{JsonEncoder, DateHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode, RowEncoder};
 
 macro_rules! def_remote_sink {
     () => {
@@ -145,7 +149,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        RemoteLogSinker::new(self.param.clone(), writer_param).await
+        RemoteLogSinker::new(self.param.clone(), writer_param, Self::SINK_NAME, self.param.schema()).await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -174,11 +178,12 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
                     | DataType::Jsonb
                     | DataType::Bytea
                     | DataType::List(_)
+                    | DataType::Struct(_)
             ) {
             Ok(())
         } else {
             Err(SinkError::Remote(anyhow_error!(
-                    "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
+                    "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea, Struct and Varchar, got {:?}: {:?}",
                     col.name,
                     col.data_type,
                 )))
@@ -228,14 +233,60 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
     .map_err(|e| anyhow!("unable to validate: {:?}", e))?
 }
 
+enum StreamChunkConverter{
+    ES(ESStreamChunkConverter),
+    Other,
+}
+impl StreamChunkConverter{
+    fn new(sink_name: &str, schema:Schema) -> Self{
+        if sink_name.eq("elasticsearch") {
+            StreamChunkConverter::ES(ESStreamChunkConverter::new(schema))
+        }else{
+            StreamChunkConverter::Other
+        }
+    }
+
+    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk>{
+        match self {
+            StreamChunkConverter::ES(es) => {
+                es.convert_chunk(chunk)
+            }
+            _ => { Ok(chunk) }
+        }
+    }
+}
+struct ESStreamChunkConverter{
+    json_encoder: JsonEncoder,
+}
+impl ESStreamChunkConverter{
+    fn new(schema:Schema) -> Self{
+        let json_encoder = JsonEncoder::new(schema, None, DateHandlingMode::String, TimestampHandlingMode::String, TimestamptzHandlingMode::UtcWithoutSuffix);
+        Self{
+            json_encoder,
+        }
+    }
+
+    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk>{
+        let mut ops = vec![];
+        let mut json_builder = <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        for (op,row) in chunk.rows(){
+            ops.push(op);
+            let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
+            risingwave_common::array::ArrayBuilder::append(&mut json_builder, Some(json.as_scalar_ref()));
+        }
+        let a = risingwave_common::array::ArrayBuilder::finish(json_builder);
+        Ok(StreamChunk::new(ops,vec![std::sync::Arc::new(ArrayImpl::Jsonb(a))]))
+    }
+}
 pub struct RemoteLogSinker {
     request_sender: BidiStreamSender<JniSinkWriterStreamRequest>,
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
     sink_metrics: SinkMetrics,
+    stream_chunk_converter: StreamChunkConverter,
 }
 
 impl RemoteLogSinker {
-    async fn new(sink_param: SinkParam, writer_param: SinkWriterParam) -> Result<Self> {
+    async fn new(sink_param: SinkParam, writer_param: SinkWriterParam, sink_name: &str, schema: Schema) -> Result<Self> {
         let SinkWriterStreamHandle {
             request_sender,
             response_stream,
@@ -248,6 +299,7 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
             sink_metrics,
+            stream_chunk_converter: StreamChunkConverter::new(sink_name, schema),
         })
     }
 }
@@ -391,6 +443,7 @@ impl LogSinker for RemoteLogSinker {
                                     .connector_sink_rows_received
                                     .inc_by(cardinality as _);
 
+                                let chunk = self.stream_chunk_converter.convert_chunk(chunk)?;
                                 request_tx
                                     .send_request(JniSinkWriterStreamRequest::Chunk {
                                         epoch,

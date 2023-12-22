@@ -15,8 +15,8 @@
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
@@ -47,6 +47,7 @@ import org.elasticsearch.client.RestHighLevelClientBuilder;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,9 +69,9 @@ public class EsSink extends SinkWriterBase {
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
     private static final TimeZone UTCTimeZone = TimeZone.getTimeZone("UTC");
-    private final SimpleDateFormat tDfm;
-    private final SimpleDateFormat tsDfm;
-    private final SimpleDateFormat tstzDfm;
+    // private final SimpleDateFormat tDfm;
+    // private final SimpleDateFormat tsDfm;
+    // private final SimpleDateFormat tstzDfm;
 
     private final EsSinkConfig config;
     private BulkProcessor bulkProcessor;
@@ -198,13 +199,13 @@ public class EsSink extends SinkWriterBase {
         this.bulkProcessor = createBulkProcessor(this.requestTracker);
 
         primaryKeyIndexes = new ArrayList<Integer>();
-        for (String primaryKey : tableSchema.getPrimaryKeys()) {
-            primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
+        for (String primaryKey : getTableSchema().getPrimaryKeys()) {
+            primaryKeyIndexes.add(getTableSchema().getColumnIndex(primaryKey));
         }
 
-        tDfm = createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
-        tsDfm = createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
-        tstzDfm = createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
+        // tDfm = createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
+        // tsDfm = createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
+        // tstzDfm = createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
     }
 
     private static RestClientBuilder configureRestClientBuilder(
@@ -297,98 +298,116 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
-    /**
-     * The api accepts doc in map form.
-     *
-     * @param row
-     * @return Map from Field name to Value
-     * @throws JsonProcessingException
-     * @throws JsonMappingException
-     */
-    private Map<String, Object> buildDoc(SinkRow row)
-            throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = new HashMap();
-        var tableSchema = getTableSchema();
-        var columnDescs = tableSchema.getColumnDescs();
-        for (int i = 0; i < row.size(); i++) {
-            var type = columnDescs.get(i).getDataType().getTypeName();
-            Object col = row.get(i);
-            switch (type) {
-                    // es client doesn't natively support java.sql.Timestamp/Time/Date
-                    // so we need to convert Date/Time/Timestamp type into a string as suggested in
-                    // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
-                case DATE:
-                    col = col.toString();
-                    break;
-                    // construct java.sql.Time/Timestamp with milliseconds time value.
-                    // it will use system timezone by default, so we have to set timezone manually
-                case TIME:
-                    col = tDfm.format(col);
-                    break;
-                case TIMESTAMP:
-                    col = tsDfm.format(col);
-                    break;
-                case TIMESTAMPTZ:
-                    col = tstzDfm.format(col);
-                    break;
-                case JSONB:
-                    ObjectMapper mapper = new ObjectMapper();
-                    JsonNode jsonNode = mapper.readTree((String) col);
-                    col = convertJsonNode(jsonNode);
-                    break;
-                default:
-                    break;
-            }
+    // /**
+    //  * The api accepts doc in map form.
+    //  *
+    //  * @param row
+    //  * @return Map from Field name to Value
+    //  * @throws JsonProcessingException
+    //  * @throws JsonMappingException
+    //  */
+    // private Map<String, Object> buildDoc(SinkRow row)
+    //         throws JsonMappingException, JsonProcessingException {
+    //     Map<String, Object> doc = new HashMap();
+    //     var tableSchema = getTableSchema();
+    //     var columnDescs = tableSchema.getColumnDescs();
+    //     for (int i = 0; i < row.size(); i++) {
+    //         var type = columnDescs.get(i).getDataType().getTypeName();
+    //         Object col = row.get(i);
+    //         switch (type) {
+    //                 // es client doesn't natively support java.sql.Timestamp/Time/Date
+    //                 // so we need to convert Date/Time/Timestamp type into a string as suggested
+    // in
+    //                 //
+    // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
+    //             case DATE:
+    //                 col = col.toString();
+    //                 break;
+    //                 // construct java.sql.Time/Timestamp with milliseconds time value.
+    //                 // it will use system timezone by default, so we have to set timezone
+    // manually
+    //             case TIME:
+    //                 col = tDfm.format(col);
+    //                 break;
+    //             case TIMESTAMP:
+    //                 col = tsDfm.format(col);
+    //                 break;
+    //             case TIMESTAMPTZ:
+    //                 col = tstzDfm.format(col);
+    //                 break;
+    //             case JSONB:
+    //                 ObjectMapper mapper = new ObjectMapper();
+    //                 JsonNode jsonNode = mapper.readTree((String) col);
+    //                 col = convertJsonNode(jsonNode);
+    //                 break;
+    //             default:
+    //                 break;
+    //         }
 
-            doc.put(getTableSchema().getColumnDesc(i).getName(), col);
-        }
-        return doc;
-    }
+    //         doc.put(getTableSchema().getColumnDesc(i).getName(), col);
+    //     }
+    //     return doc;
+    // }
 
-    private static Object convertJsonNode(JsonNode jsonNode) {
-        if (jsonNode.isObject()) {
-            Map<String, Object> resultMap = new HashMap<>();
-            jsonNode.fields()
-                    .forEachRemaining(
-                            entry -> {
-                                resultMap.put(entry.getKey(), convertJsonNode(entry.getValue()));
-                            });
-            return resultMap;
-        } else if (jsonNode.isArray()) {
-            List<Object> resultList = new ArrayList<>();
-            jsonNode.elements()
-                    .forEachRemaining(
-                            element -> {
-                                resultList.add(convertJsonNode(element));
-                            });
-            return resultList;
-        } else if (jsonNode.isNumber()) {
-            return jsonNode.numberValue();
-        } else if (jsonNode.isTextual()) {
-            return jsonNode.textValue();
-        } else if (jsonNode.isBoolean()) {
-            return jsonNode.booleanValue();
-        } else if (jsonNode.isNull()) {
-            return null;
-        } else {
-            throw new IllegalArgumentException("Unsupported JSON type");
-        }
-    }
+    // private static Object convertJsonNode(JsonNode jsonNode) {
+    //     if (jsonNode.isObject()) {
+    //         Map<String, Object> resultMap = new HashMap<>();
+    //         jsonNode.fields()
+    //                 .forEachRemaining(
+    //                         entry -> {
+    //                             resultMap.put(entry.getKey(), convertJsonNode(entry.getValue()));
+    //                         });
+    //         return resultMap;
+    //     } else if (jsonNode.isArray()) {
+    //         List<Object> resultList = new ArrayList<>();
+    //         jsonNode.elements()
+    //                 .forEachRemaining(
+    //                         element -> {
+    //                             resultList.add(convertJsonNode(element));
+    //                         });
+    //         return resultList;
+    //     } else if (jsonNode.isNumber()) {
+    //         return jsonNode.numberValue();
+    //     } else if (jsonNode.isTextual()) {
+    //         return jsonNode.textValue();
+    //     } else if (jsonNode.isBoolean()) {
+    //         return jsonNode.booleanValue();
+    //     } else if (jsonNode.isNull()) {
+    //         return null;
+    //     } else {
+    //         throw new IllegalArgumentException("Unsupported JSON type");
+    //     }
+    // }
 
     /**
      * use primary keys as id concatenated by a specific delimiter.
      *
      * @param row
      * @return
+     * @throws JsonProcessingException
+     * @throws JsonMappingException
      */
-    private String buildId(SinkRow row) {
+    private String buildId(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> col =
+                mapper.readValue((String) row.get(0), new TypeReference<Map<String, Object>>() {});
         String id;
+        var tableSchema = getTableSchema();
         if (primaryKeyIndexes.isEmpty()) {
-            id = row.get(0).toString();
+            if (col.get(tableSchema.getColumnDesc(0).getName()) != null) {
+                id = col.get(tableSchema.getColumnDesc(0).getName()).toString();
+            } else {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("No primary key find in row")
+                        .asRuntimeException();
+            }
         } else {
             List<String> keys =
                     primaryKeyIndexes.stream()
-                            .map(index -> row.get(primaryKeyIndexes.get(index)).toString())
+                            .map(
+                                    index ->
+                                            col.get(tableSchema.getColumnDesc(index).getName())
+                                                    .toString())
                             .collect(Collectors.toList());
             id = String.join(config.getDelimiter(), keys);
         }
@@ -396,17 +415,18 @@ public class EsSink extends SinkWriterBase {
     }
 
     private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = buildDoc(row);
+        String doc = (String) row.get(0);
         final String key = buildId(row);
 
         UpdateRequest updateRequest =
-                new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
+                new UpdateRequest(config.getIndex(), "doc", key).doc(doc, XContentType.JSON);
+        updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
-    private void processDelete(SinkRow row) {
-        final String key = buildId(row);
+    private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        String key = buildId(row);
         DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
@@ -436,6 +456,7 @@ public class EsSink extends SinkWriterBase {
             try {
                 writeRow(row);
             } catch (Exception ex) {
+                ex.printStackTrace();
                 throw new RuntimeException(ex);
             }
         }

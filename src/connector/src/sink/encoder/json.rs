@@ -261,7 +261,8 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            json!(jsonb_ref.to_string())
+            let asad: Map<String, Value> = serde_json::from_str(&jsonb_ref.to_string()).unwrap();
+            json!(asad)
         }
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();

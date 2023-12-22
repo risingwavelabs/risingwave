@@ -23,7 +23,10 @@ import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.proto.Data;
+import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.stub.StreamObserver;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -207,6 +210,13 @@ public class SinkWriterStreamObserver
         String connectorName = getConnectorName(sinkParam);
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
         sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
+        if (connectorName.equals("elasticsearch")) {
+            tableSchema =
+                    new TableSchema(
+                            List.of("test"),
+                            List.of(Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build()),
+                            List.of());
+        }
         switch (format) {
             case FORMAT_UNSPECIFIED:
             case UNRECOGNIZED:
