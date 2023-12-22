@@ -125,19 +125,18 @@ SELECT * FROM t_nao_pk;
 20	20	200
 200	20	200
 
-statement ok
-update t_nao_source set v2 = 1000 where v1 = 20;
-
-query ??? rowsort
-SELECT * FROM t_nao_npk;
-
-query ??? rowsort
-SELECT * FROM t_ao_npk;
-
-query ??? rowsort
-SELECT * FROM t_nao_pk;
- 
-
+# TODO: https://github.com/risingwavelabs/risingwave/issues/14157
+#statement ok
+#update t_nao_source set v2 = 1000 where v1 = 20;
+#
+#query ??? rowsort
+#SELECT * FROM t_nao_npk;
+#
+#query ??? rowsort
+#SELECT * FROM t_ao_npk;
+#
+#query ??? rowsort
+#SELECT * FROM t_nao_pk;
 
 statement ok
 drop sink s3_to_t_nao_pk;
