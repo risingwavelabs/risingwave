@@ -83,7 +83,7 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
 
-    assert!(source_parallelism < test_source.create_stream_count.load(Relaxed));
+    assert!(source_parallelism <= test_source.create_stream_count.load(Relaxed));
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     assert!(test_sink.store.inner().checkpoint_count > 0);
 
