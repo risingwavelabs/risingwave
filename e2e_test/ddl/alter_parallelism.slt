@@ -5,7 +5,7 @@ statement ok
 SET STREAMING_PARALLELISM TO DEFAULT;
 
 statement ok
-CREATE TABLE t (v1 INT);
+CREATE TABLE t (v INT);
 
 query T
 SELECT parallelism FROM rw_tables WHERE name = 't';
@@ -35,5 +35,75 @@ SELECT parallelism FROM rw_tables WHERE name = 't';
 AUTO
 
 statement ok
+CREATE MATERIALIZED VIEW m_simple AS SELECT * FROM t;
+
+query T
+SELECT parallelism FROM rw_materialized_views WHERE name = 'm_simple';
+----
+AUTO
+
+statement ok
+ALTER MATERIALIZED VIEW m_simple SET PARALLELISM = 3;
+
+query T
+SELECT parallelism FROM rw_materialized_views WHERE name = 'm_simple';
+----
+AUTO
+
+statement ok
+CREATE MATERIALIZED VIEW m_join AS SELECT t1.v AS t1v, t2.v AS t2v FROM t t1, t t2 WHERE t1.v = t2.v;
+
+query T
+SELECT parallelism FROM rw_materialized_views WHERE name = 'm_join';
+----
+AUTO
+
+statement ok
+ALTER MATERIALIZED VIEW m_join SET PARALLELISM = 3;
+
+query T
+SELECT parallelism FROM rw_materialized_views WHERE name = 'm_join';
+----
+FIXED(3)
+
+statement ok
+CREATE SINK s AS SELECT t1.v AS t1v, t2.v AS t2v FROM t t1, t t2 WHERE t1.v = t2.v WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
+
+query T
+SELECT parallelism FROM rw_sinks WHERE name = 's';
+----
+AUTO
+
+statement ok
+ALTER SINK s SET PARALLELISM = 4;
+
+query T
+SELECT parallelism FROM rw_sinks WHERE name = 's';
+----
+FIXED(4)
+
+statement ok
+DROP SINK s;
+
+statement ok
+DROP MATERIALIZED VIEW m_join;
+
+statement ok
+DROP MATERIALIZED VIEW m_simple;
+
+statement ok
 DROP TABLE t;
 
+statement ok
+SET STREAMING_PARALLELISM TO 2;
+
+statement ok
+CREATE TABLE t (v1 INT);
+
+query T
+SELECT parallelism FROM rw_tables WHERE name = 't';
+----
+FIXED(2)
+
+statement ok
+DROP TABLE t;

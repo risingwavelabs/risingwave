@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::Result;
+
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
 use risingwave_pb::meta::PbTableParallelism;
-use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
+use risingwave_sqlparser::ast::{
+    ObjectName, SetVariableValue, SetVariableValueSingle, Value,
+};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -37,19 +40,33 @@ pub async fn handle_alter_parallelism(
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();
-        let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
-        session.check_privilege_for_drop_alter(schema_name, &**table)?;
-        table.id
+        match stmt_type {
+            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
+                let (table, schema_name) =
+                    reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+                session.check_privilege_for_drop_alter(schema_name, &**table)?;
+                table.id.table_id()
+            }
+            StatementType::ALTER_SINK => {
+                let (sink, schema_name) =
+                    reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+
+                session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+                sink.id.sink_id()
+            }
+            _ => unreachable!(),
+        }
     };
 
-    let table_id = table_id.table_id();
-
     let target_parallelism = match parallelism {
-        SetVariableValue::Single(SetVariableValueSingle::Ident(_)) => PbTableParallelism {
-            parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
-        },
+        SetVariableValue::Single(SetVariableValueSingle::Ident(ident))
+            if ident.real_value() == "auto" || ident.real_value() == "'auto'".to_lowercase() =>
+        {
+            PbTableParallelism {
+                parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
+            }
+        }
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
             PbTableParallelism {
                 parallelism: Some(PbParallelism::Fixed(FixedParallelism {
@@ -57,7 +74,12 @@ pub async fn handle_alter_parallelism(
                 })),
             }
         }
-        _ => unreachable!(),
+        _ => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "target parallelism must be a number or auto".to_string(),
+            )
+            .into());
+        }
     };
 
     let catalog_writer = session.catalog_writer()?;

@@ -424,7 +424,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info await },
     { BuiltinCatalog::Table(&RW_INDEXES), read_rw_indexes_info },
     { BuiltinCatalog::Table(&RW_SOURCES), read_rw_sources_info },
-    { BuiltinCatalog::Table(&RW_SINKS), read_rw_sinks_info },
+    { BuiltinCatalog::Table(&RW_SINKS), read_rw_sinks_info await },
     { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
     { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
     { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },
