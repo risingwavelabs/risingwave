@@ -42,6 +42,7 @@ mod simple_agg;
 mod sink;
 mod sort;
 mod source;
+mod source_backfill;
 mod stateless_simple_agg;
 mod stream_cdc_scan;
 mod stream_scan;
@@ -85,6 +86,7 @@ use self::simple_agg::*;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
+use self::source_backfill::*;
 use self::stateless_simple_agg::*;
 use self::stream_cdc_scan::*;
 use self::stream_scan::*;
@@ -172,5 +174,6 @@ pub async fn create_executor(
         NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
         NodeBody::OverWindow => OverWindowExecutorBuilder,
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
+        NodeBody::SourceBackfill => KafkaBackfillExecutorBuilder,
     }
 }

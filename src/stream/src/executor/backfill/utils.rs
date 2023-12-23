@@ -623,7 +623,7 @@ pub(crate) fn get_cdc_chunk_last_offset(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<Option<CdcOffset>> {
-    let row = chunk.rows().last().unwrap().1;
+    let row = chunk.last_row();
     let offset_col = row.iter().last().unwrap();
     let output =
         offset_col.map(|scalar| Ok::<_, ConnectorError>((*offset_parse_func)(scalar.into_utf8()))?);

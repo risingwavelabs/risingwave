@@ -35,6 +35,12 @@ impl StreamChunk {
         self.rows_in(0..self.capacity())
     }
 
+    /// # Panics
+    /// If the chunk is empty.
+    pub fn last_row(&self) -> RowRef<'_> {
+        self.data_chunk().rows().next_back().unwrap()
+    }
+
     /// Return an iterator on rows of this stream chunk in a range.
     pub fn rows_in(&self, range: Range<usize>) -> impl Iterator<Item = (Op, RowRef<'_>)> {
         self.data_chunk().rows_in(range).map(|row| {

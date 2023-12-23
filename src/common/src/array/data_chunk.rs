@@ -121,6 +121,11 @@ impl DataChunk {
         self.visibility.next_set_bit(row_idx)
     }
 
+    /// Return the prev visible row index ~~on or~~ before `row_idx`.
+    pub fn prev_visible_row_idx(&self, row_idx: usize) -> Option<usize> {
+        self.visibility.prev_set_bit(row_idx)
+    }
+
     pub fn into_parts(self) -> (Vec<ArrayRef>, Bitmap) {
         (self.columns.to_vec(), self.visibility)
     }

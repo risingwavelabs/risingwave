@@ -85,6 +85,24 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
+impl<'a> DoubleEndedIterator for DataChunkRefIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.idx.start == self.idx.end {
+            return None;
+        }
+        match self.chunk.prev_visible_row_idx(self.idx.end) {
+            Some(idx) if idx >= self.idx.start => {
+                self.idx.end = idx;
+                Some(RowRef::new(self.chunk, idx))
+            }
+            _ => {
+                self.idx.end = self.idx.start;
+                None
+            }
+        }
+    }
+}
+
 impl<'a> FusedIterator for DataChunkRefIter<'a> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {

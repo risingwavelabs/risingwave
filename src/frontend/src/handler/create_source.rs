@@ -116,6 +116,8 @@ async fn extract_json_table_schema(
     }
 }
 
+/// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
+/// May also look for the usage of `SourceColumnType`.
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
     let columns = vec![
         ColumnCatalog {

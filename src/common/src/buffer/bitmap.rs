@@ -314,6 +314,13 @@ impl Bitmap {
         (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
     }
 
+    /// Return the prev set bit index ~~on or~~ before `bit_idx`.
+    pub fn prev_set_bit(&self, bit_idx: usize) -> Option<usize> {
+        (0..bit_idx)
+            .rev()
+            .find(|&idx| unsafe { self.is_set_unchecked(idx) })
+    }
+
     /// Counts the number of bits set to 1.
     pub fn count_ones(&self) -> usize {
         self.count_ones
