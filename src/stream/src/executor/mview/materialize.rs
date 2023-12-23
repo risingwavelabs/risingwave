@@ -1493,7 +1493,7 @@ mod tests {
 
         let chunks = gen_fuzz_data(N, 128);
         let messages = iter::once(Message::Barrier(Barrier::new_test_barrier(1)))
-            .chain(chunks.into_iter().map(|c| Message::Chunk(c)))
+            .chain(chunks.into_iter().map(Message::Chunk))
             .chain(iter::once(Message::Barrier(Barrier::new_test_barrier(2))))
             .collect();
         // Prepare stream executors.
