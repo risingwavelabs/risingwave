@@ -1391,6 +1391,8 @@ pub async fn handle_create_source(
         created_at_epoch: None,
         optional_associated_table_id: None,
         version: INITIAL_SOURCE_VERSION_ID,
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

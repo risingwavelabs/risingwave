@@ -137,6 +137,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             description: value.0.description,
             // TODO: fix it for model v2.
             incoming_sinks: vec![],
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -169,6 +171,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 .0
                 .optional_associated_table_id
                 .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -202,6 +206,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
             // todo: fix this for model v2
             target_table: None,
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
@@ -225,6 +231,8 @@ impl From<ObjectModel<index::Model>> for PbIndex {
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
