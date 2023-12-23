@@ -994,6 +994,7 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
