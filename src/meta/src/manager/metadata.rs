@@ -359,7 +359,7 @@ impl MetadataManager {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
-                    .get_running_actors_of_fragment(id)
+                    .get_running_actor_ids_of_fragment(id)
                     .await
             }
             MetadataManager::V2(mgr) => {
@@ -368,6 +368,22 @@ impl MetadataManager {
                     .get_running_actors_of_fragment(id as _)
                     .await?;
                 Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
+            }
+        }
+    }
+
+    pub async fn get_running_actors_and_upstream_fragment_of_fragment(
+        &self,
+        id: FragmentId,
+    ) -> MetaResult<(Vec<PbStreamActor>, Vec<FragmentId>)> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_running_actors_and_upstream_fragment_of_fragment(id)
+                    .await
+            }
+            MetadataManager::V2(_mgr) => {
+                todo!()
             }
         }
     }

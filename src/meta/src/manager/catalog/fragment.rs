@@ -985,7 +985,7 @@ impl FragmentManager {
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
-    pub async fn get_running_actors_of_fragment(
+    pub async fn get_running_actor_ids_of_fragment(
         &self,
         fragment_id: FragmentId,
     ) -> MetaResult<HashSet<ActorId>> {
@@ -1000,6 +1000,29 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    pub async fn get_running_actors_and_upstream_fragment_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<(Vec<StreamActor>, Vec<FragmentId>)> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .cloned()
+                    .collect();
+                return Ok((running_actors, fragment.upstream_fragment_ids.clone()));
             }
         }
 

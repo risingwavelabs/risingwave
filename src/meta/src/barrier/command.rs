@@ -491,7 +491,7 @@ impl CommandContext {
                             // Find the actors of the upstream fragment.
                             let upstream_actor_ids = mgr
                                 .fragment_manager
-                                .get_running_actors_of_fragment(upstream_fragment_id)
+                                .get_running_actor_ids_of_fragment(upstream_fragment_id)
                                 .await?;
 
                             // Record updates for all actors.
@@ -530,7 +530,7 @@ impl CommandContext {
                             // Find the actors of the downstream fragment.
                             let downstream_actor_ids = mgr
                                 .fragment_manager
-                                .get_running_actors_of_fragment(downstream_fragment_id)
+                                .get_running_actor_ids_of_fragment(downstream_fragment_id)
                                 .await?;
 
                             // Downstream removed actors should be skipped
