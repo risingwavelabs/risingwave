@@ -105,7 +105,6 @@ message Source {
   optional string initialized_at_cluster_version = 17;
   optional string created_at_cluster_version = 18;
 
-
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 }
@@ -154,7 +153,6 @@ message Sink {
 
   // Target table id (only applicable for table sink)
   optional uint32 target_table = 21;
-
 
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 22;
