@@ -24,6 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
@@ -117,7 +118,7 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
-        let inputs = f
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -152,20 +153,37 @@ impl Binder {
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(funcs) = schema.get_functions_by_name(&function_name)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+
+            for func in funcs {
+
+                if func.arg_types.len() != inputs.len() {
+                    continue;
                 }
-                Aggregate => todo!("support UDAF"),
+
+                let can_implicit_cast = func.arg_types
+                    .clone()
+                    .into_iter()
+                    .zip_eq_fast(inputs.iter_mut())
+                    .all(|(to, from)| from.cast_implicit_mut(to).is_ok());
+
+                if !can_implicit_cast {
+                    continue;
+                }
+
+                match &func.kind {
+                    Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into())
+                    }
+                    Aggregate => todo!("support UDAF"),
+                }
+
             }
+
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
