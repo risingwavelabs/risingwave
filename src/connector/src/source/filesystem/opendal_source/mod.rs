@@ -23,7 +23,8 @@ pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
-use super::{OpendalFsSplit, S3Properties};
+use super::s3::S3PropertiesCommon;
+use super::OpendalFsSplit;
 use crate::source::SourceProperties;
 
 pub const GCS_CONNECTOR: &str = "gcs";
@@ -81,7 +82,9 @@ impl OpendalSource for OpendalGcs {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct OpendalS3Properties {
     #[serde(flatten)]
-    pub s3_properties: S3Properties,
+    pub s3_properties: S3PropertiesCommon,
+
+    // The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 }
