@@ -60,6 +60,48 @@
       └─StreamExchange { dist: HashShard(t.b) }
         └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (a) * from t2 join t1 on t1.k = t2.k;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t1.a] }
+      └─BatchExchange { order: [], dist: HashShard(t1.a) }
+        └─BatchHashJoin { type: Inner, predicate: t2.k = t1.k, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(t2.k) }
+          │ └─BatchScan { table: t2, columns: [t2.k], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t1.k) }
+            └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.k], distribution: SomeShard }
+- sql: |
+    create table t1(a int, b int, c int, k int);
+    create table t2(k int);
+    select distinct on (3) * from t2 join t1 on t1.k = t2.k;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t1.b] }
+      └─BatchExchange { order: [], dist: HashShard(t1.b) }
+        └─BatchHashJoin { type: Inner, predicate: t2.k = t1.k, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(t2.k) }
+          │ └─BatchScan { table: t2, columns: [t2.k], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t1.k) }
+            └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.k], distribution: SomeShard }
+- sql: |
+    CREATE TABLE secret_one (
+      field_one character varying,
+      field_two timestamp with time zone,
+      field_three character varying,
+      field_four double precision,
+      field_five boolean
+    );
+    SELECT DISTINCT ON (window_start) * FROM  TUMBLE(secret_one, field_two, INTERVAL '1' minute);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [$expr1] }
+      └─BatchExchange { order: [], dist: HashShard($expr1) }
+        └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, $expr1, AddWithTimeZone($expr1, '00:01:00':Interval, 'UTC':Varchar) as $expr2] }
+          └─BatchProject { exprs: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five, TumbleStart(secret_one.field_two, '00:01:00':Interval) as $expr1] }
+            └─BatchScan { table: secret_one, columns: [secret_one.field_one, secret_one.field_two, secret_one.field_three, secret_one.field_four, secret_one.field_five], distribution: SomeShard }
+- sql: |
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   binder_error: 'Invalid input syntax: Invalid ordinal number in DISTINCT ON: 4'

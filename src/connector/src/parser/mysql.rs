@@ -24,13 +24,17 @@ use risingwave_common::types::{
 };
 use rust_decimal::Decimal as RustDecimal;
 
+static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
         let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                tracing::error!("parse column `{}` fail: {}", $name, err);
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
                 None
             }
         }
@@ -40,7 +44,9 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                tracing::error!("parse column `{}` fail: {}", $name, err);
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
                 None
             }
         }
@@ -96,7 +102,14 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                             ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
                         }),
                         Err(err) => {
-                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    "parse column `{}` fail: {} ({} suppressed)",
+                                    name,
+                                    err,
+                                    suppressed
+                                );
+                            }
                             None
                         }
                     }
@@ -108,7 +121,14 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    "parse column `{}` fail: {} ({} suppressed)",
+                                    name,
+                                    err,
+                                    suppressed
+                                );
+                            }
                             None
                         }
                     }
@@ -122,8 +142,6 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
                     }

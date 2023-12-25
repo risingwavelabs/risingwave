@@ -723,6 +723,16 @@ impl ExprImpl {
                         None
                     }
                 }
+                ty @ ExprType::Equal => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         } else {

@@ -37,11 +37,13 @@ use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
+use risingwave_pb::plan_common::{
+    AdditionalColumnType, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
+};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
+    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, Ident,
     ObjectName, SourceWatermark, TableConstraint,
 };
 
@@ -54,7 +56,7 @@ use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
-    check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
+    check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -208,6 +210,8 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Normal,
+                version: ColumnDescVersion::Pr13707,
             },
             is_hidden: false,
         });
@@ -453,6 +457,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -488,6 +493,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
         columns_from_sql,
         &column_defs,
     )?;
+
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&with_properties, include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
         &source_schema,
         &source_info,
@@ -895,8 +903,13 @@ pub(super) async fn handle_create_table_plan(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
-    let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+    let source_schema = check_create_table_with_source(
+        context.with_options(),
+        source_schema,
+        &include_column_options,
+    )?;
 
     let ((plan, source, table), job_type) =
         match (source_schema, cdc_table_info.as_ref()) {
@@ -910,6 +923,7 @@ pub(super) async fn handle_create_table_plan(
                     source_watermarks,
                     col_id_gen,
                     append_only,
+                    include_column_options,
                 )
                 .await?,
                 TableJobType::General,
@@ -961,6 +975,7 @@ pub async fn handle_create_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     cdc_table_info: Option<CdcTableInfo>,
+    include_column_options: Vec<(Ident, Option<Ident>)>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -989,6 +1004,7 @@ pub async fn handle_create_table(
             constraints,
             source_watermarks,
             append_only,
+            include_column_options,
         )
         .await?;
 
@@ -1020,8 +1036,16 @@ pub async fn handle_create_table(
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
     source_schema: Option<ConnectorSchema>,
+    include_column_options: &[(Ident, Option<Ident>)],
 ) -> Result<Option<ConnectorSchema>> {
-    if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
+    let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
+    if !include_column_options.is_empty() && !defined_source {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "INCLUDE should be used with a connector".to_owned(),
+        )
+        .into());
+    }
+    if defined_source {
         source_schema.as_ref().ok_or_else(|| {
             ErrorCode::InvalidInputSyntax("Please specify a source schema using FORMAT".to_owned())
         })?;
@@ -1056,6 +1080,7 @@ pub async fn generate_stream_graph_for_table(
                 source_watermarks,
                 col_id_gen,
                 append_only,
+                vec![],
             )
             .await?
         }

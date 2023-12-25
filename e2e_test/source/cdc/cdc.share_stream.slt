@@ -28,7 +28,7 @@ create table products_test ( id INT,
    name STRING,
    description STRING,
    PRIMARY KEY (id)
-) from mysql_mytest table 'mytest.products';
+) from mysql_mytest table 'products';
 
 statement ok
 create table products_test ( id INT,
