@@ -35,7 +35,7 @@ use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
-use crate::store::{OpConsistentLevel, ReadOptions, StateStoreRead};
+use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -378,9 +378,9 @@ pub(crate) async fn do_insert_sanity_check(
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
-    op_consistent_level: &OpConsistentLevel,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    if let OpConsistentLevel::Inconsistent = op_consistent_level {
+    if let OpConsistencyLevel::Inconsistent = op_consistency_level {
         return Ok(());
     }
     let read_options = ReadOptions {
@@ -410,9 +410,9 @@ pub(crate) async fn do_delete_sanity_check(
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
-    op_consistent_level: &OpConsistentLevel,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistentLevel::ConsistentOldValue(old_value_checker) = op_consistent_level else {
+    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
         return Ok(());
     };
     let read_options = ReadOptions {
@@ -452,9 +452,9 @@ pub(crate) async fn do_update_sanity_check(
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
-    op_consistent_level: &OpConsistentLevel,
+    op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
-    let OpConsistentLevel::ConsistentOldValue(old_value_checker) = op_consistent_level else {
+    let OpConsistencyLevel::ConsistentOldValue(old_value_checker) = op_consistency_level else {
         return Ok(());
     };
     let read_options = ReadOptions {

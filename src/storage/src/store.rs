@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistentLevel, TracedPrefetchOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
@@ -400,7 +400,7 @@ pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
     LazyLock::new(|| Arc::new(|first: &Bytes, second: &Bytes| first == second));
 
 #[derive(Default, Clone)]
-pub enum OpConsistentLevel {
+pub enum OpConsistencyLevel {
     #[default]
     Inconsistent,
     ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
@@ -416,7 +416,7 @@ pub struct NewLocalOptions {
     ///
     /// 2. The old value passed from
     /// `update` and `delete` should match the original stored value.
-    pub op_consistent_level: OpConsistentLevel,
+    pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
@@ -428,10 +428,10 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            op_consistent_level: match value.op_consistent_level {
-                TracedOpConsistentLevel::Inconsistent => OpConsistentLevel::Inconsistent,
-                TracedOpConsistentLevel::ConsistentOldValue => {
-                    OpConsistentLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+            op_consistency_level: match value.op_consistency_level {
+                TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                TracedOpConsistencyLevel::ConsistentOldValue => {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
                 }
             },
             table_option: value.table_option.into(),
@@ -444,10 +444,10 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            op_consistent_level: match value.op_consistent_level {
-                OpConsistentLevel::Inconsistent => TracedOpConsistentLevel::Inconsistent,
-                OpConsistentLevel::ConsistentOldValue(_) => {
-                    TracedOpConsistentLevel::ConsistentOldValue
+            op_consistency_level: match value.op_consistency_level {
+                OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::ConsistentOldValue(_) => {
+                    TracedOpConsistencyLevel::ConsistentOldValue
                 }
             },
             table_option: value.table_option.into(),
@@ -459,12 +459,12 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 impl NewLocalOptions {
     pub fn new(
         table_id: TableId,
-        op_consistent_level: OpConsistentLevel,
+        op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
     ) -> Self {
         NewLocalOptions {
             table_id,
-            op_consistent_level,
+            op_consistency_level,
             table_option,
             is_replicated: false,
         }
@@ -472,12 +472,12 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
-        op_consistent_level: OpConsistentLevel,
+        op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
     ) -> Self {
         NewLocalOptions {
             table_id,
-            op_consistent_level,
+            op_consistency_level,
             table_option,
             is_replicated: true,
         }
@@ -486,7 +486,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
-            op_consistent_level: OpConsistentLevel::Inconsistent,
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
             },

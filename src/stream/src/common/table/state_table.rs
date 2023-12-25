@@ -53,8 +53,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, OpConsistentLevel, PrefetchOptions, ReadOptions,
-    SealCurrentEpochOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -211,8 +211,8 @@ where
     }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistentLevel {
-    OpConsistentLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
         let first = match row_serde.deserialize(first) {
             Ok(rows) => rows,
             Err(e) => {
@@ -357,18 +357,18 @@ where
             )
         };
 
-        let op_consistent_level = if is_consistent_op {
+        let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde)
         } else {
-            OpConsistentLevel::Inconsistent
+            OpConsistencyLevel::Inconsistent
         };
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, op_consistent_level, table_option)
+            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
         } else {
-            NewLocalOptions::new(table_id, op_consistent_level, table_option)
+            NewLocalOptions::new(table_id, op_consistency_level, table_option)
         };
         let local_state_store = store.new_local(new_local_options).await;
 
@@ -573,16 +573,16 @@ where
                 Arc::from(table_columns.clone().into_boxed_slice()),
             )
         };
-        let op_consistent_level = if is_consistent_op {
+        let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde)
         } else {
-            OpConsistentLevel::Inconsistent
+            OpConsistencyLevel::Inconsistent
         };
         let local_state_store = store
             .new_local(NewLocalOptions::new(
                 table_id,
-                op_consistent_level,
+                op_consistency_level,
                 TableOption::default(),
             ))
             .await;
@@ -954,7 +954,7 @@ where
 
     /// Update a row without giving old value.
     ///
-    /// `op_consistent_level` should be set to `Inconsistent`.
+    /// `op_consistency_level` should be set to `Inconsistent`.
     pub fn update_without_old_value(&mut self, new_value: impl Row) {
         let new_pk = (&new_value).project(self.pk_indices());
         let new_key_bytes =

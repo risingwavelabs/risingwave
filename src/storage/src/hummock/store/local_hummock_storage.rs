@@ -58,7 +58,7 @@ pub struct LocalHummockStorage {
     epoch: Option<u64>,
 
     table_id: TableId,
-    op_consistent_level: OpConsistentLevel,
+    op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
 
     instance_guard: LocalInstanceGuard,
@@ -308,7 +308,7 @@ impl LocalStateStore for LocalHummockStorage {
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -323,7 +323,7 @@ impl LocalStateStore for LocalHummockStorage {
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -339,7 +339,7 @@ impl LocalStateStore for LocalHummockStorage {
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -522,11 +522,11 @@ impl LocalHummockStorage {
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {
-            mem_table: MemTable::new(option.op_consistent_level.clone()),
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
             spill_offset: 0,
             epoch: None,
             table_id: option.table_id,
-            op_consistent_level: option.op_consistent_level,
+            op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
             is_replicated: option.is_replicated,
             instance_guard,

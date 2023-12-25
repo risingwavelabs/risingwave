@@ -54,7 +54,7 @@ pub enum KeyOp {
 #[derive(Clone)]
 pub struct MemTable {
     pub(crate) buffer: MemTableStore,
-    pub(crate) op_consistent_level: OpConsistentLevel,
+    pub(crate) op_consistency_level: OpConsistencyLevel,
     pub(crate) kv_size: KvSize,
 }
 
@@ -107,17 +107,17 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
 
 impl MemTable {
-    pub fn new(op_consistent_level: OpConsistentLevel) -> Self {
+    pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
         Self {
             buffer: BTreeMap::new(),
-            op_consistent_level,
+            op_consistency_level,
             kv_size: KvSize::new(),
         }
     }
 
     pub fn drain(&mut self) -> Self {
         self.kv_size.set(0);
-        std::mem::replace(self, Self::new(self.op_consistent_level.clone()))
+        std::mem::replace(self, Self::new(self.op_consistency_level.clone()))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -126,7 +126,7 @@ impl MemTable {
 
     /// write methods
     pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
-        if let OpConsistentLevel::Inconsistent = &self.op_consistent_level {
+        if let OpConsistencyLevel::Inconsistent = &self.op_consistency_level {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
             let insert_value = KeyOp::Insert(value);
             self.kv_size.add(&pk, &insert_value);
@@ -169,7 +169,8 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
-        let OpConsistentLevel::ConsistentOldValue(value_checker) = &self.op_consistent_level else {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let delete_value = KeyOp::Delete(old_value);
             self.kv_size.add(&pk, &delete_value);
             let origin_value = self.buffer.insert(pk, delete_value);
@@ -233,7 +234,8 @@ impl MemTable {
         old_value: Bytes,
         new_value: Bytes,
     ) -> Result<()> {
-        let OpConsistentLevel::ConsistentOldValue(value_checker) = &self.op_consistent_level else {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
             let update_value = KeyOp::Update((old_value, new_value));
@@ -426,7 +428,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     epoch: Option<u64>,
 
     table_id: TableId,
-    op_consistent_level: OpConsistentLevel,
+    op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
 }
 
@@ -434,10 +436,10 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     pub fn new(inner: S, option: NewLocalOptions) -> Self {
         Self {
             inner,
-            mem_table: MemTable::new(option.op_consistent_level.clone()),
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
             epoch: None,
             table_id: option.table_id,
-            op_consistent_level: option.op_consistent_level,
+            op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
         }
     }
@@ -524,7 +526,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
-                // state store with `op_consistent_level=Inconsistent`.
+                // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
                     if ENABLE_SANITY_CHECK {
                         do_insert_sanity_check(
@@ -534,7 +536,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -549,7 +551,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -565,7 +567,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                             self.epoch(),
                             self.table_id,
                             self.table_option,
-                            &self.op_consistent_level,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -636,11 +638,11 @@ mod tests {
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
-    use crate::store::{OpConsistentLevel, CHECK_BYTES_EQUAL};
+    use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(OpConsistentLevel::ConsistentOldValue(
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
             CHECK_BYTES_EQUAL.clone(),
         ));
         assert_eq!(mem_table.kv_size.size(), 0);
@@ -752,7 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size_not_consistent_op() {
-        let mut mem_table = MemTable::new(OpConsistentLevel::Inconsistent);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::Inconsistent);
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -835,7 +837,7 @@ mod tests {
         let mut test_data = ordered_test_data.clone();
 
         test_data.shuffle(&mut rng);
-        let mut mem_table = MemTable::new(OpConsistentLevel::ConsistentOldValue(
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
             CHECK_BYTES_EQUAL.clone(),
         ));
         for (key, op) in test_data {
