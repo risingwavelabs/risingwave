@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -27,8 +27,8 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistentLevel, TracedPrefetchOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -394,6 +394,18 @@ impl From<TracedWriteOptions> for WriteOptions {
     }
 }
 
+pub trait CheckOldValueEquality = Fn(&Bytes, &Bytes) -> bool + Send + Sync;
+
+pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
+    LazyLock::new(|| Arc::new(|first: &Bytes, second: &Bytes| first == second));
+
+#[derive(Default, Clone)]
+pub enum OpConsistentLevel {
+    #[default]
+    Inconsistent,
+    ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -404,7 +416,7 @@ pub struct NewLocalOptions {
     ///
     /// 2. The old value passed from
     /// `update` and `delete` should match the original stored value.
-    pub is_consistent_op: bool,
+    pub op_consistent_level: OpConsistentLevel,
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
@@ -416,7 +428,12 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistent_level: match value.op_consistent_level {
+                TracedOpConsistentLevel::Inconsistent => OpConsistentLevel::Inconsistent,
+                TracedOpConsistentLevel::ConsistentOldValue => {
+                    OpConsistentLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -427,7 +444,12 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistent_level: match value.op_consistent_level {
+                OpConsistentLevel::Inconsistent => TracedOpConsistentLevel::Inconsistent,
+                OpConsistentLevel::ConsistentOldValue(_) => {
+                    TracedOpConsistentLevel::ConsistentOldValue
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -435,10 +457,14 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 }
 
 impl NewLocalOptions {
-    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+    pub fn new(
+        table_id: TableId,
+        op_consistent_level: OpConsistentLevel,
+        table_option: TableOption,
+    ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistent_level,
             table_option,
             is_replicated: false,
         }
@@ -446,12 +472,12 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
-        is_consistent_op: bool,
+        op_consistent_level: OpConsistentLevel,
         table_option: TableOption,
     ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistent_level,
             table_option,
             is_replicated: true,
         }
@@ -460,7 +486,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
-            is_consistent_op: false,
+            op_consistent_level: OpConsistentLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
             },
