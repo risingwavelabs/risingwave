@@ -112,7 +112,7 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::OpenDal(_) => None,
+            ServiceConfig::Opendal(_) => None,
             ServiceConfig::RedPanda(_) => None,
         };
 
@@ -271,7 +271,7 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
-            ServiceConfig::OpenDal(c) => {
+            ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
 

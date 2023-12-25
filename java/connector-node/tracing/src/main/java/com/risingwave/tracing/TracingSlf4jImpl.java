@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge};
-use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
-use crate::optimizer::plan_visitor::PlanVisitor;
+// Ported from https://github.com/MrFriendly-B-V/tracing-slf4j,
+// which is licensed under the Apache License, Version 2.0.
 
-pub struct HasMaxOneRowApply();
+package com.risingwave.tracing;
 
-impl PlanVisitor for HasMaxOneRowApply {
-    type Result = bool;
+import com.risingwave.java.binding.Binding;
 
-    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+public class TracingSlf4jImpl {
+    public static final int ERROR = 0;
+    public static final int WARN = 1;
+    public static final int INFO = 2;
+    public static final int DEBUG = 3;
+    public static final int TRACE = 4;
 
-    fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|a, b| a | b)
-    }
-
-    fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
-        plan.max_one_row() | self.visit(plan.left()) | self.visit(plan.right())
+    public static void event(String name, int level, String message) {
+        Binding.tracingSlf4jEvent(name, level, message);
     }
 }

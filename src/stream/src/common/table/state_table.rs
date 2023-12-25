@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
@@ -23,7 +24,7 @@ use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{
@@ -32,6 +33,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -148,6 +150,13 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
+    /// "i" here refers to the base state_table's actual schema.
+    /// "o" here refers to the replicated state table's output schema.
+    /// This mapping is used to reconstruct a row being written from replicated state table.
+    /// Such that the schema of this row will match the full schema of the base state table.
+    /// It is only applicable for replication.
+    i2o_mapping: ColIndexMapping,
+
     /// Output indices
     /// Used for:
     /// 1. Computing output_value_indices to ser/de replicated rows.
@@ -204,6 +213,9 @@ where
 }
 
 // initialize
+// FIXME(kwannoel): Enforce that none of the constructors here
+// should be used by replicated state table.
+// Apart from from_table_catalog_inner.
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
     StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
 where
@@ -235,7 +247,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
         is_consistent_op: bool,
-        output_indices: Vec<usize>,
+        output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -343,6 +355,34 @@ where
             StateTableWatermarkCache::new(0)
         };
 
+        // Get info for replicated state table.
+        let output_column_ids_to_input_idx = output_column_ids
+            .iter()
+            .enumerate()
+            .map(|(pos, id)| (*id, pos))
+            .collect::<HashMap<_, _>>();
+
+        // Compute column descriptions
+        let columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().into())
+            .collect_vec();
+
+        // Compute i2o mapping
+        let mut i2o_mapping = vec![None; columns.len()];
+        let mut output_column_indices = vec![];
+        for (i, column) in columns.iter().enumerate() {
+            if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
+                i2o_mapping[i] = Some(*pos);
+                output_column_indices.push(i);
+            }
+        }
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+
+        // Compute output indices
+        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -361,6 +401,7 @@ where
             watermark_cache,
             data_types,
             output_indices,
+            i2o_mapping,
         }
     }
 
@@ -534,6 +575,7 @@ where
             watermark_cache,
             data_types,
             output_indices: vec![],
+            i2o_mapping: ColIndexMapping::new(vec![], 0),
         }
     }
 
@@ -639,13 +681,7 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        let columns = table_catalog
-            .columns
-            .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().into())
-            .collect_vec();
-        let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_indices).await
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
     }
 }
 
@@ -892,10 +928,19 @@ where
         }
     }
 
+    fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
+        fill_non_output_indices(&self.i2o_mapping, &self.data_types, chunk)
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        let chunk = if IS_REPLICATED {
+            self.fill_non_output_indices(chunk)
+        } else {
+            chunk
+        };
         let (chunk, op) = chunk.into_parts();
 
         let vnodes = compute_chunk_vnode(
@@ -1478,5 +1523,65 @@ fn end_range_to_memcomparable<R: Row>(
             let serialized = serialize_pk_prefix(r);
             Excluded(serialized)
         }
+    }
+}
+
+fn fill_non_output_indices(
+    i2o_mapping: &ColIndexMapping,
+    data_types: &[DataType],
+    chunk: StreamChunk,
+) -> StreamChunk {
+    let cardinality = chunk.cardinality();
+    let (ops, columns, vis) = chunk.into_inner();
+    let mut full_columns = Vec::with_capacity(data_types.len());
+    for (i, data_type) in data_types.iter().enumerate() {
+        if let Some(j) = i2o_mapping.try_map(i) {
+            full_columns.push(columns[j].clone());
+        } else {
+            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
+            column_builder.append_n_null(cardinality);
+            let column: ArrayRef = column_builder.finish().into();
+            full_columns.push(column)
+        }
+    }
+    let data_chunk = DataChunk::new(full_columns, vis);
+    StreamChunk::from_parts(ops, data_chunk)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_fill_non_output_indices() {
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [OwnedRow::new(vec![
+            Some(222_i32.into()),
+            Some(2_i32.into()),
+        ])];
+        let replicated_chunk = StreamChunk::from_parts(
+            vec![Op::Insert],
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
+        );
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 1, capacity: 1, data:
+            +---+---+---+-----+
+            | + | 2 |   | 222 |
+            +---+---+---+-----+
+             }"#]],
+        );
     }
 }

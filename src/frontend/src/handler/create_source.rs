@@ -21,8 +21,8 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
+    KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -43,17 +43,18 @@ use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
-    PULSAR_CONNECTOR, S3_CONNECTOR, S3_V2_CONNECTOR,
+    get_connector_compatible_additional_columns, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR,
+    KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
-use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
-    DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
+    DebeziumAvroSchema, Encode, Format, Ident, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -145,37 +146,6 @@ async fn extract_avro_table_schema(
             is_hidden: false,
         })
         .collect_vec())
-}
-
-/// Extract Avro primary key columns.
-async fn extract_upsert_avro_table_pk_columns(
-    info: &StreamSourceInfo,
-    with_properties: &HashMap<String, String>,
-) -> Result<Option<Vec<String>>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
-    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
-    let vec_column_desc = conf.map_to_columns()?;
-
-    conf.extract_pks()
-        .ok()
-        .map(|pk_desc| {
-            pk_desc
-                .into_iter()
-                .map(|desc| {
-                    vec_column_desc
-                        .iter()
-                        .find(|x| x.name == desc.name)
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "Can not found primary key column {} in value schema",
-                                desc.name
-                            )))
-                        })
-                })
-                .map_ok(|desc| desc.name.clone())
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()
 }
 
 async fn extract_debezium_avro_table_pk_columns(
@@ -696,6 +666,65 @@ pub(crate) async fn bind_columns_from_source(
     Ok(res)
 }
 
+/// add connector-spec columns to the end of column catalog
+pub fn handle_addition_columns(
+    with_properties: &HashMap<String, String>,
+    mut additional_columns: Vec<(Ident, Option<Ident>)>,
+    columns: &mut Vec<ColumnCatalog>,
+) -> Result<()> {
+    let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
+
+    let addition_col_list =
+        match get_connector_compatible_additional_columns(connector_name.as_str()) {
+            Some(cols) => cols,
+            // early return if there are no accepted additional columns for the connector
+            None => {
+                return if additional_columns.is_empty() {
+                    Ok(())
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Connector {} accepts no additional column but got {:?}",
+                        connector_name, additional_columns
+                    ))))
+                }
+            }
+        };
+    let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
+        format!("_rw_{}_{}", connector_name, addi_column_name)
+    };
+
+    let latest_col_id: ColumnId = columns
+        .iter()
+        .map(|col| col.column_desc.column_id)
+        .max()
+        .unwrap(); // there must be at least one column in the column catalog
+
+    for (col_name, gen_column_catalog_fn) in addition_col_list {
+        // always insert in spec order
+        if let Some(idx) = additional_columns
+            .iter()
+            .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
+        {
+            let (_, alias) = additional_columns.remove(idx);
+            columns.push(gen_column_catalog_fn(
+                latest_col_id.next(),
+                alias
+                    .map(|alias| alias.real_value())
+                    .unwrap_or_else(|| gen_default_column_name(connector_name.as_str(), col_name))
+                    .as_str(),
+            ))
+        }
+    }
+    if !additional_columns.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "Unknown additional columns {:?}",
+            additional_columns
+        ))));
+    }
+
+    Ok(())
+}
+
 /// Bind columns from both source and sql defined.
 pub(crate) fn bind_all_columns(
     source_schema: &ConnectorSchema,
@@ -797,42 +826,77 @@ pub(crate) fn bind_all_columns(
 pub(crate) async fn bind_source_pk(
     source_schema: &ConnectorSchema,
     source_info: &StreamSourceInfo,
-    columns: &mut Vec<ColumnCatalog>,
+    columns: &mut [ColumnCatalog],
     sql_defined_pk_names: Vec<String>,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
+    let key_column_name: Option<String> = {
+        // iter columns to check if contains additional columns from key part
+        // return the key column names if exists
+        columns.iter().find_map(|catalog| {
+            if catalog.column_desc.additional_column_type == AdditionalColumnType::Key {
+                Some(catalog.name().to_string())
+            } else {
+                None
+            }
+        })
+    };
+    let additional_column_names = columns
+        .iter()
+        .filter_map(|col| {
+            if (col.column_desc.additional_column_type != AdditionalColumnType::Unspecified)
+                && (col.column_desc.additional_column_type != AdditionalColumnType::Normal)
+            {
+                Some(col.name().to_string())
+            } else {
+                None
+            }
+        })
+        .collect_vec();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
-        (Format::Upsert, Encode::Json) => {
-            if sql_defined_pk {
-                sql_defined_pk_names
-            } else {
-                add_default_key_column(columns);
-                vec![DEFAULT_KEY_COLUMN_NAME.into()]
-            }
-        }
-        (Format::Upsert, Encode::Avro) => {
-            if sql_defined_pk {
+
+        // For all Upsert formats, we only accept one and only key column as primary key.
+        // Additional KEY columns must be set in this case and must be primary key.
+        (Format::Upsert, encode @ Encode::Json | encode @ Encode::Avro) => {
+            if let Some(ref key_column_name) = key_column_name && sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
-                        "upsert avro supports only one primary key column.".to_string(),
+                        format!("upsert {:?} supports only one primary key column ({}).", encode, key_column_name)
                     )));
                 }
+                // the column name have been converted to real value in `handle_addition_columns`
+                // so we don't ignore ascii case here
+                if !key_column_name.eq(sql_defined_pk_names[0].as_str()) {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "upsert {}'s key column {} not match with sql defined primary key {}", encode,
+                        key_column_name, sql_defined_pk_names[0]
+                    ))));
+                }
                 sql_defined_pk_names
-            } else if let Some(extracted_pk_names) =
-                extract_upsert_avro_table_pk_columns(source_info, with_properties).await?
-            {
-                extracted_pk_names
             } else {
-                // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_default_key_column(columns);
-                vec![DEFAULT_KEY_COLUMN_NAME.into()]
+                return if key_column_name.is_none() {
+                    Err(
+                        RwError::from(ProtocolError(format!("INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE {:?}", encode)
+                        ))
+                    )
+                } else {
+                    Err(RwError::from(ProtocolError(format!(
+                        "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE {:?}",
+                        key_column_name.unwrap(), encode))))
+                }
             }
         }
 
         (Format::Debezium, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUM forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with FORMAT DEBEZIUM."
@@ -842,6 +906,12 @@ pub(crate) async fn bind_source_pk(
             sql_defined_pk_names
         }
         (Format::Debezium, Encode::Avro) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUM forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -863,6 +933,12 @@ pub(crate) async fn bind_source_pk(
             }
         }
         (Format::DebeziumMongo, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DEBEZIUMMONGO forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
@@ -871,6 +947,12 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Maxwell, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT MAXWELL forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
     "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
@@ -881,6 +963,12 @@ pub(crate) async fn bind_source_pk(
         }
 
         (Format::Canal, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT CANAL forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
     "Primary key must be specified when creating source with FORMAT CANAL ENCODE JSON."
@@ -916,18 +1004,6 @@ fn check_and_add_timestamp_column(
         };
         columns.push(kafka_timestamp_column);
     }
-}
-
-fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
-    let column = ColumnCatalog {
-        column_desc: ColumnDesc::named(
-            DEFAULT_KEY_COLUMN_NAME,
-            (columns.len() as i32).into(),
-            DataType::Bytea,
-        ),
-        is_hidden: false,
-    };
-    columns.push(column);
 }
 
 pub(super) fn bind_source_watermark(
@@ -1007,7 +1083,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
-                S3_V2_CONNECTOR => hashmap!(
+                OPENDAL_S3_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                ),
+                GCS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
@@ -1233,6 +1312,8 @@ pub async fn handle_create_source(
         columns_from_sql,
         &stmt.columns,
     )?;
+    // add additional columns before bind pk, because `format upsert` requires the key column
+    handle_addition_columns(&with_properties, stmt.include_column_options, &mut columns)?;
     let pk_names = bind_source_pk(
         &source_schema,
         &source_info,
@@ -1353,6 +1434,7 @@ pub async fn handle_create_source(
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use risingwave_common::catalog::{
         CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
@@ -1361,8 +1443,18 @@ pub mod tests {
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::catalog::source_catalog::SourceCatalog;
     use crate::handler::create_source::debezium_cdc_source_schema;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+
+    const GET_COLUMN_FROM_CATALOG: fn(&Arc<SourceCatalog>) -> HashMap<&str, DataType> =
+        |catalog: &Arc<SourceCatalog>| -> HashMap<&str, DataType> {
+            catalog
+                .columns
+                .iter()
+                .map(|col| (col.name(), col.data_type().clone()))
+                .collect::<HashMap<&str, DataType>>()
+        };
 
     #[tokio::test]
     async fn test_create_source_handler() {
@@ -1386,11 +1478,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(source.name, "t");
 
-        let columns = source
-            .columns
-            .iter()
-            .map(|col| (col.name(), col.data_type().clone()))
-            .collect::<HashMap<&str, DataType>>();
+        let columns = GET_COLUMN_FROM_CATALOG(source);
 
         let city_type = DataType::new_struct(
             vec![DataType::Varchar, DataType::Varchar],
@@ -1520,5 +1608,58 @@ pub mod tests {
         let columns = debezium_cdc_source_schema();
         // make sure it doesn't broken by future PRs
         assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
+    }
+
+    #[tokio::test]
+    async fn test_source_addition_columns() {
+        // test derive include column for format plain
+        let sql =
+            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json"
+                .to_string();
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s");
+
+        let columns = GET_COLUMN_FROM_CATALOG(source);
+        let expect_columns = maplit::hashmap! {
+            ROWID_PREFIX => DataType::Serial,
+            "v1" => DataType::Int32,
+            "_rw_kafka_key" => DataType::Bytea,
+            // todo: kafka connector will automatically derive the column
+            // will change to a required field in the include clause
+            "_rw_kafka_timestamp" => DataType::Timestamptz,
+        };
+        assert_eq!(columns, expect_columns);
+
+        // test derive include column for format upsert
+        let sql = "CREATE SOURCE s1 (v1 int) with (connector = 'kafka') format upsert encode json"
+            .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Protocol error: INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE Json"
+                )
+            }
+            _ => unreachable!(),
+        }
+
+        let sql = "CREATE SOURCE s2 (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format upsert encode json"
+            .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE Json")
+            }
+            _ => unreachable!(),
+        }
     }
 }
