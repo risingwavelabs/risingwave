@@ -208,7 +208,17 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
         }
     }
 
-    pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+    /// This is similar to the `with_label_values` of the raw metrics vec.
+    /// We need to pay special attention that, unless for some special purpose,
+    /// we should not drop the returned `LabelGuardedMetric` immediately after
+    /// using it, such as `metrics.with_guarded_label_values(...).inc();`,
+    /// because after dropped the label will be regarded as not used any more,
+    /// and the internal raw metrics will be removed and reset.
+    ///
+    /// Instead, we should store the returned `LabelGuardedMetric` in a scope with longer
+    /// lifetime so that the labels can be regarded as being used in its whole life scope.
+    /// This is also the recommended way to use the raw metrics vec.
+    pub fn with_guarded_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
         LabelGuardedMetric {
@@ -219,7 +229,7 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
 
     pub fn with_test_label(&self) -> LabelGuardedMetric<T::M, N> {
         let labels: [&'static str; N] = gen_test_label::<N>();
-        self.with_label_values(&labels)
+        self.with_guarded_label_values(&labels)
     }
 }
 
@@ -376,12 +386,12 @@ mod tests {
     #[test]
     fn test_label_guarded_metrics_drop() {
         let vec = LabelGuardedIntCounterVec::<3>::test_int_counter_vec();
-        let m1_1 = vec.with_label_values(&["1", "2", "3"]);
+        let m1_1 = vec.with_guarded_label_values(&["1", "2", "3"]);
         assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
-        let m1_2 = vec.with_label_values(&["1", "2", "3"]);
+        let m1_2 = vec.with_guarded_label_values(&["1", "2", "3"]);
         let m1_3 = m1_2.clone();
         assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
-        let m2 = vec.with_label_values(&["2", "2", "3"]);
+        let m2 = vec.with_guarded_label_values(&["2", "2", "3"]);
         assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_3);
         assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());

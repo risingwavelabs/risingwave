@@ -79,40 +79,44 @@ impl KvLogStoreMetrics {
     ) -> Self {
         let executor_id = format!("{}", writer_param.executor_id);
         let sink_id = format!("{}", sink_param.sink_id.sink_id);
-        let storage_write_size = metrics.kv_log_store_storage_write_size.with_label_values(&[
-            executor_id.as_str(),
-            connector,
-            sink_id.as_str(),
-        ]);
+        let storage_write_size = metrics
+            .kv_log_store_storage_write_size
+            .with_guarded_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
         let storage_write_count = metrics
             .kv_log_store_storage_write_count
-            .with_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
+            .with_guarded_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
 
         const READ_PERSISTENT_LOG: &str = "persistent_log";
         const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
 
-        let persistent_log_read_size = metrics.kv_log_store_storage_read_size.with_label_values(&[
-            executor_id.as_str(),
-            connector,
-            sink_id.as_str(),
-            READ_PERSISTENT_LOG,
-        ]);
-        let persistent_log_read_count =
-            metrics.kv_log_store_storage_read_count.with_label_values(&[
+        let persistent_log_read_size = metrics
+            .kv_log_store_storage_read_size
+            .with_guarded_label_values(&[
+                executor_id.as_str(),
+                connector,
+                sink_id.as_str(),
+                READ_PERSISTENT_LOG,
+            ]);
+        let persistent_log_read_count = metrics
+            .kv_log_store_storage_read_count
+            .with_guarded_label_values(&[
                 executor_id.as_str(),
                 connector,
                 sink_id.as_str(),
                 READ_PERSISTENT_LOG,
             ]);
 
-        let flushed_buffer_read_size = metrics.kv_log_store_storage_read_size.with_label_values(&[
-            executor_id.as_str(),
-            connector,
-            sink_id.as_str(),
-            READ_FLUSHED_BUFFER,
-        ]);
-        let flushed_buffer_read_count =
-            metrics.kv_log_store_storage_read_count.with_label_values(&[
+        let flushed_buffer_read_size = metrics
+            .kv_log_store_storage_read_size
+            .with_guarded_label_values(&[
+                executor_id.as_str(),
+                connector,
+                sink_id.as_str(),
+                READ_FLUSHED_BUFFER,
+            ]);
+        let flushed_buffer_read_count = metrics
+            .kv_log_store_storage_read_count
+            .with_guarded_label_values(&[
                 executor_id.as_str(),
                 connector,
                 sink_id.as_str(),
