@@ -84,39 +84,44 @@ impl CompactorContext {
     }
 
     pub fn acquire_task_quota(&self, parallelism: u32) -> bool {
-        let running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
+        let mut running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
         let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
 
         if parallelism + running_u32 > max_u32 {
             return false;
         }
 
-        if self
-            .running_task_parallelism
-            .compare_exchange(
+        while parallelism + running_u32 < max_u32 {
+            match self.running_task_parallelism.compare_exchange(
                 running_u32,
                 running_u32 + parallelism,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
-            )
-            .is_err()
-        {
-            return false;
+            ) {
+                Ok(_) => {
+                    return true;
+                }
+                Err(old_running_u32) => {
+                    running_u32 = old_running_u32;
+                }
+            }
         }
 
-        true
+        false
     }
 
     pub fn release_task_quota(&self, parallelism: u32) {
+        let prev = self
+            .running_task_parallelism
+            .fetch_sub(parallelism, Ordering::SeqCst);
+
         assert_ge!(
-            self.running_task_parallelism.load(Ordering::SeqCst),
+            prev,
             parallelism,
             "running {} parallelism {}",
-            self.running_task_parallelism.load(Ordering::SeqCst),
+            prev,
             parallelism
         );
-        self.running_task_parallelism
-            .fetch_sub(parallelism, Ordering::SeqCst);
     }
 
     pub fn get_free_quota(&self) -> u32 {

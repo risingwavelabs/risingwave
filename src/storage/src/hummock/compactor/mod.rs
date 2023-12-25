@@ -395,12 +395,7 @@ pub fn start_compactor(
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack.load(Ordering::SeqCst) {
                             // TODO: Compute parallelism on meta side
-                            let free_quota = compactor_context.get_free_quota();
-                            pending_pull_task_count = if free_quota > max_pull_task_count {
-                                max_pull_task_count
-                            } else {
-                                free_quota
-                            };
+                            pending_pull_task_count = compactor_context.get_free_quota().max(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
