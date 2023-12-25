@@ -17,7 +17,7 @@ create source invalid_startup_mode (
   properties.bootstrap.server = 'message_queue:29092'
 ) ROW FORMAT JSON;
 
-statement error invalid input syntax for type integer: "abc"
+statement error invalid digit found in string
 create source invalid_startup_timestamp (
   column1 varchar
 ) with (
