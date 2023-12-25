@@ -15,6 +15,7 @@ pub mod enumerator;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
+use mark_redaction_derive::MarkRedaction;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
@@ -24,7 +25,7 @@ use crate::source::SourceProperties;
 
 pub const S3_CONNECTOR: &str = "s3";
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, MarkRedaction)]
 pub struct S3Properties {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,

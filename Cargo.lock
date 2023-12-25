@@ -5537,6 +5537,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
+name = "mark_redaction"
+version = "1.5.0-alpha"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
+name = "mark_redaction_derive"
+version = "1.5.0-alpha"
+dependencies = [
+ "mark_redaction",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "workspace-hack",
+]
+
+[[package]]
 name = "match_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8461,6 +8479,8 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "maplit",
+ "mark_redaction",
+ "mark_redaction_derive",
  "moka",
  "mysql_async",
  "mysql_common",
@@ -8695,6 +8715,8 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "mark_redaction",
+ "mark_redaction_derive",
  "md5",
  "num-integer",
  "parking_lot 0.12.1",

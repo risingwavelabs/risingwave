@@ -157,6 +157,8 @@ pub struct TableCatalog {
 
     /// Incoming sinks, used for sink into table
     pub incoming_sinks: Vec<SinkId>,
+
+    pub redacted_definition: Option<String>,
 }
 
 // How the stream job was created will determine
@@ -445,6 +447,7 @@ impl TableCatalog {
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
+            redacted_definition: self.redacted_definition.clone(),
         }
     }
 
@@ -560,6 +563,7 @@ impl From<PbTable> for TableCatalog {
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
+            redacted_definition: tb.redacted_definition.clone(),
         }
     }
 }
@@ -639,6 +643,7 @@ mod tests {
             initialized_at_epoch: None,
             value_indices: vec![0],
             definition: "".into(),
+            redacted_definition: None,
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
@@ -704,6 +709,7 @@ mod tests {
                 row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
+                redacted_definition: None,
                 conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),

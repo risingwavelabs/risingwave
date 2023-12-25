@@ -17,6 +17,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use mark_redaction_derive::MarkRedaction;
 use parking_lot::Mutex;
 use risingwave_common::types::JsonbVal;
 use serde_derive::{Deserialize, Serialize};
@@ -114,7 +115,7 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, MarkRedaction)]
 pub struct TestSourceProperties {
     properties: HashMap<String, String>,
 }

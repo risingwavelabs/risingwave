@@ -675,6 +675,7 @@ fn gen_table_plan_inner(
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
         definition: "".to_string(),
+        redacted_definition: None,
         connection_id,
         initialized_at_epoch: None,
         created_at_epoch: None,

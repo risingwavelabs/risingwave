@@ -137,6 +137,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             description: None,
             // TODO: fix it for model v2.
             incoming_sinks: vec![],
+            // TODO #14115
+            redacted_definition: None,
         }
     }
 }
@@ -156,6 +158,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
             info: value.0.source_info.map(|info| info.0),
             watermark_descs: value.0.watermark_descs.0,
             definition: value.0.definition,
+            // TODO #14115
+            redacted_definition: None,
             connection_id: value.0.connection_id.map(|id| id as _),
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
@@ -202,6 +206,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
             // todo: fix this for model v2
             target_table: None,
+            // TODO #14115
+            redacted_definition: None,
         }
     }
 }

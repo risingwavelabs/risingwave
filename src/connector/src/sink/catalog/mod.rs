@@ -301,6 +301,8 @@ pub struct SinkCatalog {
     pub sink_from_name: String,
 
     pub target_table: Option<TableId>,
+
+    pub redacted_definition: Option<String>,
 }
 
 impl SinkCatalog {
@@ -339,6 +341,7 @@ impl SinkCatalog {
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
+            redacted_definition: self.redacted_definition.clone(),
         }
     }
 
@@ -428,6 +431,7 @@ impl From<PbSink> for SinkCatalog {
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
             target_table: pb.target_table.map(TableId::new),
+            redacted_definition: pb.redacted_definition,
         }
     }
 }

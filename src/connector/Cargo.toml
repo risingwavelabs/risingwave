@@ -70,6 +70,8 @@ itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
+mark_redaction = { path = "../utils/redaction/redaction" }
+mark_redaction_derive = { path = "../utils/redaction/redaction_derive" }
 moka = { version = "0.12", features = ["future"] }
 mysql_async = { version = "0.33", default-features = false, features = [
     "default",

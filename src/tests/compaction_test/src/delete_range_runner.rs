@@ -159,6 +159,7 @@ async fn compaction_test(
         create_type: PbCreateType::Foreground.into(),
         description: None,
         incoming_sinks: vec![],
+        redacted_definition: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;

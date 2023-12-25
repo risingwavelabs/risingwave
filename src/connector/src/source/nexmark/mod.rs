@@ -16,9 +16,11 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use enumerator::*;
+use mark_redaction::MarkRedaction;
+use mark_redaction_derive::MarkRedaction;
 use nexmark::config::{NexmarkConfig, RateShape};
 use nexmark::event::EventType;
 use serde::Deserialize;
@@ -45,8 +47,14 @@ const fn none<T>() -> Option<T> {
 
 pub type NexmarkProperties = Box<NexmarkPropertiesInner>;
 
+impl MarkRedaction for NexmarkProperties {
+    fn marks() -> HashSet<String> {
+        NexmarkPropertiesInner::marks()
+    }
+}
+
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Deserialize, WithOptions, MarkRedaction)]
 pub struct NexmarkPropertiesInner {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]

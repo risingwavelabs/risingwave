@@ -18,6 +18,7 @@ pub mod split;
 pub mod topic;
 
 pub use enumerator::*;
+use mark_redaction_derive::MarkRedaction;
 use serde::Deserialize;
 use serde_with::serde_as;
 pub use split::*;
@@ -37,7 +38,7 @@ impl SourceProperties for PulsarProperties {
     const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Deserialize, WithOptions, MarkRedaction)]
 #[serde_as]
 pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]

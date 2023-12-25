@@ -19,6 +19,7 @@ pub mod source;
 pub mod split;
 
 pub use enumerator::*;
+use mark_redaction_derive::MarkRedaction;
 use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
@@ -29,7 +30,7 @@ use crate::source::SourceProperties;
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash, WithOptions)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash, WithOptions, MarkRedaction)]
 pub struct PubsubProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "pubsub.split_count")]

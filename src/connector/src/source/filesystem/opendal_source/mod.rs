@@ -21,6 +21,8 @@ use serde::Deserialize;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
+use mark_redaction_derive::MarkRedaction;
+
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
 use super::{OpendalFsSplit, S3Properties};
@@ -30,7 +32,7 @@ pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, MarkRedaction)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
@@ -78,7 +80,7 @@ impl OpendalSource for OpendalGcs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, MarkRedaction)]
 pub struct OpendalS3Properties {
     pub s3_properties: S3Properties,
     #[serde(rename = "s3.assume_role", default)]

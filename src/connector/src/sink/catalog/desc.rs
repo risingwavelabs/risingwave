@@ -99,6 +99,8 @@ impl SinkDesc {
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
             target_table: self.target_table,
+            // TODO #14115: redact_statement is inaccessible because it's defined in risingwave_frontend.
+            redacted_definition: None,
         }
     }
 

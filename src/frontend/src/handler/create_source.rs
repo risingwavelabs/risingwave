@@ -1371,6 +1371,7 @@ pub async fn handle_create_source(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql.clone();
+    let redacted_definition = handler_args.redacted_sql.clone();
 
     let source = PbSource {
         id: TableId::placeholder().table_id,
@@ -1390,6 +1391,7 @@ pub async fn handle_create_source(
         created_at_epoch: None,
         optional_associated_table_id: None,
         version: INITIAL_SOURCE_VERSION_ID,
+        redacted_definition,
     };
 
     let catalog_writer = session.catalog_writer()?;

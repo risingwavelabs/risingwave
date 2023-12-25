@@ -16,6 +16,7 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use mark_redaction_derive::MarkRedaction;
 use serde::Deserialize;
 use with_options::WithOptions;
 
@@ -26,7 +27,7 @@ use crate::source::SourceProperties;
 
 pub const NATS_CONNECTOR: &str = "nats";
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Deserialize, WithOptions, MarkRedaction)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,

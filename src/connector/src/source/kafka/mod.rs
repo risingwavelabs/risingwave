@@ -22,6 +22,7 @@ pub mod split;
 pub mod stats;
 
 pub use enumerator::*;
+use mark_redaction_derive::MarkRedaction;
 pub use private_link::*;
 pub use source::*;
 pub use split::*;
@@ -87,7 +88,7 @@ pub struct RdKafkaPropertiesConsumer {
     pub enable_auto_commit: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Deserialize, WithOptions, MarkRedaction)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source

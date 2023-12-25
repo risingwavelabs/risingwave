@@ -20,6 +20,7 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use itertools::Itertools;
+use mark_redaction_derive::MarkRedaction;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
@@ -68,7 +69,7 @@ impl CdcSourceType {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, MarkRedaction)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
     pub properties: HashMap<String, String>,
