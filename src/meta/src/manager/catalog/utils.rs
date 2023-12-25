@@ -308,6 +308,18 @@ impl QueryRewriter<'_> {
                 self.visit_expr(low);
                 self.visit_expr(high);
             }
+            Expr::SimilarTo {
+                expr,
+                pat,
+                esc_text,
+                ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+                if let Some(e) = esc_text {
+                    self.visit_expr(e);
+                }
+            }
 
             Expr::IsDistinctFrom(expr1, expr2)
             | Expr::IsNotDistinctFrom(expr1, expr2)

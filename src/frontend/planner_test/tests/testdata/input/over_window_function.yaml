@@ -508,3 +508,42 @@
   expected_outputs:
     - optimized_logical_plan_for_stream
     - optimized_logical_plan_for_batch
+
+# Odd frames
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 preceding and 10 preceding)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and current row)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between current row and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 10 following and 1 following)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch

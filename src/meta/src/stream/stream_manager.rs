@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
 use futures::stream::FuturesUnordered;
-use futures_async_stream::for_await;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{CreateType, Table};
@@ -397,7 +397,7 @@ impl GlobalStreamManager {
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        let res = building_worker_actors.iter().map(|(worker_id, actors)| {
+        building_worker_actors.iter().map(|(worker_id, actors)| {
             let stream_actors = actors
                 .iter()
                 .map(|actor_id| actor_map[actor_id].clone())
@@ -422,18 +422,13 @@ impl GlobalStreamManager {
                     })
                     .await?;
 
-                Ok::<_, MetaError>(())
+                Ok(()) as MetaResult<_>
             }
-        }).collect::<FuturesUnordered<_>>();
-
-        #[for_await]
-        for r in res {
-            r?;
-        }
+        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        let res = building_worker_actors
+        building_worker_actors
             .iter()
             .map(|(worker_id, actors)| async move {
                 let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
@@ -449,14 +444,11 @@ impl GlobalStreamManager {
                     })
                     .await?;
 
-                Ok::<_, MetaError>(())
+                Ok(()) as MetaResult<()>
             })
-            .collect::<FuturesUnordered<_>>();
-
-        #[for_await]
-        for r in res {
-            r?;
-        }
+            .collect::<FuturesUnordered<_>>()
+            .try_collect::<()>()
+            .await?;
 
         Ok(())
     }
