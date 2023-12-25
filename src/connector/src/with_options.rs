@@ -37,10 +37,6 @@ impl<T: crate::source::cdc::CdcSourceTypeTrait> WithOptions
 {
 }
 
-// We might want to box the struct if it has too many fields.
-
-impl<T: WithOptions> WithOptions for Box<T> {}
-
 // impl the trait for value types
 
 impl<T: WithOptions> WithOptions for Option<T> {}
