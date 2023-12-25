@@ -1289,7 +1289,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     );
 
     let epoch2 = initial_epoch + 2;
-    local_hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local_hummock_storage
+        .seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     local_hummock_storage
         .delete(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -1312,7 +1315,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .min()
             .unwrap()
     };
-    local_hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local_hummock_storage
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
     let min_object_id_epoch1 = min_object_id(&sync_result1);
     assert_eq!(

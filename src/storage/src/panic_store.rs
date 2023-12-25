@@ -130,7 +130,11 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn seal_current_epoch(&mut self, _next_epoch: u64, _opts: SealCurrentEpochOptions) {
+    async fn seal_current_epoch(
+        &mut self,
+        _next_epoch: u64,
+        _opts: SealCurrentEpochOptions,
+    ) -> StorageResult<()> {
         panic!("should not operate on the panic state store!")
     }
 

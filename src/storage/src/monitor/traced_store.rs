@@ -208,7 +208,11 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         self.inner.init(options).await
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        opts: SealCurrentEpochOptions,
+    ) -> StorageResult<()> {
         let _span = TraceSpan::new_seal_current_epoch_span(
             next_epoch,
             TracedSealCurrentEpochOptions::from(opts.clone()),

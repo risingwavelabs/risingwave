@@ -377,7 +377,9 @@ where
                 }
 
                 if upstream_chunk_buffer_is_empty {
-                    upstream_table.commit_no_data_expected(barrier.epoch)
+                    upstream_table
+                        .commit_no_data_expected(barrier.epoch)
+                        .await?;
                 } else {
                     upstream_table.commit(barrier.epoch).await?;
                 }
@@ -496,7 +498,9 @@ where
                     "backfill_finished_after_barrier"
                 );
                 if let Message::Barrier(barrier) = &msg {
-                    self.state_table.commit_no_data_expected(barrier.epoch);
+                    self.state_table
+                        .commit_no_data_expected(barrier.epoch)
+                        .await?;
                 }
                 yield msg;
             }

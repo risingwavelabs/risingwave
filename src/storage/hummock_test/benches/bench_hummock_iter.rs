@@ -99,7 +99,12 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
-    hummock_storage.seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test());
+    runtime
+        .block_on(
+            hummock_storage
+                .seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test()),
+        )
+        .unwrap();
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {

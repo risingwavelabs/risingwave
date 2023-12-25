@@ -462,7 +462,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     let vnodes = table.vnodes().clone();
     if let Some(old_state) = old_state {
         if old_state[1..] == current_partial_state[1..] {
-            table.commit_no_data_expected(epoch);
+            table.commit_no_data_expected(epoch).await?;
             return Ok(());
         } else {
             vnodes.iter_vnodes_scalar().for_each(|vnode| {
@@ -688,7 +688,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     if has_progress {
         table.commit(epoch).await?;
     } else {
-        table.commit_no_data_expected(epoch);
+        table.commit_no_data_expected(epoch).await?;
     }
     Ok(())
 }
@@ -713,7 +713,7 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit_no_data_expected(epoch);
+        table.commit_no_data_expected(epoch).await?;
     }
     Ok(())
 }

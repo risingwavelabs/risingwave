@@ -445,11 +445,17 @@ pub mod verify {
             Ok(())
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            opts: SealCurrentEpochOptions,
+        ) -> StorageResult<()> {
             if let Some(expected) = &mut self.expected {
-                expected.seal_current_epoch(next_epoch, opts.clone());
+                expected
+                    .seal_current_epoch(next_epoch, opts.clone())
+                    .await?;
             }
-            self.actual.seal_current_epoch(next_epoch, opts);
+            self.actual.seal_current_epoch(next_epoch, opts).await
         }
 
         fn epoch(&self) -> u64 {
@@ -789,7 +795,11 @@ pub mod boxed_state_store {
 
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
-        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            opts: SealCurrentEpochOptions,
+        ) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -854,8 +864,12 @@ pub mod boxed_state_store {
             self.init(options).await
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-            self.seal_current_epoch(next_epoch, opts)
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            opts: SealCurrentEpochOptions,
+        ) -> StorageResult<()> {
+            self.seal_current_epoch(next_epoch, opts).await
         }
     }
 
@@ -927,8 +941,12 @@ pub mod boxed_state_store {
             self.deref_mut().init(options)
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-            self.deref_mut().seal_current_epoch(next_epoch, opts)
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            opts: SealCurrentEpochOptions,
+        ) -> StorageResult<()> {
+            self.deref_mut().seal_current_epoch(next_epoch, opts).await
         }
     }
 
