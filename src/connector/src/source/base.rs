@@ -61,6 +61,9 @@ pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
 }
 
+/// Represents `WITH` options for sources.
+///
+/// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
 pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;

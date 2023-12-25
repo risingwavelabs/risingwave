@@ -28,7 +28,6 @@ pub fn derive_helper_attr(input: TokenStream) -> TokenStream {
         },
         _ => return quote! { compile_error!("WithOptions can only be derived for structs"); }.into(),
     };
-    let struct_name = input.ident;
 
     let mut assert_impls = vec![];
 
@@ -36,18 +35,30 @@ pub fn derive_helper_attr(input: TokenStream) -> TokenStream {
         let field_name = field.ident.as_ref().unwrap();
 
         assert_impls.push(quote!(
-            self.#field_name.assert_receiver_is_with_options();
+            crate::with_options::WithOptions::assert_receiver_is_with_options(&self.#field_name);
         ))
     }
 
+    let struct_name = input.ident;
     // This macro is only be expected to used in risingwave_connector. This trait is also defined there.
-    let code = quote! {
-        impl crate::with_options::WithOptions for #struct_name {
-            fn assert_receiver_is_with_options(&self) {
-                #(#assert_impls)*
+    if input.generics.params.is_empty() {
+        quote! {
+            impl crate::with_options::WithOptions for #struct_name {
+                fn assert_receiver_is_with_options(&self) {
+                    #(#assert_impls)*
+                }
             }
         }
-    };
-
-    code.into()
+        .into()
+    } else {
+        // Note: CDC properties have generics.
+        let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+        quote! {
+            impl #impl_generics crate::with_options::WithOptions for #struct_name #ty_generics #where_clause {
+                fn assert_receiver_is_with_options(&self) {
+                    #(#assert_impls)*
+                }
+            }
+        }.into()
+    }
 }

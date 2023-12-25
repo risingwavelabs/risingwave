@@ -29,7 +29,7 @@ use crate::source::SourceProperties;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct DatagenProperties {
     /// split_num means data source partition
     #[serde(rename = "datagen.split.num")]

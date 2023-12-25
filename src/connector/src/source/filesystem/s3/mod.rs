@@ -25,7 +25,7 @@ use crate::source::SourceProperties;
 pub const S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct S3PropertiesCommon {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
@@ -41,7 +41,7 @@ pub struct S3PropertiesCommon {
     pub endpoint_url: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct S3Properties {
     #[serde(flatten)]
     pub common: S3PropertiesCommon,

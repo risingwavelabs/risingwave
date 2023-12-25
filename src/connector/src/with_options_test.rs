@@ -194,7 +194,12 @@ fn has_with_options_attribute(attrs: &[Attribute]) -> bool {
         if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
             return meta_list.path.is_ident("derive")
                 && meta_list.nested.iter().any(|nested| match nested {
-                    syn::NestedMeta::Meta(Meta::Path(path)) => path.is_ident("WithOptions"),
+                    syn::NestedMeta::Meta(Meta::Path(path)) => {
+                        // Check if the path contains WithOptions
+                        path.segments
+                            .iter()
+                            .any(|segment| segment.ident == "WithOptions")
+                    }
                     _ => false,
                 });
         }

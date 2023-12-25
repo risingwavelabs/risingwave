@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-/// Dummy trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
+/// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
 ///
 /// This is used to ensure the `WITH` options types have reasonable structure.
 ///
@@ -25,6 +25,21 @@ pub trait WithOptions {
     #[inline(always)]
     fn assert_receiver_is_with_options(&self) {}
 }
+
+// Currently CDC properties are handled specially.
+// - It simply passes HashMap to Java DBZ.
+// - It's not handled by serde.
+// - It contains fields other than WITH options.
+// TODO: remove the workaround here. And also use #[derive] for it.
+
+impl<T: crate::source::cdc::CdcSourceTypeTrait> WithOptions
+    for crate::source::cdc::CdcProperties<T>
+{
+}
+
+// We might want to box the struct if it has too many fields.
+
+impl<T: WithOptions> WithOptions for Box<T> {}
 
 // impl the trait for value types
 

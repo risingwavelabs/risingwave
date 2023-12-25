@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use risingwave_common::types::JsonbVal;
 use serde_derive::{Deserialize, Serialize};
+use with_options::WithOptions;
 
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -114,7 +115,7 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, WithOptions)]
 pub struct TestSourceProperties {
     properties: HashMap<String, String>,
 }
