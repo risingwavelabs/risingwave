@@ -435,6 +435,10 @@ impl HummockReadVersion {
         &self.committed
     }
 
+    /// We have assumption that the watermark is increasing monotonically. Therefore,
+    /// here if the upper layer usage has passed an regressed watermark, we should
+    /// filter out the regressed watermark. Currently the kv log store may write
+    /// regressed watermark
     pub fn filter_regress_watermarks(&self, watermarks: &mut Vec<VnodeWatermark>) {
         if let Some(watermark_index) = &self.table_watermarks {
             watermark_index.filter_regress_watermarks(watermarks)
