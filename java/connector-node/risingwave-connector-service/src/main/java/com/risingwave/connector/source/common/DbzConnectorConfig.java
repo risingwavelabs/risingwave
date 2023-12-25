@@ -166,6 +166,14 @@ public class DbzConnectorConfig {
             if (isCdcBackfill) {
                 // skip the initial snapshot for cdc backfill
                 postgresProps.setProperty("snapshot.mode", "never");
+
+                // if startOffset is specified, we should continue
+                // reading changes from the given offset
+                if (null != startOffset && !startOffset.isBlank()) {
+                    postgresProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+
             } else {
                 // if snapshot phase is finished and offset is specified, we will continue reading
                 // changes from the given offset
