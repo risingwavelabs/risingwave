@@ -52,10 +52,10 @@ use risingwave_expr::function;
 /// ----
 /// NULL
 ///
-/// statement error
+/// query error number of elements to trim must be between 0 and 6
 /// select trim_array(array[1,2,3,4,5,null], 7);
 ///
-/// statement error
+/// query error number of elements to trim must be between 0 and 6
 /// select trim_array(array[1,2,3,4,5,null], -1);
 ///
 /// statement error
@@ -74,7 +74,7 @@ use risingwave_expr::function;
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
     let values = array.iter();
     ensure!(
-        (0..array.len() as i32).contains(&n),
+        (0..=array.len() as i32).contains(&n),
         "number of elements to trim must be between 0 and {}",
         array.len()
     );
