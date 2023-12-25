@@ -140,7 +140,7 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
