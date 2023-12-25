@@ -146,6 +146,13 @@ impl From<PbFieldNotFound> for ExprError {
 #[derive(Error, Debug)]
 pub struct MultiExprError(Box<[ExprError]>);
 
+impl MultiExprError {
+    /// Returns the first error.
+    pub fn first(self) -> ExprError {
+        self.0.into_vec().into_iter().next().expect("first error")
+    }
+}
+
 impl Display for MultiExprError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, e) in self.0.iter().enumerate() {
