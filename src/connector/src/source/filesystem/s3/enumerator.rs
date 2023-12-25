@@ -138,7 +138,6 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
-            unknown_fields: Default::default(),
         };
         let mut enumerator =
             S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::default().into())

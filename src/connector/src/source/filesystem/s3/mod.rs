@@ -41,20 +41,23 @@ pub struct S3PropertiesCommon {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct S3Properties {
     #[serde(flatten)]
     pub common: S3PropertiesCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl From<S3PropertiesCommon> for S3Properties {
     fn from(common: S3PropertiesCommon) -> Self {
-        Self { common }
+        Self {
+            common,
+            unknown_fields: HashMap::new(),
+        }
     }
 }
 
