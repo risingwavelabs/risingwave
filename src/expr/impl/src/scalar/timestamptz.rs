@@ -96,10 +96,12 @@ pub fn timestamptz_timestamptz_sub(l: Timestamptz, r: Timestamptz) -> Result<Int
     let usecs = l
         .timestamp_micros()
         .checked_sub(r.timestamp_micros())
-        .context("numeric overflow")?;
+        .context("numeric out of range: overflow")?;
     let interval = Interval::from_month_day_usec(0, 0, usecs);
     // https://github.com/postgres/postgres/blob/REL_15_3/src/backend/utils/adt/timestamp.c#L2697
-    let interval = interval.justify_hour().context("numeric overflow")?;
+    let interval = interval
+        .justify_hour()
+        .context("numeric out of range: overflow")?;
     Ok(interval)
 }
 
@@ -111,7 +113,9 @@ pub fn timestamptz_interval_sub(
 ) -> Result<Timestamptz> {
     timestamptz_interval_add(
         input,
-        interval.checked_neg().context("numeric overflow")?,
+        interval
+            .checked_neg()
+            .context("numeric out of range: overflow")?,
         time_zone,
     )
 }
@@ -135,7 +139,9 @@ pub fn timestamptz_interval_add(
         // Only convert into and from naive local when necessary because it is lossy.
         // See `e2e_test/batch/functions/issue_12072.slt.part` for the difference.
         let naive = timestamptz_at_time_zone(t, time_zone)?;
-        let naive = naive.checked_add(qualitative).context("numeric overflow")?;
+        let naive = naive
+            .checked_add(qualitative)
+            .context("numeric out of range: overflow")?;
         t = timestamp_at_time_zone(naive, time_zone)?;
     }
     let t = timestamptz_interval_quantitative(t, quantitative, i64::checked_add)?;

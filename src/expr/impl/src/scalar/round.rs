@@ -21,7 +21,7 @@ pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
     if digits < 0 {
         input
             .round_left_ties_away(digits.unsigned_abs())
-            .context("numeric overflow")
+            .context("numeric out of range: overflow")
     } else {
         // rust_decimal can only handle up to 28 digits of scale
         Ok(input.round_dp_ties_away((digits as u32).min(Decimal::MAX_PRECISION.into())))

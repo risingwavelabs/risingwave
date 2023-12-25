@@ -43,14 +43,13 @@ select pow(100000, 0);
 ----
 1
 
-statement error underflow
+statement error numeric out of range: underflow
 select pow(100000, -200000000000000);
 
-statement error Numeric out of range
+statement error numeric out of range: overflow
 select pow(100000, 200000000000000);
 
-
-statement error Numeric out of range
+statement error numeric out of range: overflow
 select pow(-100000, 200000000000001);
 
 query R
@@ -98,14 +97,14 @@ select 100000 ^ 0;
 ----
 1
 
-statement error underflow
+statement error numeric out of range: underflow
 select 100000 ^ -200000000000000;
 
-statement error Numeric out of range
+statement error numeric out of range: overflow
 select 100000 ^ 200000000000000;
 
 
-statement error Numeric out of range
+statement error numeric out of range: overflow
 select -100000 ^ 200000000000001;
 
 query RRRR
@@ -231,10 +230,10 @@ select exp(2::smallint)
 ----
 7.38905609893065
 
-statement error Numeric out of range: overflow
+statement error numeric out of range: overflow
 select exp(10000000);
 
-statement error Numeric out of range: underflow
+statement error numeric out of range: underflow
 select exp(-10000000);
 
 query TRR

@@ -174,10 +174,10 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
     }
     let res = l.powf(r);
     if res.is_infinite() && l.is_finite() && r.is_finite() {
-        return Err(anyhow!("numeric overflow"));
+        return Err(anyhow!("numeric out of range: overflow"));
     }
     if res.is_zero() && l.is_finite() && r.is_finite() && !l.is_zero() {
-        return Err(anyhow!("numeric underflow"));
+        return Err(anyhow!("numeric out of range: underflow"));
     }
     Ok(res)
 }
@@ -189,7 +189,7 @@ pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
     l.checked_powd(&r).map_err(|e| match e {
         PowError::ZeroNegative => err_pow_zero_negative(),
         PowError::NegativeFract => err_pow_negative_fract(),
-        PowError::Overflow => anyhow!("numeric overflow"),
+        PowError::Overflow => anyhow!("numeric out of range: overflow"),
     })
 }
 

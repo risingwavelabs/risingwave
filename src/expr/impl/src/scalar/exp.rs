@@ -40,9 +40,9 @@ pub fn exp_f64(input: F64) -> Result<F64> {
         // means that the operation had an overflow or an underflow, and the appropriate
         // error should be returned.
         if res.is_infinite() {
-            bail!("numeric overflow")
+            bail!("numeric out of range: overflow")
         } else if res.is_zero() {
-            bail!("numeric underflow")
+            bail!("numeric out of range: underflow")
         } else {
             Ok(res)
         }
@@ -67,7 +67,9 @@ pub fn log10_f64(input: F64) -> Result<F64> {
 
 #[function("exp(decimal) -> decimal")]
 pub fn exp_decimal(input: Decimal) -> Result<Decimal> {
-    input.checked_exp().context("numeric overflow")
+    input
+        .checked_exp()
+        .context("numeric out of range: overflow")
 }
 
 #[function("ln(decimal) -> decimal")]
@@ -95,13 +97,13 @@ mod tests {
     #[test]
     fn underflow() {
         let res = exp_f64((-1000.0).into()).unwrap_err();
-        assert!(res.to_string().contains("numeric underflow"));
+        assert!(res.to_string().contains("numeric out of range: underflow"));
     }
 
     #[test]
     fn overflow() {
         let res = exp_f64(1000.0.into()).unwrap_err();
-        assert!(res.to_string().contains("numeric overflow"));
+        assert!(res.to_string().contains("numeric out of range: overflow"));
     }
 
     #[test]

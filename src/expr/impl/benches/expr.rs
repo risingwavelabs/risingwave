@@ -562,7 +562,7 @@ fn bench_raw(c: &mut Criterion) {
                 overflow |= (c ^ a) & (c ^ b) < 0;
             }
             if overflow {
-                bail!("numeric overflow");
+                bail!("numeric out of range: overflow");
             }
             c.set_bitmap(a.null_bitmap() & b.null_bitmap());
             Ok(c)
