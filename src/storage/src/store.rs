@@ -21,10 +21,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
@@ -503,30 +506,64 @@ impl From<TracedInitOptions> for InitOptions {
 }
 
 #[derive(Clone, Debug)]
-pub struct SealCurrentEpochOptions {}
+pub struct SealCurrentEpochOptions {
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+}
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
-    fn from(_value: SealCurrentEpochOptions) -> Self {
-        TracedSealCurrentEpochOptions {}
+    fn from(value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
+                (
+                    direction == WatermarkDirection::Ascending,
+                    watermarks
+                        .iter()
+                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .collect(),
+                )
+            }),
+        }
     }
 }
 
-impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
-        Ok(SealCurrentEpochOptions {})
+impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
+    fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
+        SealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
+                (
+                    if is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    watermarks
+                        .iter()
+                        .map(|serialized_watermark| {
+                            Message::decode(serialized_watermark.as_slice())
+                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .expect("should not failed")
+                        })
+                        .collect(),
+                )
+            }),
+        }
     }
 }
 
 impl SealCurrentEpochOptions {
-    #[expect(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
+        Self {
+            table_watermarks: Some((direction, watermarks)),
+        }
     }
 
-    #[cfg(any(test, feature = "test"))]
+    pub fn no_watermark() -> Self {
+        Self {
+            table_watermarks: None,
+        }
+    }
+
     pub fn for_test() -> Self {
-        Self::new()
+        Self::no_watermark()
     }
 }

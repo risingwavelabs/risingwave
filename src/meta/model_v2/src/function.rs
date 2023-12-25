@@ -74,6 +74,16 @@ impl From<Kind> for FunctionKind {
     }
 }
 
+impl From<FunctionKind> for Kind {
+    fn from(value: FunctionKind) -> Self {
+        match value {
+            FunctionKind::Scalar => Self::Scalar(Default::default()),
+            FunctionKind::Table => Self::Table(Default::default()),
+            FunctionKind::Aggregate => Self::Aggregate(Default::default()),
+        }
+    }
+}
+
 impl From<PbFunction> for ActiveModel {
     fn from(function: PbFunction) -> Self {
         Self {
