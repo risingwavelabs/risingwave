@@ -121,7 +121,10 @@ pub struct TestSourceProperties {
 }
 
 impl TryFromHashmap for TestSourceProperties {
-    fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(
+        props: HashMap<String, String>,
+        _deny_unknown_fields: bool,
+    ) -> anyhow::Result<Self> {
         if cfg!(any(madsim, test)) {
             Ok(TestSourceProperties { properties: props })
         } else {
@@ -237,4 +240,10 @@ impl SourceProperties for TestSourceProperties {
     type SplitReader = TestSourceSplitReader;
 
     const SOURCE_NAME: &'static str = TEST_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for TestSourceProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
 }

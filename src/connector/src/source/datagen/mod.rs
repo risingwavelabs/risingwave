@@ -65,6 +65,13 @@ impl SourceProperties for DatagenProperties {
     const SOURCE_NAME: &'static str = DATAGEN_CONNECTOR;
 }
 
+impl crate::source::UnknownFields for DatagenProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        // FIXME: datagen does not handle unknown fields yet
+        HashMap::new()
+    }
+}
+
 fn default_rows_per_second() -> u64 {
     10
 }

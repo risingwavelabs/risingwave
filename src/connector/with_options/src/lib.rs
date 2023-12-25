@@ -16,7 +16,34 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-/// Annotates that the struct represents the WITH properties for a connector.
+/// Annotates that the struct represents the `WITH` properties for a connector.
+/// This is a dummy marker that has no effect on the generated code. It's used to generate the `with_option_*.yaml` files.
+///
+/// ## Notes about how to define property structs
+///
+/// ### Prefer strongly-typed fields
+///
+/// Avoid using `HashMap` with `#[serde(flatten)]` to include all unknown fields.
+/// Declare all fields explicitly instead.
+///
+/// The only exception now is CDC, which needs to pass a lot of options as-is to Debezium.
+///
+/// ### `serde` attributes
+///
+/// Always add `#[serde(deny_unknown_fields)]` to the top-level struct.
+/// However, do not add it if there's a `HashMap` field with `#[serde(flatten)]`.
+///
+/// ### Common struct
+///
+/// When there are some fields can be grouped together, and/or can be shared by source and sink,
+/// or by multiple connectors, define a struct for them and use the common struct as a
+/// `#[serde(flatten)]` field.
+///
+/// Add `#[derive(WithOptions)]` to both the outer and the inner struct.
+///
+/// Avoid using nested `#[serde(flatten)]` field in the common struct,
+/// because this doesn't work with `#[serde(deny_unknown_fields)]`.
+/// Put all flatten fields in the top-level struct instead.
 #[proc_macro_derive(WithOptions, attributes(with_option))]
 pub fn derive_helper_attr(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
