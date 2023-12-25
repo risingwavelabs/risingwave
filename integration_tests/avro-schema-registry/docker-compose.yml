@@ -1,0 +1,57 @@
+---
+version: "3"
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  datagen:
+    image: python:3.10
+    depends_on: [message_queue]
+    volumes:
+      - ./datagen.py:/datagen.py
+      - ./avro_schema_create.py:/avro_schema_create.py
+      - ./prepare_data.sql:/prepare_data.sql
+    command:
+      - /bin/sh
+      - -c
+      - |
+        pip install requests psycopg2
+        python /datagen.py /prepare_data.sql
+        python /avro_schema_create.py risingwave-standalone message_queue
+    restart: always
+    container_name: datagen
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose
