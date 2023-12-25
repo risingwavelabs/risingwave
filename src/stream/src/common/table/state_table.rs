@@ -40,9 +40,10 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, range_of_prefix,
+    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
     start_bound_of_excluded_prefix, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
@@ -1040,7 +1041,7 @@ where
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -1109,7 +1110,7 @@ where
         // per epoch.
         self.watermark_buffer_strategy.tick();
         self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
     }
 
     /// Write to state store.
@@ -1118,8 +1119,6 @@ where
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
-
-        let mut delete_ranges = Vec::new();
 
         let prefix_serializer = if self.pk_indices().is_empty() {
             None
@@ -1156,10 +1155,11 @@ where
             )
         });
 
+        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
+
         // Compute Delete Ranges
         if should_clean_watermark
             && let Some(watermark_suffix) = watermark_suffix
-            && let Some(first_byte) = watermark_suffix.first()
         {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
@@ -1172,36 +1172,21 @@ where
                 .unwrap()
                 .is_ascending()
             {
-                // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
-                // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
-                // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
-                let range_begin_suffix = vec![*first_byte];
-                for vnode in self.vnodes.iter_vnodes() {
-                    let mut range_begin = vnode.to_be_bytes().to_vec();
-                    let mut range_end = range_begin.clone();
-                    range_begin.extend(&range_begin_suffix);
-                    range_end.extend(&watermark_suffix);
-                    delete_ranges.push((
-                        Bound::Included(Bytes::from(range_begin)),
-                        Bound::Excluded(Bytes::from(range_end)),
-                    ));
-                }
+                seal_watermark = Some((
+                    WatermarkDirection::Ascending,
+                    VnodeWatermark::new(
+                        self.vnodes.clone(),
+                        Bytes::copy_from_slice(watermark_suffix.as_ref())
+                    )
+                ));
             } else {
-                assert_ne!(*first_byte, u8::MAX);
-                let following_bytes = next_key(&watermark_suffix[1..]);
-                if !following_bytes.is_empty() {
-                    for vnode in self.vnodes.iter_vnodes() {
-                        let mut range_begin = vnode.to_be_bytes().to_vec();
-                        let mut range_end = range_begin.clone();
-                        range_begin.push(*first_byte);
-                        range_begin.extend(&following_bytes);
-                        range_end.push(first_byte + 1);
-                        delete_ranges.push((
-                            Bound::Included(Bytes::from(range_begin)),
-                            Bound::Excluded(Bytes::from(range_end)),
-                        ));
-                    }
-                }
+                seal_watermark = Some((
+                    WatermarkDirection::Descending,
+                    VnodeWatermark::new(
+                        self.vnodes.clone(),
+                        Bytes::copy_from_slice(watermark_suffix.as_ref())
+                    )
+                ));
             }
         }
         self.prev_cleaned_watermark = watermark;
@@ -1213,13 +1198,18 @@ where
         // 2. Mark the cache as not_synced, so we can still refill it later.
         // 3. When refilling the cache,
         //    we just refill from the largest value of the cache, as the lower bound.
-        if USE_WATERMARK_CACHE && !delete_ranges.is_empty() {
+        if USE_WATERMARK_CACHE && seal_watermark.is_some() {
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush(delete_ranges).await?;
-        self.local_store
-            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
+        self.local_store.flush(vec![]).await?;
+        let seal_opt = match seal_watermark {
+            Some((direction, watermark)) => {
+                SealCurrentEpochOptions::new(vec![watermark], direction)
+            }
+            None => SealCurrentEpochOptions::no_watermark(),
+        };
+        self.local_store.seal_current_epoch(next_epoch, seal_opt);
         Ok(())
     }
 
