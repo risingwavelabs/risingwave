@@ -117,7 +117,7 @@ impl GlobalBarrierManager {
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
-            MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
+            MetadataManager::V2(_) => self.recover_background_mv_progress_v2(),
         }
     }
 
@@ -216,7 +216,7 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
-    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
+    fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
         unimplemented!("support recover background mv progress in v2");
     }
 
@@ -390,11 +390,11 @@ impl GlobalBarrierManager {
     async fn migrate_actors(&self) -> MetaResult<BarrierActorInfo> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.migrate_actors_v1().await,
-            MetadataManager::V2(_) => self.migrate_actors_v2().await,
+            MetadataManager::V2(_) => self.migrate_actors_v2(),
         }
     }
 
-    async fn migrate_actors_v2(&self) -> MetaResult<BarrierActorInfo> {
+    fn migrate_actors_v2(&self) -> MetaResult<BarrierActorInfo> {
         unimplemented!("support migrate actors in v2");
     }
 
