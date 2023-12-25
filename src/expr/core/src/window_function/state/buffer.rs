@@ -45,7 +45,7 @@ pub struct CurrWindow<'a, K> {
 
 impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     pub fn new(frame: Frame, enable_delta: bool) -> Self {
-        assert!(frame.bounds.is_valid());
+        assert!(frame.bounds.validate().is_ok());
         if enable_delta {
             // TODO(rc): currently only support `FrameExclusion::NoOthers` for delta
             assert!(frame.exclusion.is_no_others());

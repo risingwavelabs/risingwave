@@ -8,7 +8,7 @@
             "command": "/bin/bash",
             "args": [
                 "-c",
-                "risedev k ; cargo build --bin risingwave"
+                "${workspaceFolder}/risedev k ; cargo build --bin risingwave"
             ]
         }
     ]
