@@ -12343,6 +12343,11 @@ dependencies = [
 [[package]]
 name = "with_options"
 version = "1.5.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
 
 [[package]]
 name = "workspace-config"
