@@ -47,6 +47,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -60,7 +61,7 @@ pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
 }
 
-pub trait SourceProperties: TryFromHashmap + Clone {
+pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;

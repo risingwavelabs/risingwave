@@ -17,6 +17,9 @@ use std::collections::HashMap;
 /// Dummy trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
 ///
 /// This is used to ensure the `WITH` options types have reasonable structure.
+///
+/// TODO: add this bound for sink. There's a `SourceProperties` trait for sources, but no similar
+/// things for sinks.
 pub trait WithOptions {
     #[doc(hidden)]
     #[inline(always)]
