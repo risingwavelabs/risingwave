@@ -877,9 +877,9 @@ dependencies = ["prepare"]
 condition = { env_set = [
   "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*",
+  "./java/connector-node/**/*.java",
 ], output = [
-  "./java/connector-node/assembly/target/**/*",
+  "./java/connector-node/assembly/target/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
