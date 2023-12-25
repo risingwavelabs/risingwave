@@ -320,7 +320,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics
                 .executor_metrics()
                 .row_seq_scan_next_duration
-                .with_label_values(&metrics.executor_labels(&identity))
+                .with_guarded_label_values(&metrics.executor_labels(&identity))
         });
 
         if ordered {
