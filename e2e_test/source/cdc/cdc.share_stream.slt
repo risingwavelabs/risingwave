@@ -23,6 +23,13 @@ create source mysql_mytest with (
  server.id = '5601'
 );
 
+statement error The upstream table name must contain database name prefix*
+create table products_test ( id INT,
+   name STRING,
+   description STRING,
+   PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.products';
+
 statement ok
 create table products_test ( id INT,
  name STRING,
@@ -174,6 +181,16 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_jsonb_array jsonb[],
  PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) from pg_source table 'public.postgres_all_types';
+
+statement error The upstream table name must contain schema name prefix*
+CREATE TABLE person_new (
+    id int,
+    name varchar,
+    email_address varchar,
+    credit_card varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'person';
 
 statement ok
 CREATE TABLE person_new (

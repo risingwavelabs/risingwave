@@ -154,7 +154,7 @@ impl PostgresExternalTableReader {
         let field_names = rw_schema
             .fields
             .iter()
-            .map(|f| format!("{}", Self::quote_column(&f.name)))
+            .map(|f| Self::quote_column(&f.name))
             .join(",");
 
         Ok(Self {
