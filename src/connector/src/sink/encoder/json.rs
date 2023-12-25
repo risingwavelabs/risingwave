@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, Decimal, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
@@ -62,6 +62,18 @@ impl JsonEncoder {
         }
     }
 
+    pub fn new_with_es(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        Self {
+            schema,
+            col_indices,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            custom_json_type: CustomJsonType::Es,
+            kafka_connect: None,
+        }
+    }
+
     pub fn new_with_doris(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
@@ -83,22 +95,6 @@ impl JsonEncoder {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
             ..self
-        }
-    }
-
-    pub fn new_with_big_query(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        timestamp_handling_mode: TimestampHandlingMode,
-    ) -> Self {
-        Self {
-            schema,
-            col_indices,
-            date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Bigquery,
-            kafka_connect: None,
         }
     }
 }
@@ -216,7 +212,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::None | CustomJsonType::Bigquery => {
+            _ => {
                 json!(v.to_text())
             }
         },
@@ -260,10 +256,10 @@ fn datum_to_json_object(
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            let asad: Map<String, Value> = serde_json::from_str(&jsonb_ref.to_string()).unwrap();
-            json!(asad)
-        }
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
+            CustomJsonType::Es => JsonbVal::from(jsonb_ref).take(),
+            _ => json!(jsonb_ref.to_string()),
+        },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
@@ -304,7 +300,7 @@ fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                CustomJsonType::None | CustomJsonType::Bigquery => {
+                _ => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()

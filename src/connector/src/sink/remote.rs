@@ -25,7 +25,7 @@ use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
-use risingwave_common::array::{StreamChunk, ArrayImpl, JsonbArrayBuilder};
+use risingwave_common::array::{ArrayImpl, JsonbArrayBuilder, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
@@ -55,6 +55,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -64,8 +65,6 @@ use crate::sink::{
     SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
 use crate::ConnectorParams;
-
-use super::encoder::{JsonEncoder, DateHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode, RowEncoder};
 
 macro_rules! def_remote_sink {
     () => {
@@ -149,7 +148,13 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        RemoteLogSinker::new(self.param.clone(), writer_param, Self::SINK_NAME, self.param.schema()).await
+        RemoteLogSinker::new(
+            self.param.clone(),
+            writer_param,
+            Self::SINK_NAME,
+            self.param.schema(),
+        )
+        .await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -233,49 +238,52 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
     .map_err(|e| anyhow!("unable to validate: {:?}", e))?
 }
 
-enum StreamChunkConverter{
-    ES(ESStreamChunkConverter),
+enum StreamChunkConverter {
+    Es(EsStreamChunkConverter),
     Other,
 }
-impl StreamChunkConverter{
-    fn new(sink_name: &str, schema:Schema) -> Self{
+impl StreamChunkConverter {
+    fn new(sink_name: &str, schema: Schema) -> Self {
         if sink_name.eq("elasticsearch") {
-            StreamChunkConverter::ES(ESStreamChunkConverter::new(schema))
-        }else{
+            StreamChunkConverter::Es(EsStreamChunkConverter::new(schema))
+        } else {
             StreamChunkConverter::Other
         }
     }
 
-    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk>{
+    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         match self {
-            StreamChunkConverter::ES(es) => {
-                es.convert_chunk(chunk)
-            }
-            _ => { Ok(chunk) }
+            StreamChunkConverter::Es(es) => es.convert_chunk(chunk),
+            _ => Ok(chunk),
         }
     }
 }
-struct ESStreamChunkConverter{
+struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
 }
-impl ESStreamChunkConverter{
-    fn new(schema:Schema) -> Self{
-        let json_encoder = JsonEncoder::new(schema, None, DateHandlingMode::String, TimestampHandlingMode::String, TimestamptzHandlingMode::UtcWithoutSuffix);
-        Self{
-            json_encoder,
-        }
+impl EsStreamChunkConverter {
+    fn new(schema: Schema) -> Self {
+        let json_encoder = JsonEncoder::new_with_es(schema, None);
+        Self { json_encoder }
     }
 
-    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk>{
+    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         let mut ops = vec![];
-        let mut json_builder = <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
-        for (op,row) in chunk.rows(){
+        let mut json_builder =
+            <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        for (op, row) in chunk.rows() {
             ops.push(op);
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
-            risingwave_common::array::ArrayBuilder::append(&mut json_builder, Some(json.as_scalar_ref()));
+            risingwave_common::array::ArrayBuilder::append(
+                &mut json_builder,
+                Some(json.as_scalar_ref()),
+            );
         }
         let a = risingwave_common::array::ArrayBuilder::finish(json_builder);
-        Ok(StreamChunk::new(ops,vec![std::sync::Arc::new(ArrayImpl::Jsonb(a))]))
+        Ok(StreamChunk::new(
+            ops,
+            vec![std::sync::Arc::new(ArrayImpl::Jsonb(a))],
+        ))
     }
 }
 pub struct RemoteLogSinker {
@@ -286,7 +294,12 @@ pub struct RemoteLogSinker {
 }
 
 impl RemoteLogSinker {
-    async fn new(sink_param: SinkParam, writer_param: SinkWriterParam, sink_name: &str, schema: Schema) -> Result<Self> {
+    async fn new(
+        sink_param: SinkParam,
+        writer_param: SinkWriterParam,
+        sink_name: &str,
+        schema: Schema,
+    ) -> Result<Self> {
         let SinkWriterStreamHandle {
             request_sender,
             response_stream,
