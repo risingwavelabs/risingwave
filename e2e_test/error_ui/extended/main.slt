@@ -1,7 +1,7 @@
 query error
 selet 1;
 ----
-db error: ERROR: Failed to prepare the statement
+db error: ERROR: Failed to run the query
 
 Caused by:
   sql parser error: Expected an SQL statement, found: selet at line:1, column:6
@@ -11,8 +11,9 @@ Near "selet"
 query error
 select 1/0;
 ----
-db error: ERROR: Failed to execute the statement
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: in function "divide"
+  3: division by zero
