@@ -80,7 +80,8 @@ def generate_avro_schema(postgres_schema):
 
 
 def register_avro_schema(avro_schema, subject_name):
-    avro_schema = Schema(json.dumps(avro_schema), "AVRO")
+    avro_schema_str = json.dumps(avro_schema)
+    print(avro_schema_str)
 
     # Create a Kafka Producer client
     client = SchemaRegistryClient({
@@ -88,7 +89,8 @@ def register_avro_schema(avro_schema, subject_name):
     })
 
     # Register the schema
-    schema_id = client.register_schema(subject_name, avro_schema)
+    schema_id = client.register_schema(
+        subject_name, Schema(avro_schema_str, "AVRO"))
 
     print("Schema registered successfully with ID:", schema_id)
 

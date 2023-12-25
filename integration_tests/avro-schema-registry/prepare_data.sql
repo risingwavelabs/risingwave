@@ -1,4 +1,4 @@
-create table t (
+create table if not exists t (
     id bigint primary key,
     v1 boolean,
     v2 smallint,
