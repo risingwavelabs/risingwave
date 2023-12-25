@@ -35,8 +35,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      division by zero
+    Caused by these errors (recent errors listed first):
+      1: in function "divide"
+      2: division by zero
 - before:
   - create_table_and_mv
   sql: |
@@ -44,8 +45,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      numeric out of range
+    Caused by these errors (recent errors listed first):
+      1: in function "add"
+      2: numeric out of range
 - before:
   - create_table_and_mv
   sql: |
@@ -53,8 +55,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      invalid input syntax for type bigint: "a"
+    Caused by these errors (recent errors listed first):
+      1: in function "cast"
+      2: invalid input syntax for type bigint: "a"
 - before:
   - create_table_and_mv
   sql: |
@@ -62,8 +65,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      invalid input syntax for type bigint: "a"
+    Caused by these errors (recent errors listed first):
+      1: in function "cast"
+      2: invalid input syntax for type bigint: "a"
 - before:
   - create_table_and_mv
   sql: |
@@ -148,8 +152,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      invalid input syntax for type bigint: "43.0"
+    Caused by these errors (recent errors listed first):
+      1: in function "cast"
+      2: invalid input syntax for type bigint: "43.0"
 - before:
   - create_table_and_mv
   sql: |

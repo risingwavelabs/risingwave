@@ -592,8 +592,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      division by zero
+    Caused by these errors (recent errors listed first):
+      1: in function "divide"
+      2: division by zero
 - sql: |
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
