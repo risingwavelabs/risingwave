@@ -4,8 +4,9 @@ import sys
 # PostgreSQL Connection Details
 DB_NAME = 'dev'
 DB_USER = 'root'
-DB_HOST = 'localhost'
+DB_HOST = sys.argv[1]
 DB_PORT = '4566'
+SQL_SCRIPT_PATH = sys.argv[2]
 
 
 def execute_sql_script(script_path):
@@ -31,5 +32,4 @@ def execute_sql_script(script_path):
 
 
 if __name__ == "__main__":
-    sql_script_path = sys.argv[1]
-    execute_sql_script(sql_script_path)
+    execute_sql_script(SQL_SCRIPT_PATH)

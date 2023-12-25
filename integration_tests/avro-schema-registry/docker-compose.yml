@@ -27,7 +27,7 @@ services:
       service: message_queue
   datagen:
     image: python:3.10
-    depends_on: 
+    depends_on:
       - message_queue
       - risingwave-standalone
     volumes:
@@ -39,7 +39,7 @@ services:
       - -c
       - |
         pip install requests psycopg2 confluent_kafka
-        python /datagen.py /prepare_data.sql
+        python /datagen.py risingwave-standalone /prepare_data.sql
         python /avro_schema_create.py risingwave-standalone message_queue
     restart: always
     container_name: datagen
