@@ -270,8 +270,8 @@ def section_compaction(outer_panels):
                         ),
 
                         panels.target(
-                            f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_count - {{%s}} @ {{%s}}"
+                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
