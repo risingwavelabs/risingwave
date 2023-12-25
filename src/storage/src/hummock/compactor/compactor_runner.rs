@@ -434,7 +434,7 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
+        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {} input: {:?}",
             compact_task.compaction_group_id,
             compact_task.task_id,
             compact_task_statistics,
@@ -443,7 +443,8 @@ pub async fn compact(
             compact_task.existing_table_ids,
             parallelism,
             task_memory_capacity_with_parallelism,
-            optimize_by_copy_block
+            optimize_by_copy_block,
+            compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta

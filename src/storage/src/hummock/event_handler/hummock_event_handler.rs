@@ -576,7 +576,17 @@ impl HummockEventHandler {
                 }
             }
 
-            HummockEvent::LocalSealEpoch { .. } => {}
+            HummockEvent::LocalSealEpoch {
+                epoch,
+                opts,
+                table_id,
+                ..
+            } => {
+                if let Some((direction, watermarks)) = opts.table_watermarks {
+                    self.uploader
+                        .add_table_watermarks(epoch, table_id, watermarks, direction)
+                }
+            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {

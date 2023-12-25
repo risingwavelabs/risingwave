@@ -47,7 +47,9 @@ create table t1 () with (
 );
 
 statement ok
-create table t1 () with (
+create table t1 (primary key(rw_key))
+INCLUDE KEY AS rw_key
+with (
     connector = 'kafka',
     topic = 'upsert_avro_json-topic-record',
     properties.bootstrap.server = 'message_queue:29092'
