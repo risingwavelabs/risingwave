@@ -503,13 +503,14 @@ impl MetaClient {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
-    ) -> Result<CatalogVersion> {
+    ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id,
             parallelism: Some(parallelism),
         };
-        let resp = self.inner.alter_parallelism(request).await?;
-        Ok(resp.version)
+
+        self.inner.alter_parallelism(request).await?;
+        Ok(())
     }
 
     pub async fn replace_table(

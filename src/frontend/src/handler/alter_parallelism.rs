@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::bail;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
+use risingwave_sqlparser::keywords::Keyword;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -52,28 +54,50 @@ pub async fn handle_alter_parallelism(
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                 sink.id.sink_id()
             }
-            _ => unreachable!(),
+            _ => bail!(
+                "invalid statement type for alter parallelism: {:?}",
+                stmt_type
+            ),
         }
+    };
+
+    // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.
+    let auto_parallelism = PbTableParallelism {
+        parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
     };
 
     let target_parallelism = match parallelism {
         SetVariableValue::Single(SetVariableValueSingle::Ident(ident))
-            if ident.real_value() == "auto" || ident.real_value() == "'auto'".to_lowercase() =>
+            if ident
+                .real_value()
+                .eq_ignore_ascii_case(&Keyword::AUTO.to_string()) =>
         {
-            PbTableParallelism {
-                parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
-            }
+            auto_parallelism
         }
+
+        SetVariableValue::Default => auto_parallelism,
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
-            PbTableParallelism {
-                parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                    parallelism: v.parse().unwrap(),
-                })),
+            let fixed_parallelism = v.parse().map_err(|e| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "target parallelism must be a valid number or auto: {}",
+                    e
+                ))
+            })?;
+
+            if fixed_parallelism == 0 {
+                auto_parallelism
+            } else {
+                PbTableParallelism {
+                    parallelism: Some(PbParallelism::Fixed(FixedParallelism {
+                        parallelism: fixed_parallelism,
+                    })),
+                }
             }
         }
+
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a number or auto".to_string(),
+                "target parallelism must be a valid number or auto".to_string(),
             )
             .into());
         }

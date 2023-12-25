@@ -888,10 +888,7 @@ impl DdlService for DdlServiceImpl {
             .alter_parallelism(table_id, parallelism)
             .await?;
 
-        Ok(Response::new(AlterParallelismResponse {
-            status: None,
-            version: 0,
-        }))
+        Ok(Response::new(AlterParallelismResponse {}))
     }
 }
 

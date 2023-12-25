@@ -222,10 +222,7 @@ message AlterParallelismRequest {
   meta.TableParallelism parallelism = 2;
 }
 
-message AlterParallelismResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
+message AlterParallelismResponse {}
 
 message AlterOwnerResponse {
   common.Status status = 1;

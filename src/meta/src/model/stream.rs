@@ -161,7 +161,7 @@ impl MetadataModel for TableFragments {
         let ctx = StreamContext::from_protobuf(prost.get_ctx().unwrap());
 
         let default_parallelism = PbTableParallelism {
-            parallelism: Some(Parallelism::Auto(PbAutoParallelism {})),
+            parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
         };
 
         Self {

@@ -217,7 +217,7 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        None => "none".to_string(),
+        None => "unknown".to_string(),
         Some(PbParallelism::Auto(_)) => "auto".to_string(),
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
@@ -419,12 +419,12 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_SCHEMAS), read_rw_schema_info },
     { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },
     { BuiltinCatalog::Table(&RW_USER_SECRETS), read_rw_user_secrets_info },
-    { BuiltinCatalog::Table(&RW_TABLES), read_rw_table_info await },
+    { BuiltinCatalog::Table(&RW_TABLES), read_rw_table_info },
     { BuiltinCatalog::Table(&RW_INTERNAL_TABLES), read_rw_internal_table_info },
-    { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info await },
+    { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info },
     { BuiltinCatalog::Table(&RW_INDEXES), read_rw_indexes_info },
     { BuiltinCatalog::Table(&RW_SOURCES), read_rw_sources_info },
-    { BuiltinCatalog::Table(&RW_SINKS), read_rw_sinks_info await },
+    { BuiltinCatalog::Table(&RW_SINKS), read_rw_sinks_info },
     { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
     { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
     { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },

@@ -500,12 +500,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table_id: u32,
         parallelism: PbTableParallelism,
     ) -> Result<()> {
-        let version = self
-            .meta_client
+        self.meta_client
             .alter_parallelism(table_id, parallelism)
-            .await?;
+            .await
+            .map_err(|e| anyhow!(e))?;
 
-        self.wait_version(version).await
+        Ok(())
     }
 }
 
