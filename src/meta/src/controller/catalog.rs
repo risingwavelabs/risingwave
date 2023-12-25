@@ -418,7 +418,6 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        println!("ddd: {:?}", creating_job_ids);
         if creating_job_ids.is_empty() {
             return Ok(ReleaseContext::default());
         }
