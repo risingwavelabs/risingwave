@@ -218,7 +218,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             TracedSealCurrentEpochOptions::from(opts.clone()),
             self.storage_type,
         );
-        self.inner.seal_current_epoch(next_epoch, opts)
+        self.inner.seal_current_epoch(next_epoch, opts).await
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {

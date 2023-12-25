@@ -98,7 +98,7 @@ async fn test_failpoints_state_store_read_upload() {
     local.seal_current_epoch(
         3,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-    );
+    ).await.unwrap();
 
     // Get the value after flushing to remote.
     let anchor_prefix_hint = {
@@ -137,7 +137,7 @@ async fn test_failpoints_state_store_read_upload() {
     local.seal_current_epoch(
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-    );
+    ).await.unwrap();
 
     // sync epoch1 test the read_error
     let ssts = hummock_storage
