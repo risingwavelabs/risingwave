@@ -80,6 +80,7 @@ impl OpendalSource for OpendalGcs {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct OpendalS3Properties {
+    #[serde(flatten)]
     pub s3_properties: S3Properties,
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,

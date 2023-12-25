@@ -45,8 +45,7 @@ use super::nexmark::source::message::NexmarkMeta;
 use super::OPENDAL_S3_CONNECTOR;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::opendal_source::OpendalS3Properties;
-use crate::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
+use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -382,31 +381,6 @@ impl ConnectorProperties {
 
 impl ConnectorProperties {
     pub fn extract(mut with_properties: HashMap<String, String>) -> Result<Self> {
-        if Self::is_new_fs_connector_hash_map(&with_properties) {
-            let connector = with_properties
-                .remove(UPSTREAM_SOURCE_KEY)
-                .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-            match connector.as_str() {
-                "s3_v2" => {
-                    let assume_role = with_properties.get("s3.assume_role").cloned();
-                    return Ok(ConnectorProperties::OpendalS3(Box::new(
-                        OpendalS3Properties {
-                            s3_properties: S3Properties::try_from_hashmap(with_properties)?,
-                            assume_role,
-                        },
-                    )));
-                }
-                "gcs" => {
-                    return Ok(ConnectorProperties::Gcs(Box::new(
-                        GcsProperties::try_from_hashmap(with_properties)?,
-                    )));
-                }
-                _ => {
-                    unreachable!()
-                }
-            }
-        }
-
         let connector = with_properties
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
