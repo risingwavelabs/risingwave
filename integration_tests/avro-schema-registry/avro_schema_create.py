@@ -64,12 +64,12 @@ class AvroSchema:
     schema_json: str
     subject_name: str
 
-    def __init__(self, subject_name: str, fields: [ColumnDef]):
+    def __init__(self, subject_name: str, record_name: str, fields: [ColumnDef]):
         self.subject_name = subject_name
 
         schema = {
             "type": "record",
-            "name": subject_name,
+            "name": record_name,
             "fields": []
         }
         for field in fields:
@@ -102,8 +102,14 @@ class KeyValueSchema:
         """Convert the RisignWave table schema to Avro schema"""
 
         pk_columns = [col for col in columns if col.is_primary_key]
-        self.key = AvroSchema(f"{PG_SCHEMA}.{PG_TABLE}-key", pk_columns)
-        self.value = AvroSchema(f"{PG_SCHEMA}.{PG_TABLE}", columns)
+        self.key = AvroSchema(
+            f"{PG_SCHEMA}.{PG_TABLE}-key",
+            f"{DB_NAME}.{PG_SCHEMA}.{PG_TABLE}.Key",
+            pk_columns)
+        self.value = AvroSchema(
+            f"{PG_SCHEMA}.{PG_TABLE}",
+            f"{DB_NAME}.{PG_SCHEMA}.{PG_TABLE}.Value",
+            columns)
 
     def register(self):
         """Register the schema to Schema Registry"""
