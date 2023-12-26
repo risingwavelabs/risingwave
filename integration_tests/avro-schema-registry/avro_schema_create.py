@@ -161,9 +161,11 @@ def fetch_postgres_schema() -> [ColumnDef]:
             pg_schema = [ColumnDef(column_name, data_type, False)
                          for _, column_name, data_type in cursor.fetchall()]
 
-        primary_keys = [pk.strip() for pk in PG_PRIMARY_KEYS.split(',')]
-        if len(primary_keys) == 0:
+        if PG_PRIMARY_KEYS.strip() == "":
             primary_keys = get_primary_keys(table_name=PG_TABLE, conn=conn)
+        else:
+            primary_keys = [pk.strip() for pk in PG_PRIMARY_KEYS.split(',')]
+
         for column in pg_schema:
             if column.name in primary_keys:
                 column.is_primary_key = True
