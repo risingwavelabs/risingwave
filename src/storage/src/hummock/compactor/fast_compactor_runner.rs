@@ -641,6 +641,10 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                     self.last_table_stats.total_key_count -= 1;
                     self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
                     self.last_table_stats.total_value_size -= value.encoded_len() as i64;
+
+                    if !is_new_user_key || value.is_delete() {
+                        self.last_table_stats.total_stale_key_count -= 1;
+                    }
                 }
                 iter.next();
                 continue;
