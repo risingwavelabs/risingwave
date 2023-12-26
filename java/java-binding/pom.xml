@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>java-parent</artifactId>
-        <groupId>com.risingwave.java</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <artifactId>risingwave-java-root</artifactId>
+        <groupId>com.risingwave</groupId>
+        <version>0.1.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>java-binding</artifactId>
@@ -16,10 +17,12 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <module.version>1.0-SNAPSHOT</module.version>
+        <module.version>0.1.0-SNAPSHOT</module.version>
         <jni.loader.version>1.0.0</jni.loader.version>
         <java.binding.release>false</java.binding.release>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
+
 
     <dependencies>
         <dependency>
@@ -28,11 +31,11 @@
             <version>${jni.loader.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>proto</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>common-utils</artifactId>
         </dependency>
         <dependency>
@@ -60,7 +63,8 @@
                         <executions>
                             <execution>
                                 <id>build-jni-rust</id>
-                                <!--disable the plugin-->
+                                <!--disable
+                                the plugin-->
                                 <phase>none</phase>
                             </execution>
                         </executions>

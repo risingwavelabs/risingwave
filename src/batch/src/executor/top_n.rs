@@ -19,7 +19,6 @@ use std::vec::Vec;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::collections::MemMonitoredHeap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
@@ -29,6 +28,7 @@ use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -180,7 +180,9 @@ impl TopNHeap {
                         let mut ties_with_peek = vec![];
                         // pop all the ties with peek
                         ties_with_peek.push(self.heap.pop().unwrap());
-                        while let Some(e) = self.heap.peek() && e.encoded_row == peek.encoded_row {
+                        while let Some(e) = self.heap.peek()
+                            && e.encoded_row == peek.encoded_row
+                        {
                             ties_with_peek.push(self.heap.pop().unwrap());
                         }
                         self.heap.push(elem);
@@ -225,7 +227,7 @@ impl Eq for HeapElem {}
 
 impl PartialOrd for HeapElem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.encoded_row.partial_cmp(&other.encoded_row)
+        Some(self.cmp(other))
     }
 }
 
@@ -253,7 +255,7 @@ impl HeapElem {
 }
 
 impl TopNExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
@@ -350,7 +352,7 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             assert_eq!(res.cardinality(), 3);
@@ -361,7 +363,7 @@ mod tests {
         }
 
         let res = stream.next().await;
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 
     #[tokio::test]
@@ -408,6 +410,6 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 }

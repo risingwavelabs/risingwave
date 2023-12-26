@@ -1,0 +1,17 @@
+# removed all return columns of `c.*` in issue 11321 for better consistency.
+query ITII
+select c.oid, d.description, dep.objid, dep.refobjsubid
+from pg_catalog.pg_class c
+left outer join
+    pg_catalog.pg_description d
+    on d.objoid = c.oid
+    and d.objsubid = 0
+    and d.classoid = 'pg_class'::regclass
+left outer join
+    pg_depend dep
+    on dep.refobjid = c."oid"
+    and dep.deptype = 'i'
+    and dep.refobjsubid <> 0
+    and dep.classid = dep.refclassid
+where c.relnamespace = -1 and c.relkind not in ('i', 'I', 'c'); -- query with invalid namespace -1.
+----

@@ -41,6 +41,7 @@ impl Deref for BackgroundShutdownRuntime {
         &self.0
     }
 }
+
 impl DerefMut for BackgroundShutdownRuntime {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0

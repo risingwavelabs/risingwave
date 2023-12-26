@@ -173,17 +173,17 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 --@ SELECT SUBSTRING('abcdefg' FROM 'b(.*)f') AS "cde";
 
 -- Check behavior of SIMILAR TO, which uses largely the same regexp variant
---@ SELECT 'abcdefg' SIMILAR TO '_bcd%' AS true;
---@ SELECT 'abcdefg' SIMILAR TO 'bcd%' AS false;
---@ SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '#' AS false;
---@ SELECT 'abcd%' SIMILAR TO '_bcd#%' ESCAPE '#' AS true;
---@ -- Postgres uses '\' as the default escape character, which is not per spec
---@ SELECT 'abcdefg' SIMILAR TO '_bcd\%' AS false;
---@ -- and an empty string to mean "no escape", which is also not per spec
---@ SELECT 'abcd\efg' SIMILAR TO '_bcd\%' ESCAPE '' AS true;
---@ -- these behaviors are per spec, though:
---@ SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
---@ SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
+SELECT 'abcdefg' SIMILAR TO '_bcd%' AS true;
+SELECT 'abcdefg' SIMILAR TO 'bcd%' AS false;
+SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '#' AS false;
+SELECT 'abcd%' SIMILAR TO '_bcd#%' ESCAPE '#' AS true;
+-- Postgres uses '\' as the default escape character, which is not per spec
+SELECT 'abcdefg' SIMILAR TO '_bcd\%' AS false;
+-- and an empty string to mean "no escape", which is also not per spec
+SELECT 'abcd\efg' SIMILAR TO '_bcd\%' ESCAPE '' AS true;
+-- these behaviors are per spec, though:
+SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
+SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
 
 -- Test backslash escapes in regexp_replace's replacement string
 --@ SELECT regexp_replace('1112223333', E'(\\d{3})(\\d{3})(\\d{4})', E'(\\1) \\2-\\3');
@@ -239,20 +239,24 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', $re$\s*$re$) AS foo;
 --@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', $re$\s*$re$);
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', '') AS foo;
---@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', '');
+SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', '');
+
 --@ -- case insensitive
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i') AS foo;
---@ SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i');
---@ -- no match of pattern
+SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'i');
+
+-- no match of pattern
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('the quick brown fox jumps over the lazy dog', 'nomatch') AS foo;
---@ SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', 'nomatch');
---@ -- some corner cases
---@ SELECT regexp_split_to_array('123456','1');
---@ SELECT regexp_split_to_array('123456','6');
---@ SELECT regexp_split_to_array('123456','.');
---@ SELECT regexp_split_to_array('123456','');
---@ SELECT regexp_split_to_array('123456','(?:)');
---@ SELECT regexp_split_to_array('1','');
+SELECT regexp_split_to_array('the quick brown fox jumps over the lazy dog', 'nomatch');
+
+-- some corner cases
+SELECT regexp_split_to_array('123456','1');
+SELECT regexp_split_to_array('123456','6');
+SELECT regexp_split_to_array('123456','.');
+SELECT regexp_split_to_array('123456','');
+SELECT regexp_split_to_array('123456','(?:)');
+SELECT regexp_split_to_array('1','');
+
 --@ -- errors
 --@ SELECT foo, length(foo) FROM regexp_split_to_table('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'zippy') AS foo;
 --@ SELECT regexp_split_to_array('thE QUick bROWn FOx jUMPs ovEr The lazy dOG', 'e', 'iz');
@@ -369,18 +373,18 @@ SELECT 'indio' NOT LIKE 'in_o' AS "true";
 -- Be sure to form every test as an ILIKE/NOT ILIKE pair.
 --
 
---@ SELECT 'hawkeye' ILIKE 'h%' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'h%' AS "false";
---@ 
---@ SELECT 'hawkeye' ILIKE 'H%' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'H%' AS "false";
---@ 
---@ SELECT 'hawkeye' ILIKE 'H%Eye' AS "true";
---@ SELECT 'hawkeye' NOT ILIKE 'H%Eye' AS "false";
---@ 
---@ SELECT 'Hawkeye' ILIKE 'h%' AS "true";
---@ SELECT 'Hawkeye' NOT ILIKE 'h%' AS "false";
---@ 
+SELECT 'hawkeye' ILIKE 'h%' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'h%' AS "false";
+
+SELECT 'hawkeye' ILIKE 'H%' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'H%' AS "false";
+
+SELECT 'hawkeye' ILIKE 'H%Eye' AS "true";
+SELECT 'hawkeye' NOT ILIKE 'H%Eye' AS "false";
+
+SELECT 'Hawkeye' ILIKE 'h%' AS "true";
+SELECT 'Hawkeye' NOT ILIKE 'h%' AS "false";
+
 --@ SELECT 'ABC'::name ILIKE '_b_' AS "true";
 --@ SELECT 'ABC'::name NOT ILIKE '_b_' AS "false";
 

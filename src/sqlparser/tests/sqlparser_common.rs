@@ -253,32 +253,33 @@ fn parse_select_all() {
 #[test]
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
-    assert!(format!("{}", result.unwrap_err()).contains("syntax error at or near \"DISTINCT\""));
+    assert!(format!("{}", result.unwrap_err())
+        .contains("syntax error at or near DISTINCT at line:1, column:20"));
 }
 
 #[test]
 fn parse_select_wildcard() {
     let sql = "SELECT * FROM foo";
     let select = verified_only_select(sql);
-    assert_eq!(
-        &SelectItem::WildcardOrWithExcept(None),
-        only(&select.projection)
-    );
+    assert_eq!(&SelectItem::Wildcard(None), only(&select.projection));
 
     let sql = "SELECT foo.* FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::QualifiedWildcard(ObjectName(vec![Ident::new_unchecked("foo")])),
+        &SelectItem::QualifiedWildcard(ObjectName(vec![Ident::new_unchecked("foo")]), None),
         only(&select.projection)
     );
 
     let sql = "SELECT myschema.mytable.* FROM myschema.mytable";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::QualifiedWildcard(ObjectName(vec![
-            Ident::new_unchecked("myschema"),
-            Ident::new_unchecked("mytable"),
-        ])),
+        &SelectItem::QualifiedWildcard(
+            ObjectName(vec![
+                Ident::new_unchecked("myschema"),
+                Ident::new_unchecked("mytable"),
+            ]),
+            None
+        ),
         only(&select.projection)
     );
 
@@ -292,7 +293,7 @@ fn parse_select_except() {
     let sql = "SELECT * EXCEPT (v1) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::WildcardOrWithExcept(Some(vec![Expr::Identifier(Ident::new_unchecked("v1"))])),
+        &SelectItem::Wildcard(Some(vec![Expr::Identifier(Ident::new_unchecked("v1"))])),
         only(&select.projection)
     );
 }
@@ -344,9 +345,7 @@ fn parse_select_count_wildcard() {
     assert_eq!(
         &Expr::Function(Function {
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
-                None
-            ))],
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
             over: None,
             distinct: false,
             order_by: vec![],
@@ -1086,9 +1085,7 @@ fn parse_select_having() {
         Some(Expr::BinaryOp {
             left: Box::new(Expr::Function(Function {
                 name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-                args: vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
-                    None
-                ))],
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
                 over: None,
                 distinct: false,
                 order_by: vec![],
@@ -1999,9 +1996,10 @@ fn parse_literal_string() {
         expr_from_projection(&select.projection[2])
     );
     assert_eq!(
-        &Expr::Value(Value::CstyleEscapesString(
-            r"c style escape string \x3f".to_string()
-        )),
+        &Expr::Value(Value::CstyleEscapedString(CstyleEscapedString {
+            value: "c style escape string \x3f".to_string(),
+            raw: r"c style escape string \x3f".to_string(),
+        })),
         expr_from_projection(&select.projection[3])
     );
 
@@ -3098,7 +3096,7 @@ fn parse_create_materialized_view() {
 
 #[test]
 fn parse_create_materialized_view_emit_immediately() {
-    let sql = "CREATE MATERIALIZED VIEW myschema.myview EMIT IMMEDIATELY AS SELECT foo FROM bar";
+    let sql = "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT IMMEDIATELY";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,
@@ -3126,7 +3124,7 @@ fn parse_create_materialized_view_emit_immediately() {
 #[test]
 fn parse_create_materialized_view_emit_on_window_close() {
     let sql =
-        "CREATE MATERIALIZED VIEW myschema.myview EMIT ON WINDOW CLOSE AS SELECT foo FROM bar";
+        "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT ON WINDOW CLOSE";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,

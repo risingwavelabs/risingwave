@@ -13,15 +13,18 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::{ErrorCode, Result};
+use pgwire::types::Row;
+use risingwave_common::bail_not_implemented;
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::session::transaction::AccessMode;
+use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
 macro_rules! not_impl {
     ($body:expr) => {
-        Err(ErrorCode::NotImplemented($body.into(), 10736.into()))
+        bail_not_implemented!(issue = 10376, "{}", $body)
     };
 }
 
@@ -40,7 +43,7 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL")?,
+                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
             }
         }
 
@@ -74,7 +77,7 @@ pub async fn handle_commit(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("COMMIT AND CHAIN")?;
+        not_impl!("COMMIT AND CHAIN");
     }
 
     session.txn_commit_explicit();
@@ -91,7 +94,7 @@ pub async fn handle_rollback(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("ROLLBACK AND CHAIN")?;
+        not_impl!("ROLLBACK AND CHAIN");
     }
 
     session.txn_rollback_explicit();
@@ -112,5 +115,19 @@ pub async fn handle_set(
 
     Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
         .notice(MESSAGE)
+        .into())
+}
+
+pub fn handle_show_isolation_level(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
+
+    let parameter_name = "transaction_isolation";
+    let row_desc = infer_show_variable(parameter_name);
+    let rows = vec![Row::new(vec![Some(
+        config_reader.get(parameter_name)?.into(),
+    )])];
+
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(rows.into(), row_desc)
         .into())
 }

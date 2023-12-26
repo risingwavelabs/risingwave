@@ -74,7 +74,7 @@ impl IdleManager {
     }
 
     /// Idle checker send signal when the meta does not receive requests for long time.
-    pub async fn start_idle_checker(
+    pub fn start_idle_checker(
         idle_manager: IdleManagerRef,
         check_interval: Duration,
         idle_send: tokio::sync::oneshot::Sender<()>,

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
@@ -37,7 +36,6 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
@@ -48,16 +46,100 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
-use self::generic::GenericPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
-pub trait PlanNodeMeta {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
-    fn convention(&self) -> Convention;
+/// A marker trait for different conventions, used for enforcing type safety.
+///
+/// Implementors are [`Logical`], [`Batch`], and [`Stream`].
+pub trait ConventionMarker: 'static + Sized {
+    /// The extra fields in the [`PlanBase`] of this convention.
+    type Extra: 'static + Eq + Hash + Clone + Debug;
+
+    /// Get the [`Convention`] enum value.
+    fn value() -> Convention;
 }
+
+/// The marker for logical convention.
+pub struct Logical;
+impl ConventionMarker for Logical {
+    type Extra = plan_base::NoExtra;
+
+    fn value() -> Convention {
+        Convention::Logical
+    }
+}
+
+/// The marker for batch convention.
+pub struct Batch;
+impl ConventionMarker for Batch {
+    type Extra = plan_base::BatchExtra;
+
+    fn value() -> Convention {
+        Convention::Batch
+    }
+}
+
+/// The marker for stream convention.
+pub struct Stream;
+impl ConventionMarker for Stream {
+    type Extra = plan_base::StreamExtra;
+
+    fn value() -> Convention {
+        Convention::Stream
+    }
+}
+
+/// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
+pub trait PlanNodeMeta {
+    type Convention: ConventionMarker;
+
+    const NODE_TYPE: PlanNodeType;
+
+    /// Get the reference to the [`PlanBase`] with corresponding convention.
+    fn plan_base(&self) -> &PlanBase<Self::Convention>;
+
+    /// Get the reference to the [`PlanBase`] with erased convention.
+    ///
+    /// This is mainly used for implementing [`AnyPlanNodeMeta`]. Callers should prefer
+    /// [`PlanNodeMeta::plan_base`] instead as it is more type-safe.
+    fn plan_base_ref(&self) -> PlanBaseRef<'_>;
+}
+
+// Intentionally made private.
+mod plan_node_meta {
+    use super::*;
+
+    /// The object-safe version of [`PlanNodeMeta`], used as a super trait of [`PlanNode`].
+    ///
+    /// Check [`PlanNodeMeta`] for more details.
+    pub trait AnyPlanNodeMeta {
+        fn node_type(&self) -> PlanNodeType;
+        fn plan_base(&self) -> PlanBaseRef<'_>;
+        fn convention(&self) -> Convention;
+    }
+
+    /// Implement [`AnyPlanNodeMeta`] for all [`PlanNodeMeta`].
+    impl<P> AnyPlanNodeMeta for P
+    where
+        P: PlanNodeMeta,
+    {
+        fn node_type(&self) -> PlanNodeType {
+            P::NODE_TYPE
+        }
+
+        fn plan_base(&self) -> PlanBaseRef<'_> {
+            PlanNodeMeta::plan_base_ref(self)
+        }
+
+        fn convention(&self) -> Convention {
+            P::Convention::value()
+        }
+    }
+}
+use plan_node_meta::AnyPlanNodeMeta;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -73,13 +155,14 @@ pub trait PlanNode:
     + Downcast
     + ColPrunable
     + ExprRewritable
+    + ExprVisitable
     + ToBatch
     + ToStream
     + ToDistributedBatch
     + ToPb
     + ToLocalBatch
     + PredicatePushdown
-    + PlanNodeMeta
+    + AnyPlanNodeMeta
 {
 }
 
@@ -196,7 +279,7 @@ pub trait VisitPlan: Visit<PlanRef> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Convention {
     Logical,
     Batch,
@@ -219,8 +302,30 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
-impl ColPrunable for PlanRef {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+pub(crate) trait VisitExprsRecursive {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor);
+}
+
+impl VisitExprsRecursive for PlanRef {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor) {
+        self.visit_exprs(r);
+        self.inputs()
+            .iter()
+            .for_each(|plan_ref| plan_ref.visit_exprs_recursive(r));
+    }
+}
+
+impl PlanRef {
+    pub fn expect_stream_key(&self) -> &[usize] {
+        self.stream_key().unwrap_or_else(|| {
+            panic!(
+                "a stream key is expected but not exist, plan:\n{}",
+                self.explain_to_string()
+            )
+        })
+    }
+
+    fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
@@ -306,10 +411,8 @@ impl ColPrunable for PlanRef {
             dyn_t.prune_col(required_cols, ctx)
         }
     }
-}
 
-impl PredicatePushdown for PlanRef {
-    fn predicate_pushdown(
+    fn predicate_pushdown_inner(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
@@ -331,6 +434,20 @@ impl PredicatePushdown for PlanRef {
                     .take_predicate(self.id())
                     .expect("must have predicate")
                     .into_iter()
+                    .map(|mut c| Condition {
+                        conjunctions: c
+                            .conjunctions
+                            .extract_if(|e| {
+                                // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
+                                let mut finder = ExprCorrelatedIdFinder::default();
+                                finder.visit_expr(e);
+                                e.count_nows() == 0
+                                    && e.is_pure()
+                                    && !finder.has_correlated_input_ref()
+                            })
+                            .collect(),
+                    })
                     .reduce(|a, b| a.or(b))
                     .unwrap();
                 let input: PlanRef = logical_share.input();
@@ -343,6 +460,42 @@ impl PredicatePushdown for PlanRef {
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
         }
+    }
+}
+
+impl ColPrunable for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let res = self.prune_col_inner(required_cols, ctx);
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "column pruning",
+            &LogicalProject::with_out_col_idx(self.clone(), required_cols.iter().cloned()).into(),
+            &res,
+        );
+        res
+    }
+}
+
+impl PredicatePushdown for PlanRef {
+    #[allow(clippy::let_and_return)]
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        #[cfg(debug_assertions)]
+        let predicate_clone = predicate.clone();
+
+        let res = self.predicate_pushdown_inner(predicate, ctx);
+
+        #[cfg(debug_assertions)]
+        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+            "predicate push down",
+            &LogicalFilter::new(self.clone(), predicate_clone).into(),
+            &res,
+        );
+        res
     }
 }
 
@@ -372,33 +525,34 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl StreamPlanRef for PlanRef {
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+/// Implement again for the `dyn` newtype wrapper.
+impl AnyPlanNodeMeta for PlanRef {
+    fn node_type(&self) -> PlanNodeType {
+        self.0.node_type()
     }
 
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
+    fn plan_base(&self) -> PlanBaseRef<'_> {
+        self.0.plan_base()
     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
-    }
-}
-
-impl BatchPlanRef for PlanRef {
-    fn order(&self) -> &Order {
-        &self.plan_base().order
+    fn convention(&self) -> Convention {
+        self.0.convention()
     }
 }
 
+/// Allow access to all fields defined in [`GenericPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl GenericPlanRef for PlanRef {
-    fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    fn schema(&self) -> &Schema {
+        self.plan_base().schema()
+    }
+
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -407,6 +561,38 @@ impl GenericPlanRef for PlanRef {
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
         self.plan_base().functional_dependency()
+    }
+}
+
+/// Allow access to all fields defined in [`PhysicalPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl PhysicalPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        self.plan_base().distribution()
+    }
+}
+
+/// Allow access to all fields defined in [`StreamPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl StreamPlanRef for PlanRef {
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        self.plan_base().watermark_columns()
+    }
+}
+
+/// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        self.plan_base().order()
     }
 }
 
@@ -463,54 +649,43 @@ pub(crate) fn pretty_config() -> PrettyConfig {
     }
 }
 
+/// Directly implement methods for [`PlanNode`] to access the fields defined in [`GenericPlanRef`].
+// TODO: always require `GenericPlanRef` to make it more consistent.
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id
+        self.plan_base().id()
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx.clone()
+        self.plan_base().ctx().clone()
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
-    pub fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
-    }
-
-    pub fn order(&self) -> &Order {
-        &self.plan_base().order
-    }
-
-    pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
-    }
-
-    pub fn append_only(&self) -> bool {
-        self.plan_base().append_only
-    }
-
-    pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency
+        self.plan_base().functional_dependency()
     }
+}
 
-    pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns
-    }
-
+impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
+        use stream::prelude::*;
+
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
+        }
+        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -528,9 +703,14 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
             fields: self.schema().to_prost(),
-            append_only: self.append_only(),
+            append_only: self.plan_base().append_only(),
         }
     }
 
@@ -565,8 +745,6 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
-#[macro_use]
-mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -574,6 +752,8 @@ pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
 mod expr_rewritable;
+pub use expr_rewritable::*;
+mod expr_visitable;
 pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
@@ -589,7 +769,6 @@ pub use merge_eq_nodes::*;
 pub mod batch;
 pub mod generic;
 pub mod stream;
-pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
@@ -604,6 +783,7 @@ mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
+mod batch_max_one_row;
 mod batch_nested_loop_join;
 mod batch_over_window;
 mod batch_project;
@@ -613,6 +793,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
 mod batch_source;
+mod batch_sys_seq_scan;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -620,6 +801,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_cdc_scan;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -630,6 +812,7 @@ mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_limit;
+mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
 mod logical_over_window;
@@ -638,6 +821,7 @@ mod logical_project_set;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
+mod logical_sys_scan;
 mod logical_table_function;
 mod logical_topn;
 mod logical_union;
@@ -651,6 +835,7 @@ mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
+mod stream_fs_fetch;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
@@ -672,6 +857,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod derive;
+mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
@@ -688,6 +874,7 @@ pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
+pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
@@ -697,6 +884,7 @@ pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
 pub use batch_source::BatchSource;
+pub use batch_sys_seq_scan::BatchSysSeqScan;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -704,6 +892,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -714,6 +903,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
@@ -722,11 +912,13 @@ pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
+pub use logical_sys_scan::LogicalSysScan;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -735,6 +927,7 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
+pub use stream_fs_fetch::StreamFsFetch;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
@@ -748,7 +941,7 @@ pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
-pub use stream_sort::StreamSort;
+pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
@@ -758,9 +951,11 @@ pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
+use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
@@ -785,6 +980,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -805,6 +1002,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -814,6 +1012,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Delete }
             , { Batch, Update }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -830,9 +1029,11 @@ macro_rules! for_all_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
@@ -858,8 +1059,9 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }
@@ -874,6 +1076,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -894,6 +1098,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
         }
     };
 }
@@ -909,6 +1114,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -928,6 +1134,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
         }
     };
 }
@@ -942,6 +1149,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
@@ -965,8 +1173,9 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, Sort }
+            , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }
@@ -982,14 +1191,23 @@ macro_rules! impl_plan_node_meta {
             }
 
             $(impl PlanNodeMeta for [<$convention $name>] {
-                fn node_type(&self) -> PlanNodeType{
-                    PlanNodeType::[<$convention $name>]
-                }
-                fn plan_base(&self) -> &PlanBase {
+                type Convention = $convention;
+                const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
+
+                fn plan_base(&self) -> &PlanBase<$convention> {
                     &self.base
                 }
-                fn convention(&self) -> Convention {
-                    Convention::$convention
+
+                fn plan_base_ref(&self) -> PlanBaseRef<'_> {
+                    PlanBaseRef::$convention(&self.base)
+                }
+            }
+
+            impl Deref for [<$convention $name>] {
+                type Target = PlanBase<$convention>;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.base
                 }
             })*
         }

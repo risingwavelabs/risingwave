@@ -31,7 +31,7 @@ FROM employees e NATURAL JOIN departments d
 ORDER BY employee_name;
 
 # Nested-loop joins are not supported in the streaming mode.
-statement error 
+statement error
 CREATE MATERIALIZED VIEW employee_department_cross_join AS
 SELECT e.employee_name, d.department_name
 FROM employees e CROSS JOIN departments d

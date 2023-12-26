@@ -16,7 +16,9 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{try_derive_watermark, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{
+    try_derive_watermark, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -42,11 +44,12 @@ impl Rule for FilterWithNowToJoinRule {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
 
-                // as a sanity check, ensure that this expression will derive a watermark
-                // on the output of the now executor
-                debug_assert_eq!(try_derive_watermark(&now_expr), Some(lhs_len));
-
-                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                // ensure that this expression will derive a watermark
+                if try_derive_watermark(&now_expr) != WatermarkDerivation::Watermark(lhs_len) {
+                    remainder.push(expr.clone());
+                } else {
+                    now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                }
             } else {
                 remainder.push(expr.clone());
             }
@@ -57,13 +60,8 @@ impl Rule for FilterWithNowToJoinRule {
         // increasing)
         now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
 
-        // Ignore no now filter & forbid now filters that do not create a watermark
-        if now_filters.is_empty()
-            || !matches!(
-                now_filters[0].func_type(),
-                Type::GreaterThan | Type::GreaterThanOrEqual
-            )
-        {
+        // Ignore no now filter
+        if now_filters.is_empty() {
             return None;
         }
         let mut new_plan = plan.inputs()[0].clone();

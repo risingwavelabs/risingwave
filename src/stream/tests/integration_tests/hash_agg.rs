@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
 use crate::prelude::*;
@@ -284,7 +284,7 @@ async fn test_hash_agg_emit_on_window_close() {
     };
 
     check_with_script(
-        || create_executor(),
+        create_executor,
         &format!(
             r###"
             - !barrier 1

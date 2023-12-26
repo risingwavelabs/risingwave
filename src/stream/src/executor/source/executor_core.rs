@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_connector::source::{SplitId, SplitImpl};
+use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
@@ -64,5 +64,12 @@ where
             split_state_store,
             state_cache: HashMap::new(),
         }
+    }
+
+    pub fn init_split_state(&mut self, splits: Vec<SplitImpl>) {
+        self.stream_source_splits = splits
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
     }
 }

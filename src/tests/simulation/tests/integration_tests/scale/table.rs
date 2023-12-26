@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::{repeat, repeat_with};
-use std::time::Duration;
+use std::iter::repeat_with;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::sleep;
-use rand::prelude::SliceRandom;
-use rand::thread_rng;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
-use risingwave_simulation::utils::AssertResult;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
 const MV1: &str = "create materialized view m1 as select * from t;";
@@ -41,7 +36,7 @@ macro_rules! insert_and_flush {
     }};
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_table() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     cluster.run(ROOT_TABLE_CREATE).await?;
@@ -65,7 +60,7 @@ async fn test_table() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_mv_on_scaled_table() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     cluster.run(ROOT_TABLE_CREATE).await?;

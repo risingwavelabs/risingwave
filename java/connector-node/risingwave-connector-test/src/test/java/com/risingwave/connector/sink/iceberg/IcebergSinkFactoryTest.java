@@ -17,11 +17,10 @@ package com.risingwave.connector.sink.iceberg;
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Lists;
-import com.risingwave.connector.IcebergSink;
+import com.risingwave.connector.AppendOnlyIcebergSinkWriter;
 import com.risingwave.connector.IcebergSinkFactory;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import com.risingwave.proto.Data;
 import java.io.IOException;
@@ -66,21 +65,19 @@ public class IcebergSinkFactoryTest {
     public void testCreate() throws IOException {
         createMockTable();
         IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
-        IcebergSink sink =
-                (IcebergSink)
-                        ((SinkWriterV1.Adapter)
-                                        sinkFactory.createWriter(
-                                                TestUtils.getMockTableSchema(),
-                                                Map.of(
-                                                        "type",
-                                                        sinkMode,
-                                                        "warehouse.path",
-                                                        warehousePath,
-                                                        "database.name",
-                                                        databaseName,
-                                                        "table.name",
-                                                        tableName)))
-                                .getInner();
+        AppendOnlyIcebergSinkWriter sink =
+                (AppendOnlyIcebergSinkWriter)
+                        sinkFactory.createWriter(
+                                TestUtils.getMockTableSchema(),
+                                Map.of(
+                                        "type",
+                                        sinkMode,
+                                        "warehouse.path",
+                                        warehousePath,
+                                        "database.name",
+                                        databaseName,
+                                        "table.name",
+                                        tableName));
         try {
             assertTrue(
                     sink.getHadoopCatalog()
@@ -120,7 +117,7 @@ public class IcebergSinkFactoryTest {
                                         .setTypeName(Data.DataType.TypeName.VARCHAR)
                                         .build()),
                         Lists.newArrayList("id"));
-        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.APPEND_ONLY);
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
     }
 
     @Test(expected = RuntimeException.class)
@@ -148,6 +145,6 @@ public class IcebergSinkFactoryTest {
                                         .setTypeName(Data.DataType.TypeName.INT32)
                                         .build()),
                         Lists.newArrayList("id"));
-        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.APPEND_ONLY);
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
     }
 }

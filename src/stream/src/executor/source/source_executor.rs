@@ -13,18 +13,22 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
 };
+use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -38,13 +42,8 @@ use crate::executor::*;
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
-    ctx: ActorContextRef,
-
-    identity: String,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
+    actor_ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -60,31 +59,32 @@ pub struct SourceExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
+
+    // config for the connector node
+    connector_params: ConnectorParams,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ctx: ActorContextRef,
-        schema: Schema,
-        pk_indices: PkIndices,
+        actor_ctx: ActorContextRef,
+        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
+        connector_params: ConnectorParams,
     ) -> Self {
         Self {
-            ctx,
-            identity: format!("SourceExecutor {:X}", executor_id),
-            schema,
-            pk_indices,
+            actor_ctx,
+            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
+            connector_params,
         }
     }
 
@@ -98,47 +98,20 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let mut source_ctx = SourceContext::new(
-            self.ctx.id,
+        let source_ctx = SourceContext::new_with_suppressor(
+            self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
-            self.ctx.fragment_id,
+            self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
+            self.connector_params.connector_client.clone(),
+            self.actor_ctx.error_suppressor.clone(),
         );
-        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
-    }
-
-    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
-        let core = self.stream_source_core.as_ref().unwrap();
-
-        let mut revert_index = HashMap::new();
-
-        for (actor_id, splits) in actor_splits {
-            for split in splits {
-                assert!(revert_index.insert(split.id(), actor_id).is_none());
-            }
-        }
-
-        for split_id in core.state_cache.keys() {
-            if let Some(actor_id) = revert_index.remove(split_id) {
-                if self.ctx.id != *actor_id {
-                    tracing::warn!(
-                        "split {} migration detected, from {} to {}",
-                        split_id,
-                        self.ctx.id,
-                        actor_id
-                    );
-                    return true;
-                }
-            }
-        }
-
-        false
     }
 
     #[inline]
@@ -154,7 +127,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .unwrap()
                 .source_name
                 .clone(),
-            self.ctx.id.to_string(),
+            self.actor_ctx.id.to_string(),
         ]
     }
 
@@ -174,10 +147,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     .collect::<Vec<&str>>(),
             )
             .inc();
-        if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
+        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
                 tracing::info!(
-                    actor_id = self.ctx.id,
+                    actor_id = self.actor_ctx.id,
                     state = ?target_state,
                     "apply split change"
                 );
@@ -250,6 +223,51 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(split_changed.then_some(target_state))
     }
 
+    /// Rebuild stream if there is a err in stream
+    async fn rebuild_stream_reader_from_error<const BIASED: bool>(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        split_info: &mut [SplitImpl],
+        e: StreamExecutorError,
+    ) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        tracing::warn!(
+            "stream source reader error, actor: {:?}, source: {:?}",
+            self.actor_ctx.id,
+            core.source_id,
+        );
+        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+            "SourceReaderError".to_owned(),
+            e.to_report_string(),
+            "SourceExecutor".to_owned(),
+            self.actor_ctx.id.to_string(),
+            core.source_id.to_string(),
+        ]);
+        // fetch the newest offset, either it's in cache (before barrier)
+        // or in state table (just after barrier)
+        let target_state = if core.state_cache.is_empty() {
+            for ele in &mut *split_info {
+                if let Some(recover_state) = core
+                    .split_state_store
+                    .try_recover_from_state_store(ele)
+                    .await?
+                {
+                    *ele = recover_state;
+                }
+            }
+            split_info.to_owned()
+        } else {
+            core.state_cache
+                .values()
+                .map(|split_impl| split_impl.to_owned())
+                .collect_vec()
+        };
+
+        self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
+            .await
+    }
+
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
@@ -258,7 +276,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
-            self.ctx.id,
+            self.actor_ctx.id,
             target_state
         );
 
@@ -294,7 +312,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
             let dropped_splits = core
                 .stream_source_splits
-                .drain_filter(|split_id, _| !target_split_ids.contains(split_id))
+                .extract_if(|split_id, _| !target_split_ids.contains(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -310,13 +328,20 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         if !cache.is_empty() {
-            tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
+            tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
             core.split_state_store.take_snapshot(cache).await?
         }
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
 
         core.state_cache.clear();
+
+        Ok(())
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        core.split_state_store.state_store.try_flush().await?;
 
         Ok(())
     }
@@ -333,11 +358,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
-                    self.ctx.id,
+                    self.actor_ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id
-                ))
+                )
             })?;
 
         let mut core = self.stream_source_core.unwrap();
@@ -346,32 +371,31 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
         let source_desc = source_desc_builder
             .build()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
+                Mutation::Add(AddMutation { splits, .. })
+                | Mutation::Update(UpdateMutation {
                     actor_splits: splits,
                     ..
-                } => {
-                    if let Some(splits) = splits.get(&self.ctx.id) {
+                }) => {
+                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                        tracing::info!(
+                            "source exector: actor {:?} boot with splits: {:?}",
+                            self.actor_ctx.id,
+                            splits
+                        );
                         boot_state = splits.clone();
                     }
                 }
                 _ => {}
             }
         }
+        let mut latest_split_info = boot_state.clone();
 
         core.split_state_store.init_epoch(barrier.epoch);
-
-        core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
 
         for ele in &mut boot_state {
             if let Some(recover_state) = core
@@ -383,12 +407,14 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        core.init_split_state(boot_state.clone());
+
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
-
+        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
@@ -402,9 +428,8 @@ impl<S: StateStore> SourceExecutor<S> {
             source_chunk_reader,
         );
 
-        // If the first barrier is configuration change, then the source executor must be newly
-        // created, and we should start with the paused state.
-        if barrier.is_update() {
+        // If the first barrier requires us to pause on startup, pause the stream.
+        if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
 
@@ -417,140 +442,181 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
+
         while let Some(msg) = stream.next().await {
-            match msg? {
-                // This branch will be preferred.
-                Either::Left(msg) => match &msg {
-                    Message::Barrier(barrier) => {
-                        last_barrier_time = Instant::now();
+            match msg {
+                Err(e) => {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    self.rebuild_stream_reader_from_error(
+                        &source_desc,
+                        &mut stream,
+                        &mut latest_split_info,
+                        e,
+                    )
+                    .await?;
+                }
+                Ok(msg) => {
+                    match msg {
+                        // This branch will be preferred.
+                        Either::Left(msg) => match &msg {
+                            Message::Barrier(barrier) => {
+                                last_barrier_time = Instant::now();
 
-                        if self_paused {
-                            stream.resume_stream();
-                            self_paused = false;
-                        }
-
-                        let epoch = barrier.epoch;
-
-                        let mut target_state = None;
-                        let mut should_trim_state = false;
-
-                        if let Some(ref mutation) = barrier.mutation.as_deref() {
-                            match mutation {
-                                Mutation::Pause => stream.pause_stream(),
-                                Mutation::Resume => stream.resume_stream(),
-                                Mutation::SourceChangeSplit(actor_splits) => {
-                                    // In the context of split changes, we do not allow split
-                                    // migration because it can lead to inconsistent states.
-                                    // Therefore, all split migration must be done via update
-                                    // mutation and pause/resume
-                                    assert!(!self.check_split_is_migration(actor_splits));
-
-                                    target_state = self
-                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?;
-                                    should_trim_state = true;
+                                if self_paused {
+                                    stream.resume_stream();
+                                    self_paused = false;
                                 }
 
-                                Mutation::Update { actor_splits, .. } => {
-                                    target_state = self
-                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?;
+                                let epoch = barrier.epoch;
+
+                                let mut target_state = None;
+                                let mut should_trim_state = false;
+
+                                if let Some(ref mutation) = barrier.mutation.as_deref() {
+                                    match mutation {
+                                        Mutation::Pause => stream.pause_stream(),
+                                        Mutation::Resume => stream.resume_stream(),
+                                        Mutation::SourceChangeSplit(actor_splits) => {
+                                            tracing::info!(
+                                                actor_id = self.actor_ctx.id,
+                                                actor_splits = ?actor_splits,
+                                                "source change split received"
+                                            );
+
+                                            target_state = self
+                                                .apply_split_change(
+                                                    &source_desc,
+                                                    &mut stream,
+                                                    actor_splits,
+                                                )
+                                                .await?;
+                                            should_trim_state = true;
+                                        }
+
+                                        Mutation::Update(UpdateMutation {
+                                            actor_splits, ..
+                                        }) => {
+                                            target_state = self
+                                                .apply_split_change(
+                                                    &source_desc,
+                                                    &mut stream,
+                                                    actor_splits,
+                                                )
+                                                .await?;
+                                        }
+                                        _ => {}
+                                    }
                                 }
-                                _ => {}
+
+                                if let Some(target_state) = &target_state {
+                                    latest_split_info = target_state.clone();
+                                }
+
+                                self.take_snapshot_and_clear_cache(
+                                    epoch,
+                                    target_state,
+                                    should_trim_state,
+                                )
+                                .await?;
+
+                                self.metrics
+                                    .source_row_per_barrier
+                                    .with_label_values(&[
+                                        self.actor_ctx.id.to_string().as_str(),
+                                        self.stream_source_core
+                                            .as_ref()
+                                            .unwrap()
+                                            .source_id
+                                            .to_string()
+                                            .as_ref(),
+                                    ])
+                                    .inc_by(metric_row_per_barrier);
+                                metric_row_per_barrier = 0;
+
+                                yield msg;
                             }
-                        }
+                            _ => {
+                                // For the source executor, the message we receive from this arm
+                                // should always be barrier message.
+                                unreachable!();
+                            }
+                        },
 
-                        self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
-                            .await?;
+                        Either::Right(StreamChunkWithState {
+                            chunk,
+                            split_offset_mapping,
+                        }) => {
+                            if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                                // Exceeds the max wait barrier time, the source will be paused.
+                                // Currently we can guarantee the
+                                // source is not paused since it received stream
+                                // chunks.
+                                self_paused = true;
+                                tracing::warn!(
+                                    "source {} paused, wait barrier for {:?}",
+                                    self.info.identity,
+                                    last_barrier_time.elapsed()
+                                );
+                                stream.pause_stream();
 
-                        self.metrics
-                            .source_row_per_barrier
-                            .with_label_values(&[
-                                self.ctx.id.to_string().as_str(),
+                                // Only update `max_wait_barrier_time_ms` to capture
+                                // `barrier_interval_ms`
+                                // changes here to avoid frequently accessing the shared
+                                // `system_params`.
+                                max_wait_barrier_time_ms =
+                                    self.system_params.load().barrier_interval_ms() as u128
+                                        * WAIT_BARRIER_MULTIPLE_TIMES;
+                            }
+                            if let Some(mapping) = split_offset_mapping {
+                                let state: HashMap<_, _> = mapping
+                                    .iter()
+                                    .flat_map(|(split_id, offset)| {
+                                        let origin_split_impl = self
+                                            .stream_source_core
+                                            .as_mut()
+                                            .unwrap()
+                                            .stream_source_splits
+                                            .get_mut(split_id);
+
+                                        origin_split_impl.map(|split_impl| {
+                                            split_impl.update_in_place(offset.clone())?;
+                                            Ok::<_, anyhow::Error>((
+                                                split_id.clone(),
+                                                split_impl.clone(),
+                                            ))
+                                        })
+                                    })
+                                    .try_collect()?;
+
                                 self.stream_source_core
-                                    .as_ref()
+                                    .as_mut()
                                     .unwrap()
-                                    .source_id
-                                    .to_string()
-                                    .as_ref(),
-                            ])
-                            .inc_by(metric_row_per_barrier);
-                        metric_row_per_barrier = 0;
+                                    .state_cache
+                                    .extend(state);
+                            }
+                            metric_row_per_barrier += chunk.cardinality() as u64;
 
-                        yield msg;
+                            self.metrics
+                                .source_output_row_count
+                                .with_label_values(
+                                    &self
+                                        .get_metric_labels()
+                                        .iter()
+                                        .map(AsRef::as_ref)
+                                        .collect::<Vec<&str>>(),
+                                )
+                                .inc_by(chunk.cardinality() as u64);
+                            yield Message::Chunk(chunk);
+                            self.try_flush_data().await?;
+                        }
                     }
-                    _ => {
-                        // For the source executor, the message we receive from this arm should
-                        // always be barrier message.
-                        unreachable!();
-                    }
-                },
-
-                Either::Right(StreamChunkWithState {
-                    chunk,
-                    split_offset_mapping,
-                }) => {
-                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                        // Exceeds the max wait barrier time, the source will be paused. Currently
-                        // we can guarantee the source is not paused since it received stream
-                        // chunks.
-                        self_paused = true;
-                        tracing::warn!(
-                            "source {} paused, wait barrier for {:?}",
-                            self.identity,
-                            last_barrier_time.elapsed()
-                        );
-                        stream.pause_stream();
-
-                        // Only update `max_wait_barrier_time_ms` to capture `barrier_interval_ms`
-                        // changes here to avoid frequently accessing the shared `system_params`.
-                        max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
-                            as u128
-                            * WAIT_BARRIER_MULTIPLE_TIMES;
-                    }
-                    if let Some(mapping) = split_offset_mapping {
-                        let state: HashMap<_, _> = mapping
-                            .iter()
-                            .flat_map(|(split_id, offset)| {
-                                let origin_split_impl = self
-                                    .stream_source_core
-                                    .as_ref()
-                                    .unwrap()
-                                    .stream_source_splits
-                                    .get(split_id);
-
-                                origin_split_impl.map(|split_impl| {
-                                    (split_id.clone(), split_impl.update(offset.clone()))
-                                })
-                            })
-                            .collect();
-
-                        self.stream_source_core
-                            .as_mut()
-                            .unwrap()
-                            .state_cache
-                            .extend(state);
-                    }
-                    metric_row_per_barrier += chunk.cardinality() as u64;
-
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
-                    yield Message::Chunk(chunk);
                 }
             }
         }
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.ctx.id,
+            actor_id = self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }
@@ -565,10 +631,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
-                    self.ctx.id
-                ))
+                    self.actor_ctx.id
+                )
             })?;
         yield Message::Barrier(barrier);
 
@@ -588,15 +654,15 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -606,7 +672,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.pk_indices)
+                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
@@ -682,18 +748,21 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
+            ConnectorParams::default(),
         );
         let mut executor = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -705,7 +774,8 @@ mod tests {
                     }),
                 ],
             },
-        });
+            pause: false,
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -772,18 +842,21 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
+            ConnectorParams::default(),
         );
         let mut handler = Box::new(executor).execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits: hashmap! {
@@ -795,7 +868,8 @@ mod tests {
                     }),
                 ],
             },
-        });
+            pause: false,
+        }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.

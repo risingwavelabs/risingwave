@@ -14,8 +14,9 @@
 
 use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::bail;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{Datum, FromSqlError, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
@@ -23,14 +24,14 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 
 /// Rewrites parameter expressions to literals.
 pub(crate) struct ParamRewriter {
-    pub(crate) params: Vec<Bytes>,
+    pub(crate) params: Vec<Option<Bytes>>,
     pub(crate) parsed_params: Vec<Datum>,
     pub(crate) param_formats: Vec<Format>,
-    pub(crate) error: Option<RwError>,
+    pub(crate) error: Option<FromSqlError>,
 }
 
 impl ParamRewriter {
-    pub(crate) fn new(param_formats: Vec<Format>, params: Vec<Bytes>) -> Self {
+    pub(crate) fn new(param_formats: Vec<Format>, params: Vec<Option<Bytes>>) -> Self {
         Self {
             parsed_params: vec![None; params.len()],
             params,
@@ -49,6 +50,9 @@ impl ExprRewriter for ParamRewriter {
             ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner),
             ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
             ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
+            ExprImpl::FunctionCallWithLambda(inner) => {
+                self.rewrite_function_call_with_lambda(*inner)
+            }
             ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
             ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
@@ -63,39 +67,35 @@ impl ExprRewriter for ParamRewriter {
     fn rewrite_parameter(&mut self, parameter: crate::expr::Parameter) -> ExprImpl {
         let data_type = parameter.return_type();
 
-        // original parameter.index is 1-based.
+        // Postgresql parameter index is 1-based. e.g. $1,$2,$3
+        // But we store it in 0-based vector. So we need to minus 1.
         let parameter_index = (parameter.index - 1) as usize;
 
-        let format = self.param_formats[parameter_index];
-        let scalar = {
-            let res = match format {
-                Format::Text => {
-                    let value = self.params[parameter_index].clone();
-                    ScalarImpl::from_text(&value, &data_type)
-                }
-                Format::Binary => {
-                    let value = self.params[parameter_index].clone();
-                    ScalarImpl::from_binary(&value, &data_type)
-                }
+        let datum: Datum = if let Some(val_bytes) = self.params[parameter_index].clone() {
+            let res = match self.param_formats[parameter_index] {
+                Format::Text => ScalarImpl::from_text(&val_bytes, &data_type),
+                Format::Binary => ScalarImpl::from_binary(&val_bytes, &data_type),
             };
-
             match res {
-                Ok(datum) => datum,
+                Ok(datum) => Some(datum),
                 Err(e) => {
                     self.error = Some(e);
                     return parameter.into();
                 }
             }
+        } else {
+            None
         };
-        self.parsed_params[parameter_index] = Some(scalar.clone());
-        Literal::new(Some(scalar), data_type).into()
+
+        self.parsed_params[parameter_index] = datum.clone();
+        Literal::new(datum, data_type).into()
     }
 }
 
 impl BoundStatement {
     pub fn bind_parameter(
         mut self,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
     ) -> Result<(BoundStatement, Vec<Datum>)> {
         let mut rewriter = ParamRewriter::new(
@@ -108,7 +108,7 @@ impl BoundStatement {
         self.rewrite_exprs_recursive(&mut rewriter);
 
         if let Some(err) = rewriter.error {
-            return Err(err);
+            bail!(err);
         }
 
         Ok((self, rewriter.parsed_params))
@@ -133,8 +133,8 @@ mod test {
 
     fn create_actual_bound(
         sql: &str,
-        param_types: Vec<DataType>,
-        params: Vec<Bytes>,
+        param_types: Vec<Option<DataType>>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
     ) -> BoundStatement {
         let mut binder = mock_binder_with_param_types(param_types);
@@ -155,7 +155,7 @@ mod test {
             create_actual_bound(
                 "select $1::int4",
                 vec![],
-                vec!["1".into()],
+                vec![Some("1".into())],
                 vec![Format::Text],
             ),
         );
@@ -168,7 +168,7 @@ mod test {
             create_actual_bound(
                 "values($1::int4)",
                 vec![],
-                vec!["1".into()],
+                vec![Some("1".into())],
                 vec![Format::Text],
             ),
         );
@@ -178,7 +178,12 @@ mod test {
     async fn default_type() {
         expect_actual_eq(
             create_expect_bound("select '1'"),
-            create_actual_bound("select $1", vec![], vec!["1".into()], vec![Format::Text]),
+            create_actual_bound(
+                "select $1",
+                vec![],
+                vec![Some("1".into())],
+                vec![Format::Text],
+            ),
         );
     }
 
@@ -188,8 +193,8 @@ mod test {
             create_expect_bound("select 1::varchar"),
             create_actual_bound(
                 "select $1::varchar",
-                vec![DataType::Int32],
-                vec!["1".into()],
+                vec![Some(DataType::Int32)],
+                vec![Some("1".into())],
                 vec![Format::Text],
             ),
         );
@@ -202,7 +207,7 @@ mod test {
             create_actual_bound(
                 "select $1,$1::INT4",
                 vec![],
-                vec!["1".into()],
+                vec![Some("1".into())],
                 vec![Format::Text],
             ),
         );

@@ -38,6 +38,11 @@ impl SplitMetaData for NexmarkSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
+        Ok(())
+    }
 }
 
 impl NexmarkSplit {
@@ -47,13 +52,5 @@ impl NexmarkSplit {
             split_num,
             start_offset,
         }
-    }
-
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(
-            self.split_index,
-            self.split_num,
-            Some(start_offset.as_str().parse::<u64>().unwrap()),
-        )
     }
 }

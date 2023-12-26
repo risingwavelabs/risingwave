@@ -16,7 +16,7 @@ package com.risingwave.connector.api.sink;
 
 import com.risingwave.proto.Data;
 
-public interface SinkRow extends AutoCloseable {
+public interface SinkRow {
     Object get(int index);
 
     Data.Op getOp();

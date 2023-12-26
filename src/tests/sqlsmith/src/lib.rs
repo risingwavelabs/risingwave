@@ -16,6 +16,11 @@
 #![feature(if_let_guard)]
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
+
+risingwave_expr_impl::enable!();
 
 use std::collections::{HashMap, HashSet};
 
@@ -150,7 +155,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             }
             let mut pk_indices = pk_indices.into_iter().collect_vec();
             pk_indices.sort_unstable();
-            Table::new_with_pk(
+            Table::new_for_base_table(
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
@@ -206,6 +211,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                 },
                             ],
                             pk_indices: [],
+                            is_base_table: true,
                         },
                         Table {
                             name: "t2",
@@ -220,6 +226,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                 },
                             ],
                             pk_indices: [],
+                            is_base_table: true,
                         },
                         Table {
                             name: "t3",
@@ -238,6 +245,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                                 },
                             ],
                             pk_indices: [],
+                            is_base_table: true,
                         },
                     ],
                     [
@@ -272,6 +280,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -315,6 +325,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -369,6 +381,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                     ],
                 )"#]],
@@ -399,6 +413,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             pk_indices: [
                                 0,
                             ],
+                            is_base_table: true,
                         },
                         Table {
                             name: "t2",
@@ -415,6 +430,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             pk_indices: [
                                 1,
                             ],
+                            is_base_table: true,
                         },
                         Table {
                             name: "t3",
@@ -432,6 +448,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 0,
                                 1,
                             ],
+                            is_base_table: true,
                         },
                         Table {
                             name: "t4",
@@ -454,6 +471,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                                 2,
                             ],
+                            is_base_table: true,
                         },
                     ],
                     [
@@ -495,6 +513,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -545,6 +565,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -602,6 +624,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                         CreateTable {
                             or_replace: false,
@@ -677,6 +701,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_table_info: None,
+                            include_column_options: [],
                         },
                     ],
                 )"#]],

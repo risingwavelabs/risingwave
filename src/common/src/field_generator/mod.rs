@@ -26,7 +26,7 @@ pub use timestamp::*;
 pub use varchar::*;
 
 use crate::array::{ListValue, StructValue};
-use crate::types::{DataType, Datum, ScalarImpl};
+use crate::types::{DataType, Datum, ScalarImpl, Timestamp, Timestamptz};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
@@ -95,7 +95,8 @@ pub enum FieldGeneratorImpl {
     VarcharRandomVariableLength(VarcharRandomVariableLengthField),
     VarcharRandomFixedLength(VarcharRandomFixedLengthField),
     VarcharConstant,
-    Timestamp(TimestampField),
+    Timestamp(ChronoField<Timestamp>),
+    Timestamptz(ChronoField<Timestamptz>),
     Struct(Vec<(String, FieldGeneratorImpl)>),
     List(Box<FieldGeneratorImpl>, usize),
 }
@@ -181,7 +182,21 @@ impl FieldGeneratorImpl {
         max_past_mode: Option<String>,
         seed: u64,
     ) -> Result<Self> {
-        Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+        Ok(FieldGeneratorImpl::Timestamp(ChronoField::new(
+            base,
+            max_past,
+            max_past_mode,
+            seed,
+        )?))
+    }
+
+    pub fn with_timestamptz(
+        base: Option<DateTime<FixedOffset>>,
+        max_past: Option<String>,
+        max_past_mode: Option<String>,
+        seed: u64,
+    ) -> Result<Self> {
+        Ok(FieldGeneratorImpl::Timestamptz(ChronoField::new(
             base,
             max_past,
             max_past_mode,
@@ -235,6 +250,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate(offset),
             FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_json(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(offset),
+            FieldGeneratorImpl::Timestamptz(f) => f.generate(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
                     .iter_mut()
@@ -267,6 +283,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate_datum(offset),
             FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_datum(),
             FieldGeneratorImpl::Timestamp(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::Timestamptz(f) => f.generate_datum(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let data = fields
                     .iter_mut()
@@ -275,11 +292,33 @@ impl FieldGeneratorImpl {
                 Some(ScalarImpl::Struct(StructValue::new(data)))
             }
             FieldGeneratorImpl::List(field, list_length) => {
-                let data = (0..*list_length)
-                    .map(|_| field.generate_datum(offset))
-                    .collect::<Vec<_>>();
-                Some(ScalarImpl::List(ListValue::new(data)))
+                Some(ScalarImpl::List(ListValue::from_datum_iter(
+                    &field.data_type(),
+                    std::iter::repeat_with(|| field.generate_datum(offset)).take(*list_length),
+                )))
             }
+        }
+    }
+
+    fn data_type(&self) -> DataType {
+        match self {
+            Self::I16Sequence(_) => DataType::Int16,
+            Self::I32Sequence(_) => DataType::Int32,
+            Self::I64Sequence(_) => DataType::Int64,
+            Self::F32Sequence(_) => DataType::Float32,
+            Self::F64Sequence(_) => DataType::Float64,
+            Self::I16Random(_) => DataType::Int16,
+            Self::I32Random(_) => DataType::Int32,
+            Self::I64Random(_) => DataType::Int64,
+            Self::F32Random(_) => DataType::Float32,
+            Self::F64Random(_) => DataType::Float64,
+            Self::VarcharRandomFixedLength(_) => DataType::Varchar,
+            Self::VarcharRandomVariableLength(_) => DataType::Varchar,
+            Self::VarcharConstant => DataType::Varchar,
+            Self::Timestamp(_) => DataType::Timestamp,
+            Self::Timestamptz(_) => DataType::Timestamptz,
+            Self::Struct(_) => todo!("data_type for struct"),
+            Self::List(inner, _) => DataType::List(Box::new(inner.data_type())),
         }
     }
 }
@@ -328,6 +367,7 @@ mod tests {
             DataType::Float64,
             DataType::Varchar,
             DataType::Timestamp,
+            DataType::Timestamptz,
         ] {
             let mut generator = match data_type {
                 DataType::Varchar => FieldGeneratorImpl::with_varchar(
@@ -336,6 +376,9 @@ mod tests {
                 ),
                 DataType::Timestamp => {
                     FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
+                }
+                DataType::Timestamptz => {
+                    FieldGeneratorImpl::with_timestamptz(None, None, None, seed).unwrap()
                 }
                 _ => FieldGeneratorImpl::with_number_random(data_type, None, None, seed).unwrap(),
             };

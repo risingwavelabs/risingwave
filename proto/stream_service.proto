@@ -72,7 +72,7 @@ message BarrierCompleteRequest {
 }
 message BarrierCompleteResponse {
   message CreateMviewProgress {
-    uint32 chain_actor_id = 1;
+    uint32 backfill_actor_id = 1;
     bool done = 2;
     uint64 consumed_epoch = 3;
     uint64 consumed_rows = 4;
@@ -87,6 +87,7 @@ message BarrierCompleteResponse {
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
+  map<uint32, hummock.TableWatermarks> table_watermarks = 6;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

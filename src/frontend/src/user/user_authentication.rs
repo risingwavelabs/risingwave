@@ -146,7 +146,7 @@ mod tests {
             sha256_hash(user_name, password)
         );
 
-        let input_passwords = vec![
+        let input_passwords = [
             "bar",
             "",
             "md596948aad3fcae80c08a35c9b5958cd89",

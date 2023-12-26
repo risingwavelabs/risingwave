@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::CdcSourceTypeTrait;
+use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -37,37 +39,6 @@ impl CdcSplitBase {
             snapshot_done: false,
         }
     }
-}
-
-// Example debezium offset for Postgres:
-// {
-//     "sourcePartition":
-//     {
-//         "server": "RW_CDC_public.te"
-//     },
-//     "sourceOffset":
-//     {
-//         "last_snapshot_record": false,
-//         "lsn": 29973552,
-//         "txId": 1046,
-//         "ts_usec": 1670826189008456,
-//         "snapshot": true
-//     }
-// }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DebeziumOffset {
-    #[serde(rename = "sourcePartition")]
-    source_partition: HashMap<String, String>,
-    #[serde(rename = "sourceOffset")]
-    source_offset: DebeziumSourceOffset,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DebeziumSourceOffset {
-    // postgres snapshot progress
-    last_snapshot_record: Option<bool>,
-    // mysql snapshot progress
-    snapshot: Option<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -92,22 +63,30 @@ impl MySqlCdcSplit {
         Self { inner: split }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        // deserialize the start_offset
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let mut snapshot_done = self.inner.snapshot_done;
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid mysql offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
 
-        let snapshot_done = match dbz_offset.source_offset.snapshot {
-            Some(val) => !val,
-            None => true,
-        };
-
-        let split = CdcSplitBase {
-            split_id: self.inner.split_id,
-            start_offset: Some(start_offset),
-            snapshot_done,
-        };
-        Self { inner: split }
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = match dbz_offset.source_offset.snapshot {
+                    Some(val) => !val,
+                    None => true,
+                };
+            }
+        }
+        self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it won't be updated
+        self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
@@ -124,38 +103,45 @@ impl PostgresCdcSplit {
         }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        // deserialize the start_offset
-        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let mut snapshot_done = self.inner.snapshot_done;
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
+                anyhow!(
+                    "invalid postgres offset: {}, error: {}, split: {}",
+                    start_offset,
+                    e,
+                    self.inner.split_id
+                )
+            })?;
 
-        let snapshot_done = dbz_offset
-            .source_offset
-            .last_snapshot_record
-            .unwrap_or(false);
-
-        let split = CdcSplitBase {
-            split_id: self.inner.split_id,
-            start_offset: Some(start_offset),
-            snapshot_done,
-        };
-
-        let server_addr = self.server_addr.clone();
-        Self {
-            inner: split,
-            server_addr,
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = dbz_offset
+                    .source_offset
+                    .last_snapshot_record
+                    .unwrap_or(false);
+            }
         }
+        self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it won't be updated
+        self.inner.snapshot_done = snapshot_done;
+        Ok(())
     }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct DebeziumCdcSplit {
+pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
     pub pg_split: Option<PostgresCdcSplit>,
+
+    #[serde(skip)]
+    pub _phantom: PhantomData<T>,
 }
 
-impl SplitMetaData for DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
+        // TODO: may check T to get the specific cdc type
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &self.mysql_split {
             return format!("{}", split.inner.split_id).into();
@@ -173,13 +159,25 @@ impl SplitMetaData for DebeziumCdcSplit {
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        // TODO: may check T to get the specific cdc type
+        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
+        if let Some(split) = &mut self.mysql_split {
+            split.update_with_offset(start_offset)?
+        } else if let Some(split) = &mut self.pg_split {
+            split.update_with_offset(start_offset)?
+        }
+        Ok(())
+    }
 }
 
-impl DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
         Self {
             mysql_split,
             pg_split,
+            _phantom: PhantomData,
         }
     }
 
@@ -213,29 +211,11 @@ impl DebeziumCdcSplit {
         unreachable!("invalid debezium split")
     }
 
-    pub fn server_addr(&self) -> &Option<String> {
+    pub fn server_addr(&self) -> Option<String> {
         if let Some(split) = &self.pg_split {
-            return &split.server_addr;
+            split.server_addr.clone()
+        } else {
+            None
         }
-        unreachable!("invalid debezium split")
-    }
-
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &self.mysql_split {
-            let mysql_split = Some(split.copy_with_offset(start_offset));
-            return Self {
-                mysql_split,
-                pg_split: None,
-            };
-        }
-        if let Some(split) = &self.pg_split {
-            let pg_split = Some(split.copy_with_offset(start_offset));
-            return Self {
-                mysql_split: None,
-                pg_split,
-            };
-        }
-        unreachable!("invalid debezium split")
     }
 }

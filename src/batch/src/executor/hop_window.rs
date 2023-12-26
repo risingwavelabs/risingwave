@@ -16,14 +16,14 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -146,7 +146,7 @@ impl Executor for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
@@ -163,7 +163,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 
@@ -172,7 +173,7 @@ impl HopWindowExecutor {
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+            assert!(data_chunk.is_compacted());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
@@ -238,7 +239,7 @@ mod tests {
             6 2 ^10:42:00
             7 1 ^10:51:00
             8 3 ^11:02:00"
-                .replace('^', "2022-2-2T"),
+                .replace('^', "2022-02-02T"),
         );
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
@@ -325,7 +326,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:14:00 ^10:44:00
                 7 1 ^10:51:00 ^10:29:00 ^10:59:00
                 8 3 ^11:02:00 ^10:44:00 ^11:14:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
         assert_eq!(
@@ -340,7 +341,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:14:00 ^10:44:00
                 7 1 ^10:51:00 ^10:29:00 ^10:59:00
                 8 3 ^11:02:00 ^10:44:00 ^11:14:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -370,7 +371,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:15:00 ^10:45:00
                 7 1 ^10:51:00 ^10:30:00 ^11:00:00
                 8 3 ^11:02:00 ^10:45:00 ^11:15:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
 
@@ -387,7 +388,7 @@ mod tests {
                 6 2 ^10:42:00 ^10:30:00 ^11:00:00
                 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -414,7 +415,7 @@ mod tests {
                    2 ^10:15:00 ^10:45:00 ^10:42:00
                    1 ^10:30:00 ^11:00:00 ^10:51:00
                    3 ^10:45:00 ^11:15:00 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
 
@@ -431,7 +432,7 @@ mod tests {
                   2 ^10:30:00 ^11:00:00 ^10:42:00
                   1 ^10:45:00 ^11:15:00 ^10:51:00
                   3 ^11:00:00 ^11:30:00 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }

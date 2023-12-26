@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
+#![feature(let_chains)]
+#![feature(try_blocks)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
 
 pub mod client;
 pub mod cluster;
@@ -24,3 +28,5 @@ pub mod kafka;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;
+
+risingwave_expr_impl::enable!();

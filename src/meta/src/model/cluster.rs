@@ -17,6 +17,7 @@ use std::ops::{Add, Deref};
 use std::time::{Duration, SystemTime};
 
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::common::worker_node::Resource;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use uuid::Uuid;
@@ -37,14 +38,16 @@ pub struct Worker {
     // Volatile values updated by meta node as follows.
     //
     // Unix timestamp that the worker will expire at.
-    expire_at: u64,
+    pub expire_at: u64,
+    pub started_at: Option<u64>,
 
     // Volatile values updated by worker as follows:
     //
     // Monotonic increasing id since meta node bootstrap.
-    info_version_id: u64,
+    pub info_version_id: u64,
     // GC watermark.
-    hummock_gc_watermark: Option<HummockSstableObjectId>,
+    pub hummock_gc_watermark: Option<HummockSstableObjectId>,
+    pub resource: Option<Resource>,
 }
 
 impl MetadataModel for Worker {
@@ -63,8 +66,10 @@ impl MetadataModel for Worker {
         Self {
             worker_node: prost,
             expire_at: INVALID_EXPIRE_AT,
+            started_at: None,
             info_version_id: 0,
-            hummock_gc_watermark: Default::default(),
+            hummock_gc_watermark: None,
+            resource: None,
         }
     }
 
@@ -86,13 +91,9 @@ impl Worker {
         self.worker_node.r#type()
     }
 
-    pub fn expire_at(&self) -> u64 {
-        self.expire_at
-    }
-
-    pub fn update_ttl(&mut self, ttl: Duration) {
+    pub fn update_expire_at(&mut self, ttl: Duration) {
         let expire_at = cmp::max(
-            self.expire_at(),
+            self.expire_at,
             SystemTime::now()
                 .add(ttl)
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -100,6 +101,10 @@ impl Worker {
                 .as_secs(),
         );
         self.expire_at = expire_at;
+    }
+
+    pub fn update_started_at(&mut self, started_at: u64) {
+        self.started_at = Some(started_at);
     }
 
     pub fn update_info(&mut self, info: Vec<Info>) {
@@ -113,12 +118,8 @@ impl Worker {
         }
     }
 
-    pub fn hummock_gc_watermark(&self) -> Option<HummockSstableObjectId> {
-        self.hummock_gc_watermark
-    }
-
-    pub fn info_version_id(&self) -> u64 {
-        self.info_version_id
+    pub fn update_resource(&mut self, resource: Option<Resource>) {
+        self.resource = resource;
     }
 }
 
@@ -128,8 +129,14 @@ const CLUSTER_ID_KEY: &[u8] = "cluster_id".as_bytes();
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);
 
+impl Default for ClusterId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClusterId {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
     }
 
@@ -139,15 +146,13 @@ impl ClusterId {
         ))
     }
 
-    pub(crate) async fn from_meta_store<S: MetaStore>(
+    pub async fn from_meta_store<S: MetaStore>(
         meta_store: &S,
     ) -> MetadataModelResult<Option<Self>> {
         Self::from_snapshot::<S>(&meta_store.snapshot().await).await
     }
 
-    pub(crate) async fn from_snapshot<S: MetaStore>(
-        s: &S::Snapshot,
-    ) -> MetadataModelResult<Option<Self>> {
+    pub async fn from_snapshot<S: MetaStore>(s: &S::Snapshot) -> MetadataModelResult<Option<Self>> {
         match s.get_cf(CLUSTER_ID_CF_NAME, CLUSTER_ID_KEY).await {
             Ok(bytes) => Ok(Some(Self::from_bytes(bytes)?)),
             Err(e) => match e {
@@ -157,10 +162,7 @@ impl ClusterId {
         }
     }
 
-    pub(crate) async fn put_at_meta_store<S: MetaStore>(
-        &self,
-        meta_store: &S,
-    ) -> MetadataModelResult<()> {
+    pub async fn put_at_meta_store<S: MetaStore>(&self, meta_store: &S) -> MetadataModelResult<()> {
         Ok(meta_store
             .put_cf(
                 CLUSTER_ID_CF_NAME,

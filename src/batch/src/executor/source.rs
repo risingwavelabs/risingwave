@@ -15,26 +15,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SourceFormat, SplitImpl,
-    SplitMetaData,
+    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -67,32 +62,11 @@ impl BoxedExecutorBuilder for SourceExecutor {
 
         // prepare connector source
         let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.properties.clone().into_iter());
-        let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+            HashMap::from_iter(source_node.with_properties.clone());
+        let config = ConnectorProperties::extract(source_props).map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let format = match info.get_row_format()? {
-            RowFormatType::Json => SourceFormat::Json,
-            RowFormatType::Protobuf => SourceFormat::Protobuf,
-            RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
-            RowFormatType::Avro => SourceFormat::Avro,
-            RowFormatType::Maxwell => SourceFormat::Maxwell,
-            RowFormatType::CanalJson => SourceFormat::CanalJson,
-            RowFormatType::Native => SourceFormat::Native,
-            RowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
-            RowFormatType::UpsertJson => SourceFormat::UpsertJson,
-            RowFormatType::Bytes => SourceFormat::Bytes,
-            _ => unreachable!(),
-        };
-        if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
-            return Err(RwError::from(ProtocolError(
-                "protobuf file location not provided".to_string(),
-            )));
-        }
-
-        let parser_config =
-            SpecificParserConfig::new(format, info, &source_node.properties).await?;
+        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -162,7 +136,7 @@ impl Executor for SourceExecutor {
 }
 
 impl SourceExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let source_ctx = Arc::new(SourceContext::new(
             u32::MAX,
@@ -170,6 +144,7 @@ impl SourceExecutor {
             u32::MAX,
             self.metrics,
             self.source_ctrl_opts.clone(),
+            None,
         ));
         let stream = self
             .connector_source
@@ -178,13 +153,10 @@ impl SourceExecutor {
 
         #[for_await]
         for chunk in stream {
-            match chunk {
-                Ok(chunk) => {
-                    yield covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
-                }
-                Err(e) => {
-                    return Err(e);
-                }
+            let chunk = chunk.map_err(BatchError::connector)?;
+            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
+            if data_chunk.capacity() > 0 {
+                yield data_chunk;
             }
         }
     }
@@ -192,12 +164,10 @@ impl SourceExecutor {
 
 fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     // chunk read from source must be compact
-    assert!(chunk.data_chunk().visibility().is_none());
+    assert!(chunk.data_chunk().is_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
-        return Err(RwError::from(BatchError::Internal(anyhow!(
-            "Only support insert op in batch source executor"
-        ))));
+        bail!("Only support insert op in batch source executor");
     }
 
     Ok(chunk.data_chunk().clone())

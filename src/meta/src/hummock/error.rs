@@ -14,6 +14,7 @@
 
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -25,20 +26,30 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
+    #[error("failed to access meta store: {0}")]
+    MetaStore(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
-    MetaStore(anyhow::Error),
-    #[error(transparent)]
-    ObjectStore(ObjectError),
+    ObjectStore(
+        #[from]
+        #[backtrace]
+        ObjectError,
+    ),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
-    #[error("compaction task {0} already assigned to compactor {1}")]
-    CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("compaction group error: {0}")]
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl Error {
@@ -74,18 +85,6 @@ impl From<MetadataModelError> for Error {
 
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
-    }
-}
-
-impl From<anyhow::Error> for Error {
-    fn from(e: anyhow::Error) -> Self {
-        Error::Internal(e)
-    }
-}
-
-impl From<ObjectError> for Error {
-    fn from(e: ObjectError) -> Self {
-        Error::ObjectStore(e)
+        err.to_status(tonic::Code::Internal, "hummock")
     }
 }

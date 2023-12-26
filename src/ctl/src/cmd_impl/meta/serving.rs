@@ -25,7 +25,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
     let meta_client = context.meta_client().await?;
     let mappings = meta_client.list_serving_vnode_mappings().await?;
     let workers = meta_client
-        .list_worker_nodes(WorkerType::ComputeNode)
+        .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
     let mut pu_to_worker: HashMap<ParallelUnitId, &WorkerNode> = HashMap::new();
     for w in &workers {
@@ -50,7 +50,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
         .flat_map(|(fragment_id, (table_id, mapping))| {
             let mut pu_vnodes: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
             for (vnode, pu) in mapping.iter_with_vnode() {
-                pu_vnodes.entry(pu).or_insert(vec![]).push(vnode);
+                pu_vnodes.entry(pu).or_default().push(vnode);
             }
             pu_vnodes.into_iter().map(|(pu_id, vnodes)| {
                 (
@@ -82,7 +82,9 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
             )
             .into(),
         );
-        if let Some(w) = worker && let Some(addr) = w.host.as_ref() {
+        if let Some(w) = worker
+            && let Some(addr) = w.host.as_ref()
+        {
             row.add_cell(format!("id: {}; {}:{}", w.id, addr.host, addr.port).into());
         } else {
             row.add_cell("".into());

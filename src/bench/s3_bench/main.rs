@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use aws_config::retry::RetryConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::Client;
-use aws_smithy_http::body::SdkBody;
+use aws_smithy_types::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
@@ -136,7 +136,7 @@ enum Case {
 
 #[derive(Parser, Debug)]
 pub struct Config {
-    /// AWS S3 Bucket, either <BUCKET> should be given.
+    /// AWS S3 Bucket.
     #[clap(short, long)]
     bucket: String,
 

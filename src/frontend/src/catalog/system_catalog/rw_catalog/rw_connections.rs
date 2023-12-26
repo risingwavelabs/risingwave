@@ -12,18 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_CONNECTIONS_TABLE_NAME: &str = "rw_connections";
+pub const RW_CONNECTIONS: BuiltinTable = BuiltinTable {
+    name: "rw_connections",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "schema_id"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "type"),
+        (DataType::Varchar, "provider"),
+        (DataType::Varchar, "acl"),
+    ],
+    pk: &[0],
+};
 
-pub const RW_CONNECTIONS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "schema_id"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "type"),
-    (DataType::Varchar, "provider"),
-    (DataType::Varchar, "acl"),
-];
+impl SysCatalogReaderImpl {
+    pub fn read_rw_connections_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema.iter_connections().map(|conn| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int32(conn.id as i32)),
+                        Some(ScalarImpl::Utf8(conn.name.clone().into())),
+                        Some(ScalarImpl::Int32(schema.id() as i32)),
+                        Some(ScalarImpl::Int32(conn.owner as i32)),
+                        Some(ScalarImpl::Utf8(conn.connection_type().into())),
+                        Some(ScalarImpl::Utf8(conn.provider().into())),
+                        Some(ScalarImpl::Utf8("".into())),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+}

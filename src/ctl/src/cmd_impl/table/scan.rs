@@ -124,12 +124,12 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),
             true,
-            PrefetchOptions::new_for_exhaust_iter(),
+            PrefetchOptions::prefetch_for_large_range_scan(),
         )
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
-        println!("{:?}", item?);
+        println!("{:?}", item?.into_owned_row());
     }
     Ok(())
 }

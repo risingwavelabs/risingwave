@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use paste::paste;
-mod max_one_row_visitor;
-pub use max_one_row_visitor::*;
+mod apply_visitor;
+pub use apply_visitor::*;
 mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
@@ -80,14 +80,15 @@ macro_rules! def_visitor {
     ($({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
-        pub trait PlanVisitor<R: Default> {
-            type DefaultBehavior: DefaultBehavior<R>;
+        pub trait PlanVisitor {
+            type Result: Default;
+            type DefaultBehavior: DefaultBehavior<Self::Result>;
 
             /// The behavior for the default implementations of `visit_xxx`.
             fn default_behavior() -> Self::DefaultBehavior;
 
             paste! {
-                fn visit(&mut self, plan: PlanRef) -> R{
+                fn visit(&mut self, plan: PlanRef) -> Self::Result {
                     match plan.node_type() {
                         $(
                             PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
@@ -97,7 +98,7 @@ macro_rules! def_visitor {
 
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
-                    fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
+                    fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
                         let results = plan.inputs().into_iter().map(|input| self.visit(input));
                         Self::default_behavior().apply(results)
                     }
@@ -121,17 +122,18 @@ macro_rules! impl_has_variant {
                         pred: P,
                     }
 
-                    impl<P> PlanVisitor<bool> for HasWhere<P>
+                    impl<P> PlanVisitor for HasWhere<P>
                     where
                         P: FnMut(&$variant) -> bool,
                     {
-                        type DefaultBehavior = impl DefaultBehavior<bool>;
+                        type Result = bool;
+                        type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
                         fn default_behavior() -> Self::DefaultBehavior {
                             Merge(|a, b| a | b)
                         }
 
-                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> bool {
+                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> Self::Result {
                             (self.pred)(node)
                         }
                     }
@@ -151,6 +153,7 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {
     LogicalApply,
+    LogicalMaxOneRow,
     LogicalOverWindow,
     LogicalScan,
     LogicalSource,

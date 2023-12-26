@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::future::Future;
 use std::hash::Hash;
+use std::ops::Deref;
 use std::ptr;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -708,9 +709,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 
     pub fn contains(self: &Arc<Self>, hash: u64, key: &K) -> bool {
-        let mut shard = self.shards[self.shard(hash)].lock();
+        let shard = self.shards[self.shard(hash)].lock();
         unsafe {
-            let ptr = shard.lookup(hash, key);
+            let ptr = shard.table.lookup(hash, key);
             !ptr.is_null()
         }
     }
@@ -757,7 +758,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.release(handle)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key, value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data
+            && let Some(listener) = &self.listener
+        {
             listener.on_release(key, value);
         }
     }
@@ -819,7 +822,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.erase(hash, key)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key, value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data
+            && let Some(listener) = &self.listener
+        {
             listener.on_release(key, value);
         }
     }
@@ -991,6 +996,14 @@ unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
 impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
     pub fn value(&self) -> &T {
+        unsafe { (*self.handle).get_value() }
+    }
+}
+
+impl<K: LruKey, T: LruValue> Deref for CacheableEntry<K, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
         unsafe { (*self.handle).get_value() }
     }
 }

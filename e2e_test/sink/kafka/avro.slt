@@ -1,0 +1,112 @@
+statement ok
+create table from_kafka ( primary key (some_key) )
+include key as some_key
+with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro',
+  properties.bootstrap.server = 'message_queue:29092')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081');
+
+statement ok
+create table into_kafka (
+  bool_field bool,
+  string_field varchar,
+  bytes_field bytea,
+  float_field real,
+  double_field double precision,
+  int32_field int,
+  int64_field bigint,
+  record_field struct<id int, name varchar>,
+  array_field int[][],
+  timestamp_micros_field timestamptz,
+  timestamp_millis_field timestamptz,
+  date_field date,
+  time_micros_field time,
+  time_millis_field time);
+
+statement ok
+insert into into_kafka values
+  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, null, array[array[null, 3], null, array[7, null, 2]], '2006-01-02 15:04:05-07:00', null, null, '12:34:56.123456', null),
+  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, row(null::int, 'foo'), null, null, '2006-01-02 15:04:05-07:00', '2021-04-01', null, '23:45:16.654321');
+
+statement ok
+flush;
+
+statement ok
+create sink sink0 from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field,string_field')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081');
+
+sleep 2s
+
+query TTTRRIITTTTTTTT
+select
+  bool_field,
+  string_field,
+  bytes_field,
+  float_field,
+  double_field,
+  int32_field,
+  int64_field,
+  record_field,
+  array_field,
+  timestamp_micros_field,
+  timestamp_millis_field,
+  date_field,
+  time_micros_field,
+  time_millis_field from from_kafka order by string_field;
+----
+t Rising \x6130   3.5 4.25 22 23 NULL   {{NULL,3},NULL,{7,NULL,2}} 2006-01-02 22:04:05+00:00 NULL                      NULL       12:34:56.123456 NULL
+f Wave   \x5a4446 1.5 NULL 11 12 (,foo) NULL                       NULL                      2006-01-02 22:04:05+00:00 2021-04-01 NULL            23:45:16.654
+
+statement error SchemaFetchError
+create sink sink_err from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro-err',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field,string_field')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081');
+
+statement error field not in avro
+create sink sink_err as select 1 as extra_column, * from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field,string_field')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081');
+
+statement error unrecognized
+create sink sink_err from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field,string_field')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081',
+  schema.registry.name.strategy = 'typo');
+
+statement error empty field key.message
+create sink sink_err from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field,string_field')
+format upsert encode avro (
+  schema.registry = 'http://message_queue:8081',
+  schema.registry.name.strategy = 'record_name_strategy');
+
+statement ok
+drop sink sink0;
+
+statement ok
+drop table into_kafka;
+
+statement ok
+drop table from_kafka;

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_expr::function::window::WindowFuncKind;
+use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 

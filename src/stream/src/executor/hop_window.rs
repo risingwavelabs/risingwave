@@ -17,24 +17,24 @@ use std::num::NonZeroUsize;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
-    ctx: ActorContextRef,
-    pub input: BoxedExecutor,
+    _ctx: ActorContextRef,
     pub info: ExecutorInfo,
+    pub input: BoxedExecutor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
-    window_start_exprs: Vec<BoxedExpression>,
-    window_end_exprs: Vec<BoxedExpression>,
+    window_start_exprs: Vec<NonStrictExpression>,
+    window_end_exprs: Vec<NonStrictExpression>,
     pub output_indices: Vec<usize>,
     chunk_size: usize,
 }
@@ -43,20 +43,20 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: BoxedExecutor,
         info: ExecutorInfo,
+        input: BoxedExecutor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
-        window_start_exprs: Vec<BoxedExpression>,
-        window_end_exprs: Vec<BoxedExpression>,
+        window_start_exprs: Vec<NonStrictExpression>,
+        window_end_exprs: Vec<NonStrictExpression>,
         output_indices: Vec<usize>,
         chunk_size: usize,
     ) -> Self {
         HopWindowExecutor {
-            ctx,
-            input,
+            _ctx: ctx,
             info,
+            input,
             time_col_idx,
             window_slide,
             window_size,
@@ -90,13 +90,11 @@ impl HopWindowExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let Self {
-            ctx,
             input,
 
             window_slide,
             window_size,
             output_indices,
-            info,
             time_col_idx,
 
             chunk_size,
@@ -110,7 +108,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 
@@ -141,7 +140,7 @@ impl HopWindowExecutor {
                     let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+                    assert!(data_chunk.is_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.
@@ -151,22 +150,14 @@ impl HopWindowExecutor {
                         let window_start_col = if out_window_start_col_idx.is_some() {
                             Some(
                                 self.window_start_exprs[i]
-                                    .eval_infallible(&data_chunk, |err| {
-                                        ctx.on_compute_error(err, &info.identity)
-                                    })
+                                    .eval_infallible(&data_chunk)
                                     .await,
                             )
                         } else {
                             None
                         };
                         let window_end_col = if out_window_end_col_idx.is_some() {
-                            Some(
-                                self.window_end_exprs[i]
-                                    .eval_infallible(&data_chunk, |err| {
-                                        ctx.on_compute_error(err, &info.identity)
-                                    })
-                                    .await,
-                            )
+                            Some(self.window_end_exprs[i].eval_infallible(&data_chunk).await)
                         } else {
                             None
                         };
@@ -192,10 +183,9 @@ impl HopWindowExecutor {
                     let mut row_iters = chunks.iter().map(|c| c.rows()).collect_vec();
 
                     let data_types = chunks[0].data_types();
-                    let mut chunk_builder = DataChunkBuilder::new(data_types, chunk_size);
-                    let mut op_builder = Vec::with_capacity(chunk_size);
+                    let mut chunk_builder = StreamChunkBuilder::new(chunk_size, data_types);
 
-                    for &op in &ops {
+                    for &op in &*ops {
                         // Since there could be multiple rows for the same input row, we need to
                         // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
                         let op = match op {
@@ -203,25 +193,19 @@ impl HopWindowExecutor {
                             Op::Delete | Op::UpdateDelete => Op::Delete,
                         };
                         for row_iter in &mut row_iters {
-                            op_builder.push(op);
                             if let Some(chunk) =
-                                chunk_builder.append_one_row(row_iter.next().unwrap())
+                                chunk_builder.append_row(op, row_iter.next().unwrap())
                             {
-                                let ops = op_builder.drain(..).collect_vec();
-                                let chunk = StreamChunk::from_data_chunk(ops, chunk);
                                 yield Message::Chunk(chunk);
                             }
                         }
                     }
 
-                    if let Some(chunk) = chunk_builder.consume_all() {
-                        let ops = op_builder.drain(..).collect_vec();
-                        let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                    if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
 
-                    // All builders should be exhausted.
-                    debug_assert!(op_builder.is_empty());
+                    // Rows should be exhausted.
                     debug_assert!(row_iters.into_iter().all(|mut it| it.next().is_none()));
                 }
                 Message::Barrier(b) => {
@@ -230,26 +214,20 @@ impl HopWindowExecutor {
                 Message::Watermark(w) => {
                     if w.col_idx == time_col_idx {
                         if let (Some(out_start_idx), Some(start_expr)) =
-                            (out_window_start_col_idx, self.window_start_exprs.get(0))
+                            (out_window_start_col_idx, self.window_start_exprs.first())
                         {
                             let w = w
                                 .clone()
-                                .transform_with_expr(start_expr, out_start_idx, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                })
+                                .transform_with_expr(start_expr, out_start_idx)
                                 .await;
                             if let Some(w) = w {
                                 yield Message::Watermark(w);
                             }
                         }
                         if let (Some(out_end_idx), Some(end_expr)) =
-                            (out_window_end_col_idx, self.window_end_exprs.get(0))
+                            (out_window_end_col_idx, self.window_end_exprs.first())
                         {
-                            let w = w
-                                .transform_with_expr(end_expr, out_end_idx, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                })
-                                .await;
+                            let w = w.transform_with_expr(end_expr, out_end_idx).await;
                             if let Some(w) = w {
                                 yield Message::Watermark(w);
                             }
@@ -273,6 +251,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Interval};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
+    use risingwave_expr::expr::NonStrictExpression;
 
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
@@ -296,7 +275,7 @@ mod tests {
            U+ 6 2 ^10:42:00
             - 7 1 ^10:51:00
             + 8 3 ^11:02:00"
-                .replace('^', "2022-2-2T"),
+                .replace('^', "2022-02-02T"),
         );
         let input =
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
@@ -314,23 +293,30 @@ mod tests {
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
-            input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            input,
             2,
             window_slide,
             window_size,
-            window_start_exprs,
-            window_end_exprs,
+            window_start_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
+            window_end_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
             output_indices,
             CHUNK_SIZE,
         )
         .boxed()
     }
+
     #[tokio::test]
     async fn test_execute() {
         let default_indices: Vec<_> = (0..5).collect();
@@ -360,7 +346,7 @@ mod tests {
                 - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -393,7 +379,7 @@ mod tests {
                 - ^11:15:00 1 7 ^10:51:00
                 + ^11:15:00 3 8 ^11:02:00
                 + ^11:30:00 3 8 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }

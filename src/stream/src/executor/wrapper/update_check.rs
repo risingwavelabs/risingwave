@@ -70,9 +70,9 @@ mod tests {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
             "     I
-            U-  114 
+            U-  114
             U-  514
-            U+ 1919 
+            U+ 1919
             U+  810",
         ));
 
@@ -103,7 +103,7 @@ mod tests {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
             "        I
-            U-     114 
+            U-     114
             U+     514
             U- 1919810",
         ));

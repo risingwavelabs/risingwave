@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::{AggArgs, AggKind};
-use risingwave_expr::function::window::{
+use risingwave_common::session_config::OverWindowCachePolicy;
+use risingwave_expr::aggregate::{AggArgs, AggKind};
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
-use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
+use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::{ExecutorInfo, OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -54,6 +56,13 @@ async fn create_executor<S: StateStore>(
         OrderType::ascending(),
     ];
 
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
     let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution(
@@ -67,17 +76,24 @@ async fn create_executor<S: StateStore>(
 
     let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
-        input: source.boxed(),
         actor_ctx: ActorContext::create(123),
-        pk_indices: output_pk_indices,
-        executor_id: 1,
+        info: ExecutorInfo {
+            schema: output_schema,
+            pk_indices: output_pk_indices,
+            identity: "OverWindowExecutor".to_string(),
+        },
+
+        input: source.boxed(),
+
         calls,
         partition_key_indices,
         order_key_indices,
         order_key_order_types,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
+        cache_policy: OverWindowCachePolicy::Recent,
     });
     (tx, executor.boxed().execute())
 }

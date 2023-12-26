@@ -105,14 +105,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use prometheus::IntGauge;
-
     use crate::estimate_size::collections::MemMonitoredHeap;
     use crate::memory::MemoryContext;
+    use crate::metrics::LabelGuardedIntGauge;
 
     #[test]
     fn test_heap() {
-        let gauge = IntGauge::new("test", "test").unwrap();
+        let gauge = LabelGuardedIntGauge::<4>::test_int_gauge();
         let mem_ctx = MemoryContext::root(gauge.clone());
 
         let mut heap = MemMonitoredHeap::<u8>::new_with(mem_ctx);
@@ -130,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_heap_drop() {
-        let gauge = IntGauge::new("test", "test").unwrap();
+        let gauge = LabelGuardedIntGauge::<4>::test_int_gauge();
         let mem_ctx = MemoryContext::root(gauge.clone());
 
         let vec = {

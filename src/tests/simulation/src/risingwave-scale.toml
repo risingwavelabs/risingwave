@@ -13,3 +13,4 @@ checkpoint_frequency = 4
 
 [server]
 telemetry_enabled = false
+metrics_level = "Disabled"

@@ -12,34 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::ConfigReporter;
+use risingwave_common::error::Result;
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
+use crate::utils::infer_stmt_row_desc::infer_show_variable;
+
+/// convert `SetVariableValue` to string while remove the quotes on literals.
+pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
+    match value {
+        SetVariableValue::Single(var) => Some(var.to_string_unquoted()),
+        SetVariableValue::List(list) => Some(
+            list.iter()
+                .map(|var| var.to_string_unquoted())
+                .join(SESSION_CONFIG_LIST_SEP),
+        ),
+        SetVariableValue::Default => None,
+    }
+}
 
 pub fn handle_set(
     handler_args: HandlerArgs,
     name: Ident,
-    value: Vec<SetVariableValue>,
+    value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_vals = value
-        .into_iter()
-        .map(|v| match v {
-            SetVariableValue::Literal(Value::DoubleQuotedString(s))
-            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
-            _ => v.to_string(),
-        })
-        .collect_vec();
+    let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -60,7 +67,7 @@ pub fn handle_set(
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
         &name.real_value().to_lowercase(),
-        string_vals,
+        string_val,
         Reporter {
             status: &mut status,
         },
@@ -76,8 +83,9 @@ pub(super) fn handle_set_time_zone(
     value: SetTimeZoneValue,
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
-        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Local => {
+            iana_time_zone::get_timezone().context("Failed to get local time zone")
+        }
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
@@ -85,7 +93,7 @@ pub(super) fn handle_set_time_zone(
         _ => Ok(value.to_string()),
     }?;
 
-    handler_args.session.set_config("timezone", vec![tz_info])?;
+    handler_args.session.set_config("timezone", tz_info)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
@@ -96,32 +104,25 @@ pub(super) async fn handle_show(
 ) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
-    if name.eq_ignore_ascii_case("PARAMETERS") {
-        return handle_show_system_params(handler_args).await;
-    }
-    // Show session config.
-    let config_reader = handler_args.session.config();
-    if name.eq_ignore_ascii_case("ALL") {
-        return handle_show_all(handler_args.clone());
-    }
-    let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
+    let row_desc = infer_show_variable(&name);
+    let rows = if name.eq_ignore_ascii_case("PARAMETERS") {
+        handle_show_system_params(handler_args).await?
+    } else if name.eq_ignore_ascii_case("ALL") {
+        handle_show_all(handler_args.clone())?
+    } else {
+        let config_reader = handler_args.session.config();
+        vec![Row::new(vec![Some(config_reader.get(&name)?.into())])]
+    };
 
     Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            vec![row].into(),
-            vec![PgFieldDescriptor::new(
-                name.to_ascii_lowercase(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
+        .values(rows.into(), row_desc)
         .into())
 }
 
-fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+fn handle_show_all(handler_args: HandlerArgs) -> Result<Vec<Row>> {
     let config_reader = handler_args.session.config();
 
-    let all_variables = config_reader.get_all();
+    let all_variables = config_reader.show_all();
 
     let rows = all_variables
         .iter()
@@ -133,32 +134,10 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
             ])
         })
         .collect_vec();
-
-    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            rows.into(),
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Setting".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Description".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ],
-        )
-        .into())
+    Ok(rows)
 }
 
-async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<Vec<Row>> {
     let params = handler_args
         .session
         .env()
@@ -175,27 +154,5 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
             Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
         })
         .collect_vec();
-
-    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            rows.into(),
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Value".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Mutable".to_string(),
-                    DataType::Boolean.to_oid(),
-                    DataType::Boolean.type_len(),
-                ),
-            ],
-        )
-        .into())
+    Ok(rows)
 }

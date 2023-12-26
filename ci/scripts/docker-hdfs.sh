@@ -11,7 +11,7 @@ BUILDKITE_COMMIT="HDFS_$(echo $RANDOM | md5sum | head -c 20;)"
 java_home_path=$(uname -m)
 if [ "$arch" = "arm64" ] || [ "$arch" = "aarch64" ]; then
     java_home_path="/usr/lib/jvm/java-11-openjdk-arm64"
-else 
+else
 # x86_64
     java_home_path="/usr/lib/jvm/java-11-openjdk-amd64"
 fi
@@ -19,7 +19,7 @@ echo $java_home_path
 
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
-docker build -f docker/Dockerfile --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" --build-arg "JAVA_HOME_PATH=${java_home_path}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
+docker build -f docker/Dockerfile.hdfs --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" --build-arg "JAVA_HOME_PATH=${java_home_path}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
 
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)

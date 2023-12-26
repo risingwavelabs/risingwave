@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -29,25 +29,26 @@ use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
-    /// Upstream channels.
-    upstreams: Vec<BoxedInput>,
-
     /// The context of the actor.
     actor_context: ActorContextRef,
+
+    /// Logical Operator Info
+    info: ExecutorInfo,
+
+    /// Upstream channels.
+    upstreams: Vec<BoxedInput>,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
 
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
-
-    /// Logical Operator Info
-    info: ExecutorInfo,
 
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
@@ -59,27 +60,21 @@ pub struct MergeExecutor {
 impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        executor_id: u64,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            upstreams: inputs,
             actor_context: ctx,
+            info,
+            upstreams: inputs,
             fragment_id,
             upstream_fragment_id,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("MergeExecutor {:X}", executor_id),
-            },
             context,
             metrics,
         }
@@ -91,12 +86,14 @@ impl MergeExecutor {
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            schema,
-            vec![],
             ActorContext::create(114),
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: "MergeExecutor".to_string(),
+            },
             514,
             1919,
-            1024,
             inputs
                 .into_iter()
                 .enumerate()
@@ -113,16 +110,20 @@ impl MergeExecutor {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
-        let actor_id_str = actor_id.to_string();
-        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let mut metrics = ActorInputMetrics::new(
+            &self.metrics,
+            actor_id,
+            self.fragment_id,
+            self.upstream_fragment_id,
+        );
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
-            self.metrics
+            metrics
                 .actor_input_buffer_blocking_duration_ns
-                .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let mut msg: Message = msg?;
 
@@ -131,21 +132,19 @@ impl MergeExecutor {
                     // Do nothing.
                 }
                 Message::Chunk(chunk) => {
-                    self.metrics
-                        .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .inc_by(chunk.cardinality() as _);
+                    metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
-                    tracing::trace!(
-                        target: "events::barrier::path",
+                    tracing::debug!(
+                        target: "events::stream::barrier::path",
                         actor_id = actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
+                        barrier.mutation.as_deref()
                     {
                         if select_all
                             .upstream_actor_ids()
@@ -195,7 +194,7 @@ impl MergeExecutor {
                                     )
                                 })
                                 .try_collect()
-                                .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
+                                .context("failed to create upstream receivers")?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
@@ -228,7 +227,12 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+                        metrics = ActorInputMetrics::new(
+                            &self.metrics,
+                            actor_id,
+                            self.fragment_id,
+                            self.upstream_fragment_id,
+                        );
 
                         select_all.update_actor_ids();
                     }
@@ -466,7 +470,7 @@ mod tests {
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
         let ops = vec![Op::Insert; epoch as usize];
-        StreamChunk::new(ops, vec![], None)
+        StreamChunk::new(ops, vec![])
     }
 
     #[tokio::test]
@@ -589,12 +593,14 @@ mod tests {
             .unwrap();
 
         let merge = MergeExecutor::new(
-            schema,
-            vec![],
             ActorContext::create(actor_id),
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: "MergeExecutor".to_string(),
+            },
             fragment_id,
             upstream_fragment_id,
-            1024,
             inputs,
             ctx.clone(),
             233,
@@ -640,13 +646,14 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
-        });
+            actor_new_dispatchers: Default::default(),
+        }));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
@@ -757,9 +764,9 @@ mod tests {
 
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
-            assert_eq!(ops.len() as u64, 0);
-            assert_eq!(columns.len() as u64, 0);
-            assert_eq!(visibility, None);
+            assert!(ops.is_empty());
+            assert!(columns.is_empty());
+            assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);

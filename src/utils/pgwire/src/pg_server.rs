@@ -16,15 +16,15 @@ use std::future::Future;
 use std::io;
 use std::result::Result;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
-use futures::TryFutureExt;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tracing::debug;
 
+use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -32,14 +32,21 @@ use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-pub type SessionId = (i32, i32);
+type ProcessId = i32;
+type SecretKey = i32;
+pub type SessionId = (ProcessId, SecretKey);
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
+    fn connect(
+        &self,
+        database: &str,
+        user_name: &str,
+        peer_addr: AddressRef,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -56,17 +63,17 @@ pub trait Session: Send + Sync {
     type Portal: Send + Clone + std::fmt::Display + 'static;
 
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
-    /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
+    /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
     fn run_one_query(
         self: Arc<Self>,
-        sql: Statement,
+        stmt: Statement,
         format: Format,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn parse(
         self: Arc<Self>,
         sql: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> Result<Self::PreparedStatement, BoxedError>;
 
     // TODO: maybe this function should be async and return the notice more timely
@@ -76,7 +83,7 @@ pub trait Session: Send + Sync {
     fn bind(
         self: Arc<Self>,
         prepare_statement: Self::PreparedStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> Result<Self::Portal, BoxedError>;
@@ -100,9 +107,29 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
+
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
+}
+
+/// Each session could run different SQLs multiple times.
+/// `ExecContext` represents the lifetime of a running SQL in the current session.
+pub struct ExecContext {
+    pub running_sql: Arc<str>,
+    /// The instant of the running sql
+    pub last_instant: Instant,
+}
+
+/// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
+/// the inner `Arc<ExecContext>` should not be referred anymore, so that its `Weak` reference (used in `SessionImpl`) will be the same lifecycle of the running sql execution context.
+pub struct ExecContextGuard(Arc<ExecContext>);
+
+impl ExecContextGuard {
+    pub fn new(exec_context: Arc<ExecContext>) -> Self {
+        Self(exec_context)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,53 +157,57 @@ impl UserAuthenticator {
     }
 }
 
-/// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
+/// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
 pub async fn pg_serve(
     addr: &str,
     session_mgr: Arc<impl SessionManager>,
-    ssl_config: Option<TlsConfig>,
+    tls_config: Option<TlsConfig>,
 ) -> io::Result<()> {
-    let listener = TcpListener::bind(addr).await.unwrap();
-    // accept connections and process them, spawning a new thread for each one
-    tracing::info!("Server Listening at {}", addr);
+    let listener = Listener::bind(addr).await?;
+    tracing::info!(addr, "server started");
+
     loop {
-        let session_mgr = session_mgr.clone();
         let conn_ret = listener.accept().await;
         match conn_ret {
             Ok((stream, peer_addr)) => {
-                tracing::info!("New connection: {}", peer_addr);
-                stream.set_nodelay(true)?;
-                let ssl_config = ssl_config.clone();
-                let fut = handle_connection(stream, session_mgr, ssl_config);
-                tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
+                tracing::info!(%peer_addr, "accept connection");
+                tokio::spawn(handle_connection(
+                    stream,
+                    session_mgr.clone(),
+                    tls_config.clone(),
+                    Arc::new(peer_addr),
+                ));
             }
 
             Err(e) => {
-                tracing::error!("Connection failure: {}", e);
+                tracing::error!(error = %e.as_report(), "failed to accept connection",);
             }
         }
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn handle_connection<S, SM>(
+pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
-) -> impl Future<Output = Result<(), anyhow::Error>>
-where
+    peer_addr: AddressRef,
+) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
-    async {
-        loop {
-            let msg = pg_proto.read_message().await?;
-            tracing::trace!("Received message: {:?}", msg);
-            let ret = pg_proto.process(msg).await;
-            if ret {
-                return Ok(());
+    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
+    loop {
+        let msg = match pg_proto.read_message().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(error = %e.as_report(), "error when reading message");
+                break;
             }
+        };
+        tracing::trace!("Received message: {:?}", msg);
+        let ret = pg_proto.process(msg).await;
+        if ret {
+            break;
         }
     }
 }
@@ -185,6 +216,7 @@ where
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
+    use std::time::Instant;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -197,7 +229,8 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
+        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator,
     };
     use crate::types;
     use crate::types::Row;
@@ -212,6 +245,7 @@ mod tests {
             &self,
             _database: &str,
             _user_name: &str,
+            _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -232,10 +266,9 @@ mod tests {
         type PreparedStatement = String;
         type ValuesStream = BoxStream<'static, RowSetResult>;
 
-        #[expect(clippy::unused_async)]
         async fn run_one_query(
             self: Arc<Self>,
-            _sql: Statement,
+            _stmt: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
@@ -255,7 +288,7 @@ mod tests {
         fn parse(
             self: Arc<Self>,
             _sql: Option<Statement>,
-            _params_types: Vec<DataType>,
+            _params_types: Vec<Option<DataType>>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
         }
@@ -263,14 +296,13 @@ mod tests {
         fn bind(
             self: Arc<Self>,
             _prepare_statement: String,
-            _params: Vec<Bytes>,
+            _params: Vec<Option<Bytes>>,
             _param_formats: Vec<types::Format>,
             _result_formats: Vec<types::Format>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
         }
 
-        #[expect(clippy::unused_async)]
         async fn execute(
             self: Arc<Self>,
             _portal: String,
@@ -314,7 +346,7 @@ mod tests {
             (0, 0)
         }
 
-        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+        fn set_config(&self, _key: &str, _value: String) -> Result<(), BoxedError> {
             Ok(())
         }
 
@@ -325,19 +357,27 @@ mod tests {
         fn transaction_status(&self) -> TransactionStatus {
             TransactionStatus::Idle
         }
+
+        fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+            let exec_context = Arc::new(ExecContext {
+                running_sql: sql,
+                last_instant: Instant::now(),
+            });
+            ExecContextGuard::new(exec_context)
+        }
     }
 
-    #[tokio::test]
-    async fn test_query() {
+    async fn do_test_query(bind_addr: impl Into<String>, pg_config: impl Into<String>) {
+        let bind_addr = bind_addr.into();
+        let pg_config = pg_config.into();
+
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
+        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None).await });
         // wait for server to start
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
-            .await
-            .unwrap();
+        let (client, connection) = tokio_postgres::connect(&pg_config, NoTls).await.unwrap();
 
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own.
@@ -359,5 +399,24 @@ mod tests {
             .await
             .expect("Error executing query");
         assert_eq!(rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_query_tcp() {
+        do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_query_unix() {
+        let port: i16 = 10000;
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join(format!(".s.PGSQL.{port}"));
+
+        do_test_query(
+            format!("unix:{}", sock.to_str().unwrap()),
+            format!("host={} port={}", dir.path().to_str().unwrap(), port),
+        )
+        .await;
     }
 }

@@ -81,7 +81,7 @@ where
         if let Some(max_option) = max_option {
             max = max_option.parse::<T>()?;
         }
-        assert!(min < max);
+        assert!(min <= max);
 
         Ok(Self { min, max, seed })
     }
@@ -124,7 +124,7 @@ where
             end = end_option.parse::<T>()?;
         }
 
-        assert!(start < end);
+        assert!(start <= end);
         Ok(Self {
             start,
             end,

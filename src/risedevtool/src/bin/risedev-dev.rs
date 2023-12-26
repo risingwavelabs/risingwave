@@ -24,11 +24,11 @@ use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
+    generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
+    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
+    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService,
+    RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -112,9 +112,8 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::OpenDal(_) => None,
+            ServiceConfig::Opendal(_) => None,
             ServiceConfig::RedPanda(_) => None,
-            ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
 
         if let Some(x) = listen_info {
@@ -272,7 +271,7 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
-            ServiceConfig::OpenDal(c) => {
+            ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
 
@@ -339,17 +338,6 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
-            ServiceConfig::ConnectorNode(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ConnectorNodeService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("connector grpc://{}:{}", c.address, c.port));
-            }
         }
 
         let service_id = service.id().to_string();
@@ -361,6 +349,10 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
+    // Backtraces for RisingWave components are enabled in `Task::execute`.
+    std::env::set_var("RUST_BACKTRACE", "0");
+
     preflight_check()?;
 
     let task_name = std::env::args()
@@ -424,14 +416,9 @@ fn main() -> Result<()> {
             println!("-------------------------------");
             println!();
 
-            let risectl_env = match compute_risectl_env(&services) {
-                Ok(x) => x,
-                Err(_) => "".into(),
-            };
-
             fs_err::write(
-                Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                risectl_env,
+                Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+                generate_risedev_env(&services),
             )?;
 
             println!("All services started successfully.");
@@ -457,13 +444,13 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {}\nCaused by:\n\t{}",
+                "{} - Failed to start: {:?}", // with `Caused by`
                 style("ERROR").red().bold(),
                 err,
-                err.root_cause().to_string().trim(),
             );
+            println!();
             println!(
-                "* Use `{}` to enable new compoenents, if they are missing.",
+                "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
             );
             println!(
@@ -481,9 +468,12 @@ fn main() -> Result<()> {
             );
             println!("---");
             println!();
-            println!();
 
-            Err(err)
+            // As we have already printed the error above, we don't need to print that error again.
+            // However, to return with a proper exit code, still return an error here.
+            Err(anyhow!(
+                "Failed to start all services. See details and instructions above."
+            ))
         }
     }
 }

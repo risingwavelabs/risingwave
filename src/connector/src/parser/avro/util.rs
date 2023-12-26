@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use apache_avro::Schema;
+use std::sync::LazyLock;
+
+use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
 use itertools::Itertools;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
 
 pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<ColumnDesc>> {
-    if let Schema::Record { fields, .. } = schema {
+    if let Schema::Record(RecordSchema { fields, .. }) = schema {
         let mut index = 0;
         let fields = fields
             .iter()
@@ -40,11 +43,11 @@ fn avro_field_to_column_desc(
 ) -> anyhow::Result<ColumnDesc> {
     let data_type = avro_type_mapping(schema)?;
     match schema {
-        Schema::Record {
+        Schema::Record(RecordSchema {
             name: schema_name,
             fields,
             ..
-        } => {
+        }) => {
             let vec_column = fields
                 .iter()
                 .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
@@ -57,6 +60,9 @@ fn avro_field_to_column_desc(
                 field_descs: vec_column,
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
+                description: None,
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
             })
         }
         _ => {
@@ -65,6 +71,8 @@ fn avro_field_to_column_desc(
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
         }
@@ -79,13 +87,18 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Boolean => DataType::Boolean,
         Schema::Float => DataType::Float32,
         Schema::Double => DataType::Float64,
-        Schema::Decimal { precision, .. } => {
+        Schema::Decimal(DecimalSchema { precision, .. }) => {
             if *precision > Decimal::MAX_PRECISION.into() {
-                tracing::warn!(
-                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(
+                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate. ({} suppressed)",
                     Decimal::MAX_PRECISION,
+                    suppressed_count,
                     precision
                 );
+                }
             }
             DataType::Decimal
         }
@@ -95,7 +108,9 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
-        Schema::Record { fields, name, .. } => {
+        Schema::TimeMillis => DataType::Time,
+        Schema::TimeMicros => DataType::Time,
+        Schema::Record(RecordSchema { fields, name, .. }) => {
             if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
                 && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
             {

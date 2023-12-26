@@ -27,8 +27,9 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl, SplitImpl,
+    ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -41,7 +42,7 @@ use uuid::Uuid;
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -102,7 +103,7 @@ impl Serialize for ExecutionPlanNode {
 impl From<PlanRef> for ExecutionPlanNode {
     fn from(plan_node: PlanRef) -> Self {
         Self {
-            plan_node_id: plan_node.plan_base().id,
+            plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
             node: plan_node.to_batch_prost_body(),
             children: vec![],
@@ -266,19 +267,17 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        let mut enumerator = SplitEnumeratorImpl::create(
-            fetch_info.connector,
-            SourceEnumeratorContext::default().into(),
-        )
-        .await?;
-        let kafka_enumerator = match enumerator {
-            SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+        let kafka_prop = match fetch_info.connector {
+            ConnectorProperties::Kafka(prop) => *prop,
             _ => {
                 return Err(SchedulerError::Internal(anyhow!(
                     "Unsupported to query directly from this source"
                 )))
             }
         };
+        let mut kafka_enumerator =
+            KafkaSplitEnumerator::new(kafka_prop, SourceEnumeratorContext::default().into())
+                .await?;
         let split_info = kafka_enumerator
             .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
             .await?
@@ -892,7 +891,7 @@ impl BatchPlanFragmenter {
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
-                    source_catalog.properties.clone().into_iter().collect(),
+                    source_catalog.with_properties.clone().into_iter().collect(),
                 )?;
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
@@ -917,26 +916,25 @@ impl BatchPlanFragmenter {
             // Do not visit next stage.
             return Ok(None);
         }
+        if let Some(scan_node) = node.as_batch_sys_seq_scan() {
+            let name = scan_node.core().table_name.to_owned();
+            return Ok(Some(TableScanInfo::system_table(name)));
+        }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.logical().table_name.to_owned();
-            let info = if scan_node.logical().is_sys_table {
-                TableScanInfo::system_table(name)
-            } else {
-                let table_desc = &*scan_node.logical().table_desc;
-                let table_catalog = self
-                    .catalog_reader
-                    .read_guard()
-                    .get_table_by_id(&table_desc.table_id)
-                    .cloned()
-                    .map_err(RwError::from)?;
-                let vnode_mapping = self
-                    .worker_node_manager
-                    .fragment_mapping(table_catalog.fragment_id)?;
-                let partitions =
-                    derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
-                TableScanInfo::new(name, partitions)
-            };
+            let name = scan_node.core().table_name.to_owned();
+            let table_desc = &*scan_node.core().table_desc;
+            let table_catalog = self
+                .catalog_reader
+                .read_guard()
+                .get_table_by_id(&table_desc.table_id)
+                .cloned()
+                .map_err(RwError::from)?;
+            let vnode_mapping = self
+                .worker_node_manager
+                .fragment_mapping(table_catalog.fragment_id)?;
+            let partitions = derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
+            let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
         } else {
             node.inputs()
@@ -952,11 +950,11 @@ impl BatchPlanFragmenter {
             return None;
         }
         if let Some(insert) = node.as_batch_insert() {
-            Some(insert.logical.table_id)
+            Some(insert.core.table_id)
         } else if let Some(update) = node.as_batch_update() {
-            Some(update.logical.table_id)
+            Some(update.core.table_id)
         } else if let Some(delete) = node.as_batch_delete() {
-            Some(delete.logical.table_id)
+            Some(delete.core.table_id)
         } else {
             node.inputs()
                 .into_iter()

@@ -14,12 +14,11 @@
 
 use std::time::Duration;
 
-use risingwave_common::bail;
-use risingwave_common::error::Result;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
 
@@ -80,6 +79,26 @@ impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
     }
 }
 
+/// Error type for [`ObserverManager`].
+#[derive(thiserror::Error, Debug)]
+pub enum ObserverError {
+    #[error("notification channel closed")]
+    ChannelClosed,
+
+    #[error(transparent)]
+    Rpc(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
+}
+
+impl From<tonic::Status> for ObserverError {
+    fn from(value: tonic::Status) -> Self {
+        Self::Rpc(value.into())
+    }
+}
+
 impl<T, S> ObserverManager<T, S>
 where
     T: NotificationClient,
@@ -97,17 +116,19 @@ where
         }
     }
 
-    async fn wait_init_notification(&mut self) -> Result<()> {
+    async fn wait_init_notification(&mut self) -> Result<(), ObserverError> {
         let mut notification_vec = Vec::new();
         let init_notification = loop {
             // notification before init notification must be received successfully.
-            let Ok(Some(notification)) = self.rx.message().await else {
-                bail!("receives meta's notification err");
-            };
-            if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
-                notification_vec.push(notification);
-            } else {
-                break notification;
+            match self.rx.message().await? {
+                Some(notification) => {
+                    if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
+                        notification_vec.push(notification);
+                    } else {
+                        break notification;
+                    }
+                }
+                None => return Err(ObserverError::ChannelClosed),
             }
         };
 
@@ -154,7 +175,8 @@ where
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> JoinHandle<()> {
-        if matches!(self.wait_init_notification().await, Err(_)) {
+        if let Err(err) = self.wait_init_notification().await {
+            tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
             self.re_subscribe().await;
         }
 
@@ -169,8 +191,8 @@ where
                         }
                         self.observer_states.handle_notification(resp.unwrap());
                     }
-                    Err(e) => {
-                        tracing::error!("Receives meta's notification err {:?}", e);
+                    Err(err) => {
+                        tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
                         self.re_subscribe().await;
                     }
                 }
@@ -189,7 +211,10 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if !matches!(self.wait_init_notification().await, Err(_)) {
+                    if let Err(err) = self.wait_init_notification().await {
+                        tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
+                        continue;
+                    } else {
                         break;
                     }
                 }
@@ -220,7 +245,10 @@ impl<T: Send + 'static> Channel for Streaming<T> {
 #[async_trait::async_trait]
 pub trait NotificationClient: Send + Sync + 'static {
     type Channel: Channel<Item = SubscribeResponse>;
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel>;
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> Result<Self::Channel, ObserverError>;
 }
 
 pub struct RpcNotificationClient {
@@ -237,10 +265,13 @@ impl RpcNotificationClient {
 impl NotificationClient for RpcNotificationClient {
     type Channel = Streaming<SubscribeResponse>;
 
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> Result<Self::Channel, ObserverError> {
         self.meta_client
             .subscribe(subscribe_type)
             .await
-            .map_err(RpcError::into)
+            .map_err(Into::into)
     }
 }

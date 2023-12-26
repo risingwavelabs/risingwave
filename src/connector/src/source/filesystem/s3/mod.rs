@@ -11,18 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-mod enumerator;
+pub mod enumerator;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
+use crate::source::filesystem::FsSplit;
+use crate::source::SourceProperties;
 
 pub const S3_CONNECTOR: &str = "s3";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct S3Properties {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
@@ -35,7 +37,15 @@ pub struct S3Properties {
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
-    endpoint_url: Option<String>,
+    pub endpoint_url: Option<String>,
+}
+
+impl SourceProperties for S3Properties {
+    type Split = FsSplit;
+    type SplitEnumerator = S3SplitEnumerator;
+    type SplitReader = S3FileReader;
+
+    const SOURCE_NAME: &'static str = S3_CONNECTOR;
 }
 
 impl From<&S3Properties> for AwsAuthProps {

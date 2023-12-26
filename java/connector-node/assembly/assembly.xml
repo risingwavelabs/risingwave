@@ -40,6 +40,7 @@
 
                 <!-- Sink connectors -->
                 <include>*:risingwave-sink-es-7</include>
+                <include>*:risingwave-sink-cassandra</include>
                 <include>*:risingwave-sink-jdbc</include>
                 <include>*:risingwave-sink-iceberg</include>
                 <include>*:risingwave-sink-deltalake</include>

@@ -28,14 +28,11 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result as RwResult;
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(
-    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
-)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -46,6 +43,8 @@ pub enum Decimal {
     #[display("NaN")]
     NaN,
 }
+
+impl ZeroHeapSize for Decimal {}
 
 impl ToText for Decimal {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
@@ -82,7 +81,7 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
@@ -409,43 +408,17 @@ impl Sub for Decimal {
 impl Decimal {
     pub const MAX_PRECISION: u8 = 28;
 
-    /// TODO: handle nan and inf
-    pub fn mantissa(&self) -> i128 {
-        match self {
-            Self::Normalized(d) => d.mantissa(),
-            _ => 0,
-        }
+    pub fn scale(&self) -> Option<i32> {
+        let Decimal::Normalized(d) = self else {
+            return None;
+        };
+        Some(d.scale() as _)
     }
 
-    /// TODO: handle nan and inf
-    pub fn scale(&self) -> i32 {
-        match self {
-            Self::Normalized(d) => d.scale() as i32,
-            _ => 0,
+    pub fn rescale(&mut self, scale: u32) {
+        if let Normalized(a) = self {
+            a.rescale(scale);
         }
-    }
-
-    /// TODO: handle nan and inf
-    /// There are maybe better solution here.
-    pub fn precision(&self) -> u32 {
-        match &self {
-            Decimal::Normalized(decimal) => {
-                let s = decimal.to_string();
-                let mut res = s.len();
-                if s.find('.').is_some() {
-                    res -= 1;
-                }
-                if s.find('-').is_some() {
-                    res -= 1;
-                }
-                res as u32
-            }
-            _ => 0,
-        }
-    }
-
-    pub fn new(num: i64, scale: u32) -> Self {
-        Self::Normalized(RustDecimal::new(num, scale))
     }
 
     #[must_use]
@@ -462,7 +435,9 @@ impl Decimal {
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let Self::Normalized(mut d) = self else { return Some(*self) };
+        let Self::Normalized(mut d) = self else {
+            return Some(*self);
+        };
 
         // First, move the decimal point to the left so that we can reuse `round`. This is more
         // efficient than division.
@@ -796,6 +771,7 @@ mod tests {
     use itertools::Itertools as _;
 
     use super::*;
+    use crate::estimate_size::EstimateSize;
     use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {

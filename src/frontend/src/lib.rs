@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -33,8 +32,13 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_fn_in_trait)]
+#![feature(result_flattening)]
+#![feature(error_generic_member_access)]
+#![feature(round_ties_even)]
 #![recursion_limit = "256"]
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();
 
 #[macro_use]
 mod catalog;
@@ -52,7 +56,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common::config::OverrideConfig;
+use risingwave_common::config::{MetricLevel, OverrideConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -74,7 +78,7 @@ use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
     version,
     about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
@@ -124,19 +128,12 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    override_opts: OverrideConfigOpts,
-}
-
-/// Command-line arguments for frontend-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
+    /// 0 = disable metrics
+    /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
@@ -161,7 +158,7 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, Some(TlsConfig::new_default()))
+        pg_serve(&listen_addr, session_mgr, TlsConfig::new_default())
             .await
             .unwrap();
     })

@@ -113,7 +113,7 @@ public class ConnectorNodeMetrics {
         }
     }
 
-    public static void startHTTPServer(int port) {
+    public static void startHTTPServer(String host, int port) {
         CollectorRegistry registry = new CollectorRegistry();
         registry.register(activeSourceConnections);
         registry.register(activeSinkConnections);
@@ -124,7 +124,7 @@ public class ConnectorNodeMetrics {
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
         try {
-            new HTTPServer(new InetSocketAddress("localhost", port), registry);
+            new HTTPServer(new InetSocketAddress(host, port), registry);
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)

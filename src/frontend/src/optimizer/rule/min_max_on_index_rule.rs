@@ -23,11 +23,11 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalScan, LogicalTopN, PlanAggCall, PlanTreeNodeUnary,
 };

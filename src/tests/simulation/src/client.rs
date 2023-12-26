@@ -64,7 +64,7 @@ impl<'a, 'b> SetStmtsIterator<'a, 'b> {
 
 impl SetStmts {
     fn push(&mut self, sql: &str) {
-        let ast = Parser::parse_sql(&sql).expect("a set statement should be parsed successfully");
+        let ast = Parser::parse_sql(sql).expect("a set statement should be parsed successfully");
         match ast
             .into_iter()
             .exactly_one()
@@ -134,7 +134,7 @@ impl RisingWave {
             .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
             .await?;
         // replay all SET statements
-        for stmt in SetStmtsIterator::new(&set_stmts) {
+        for stmt in SetStmtsIterator::new(set_stmts) {
             client.simple_query(&stmt).await?;
         }
         Ok((client, task))
@@ -222,5 +222,11 @@ impl sqllogictest::AsyncDB for RisingWave {
 
     async fn sleep(dur: Duration) {
         tokio::time::sleep(dur).await
+    }
+
+    async fn run_command(
+        _command: std::process::Command,
+    ) -> std::io::Result<std::process::ExitStatus> {
+        unimplemented!("spawning process is not supported in simulation mode")
     }
 }

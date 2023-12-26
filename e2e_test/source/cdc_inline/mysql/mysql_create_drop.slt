@@ -1,0 +1,133 @@
+# create and drop CDC mysql tables concurrently
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql --protocol=tcp -u root -e "
+    DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
+    USE testdb1;
+    CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');
+    CREATE TABLE tt2 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt2 VALUES (2, '2023-10-23 11:00:00');
+    CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt3 VALUES (3, '2023-10-23 12:00:00');
+    CREATE TABLE tt4 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt4 VALUES (4, '2023-10-23 13:00:00');
+    CREATE TABLE tt5 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt5 VALUES (5, '2023-10-23 14:00:00');"
+
+statement ok
+create table tt1 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST:localhost}',
+  port = '${MYSQL_TCP_PORT:8306}',
+  username = 'dbz',
+  password = '${MYSQL_PWD:}',
+  database.name = 'testdb1',
+  table.name = 'tt1',
+);
+
+statement ok
+create table tt2 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST:localhost}',
+  port = '${MYSQL_TCP_PORT:8306}',
+  username = 'dbz',
+  password = '${MYSQL_PWD:}',
+  database.name = 'testdb1',
+  table.name = 'tt2',
+);
+
+statement ok
+create table tt3 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST:localhost}',
+  port = '${MYSQL_TCP_PORT:8306}',
+  username = 'dbz',
+  password = '${MYSQL_PWD:}',
+  database.name = 'testdb1',
+  table.name = 'tt3',
+);
+
+statement ok
+create table tt4 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST:localhost}',
+  port = '${MYSQL_TCP_PORT:8306}',
+  username = 'dbz',
+  password = '${MYSQL_PWD:}',
+  database.name = 'testdb1',
+  table.name = 'tt4',
+);
+
+statement ok
+create table tt5 (v1 int,
+  v2 timestamptz,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST:localhost}',
+  port = '${MYSQL_TCP_PORT:8306}',
+  username = 'dbz',
+  password = '${MYSQL_PWD:}',
+  database.name = 'testdb1',
+  table.name = 'tt5',
+);
+
+sleep 5s
+
+query IT
+select * from tt1;
+----
+1 2023-10-23 10:00:00+00:00
+
+query IT
+select * from tt2;
+----
+2 2023-10-23 11:00:00+00:00
+
+query IT
+select * from tt3;
+----
+3 2023-10-23 12:00:00+00:00
+
+query IT
+select * from tt4;
+----
+4 2023-10-23 13:00:00+00:00
+
+query IT
+select * from tt5;
+----
+5 2023-10-23 14:00:00+00:00
+
+statement ok
+drop table tt1;
+
+statement ok
+drop table tt2;
+
+statement ok
+drop table tt3;
+
+statement ok
+drop table tt4;
+
+statement ok
+drop table tt5;

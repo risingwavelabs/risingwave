@@ -22,11 +22,10 @@ use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use super::*;
-use crate::executor::BatchQueryExecutor;
+use crate::executor::{BatchQueryExecutor, DummyExecutor};
 
 pub struct BatchQueryExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
     type Node = BatchPlanNode;
 
@@ -36,6 +35,13 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
+        if node.table_desc.is_none() {
+            // used in sharing cdc source backfill as a dummy batch plan node
+            let mut info = params.info;
+            info.identity = "DummyBatchQueryExecutor".to_string();
+            return Ok(Box::new(DummyExecutor::new(info)));
+        }
+
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -106,17 +112,10 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             prefix_hint_len,
             versioned,
         );
+        assert_eq!(table.schema().data_types(), params.info.schema.data_types());
 
-        let schema = table.schema().clone();
-        let executor = BatchQueryExecutor::new(
-            table,
-            stream.config.developer.chunk_size,
-            ExecutorInfo {
-                schema,
-                pk_indices: params.pk_indices,
-                identity: "BatchQuery".to_owned(),
-            },
-        );
+        let executor =
+            BatchQueryExecutor::new(table, stream.config.developer.chunk_size, params.info);
 
         Ok(executor.boxed())
     }

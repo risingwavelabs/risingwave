@@ -12,15 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::PausedReason;
 use tokio::sync::oneshot;
 
 use crate::{MetaError, MetaResult};
 
+/// The barrier info sent back to the caller when a barrier is injected.
+#[derive(Debug, Clone, Copy)]
+pub struct BarrierInfo {
+    pub prev_epoch: Epoch,
+    pub curr_epoch: Epoch,
+
+    pub prev_paused_reason: Option<PausedReason>,
+    pub curr_paused_reason: Option<PausedReason>,
+}
+
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
-pub(super) struct Notifier {
-    /// Get notified when scheduled barrier is about to send.
-    pub to_send: Option<oneshot::Sender<()>>,
+pub(crate) struct Notifier {
+    /// Get notified when scheduled barrier is injected to compute nodes.
+    pub injected: Option<oneshot::Sender<BarrierInfo>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -30,10 +42,10 @@ pub(super) struct Notifier {
 }
 
 impl Notifier {
-    /// Notify when we are about to send a barrier.
-    pub fn notify_to_send(&mut self) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(()).ok();
+    /// Notify when we have injected a barrier to compute nodes.
+    pub fn notify_injected(&mut self, info: BarrierInfo) {
+        if let Some(tx) = self.injected.take() {
+            tx.send(info).ok();
         }
     }
 
@@ -55,7 +67,7 @@ impl Notifier {
     ///
     /// Generally when a barrier is collected, it's also finished since it does not require further
     /// report of finishing from actors.
-    /// However for creating MV, this is only called when all `Chain` report it finished.
+    /// However for creating MV, this is only called when all `BackfillExecutor` report it finished.
     pub fn notify_finished(self) {
         if let Some(tx) = self.finished {
             tx.send(()).ok();

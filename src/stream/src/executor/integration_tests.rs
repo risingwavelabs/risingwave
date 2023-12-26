@@ -14,15 +14,15 @@
 
 use std::sync::{Arc, Mutex};
 
-use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
@@ -32,7 +32,9 @@ use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
+use crate::executor::test_utils::agg_executor::{
+    generate_agg_schema, new_boxed_simple_agg_executor,
+};
 use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::SharedContext;
 
@@ -41,6 +43,10 @@ use crate::task::SharedContext;
 /// and do this again and again.
 #[tokio::test]
 async fn test_merger_sum_aggr() {
+    let expr_context = ExprContext {
+        time_zone: String::from("UTC"),
+    };
+
     let actor_ctx = ActorContext::create(0);
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
@@ -48,16 +54,21 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::for_test(input_rx);
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+        ];
+        let schema = generate_agg_schema(&input, &agg_calls, None);
         // for the local aggregator, we need two states: row count and sum
         let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: format!("StatelessSimpleAggExecutor {:X}", 1),
+            },
             input.boxed(),
-            vec![
-                AggCall::from_pretty("(count:int8)"),
-                AggCall::from_pretty("(sum:int8 $0:int8)"),
-            ],
-            vec![],
-            1,
+            agg_calls,
         )
         .unwrap();
         let (tx, rx) = channel_for_test();
@@ -72,6 +83,7 @@ async fn test_merger_sum_aggr() {
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
+            expr_context.clone(),
         );
         (actor, rx)
     };
@@ -112,6 +124,7 @@ async fn test_merger_sum_aggr() {
             0,
         ))],
         0,
+        0,
         ctx,
         metrics,
     );
@@ -122,6 +135,7 @@ async fn test_merger_sum_aggr() {
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
+        expr_context.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -148,14 +162,20 @@ async fn test_merger_sum_aggr() {
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
+        ExecutorInfo {
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            },
+            pk_indices: vec![],
+            identity: format!("ProjectExecutor {:X}", 3),
+        },
         aggregator,
-        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(DataType::Int64, 1)),
+            NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
         ],
-        3,
         MultiMap::new(),
+        vec![],
         0.0,
     );
 
@@ -171,6 +191,7 @@ async fn test_merger_sum_aggr() {
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
+        expr_context.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -186,7 +207,6 @@ async fn test_merger_sum_aggr() {
             let chunk = StreamChunk::new(
                 vec![op; i],
                 vec![I64Array::from_iter(vec![1; i]).into_ref()],
-                None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
@@ -258,7 +278,7 @@ impl StreamConsumer for SenderConsumer {
                 let msg = item?;
                 let barrier = msg.as_barrier().cloned();
 
-                channel.send(msg).await.context("failed to send message")?;
+                channel.send(msg).await.expect("failed to send message");
 
                 if let Some(barrier) = barrier {
                     yield barrier;

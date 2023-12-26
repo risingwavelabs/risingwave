@@ -17,6 +17,7 @@ use std::ops::Sub;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::stream;
 use itertools::Itertools;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -59,9 +60,10 @@ async fn test_vacuum() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    Vacuum::vacuum_inner(vacuum_task, sstable_store, mock_hummock_meta_client)
+    Vacuum::handle_vacuum_task(sstable_store, &vacuum_task.sstable_object_ids)
         .await
         .unwrap();
+    assert!(Vacuum::report_vacuum_task(vacuum_task, mock_hummock_meta_client).await);
 }
 
 #[tokio::test]
@@ -86,30 +88,29 @@ async fn test_full_scan() {
             total_size: 128,
         },
     ];
+    let object_metadata_iter = Box::pin(stream::iter(object_store_list_result.into_iter().map(Ok)));
 
     let task = FullScanTask {
         sst_retention_time_sec: 10000,
     };
-    let scan_result = Vacuum::full_scan_inner(
-        task,
-        object_store_list_result.clone(),
-        sstable_store.clone(),
-    );
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+        .await
+        .unwrap();
     assert!(scan_result.is_empty());
 
     let task = FullScanTask {
         sst_retention_time_sec: 6000,
     };
-    let scan_result = Vacuum::full_scan_inner(
-        task,
-        object_store_list_result.clone(),
-        sstable_store.clone(),
-    );
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
+        .await
+        .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1]);
 
     let task = FullScanTask {
         sst_retention_time_sec: 2000,
     };
-    let scan_result = Vacuum::full_scan_inner(task, object_store_list_result, sstable_store);
+    let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter)
+        .await
+        .unwrap();
     assert_eq!(scan_result.into_iter().sorted().collect_vec(), vec![1, 2]);
 }

@@ -16,7 +16,7 @@ use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 
-#[madsim::test]
+#[tokio::test]
 async fn test_streaming_parallelism_default() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
@@ -28,7 +28,7 @@ async fn test_streaming_parallelism_default() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_streaming_parallelism_set_some() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
@@ -48,7 +48,7 @@ async fn test_streaming_parallelism_set_some() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
@@ -64,7 +64,7 @@ async fn test_streaming_parallelism_set_zero() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_streaming_parallelism_mv_on_mv() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
@@ -101,7 +101,7 @@ async fn test_streaming_parallelism_mv_on_mv() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_streaming_parallelism_index() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;

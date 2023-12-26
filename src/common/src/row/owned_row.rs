@@ -45,7 +45,7 @@ impl AsRef<OwnedRow> for OwnedRow {
 impl OwnedRow {
     /// Returns an empty row.
     ///
-    /// Note: use [`empty`](super::empty) if possible.
+    /// Note: use [`empty`](super::empty()) if possible.
     pub fn empty() -> Self {
         Self(Box::new([]))
     }
@@ -88,6 +88,10 @@ impl OwnedRow {
             })
             .collect();
         Self::new(datums)
+    }
+
+    pub fn last(&self) -> DatumRef<'_> {
+        self.0[self.len() - 1].to_datum_ref()
     }
 }
 

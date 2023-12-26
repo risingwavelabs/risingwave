@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The `pg_stat_activity` view will have one row per server process, showing information related to
-/// the current activity of that process. Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
-pub const PG_STAT_ACTIVITY_TABLE_NAME: &str = "pg_stat_activity";
 pub const PG_STAT_ACTIVITY_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "pid"),       // Process ID of this backend.
     (DataType::Int32, "datid"),     // OID of the database this backend is connected to.
@@ -38,3 +38,13 @@ pub const PG_STAT_ACTIVITY_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
                                        * communication with this backend, or -1 if a Unix socket
                                        * is used. */
 ];
+
+/// The `pg_stat_activity` view will have one row per server process, showing information related to
+/// the current activity of that process.
+/// Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
+pub static PG_STAT_ACTIVITY: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_stat_activity",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_STAT_ACTIVITY_COLUMNS,
+    sql: infer_dummy_view_sql(PG_STAT_ACTIVITY_COLUMNS),
+});

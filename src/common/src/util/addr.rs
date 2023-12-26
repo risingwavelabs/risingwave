@@ -15,7 +15,7 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_pb::common::PbHostAddress;
 
 /// General host address and port.
@@ -43,14 +43,11 @@ impl TryFrom<&str> for HostAddr {
     type Error = anyhow::Error;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let addr =
-            url::Url::parse(&format!("http://{}", s)).map_err(|e| anyhow!("{}: {}", e, s))?;
+        let s = format!("http://{s}");
+        let addr = url::Url::parse(&s).with_context(|| format!("failed to parse address: {s}"))?;
         Ok(HostAddr {
-            host: addr
-                .host()
-                .ok_or_else(|| anyhow!("invalid host"))?
-                .to_string(),
-            port: addr.port().ok_or_else(|| anyhow!("invalid port"))?,
+            host: addr.host().context("invalid host")?.to_string(),
+            port: addr.port().context("invalid port")?,
         })
     }
 }

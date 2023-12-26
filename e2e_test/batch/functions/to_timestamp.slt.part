@@ -1,47 +1,47 @@
 query T
 select to_timestamp('2022 12 25', 'YYYY MM DD');
 ----
-2022-12-25 00:00:00
+2022-12-25 00:00:00+00:00
 
 query T
 select to_timestamp('2022/12/25 15:24:33', 'YYYY/MM/DD HH24:MI:SS');
 ----
-2022-12-25 15:24:33
+2022-12-25 15:24:33+00:00
 
 query T
 select to_timestamp('2022/12/25 10:24:33', 'YYYY/MM/DD HH12:MI:SS');
 ----
-2022-12-25 10:24:33
+2022-12-25 10:24:33+00:00
 
 query T
 select to_timestamp('2022/12/25 10:24:33', 'YYYY/MM/DD HH12:MI:SS');
 ----
-2022-12-25 10:24:33
+2022-12-25 10:24:33+00:00
 
 query T
 select to_timestamp('2022/12/25 15', 'YYYY/MM/DD HH24');
 ----
-2022-12-25 15:00:00
+2022-12-25 15:00:00+00:00
 
 query T
 select to_timestamp('2001-04-17 00:00:00.900006', 'YYYY-MM-DD HH24:MI:SS.US');
 ----
-2001-04-17 00:00:00.900006
+2001-04-17 00:00:00.900006+00:00
 
 query T
 select to_timestamp('2001-04-17 00:00:00.000000', 'YYYY-MM-DD HH24:MI:SS.US');
 ----
-2001-04-17 00:00:00
+2001-04-17 00:00:00+00:00
 
 query T
 select to_timestamp('2001-04-17 00:00:00.906', 'YYYY-MM-DD HH24:MI:SS.MS');
 ----
-2001-04-17 00:00:00.906
+2001-04-17 00:00:00.906+00:00
 
 query T
 select to_timestamp('2001-04-17 00:00:00.000', 'YYYY-MM-DD HH24:MI:SS.MS');
 ----
-2001-04-17 00:00:00
+2001-04-17 00:00:00+00:00
 
 # FIXME: false positive cases, but hard to handle in chrono.
 
@@ -52,17 +52,16 @@ statement error
 select to_timestamp('2001-04-17 00:00:00.9999', 'YYYY-MM-DD HH24:MI:SS.US');
 
 # Timezone
-# FIXME: We should return timestamptz here.
 
 query T
 SELECT to_timestamp('2021/12/30 14:52:49 +03:30', 'YYYY/MM/DD HH24:MI:SS TZH:TZM');
 ----
-2021-12-30 11:22:49
+2021-12-30 11:22:49+00:00
 
 query T
 SELECT to_timestamp('2021/12/30 14:52:49 +0330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
 ----
-2021-12-30 11:22:49
+2021-12-30 11:22:49+00:00
 
 statement error
 SELECT to_timestamp('2021/12/30 14:52:49 +330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
@@ -70,4 +69,4 @@ SELECT to_timestamp('2021/12/30 14:52:49 +330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
 query T
 SELECT to_timestamp('2021/12/30 14:52:49 +03', 'YYYY/MM/DD HH24:MI:SS TZH');
 ----
-2021-12-30 11:52:49
+2021-12-30 11:52:49+00:00

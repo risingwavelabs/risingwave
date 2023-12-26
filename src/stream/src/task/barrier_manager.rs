@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use prometheus::HistogramTimer;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -32,7 +33,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::bail;
 use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -42,7 +42,11 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
+    /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    /// The kind of barrier.
+    pub kind: BarrierKind,
 }
 
 enum BarrierState {
@@ -63,10 +67,6 @@ pub struct LocalBarrierManager {
     /// Stores all streaming job source sender.
     senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
-    /// Span of the current epoch.
-    #[expect(dead_code)]
-    span: tracing::Span,
-
     /// Current barrier collection state.
     state: BarrierState,
 
@@ -80,15 +80,14 @@ pub struct CompleteReceiver {
     pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
-    /// Mark whether this is a checkpoint barrier.
-    pub checkpoint: bool,
+    /// The kind of barrier.
+    pub kind: BarrierKind,
 }
 
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
             senders: HashMap::new(),
-            span: tracing::Span::none(),
             state,
             collect_complete_receiver: HashMap::default(),
         }
@@ -101,7 +100,11 @@ impl LocalBarrierManager {
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        tracing::trace!(actor_id = actor_id, "register sender");
+        tracing::debug!(
+            target: "events::stream::barrier::manager",
+            actor_id = actor_id,
+            "register sender"
+        );
         self.senders.entry(actor_id).or_default().push(sender);
     }
 
@@ -128,7 +131,8 @@ impl LocalBarrierManager {
             }
         };
         let to_collect: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
-        trace!(
+        debug!(
+            target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
             to_send,
@@ -153,21 +157,33 @@ impl LocalBarrierManager {
             match self.senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
-                        if let Err(err) = sender.send(barrier.clone()) {
+                        if let Err(_err) = sender.send(barrier.clone()) {
                             // return err to trigger recovery.
-                            bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+                            return Err(StreamError::barrier_send(
+                                barrier.clone(),
+                                actor_id,
+                                "channel closed",
+                            ));
                         }
                     }
                 }
                 None => {
-                    bail!("sender for actor {} does not exist", actor_id)
+                    return Err(StreamError::barrier_send(
+                        barrier.clone(),
+                        actor_id,
+                        "sender not found",
+                    ));
                 }
             }
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            trace!("remove actors {:?} from senders", actors);
+            debug!(
+                target: "events::stream::barrier::manager",
+                "remove actors {:?} from senders",
+                actors
+            );
             for actor in actors {
                 self.senders.remove(actor);
             }
@@ -178,7 +194,7 @@ impl LocalBarrierManager {
             CompleteReceiver {
                 complete_receiver: rx,
                 barrier_inflight_timer: timer,
-                checkpoint: barrier.checkpoint,
+                kind: barrier.kind,
             },
         );
         Ok(())
@@ -200,14 +216,11 @@ impl LocalBarrierManager {
             })
     }
 
-    // remove all senders
-    pub fn clear_senders(&mut self) {
+    /// Reset all internal states.
+    pub fn reset(&mut self) {
         self.senders.clear();
-    }
-
-    /// remove all collect rx
-    pub fn clear_collect_rx(&mut self) {
         self.collect_complete_receiver.clear();
+
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}

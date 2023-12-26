@@ -6,6 +6,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+RUST_TOOLCHAIN=$(cat rust-toolchain)
+
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
@@ -27,7 +29,7 @@ get_nexmark_queries_to_run() {
       https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
     | parse_labels)
   elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
-    export NEXMARK_QUERIES="$(ls $QUERY_DIR | sed -n 's/^q\([0-9]*\)\.sql/\1/p' | sort -n | sed 's/\(.*\)/nexmark-q\1/')"
+    export NEXMARK_QUERIES="$(ls $QUERY_DIR | grep -v "\.drop\.sql" | grep -v "ddl.sql" | sed 's/\(.*\)\.sql/nexmark-\1/' | sort)"
   else
     echo "NEXMARK_QUERIES already set."
   fi
@@ -79,7 +81,7 @@ install_all() {
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
   git checkout 0.20.0
-  echo "nightly-2023-04-07" > rust-toolchain
+  echo "$RUST_TOOLCHAIN" > rust-toolchain
   cargo b --examples -r
   mv ./target/release/examples/addr2line $(which addr2line)
   popd
@@ -195,7 +197,7 @@ start_kafka() {
 gen_events() {
   pushd nexmark-bench
   nexmark-server -c
-  NEXMARK_EVENTS=$((400 * 1000 * 1000))
+  NEXMARK_EVENTS=$((300 * 1000 * 1000))
   echo "Generating $NEXMARK_EVENTS events"
   nexmark-server \
     --event-rate 500000 \

@@ -14,5 +14,11 @@
 
 #![feature(lazy_cell)]
 
+mod common;
 pub mod playground;
+mod standalone;
+
 pub use playground::*;
+pub use standalone::*;
+
+risingwave_expr_impl::enable!();

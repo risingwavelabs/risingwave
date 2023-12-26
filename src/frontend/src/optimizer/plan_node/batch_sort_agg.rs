@@ -17,29 +17,31 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSortAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Agg<PlanRef>,
     input_order: Order,
 }
 
 impl BatchSortAgg {
-    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        assert!(!logical.group_key.is_empty());
-        assert!(logical.input_provides_order_on_group_keys());
+    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+        assert!(!core.group_key.is_empty());
+        assert!(core.input_provides_order_on_group_keys());
 
-        let input = logical.input.clone();
+        let input = core.input.clone();
         let input_dist = input.distribution();
-        let dist = logical
+        let dist = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
         let input_order = Order {
@@ -47,46 +49,44 @@ impl BatchSortAgg {
                 .order()
                 .column_orders
                 .iter()
-                .filter(|o| logical.group_key.indices().any(|g_k| g_k == o.column_index))
+                .filter(|o| core.group_key.indices().any(|g_k| g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
 
-        let order = logical
-            .i2o_col_mapping()
-            .rewrite_provided_order(&input_order);
+        let order = core.i2o_col_mapping().rewrite_provided_order(&input_order);
 
-        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
+        let base = PlanBase::new_batch_with_core(&core, dist, order);
 
         BatchSortAgg {
             base,
-            logical,
+            core,
             input_order,
         }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 
     pub fn group_key(&self) -> &IndexSet {
-        &self.logical.group_key
+        &self.core.group_key
     }
 }
 
 impl PlanTreeNodeUnary for BatchSortAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! { BatchSortAgg }
-impl_distill_by_unit!(BatchSortAgg, logical, "BatchSortAgg");
+impl_distill_by_unit!(BatchSortAgg, core, "BatchSortAgg");
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -136,8 +136,14 @@ impl ExprRewritable for BatchSortAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new_logical = self.logical.clone();
+        let mut new_logical = self.core.clone();
         new_logical.rewrite_exprs(r);
         Self::new(new_logical).into()
+    }
+}
+
+impl ExprVisitable for BatchSortAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

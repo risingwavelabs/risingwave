@@ -16,14 +16,14 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, TopNExecutor};
-use risingwave_common::enable_jemalloc_on_unix;
+use risingwave_common::enable_jemalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_top_n_executor(
     chunk_size: usize,
@@ -85,7 +85,7 @@ fn bench_top_n(c: &mut Criterion) {
                     let chunk_num = SIZE / chunk_size;
                     b.to_async(&rt).iter_batched(
                         || create_top_n_executor(chunk_size, chunk_num, single_column, 128, 128),
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

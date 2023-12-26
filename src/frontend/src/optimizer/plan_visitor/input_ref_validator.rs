@@ -23,22 +23,17 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 
 struct ExprVis<'a> {
     schema: &'a Schema,
+    string: Option<String>,
 }
 
-impl ExprVisitor<Option<String>> for ExprVis<'_> {
-    fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) -> Option<String> {
+impl ExprVisitor for ExprVis<'_> {
+    fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) {
         if input_ref.data_type != self.schema[input_ref.index].data_type {
-            Some(format!(
+            self.string.replace(format!(
                 "InputRef#{} has type {}, but its type is {} in the input schema",
                 input_ref.index, input_ref.data_type, self.schema[input_ref.index].data_type
-            ))
-        } else {
-            None
+            ));
         }
-    }
-
-    fn merge(a: Option<String>, b: Option<String>) -> Option<String> {
-        a.or(b)
     }
 }
 
@@ -69,8 +64,10 @@ macro_rules! visit_filter {
                     let input = plan.input();
                     let mut vis = ExprVis {
                         schema: input.schema(),
+                        string: None,
                     };
-                    plan.predicate().visit_expr(&mut vis).or_else(|| {
+                    plan.predicate().visit_expr(&mut vis);
+                    vis.string.or_else(|| {
                         self.visit(input)
                     })
                 }
@@ -87,11 +84,12 @@ macro_rules! visit_project {
                     let input = plan.input();
                     let mut vis = ExprVis {
                         schema: input.schema(),
+                        string: None,
                     };
                     for expr in plan.exprs() {
-                        let res = vis.visit_expr(expr);
-                        if res.is_some() {
-                            return res;
+                        vis.visit_expr(expr);
+                        if vis.string.is_some() {
+                            return vis.string;
                         }
                     }
                     self.visit(input)
@@ -101,8 +99,10 @@ macro_rules! visit_project {
     };
 }
 
-impl PlanVisitor<Option<String>> for InputRefValidator {
-    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+impl PlanVisitor for InputRefValidator {
+    type Result = Option<String>;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     visit_filter!(logical, batch, stream);
 
@@ -125,8 +125,10 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
         let input_schema = Schema { fields };
         let mut vis = ExprVis {
             schema: &input_schema,
+            string: None,
         };
-        plan.predicate().visit_expr(&mut vis)
+        plan.predicate().visit_expr(&mut vis);
+        vis.string
     }
 
     // TODO: add more checks

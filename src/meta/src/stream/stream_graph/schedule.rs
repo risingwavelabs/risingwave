@@ -104,12 +104,15 @@ crepe::crepe! {
 
     // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
-    // Requirements of `NoShuffle` edges.
+    // Requirements propagate through `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 
     // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
+    // Singleton requirements propagate through `NoShuffle` edges.
+    SingletonReq(x) <- Edge(x, y, NoShuffle), SingletonReq(y);
+    SingletonReq(y) <- Edge(x, y, NoShuffle), SingletonReq(x);
 
     // Multiple requirements conflict.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
@@ -218,14 +221,16 @@ impl Scheduler {
         // Visit the parallel units in a round-robin manner on each worker.
         let mut round_robin = Vec::new();
         while !parallel_units.is_empty() {
-            parallel_units.drain_filter(|ps| {
-                if let Some(p) = ps.next() {
-                    round_robin.push(p);
-                    false
-                } else {
-                    true
-                }
-            });
+            parallel_units
+                .extract_if(|ps| {
+                    if let Some(p) = ps.next() {
+                        round_robin.push(p);
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .for_each(drop);
         }
         round_robin.truncate(default_parallelism.get());
         assert_eq!(round_robin.len(), default_parallelism.get());
@@ -323,6 +328,8 @@ impl Scheduler {
                 (id, distribution)
             })
             .collect();
+
+        tracing::debug!(?distributions, "schedule fragments");
 
         Ok(distributions)
     }

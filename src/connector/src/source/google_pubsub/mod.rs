@@ -22,11 +22,14 @@ pub use enumerator::*;
 use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
+use with_options::WithOptions;
+
+use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash, WithOptions)]
 pub struct PubsubProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "pubsub.split_count")]
@@ -39,7 +42,7 @@ pub struct PubsubProperties {
     pub subscription: String,
 
     /// use the connector with a pubsub emulator
-    /// https://cloud.google.com/pubsub/docs/emulator
+    /// <https://cloud.google.com/pubsub/docs/emulator>
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
@@ -68,6 +71,14 @@ pub struct PubsubProperties {
     /// more details.
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
+}
+
+impl SourceProperties for PubsubProperties {
+    type Split = PubsubSplit;
+    type SplitEnumerator = PubsubSplitEnumerator;
+    type SplitReader = PubsubSplitReader;
+
+    const SOURCE_NAME: &'static str = GOOGLE_PUBSUB_CONNECTOR;
 }
 
 impl PubsubProperties {

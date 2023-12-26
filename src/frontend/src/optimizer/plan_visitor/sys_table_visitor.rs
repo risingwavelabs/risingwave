@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, Merge};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalScan, StreamTableScan};
+use crate::optimizer::plan_node::{BatchSysSeqScan, LogicalSysScan, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
@@ -27,22 +27,25 @@ impl SysTableVisitor {
     }
 }
 
-impl PlanVisitor<bool> for SysTableVisitor {
-    type DefaultBehavior = impl DefaultBehavior<bool>;
+impl PlanVisitor for SysTableVisitor {
+    type Result = bool;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
     }
 
-    fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        batch_seq_scan.logical().is_sys_table
+    fn visit_batch_sys_seq_scan(&mut self, _batch_seq_scan: &BatchSysSeqScan) -> bool {
+        true
     }
 
-    fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {
-        logical_scan.is_sys_table()
+    fn visit_logical_sys_scan(&mut self, _logical_scan: &LogicalSysScan) -> bool {
+        true
     }
 
-    fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
-        stream_table_scan.logical().is_sys_table
+    // Sys scan not allowed for streaming.
+    fn visit_stream_table_scan(&mut self, _stream_table_scan: &StreamTableScan) -> bool {
+        false
     }
 }

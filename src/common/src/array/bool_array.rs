@@ -30,6 +30,15 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
+    /// Build a [`BoolArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = bool>, bitmap: Bitmap) -> Self {
+        let data: Bitmap = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        BoolArray { bitmap, data }
+    }
+
     pub fn data(&self) -> &Bitmap {
         &self.data
     }
@@ -116,7 +125,7 @@ impl Array for BoolArray {
 }
 
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,
@@ -287,7 +296,7 @@ mod tests {
                     None => NULL_VAL_FOR_HASH.hash(state),
                 })
         });
-        let hashes = hash_finish(&mut states[..]);
+        let hashes = hash_finish(&states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 6);

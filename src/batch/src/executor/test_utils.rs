@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::future::Future;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
@@ -21,7 +20,6 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
@@ -30,6 +28,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
 use super::{BoxedExecutorBuilder, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
@@ -46,6 +45,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
         batch_size,
         data_types,
         &VarcharProperty::RandomFixedLength(None),
+        1.0,
     )
 }
 
@@ -157,7 +157,7 @@ impl Executor for MockExecutor {
 }
 
 impl MockExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         for data_chunk in self.chunks {
             yield data_chunk;
@@ -219,8 +219,8 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
 }
 
 fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
-    assert!(left.visibility().is_none());
-    assert!(right.visibility().is_none());
+    assert!(left.is_compacted());
+    assert!(right.is_compacted());
 
     assert_eq!(
         left.cardinality(),
@@ -245,15 +245,11 @@ impl FakeExchangeSource {
 }
 
 impl ExchangeSource for FakeExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
-
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            if let Some(chunk) = self.chunks.pop() {
-                Ok(chunk)
-            } else {
-                Ok(None)
-            }
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        if let Some(chunk) = self.chunks.pop() {
+            Ok(chunk)
+        } else {
+            Ok(None)
         }
     }
 
@@ -370,7 +366,7 @@ impl Executor for BlockExecutor {
 }
 
 impl BlockExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         // infinite loop to block
         #[allow(clippy::empty_loop)]
@@ -407,7 +403,7 @@ impl Executor for BusyLoopExecutor {
 }
 
 impl BusyLoopExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         // infinite loop to generate data
         loop {

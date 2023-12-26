@@ -27,6 +27,7 @@ pub struct KinesisMessage {
 impl From<KinesisMessage> for SourceMessage {
     fn from(msg: KinesisMessage) -> Self {
         SourceMessage {
+            key: Some(msg.partition_key.into_bytes()),
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.shard_id,
@@ -39,9 +40,9 @@ impl KinesisMessage {
     pub fn new(shard_id: SplitId, message: Record) -> Self {
         KinesisMessage {
             shard_id,
-            sequence_number: message.sequence_number.unwrap(),
-            partition_key: message.partition_key.unwrap(),
-            payload: message.data.unwrap().into_inner(),
+            sequence_number: message.sequence_number,
+            partition_key: message.partition_key,
+            payload: message.data.into_inner(),
         }
     }
 }

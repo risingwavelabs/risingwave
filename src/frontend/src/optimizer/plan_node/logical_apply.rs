@@ -11,20 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
+//
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
+use super::generic::{
+    self, push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+};
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, ExprRewritable, LogicalFilter, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
@@ -36,7 +39,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// left side.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
@@ -86,16 +89,13 @@ impl LogicalApply {
         let ctx = left.ctx();
         let join_core = generic::Join::with_full_output(left, right, join_type, on);
         let schema = join_core.schema();
-        let pk_indices = join_core.logical_pk();
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        let stream_key = join_core.stream_key();
+        let functional_dependency = match &stream_key {
+            Some(stream_key) => FunctionalDependencySet::with_key(schema.len(), stream_key),
+            None => FunctionalDependencySet::new(schema.len()),
         };
         let (left, right, on, join_type, _output_indices) = join_core.decompose();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, stream_key, functional_dependency);
         LogicalApply {
             base,
             left,
@@ -310,6 +310,12 @@ impl ExprRewritable for LogicalApply {
     }
 }
 
+impl ExprVisitable for LogicalApply {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.on.visit_expr(v)
+    }
+}
+
 impl PredicatePushdown for LogicalApply {
     fn predicate_pushdown(
         &self,
@@ -321,11 +327,11 @@ impl PredicatePushdown for LogicalApply {
         let join_type = self.join_type();
 
         let (left_from_filter, right_from_filter, on) =
-            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type, true);
 
         let mut new_on = self.on.clone().and(on);
         let (left_from_on, right_from_on) =
-            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type, true);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);

@@ -18,7 +18,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use crate::expr::{
-    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    InputRefDisplay,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -238,16 +239,20 @@ impl EqJoinPredicate {
         for (left, right, _) in self.eq_keys() {
             map[right.index - left_cols_num] = Some(left.index);
         }
-        ColIndexMapping::new(map)
+        ColIndexMapping::new(map, left_cols_num)
     }
 
     /// return the eq columns index mapping from left inputs to right inputs
-    pub fn l2r_eq_columns_mapping(&self, left_cols_num: usize) -> ColIndexMapping {
+    pub fn l2r_eq_columns_mapping(
+        &self,
+        left_cols_num: usize,
+        right_cols_num: usize,
+    ) -> ColIndexMapping {
         let mut map = vec![None; left_cols_num];
         for (left, right, _) in self.eq_keys() {
             map[left.index] = Some(right.index - left_cols_num);
         }
-        ColIndexMapping::new(map)
+        ColIndexMapping::new(map, right_cols_num)
     }
 
     /// Reorder the `eq_keys` according to the `reorder_idx`.
@@ -312,6 +317,10 @@ impl EqJoinPredicate {
         let mut new = self.clone();
         new.other_cond = new.other_cond.rewrite_expr(rewriter);
         new
+    }
+
+    pub fn visit_exprs(&self, v: &mut (impl ExprVisitor + ?Sized)) {
+        self.other_cond.visit_expr(v);
     }
 }
 

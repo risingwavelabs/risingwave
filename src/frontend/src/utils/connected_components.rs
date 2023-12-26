@@ -50,10 +50,7 @@ impl ConnectedComponentLabeller {
         };
 
         {
-            let edges = self
-                .labels_to_edges
-                .entry(new_label)
-                .or_insert_with(BTreeSet::new);
+            let edges = self.labels_to_edges.entry(new_label).or_default();
 
             let new_edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
             edges.insert(new_edge);
@@ -73,10 +70,7 @@ impl ConnectedComponentLabeller {
             self.vertex_to_label.insert(v, new_label);
         }
         if let Some(old_edges) = self.labels_to_edges.remove(&old_label) {
-            let edges = self
-                .labels_to_edges
-                .entry(new_label)
-                .or_insert_with(BTreeSet::new);
+            let edges = self.labels_to_edges.entry(new_label).or_default();
             edges.extend(old_edges);
         }
     }

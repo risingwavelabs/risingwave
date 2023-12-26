@@ -307,10 +307,10 @@ pub enum SelectItem {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
-    /// `alias.*` or even `schema.table.*`
-    QualifiedWildcard(ObjectName),
+    /// `alias.*` or even `schema.table.*` followed by optional except
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*`, or `* except (exprs)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for SelectItem {
@@ -326,13 +326,24 @@ impl fmt::Display for SelectItem {
                     .iter()
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
-            SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::WildcardOrWithExcept(w) => match w {
-                Some(exprs) => write!(
+            SelectItem::QualifiedWildcard(prefix, except) => match except {
+                Some(cols) => write!(
+                    f,
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    cols.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+            SelectItem::Wildcard(except) => match except {
+                Some(cols) => write!(
                     f,
                     "* EXCEPT ({})",
-                    exprs
-                        .iter()
+                    cols.iter()
                         .map(|v| v.to_string())
                         .collect::<Vec<String>>()
                         .as_slice()
@@ -376,11 +387,14 @@ pub enum TableFactor {
         subquery: Box<Query>,
         alias: Option<TableAlias>,
     },
-    /// `<expr>[ AS <alias> ]`
+    /// `<expr>(args)[ AS <alias> ]`
+    ///
+    /// Note that scalar functions can also be used in this way.
     TableFunction {
         name: ObjectName,
         alias: Option<TableAlias>,
         args: Vec<FunctionArg>,
+        with_ordinality: bool,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
     /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
@@ -422,8 +436,16 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { name, alias, args } => {
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
                 write!(f, "{}({})", name, display_comma_separated(args))?;
+                if *with_ordinality {
+                    write!(f, " WITH ORDINALITY")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

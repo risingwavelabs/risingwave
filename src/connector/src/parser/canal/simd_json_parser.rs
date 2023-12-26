@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, Mutable, ValueAccess};
+use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
+use simd_json::BorrowedValue;
 
+use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{
+    ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
@@ -31,13 +36,19 @@ const IS_DDL: &str = "isDdl";
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    payload_start_idx: usize,
 }
 
 impl CanalJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+        config: &JsonProperties,
+    ) -> Result<Self> {
         Ok(Self {
             rw_columns,
             source_ctx,
+            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
         })
     }
 
@@ -46,9 +57,10 @@ impl CanalJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+    ) -> Result<()> {
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
             RwError::from(ProtocolError(
@@ -81,24 +93,23 @@ impl CanalJsonParser {
                     "'data' is missing for creating event".to_string(),
                 ))
             })?;
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for event in events.drain(..) {
             let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::CANAL);
             match apply_row_operation_on_stream_chunk_writer((op, accessor), &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single canal json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }
@@ -113,12 +124,17 @@ impl ByteStreamSourceParser for CanalJsonParser {
         &self.source_ctx
     }
 
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::CanalJson
+    }
+
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+    ) -> Result<()> {
+        only_parse_payload!(self, payload, writer)
     }
 }
 
@@ -127,7 +143,6 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
-    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, JsonbVal, ScalarImpl, ToOwnedDatum};
     use serde_json::Value;
@@ -149,7 +164,12 @@ mod tests {
             SourceColumnDesc::simple("binary", DataType::Bytea, 6.into()),
             SourceColumnDesc::simple("json", DataType::Jsonb, 7.into()),
         ];
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
 
@@ -169,7 +189,7 @@ mod tests {
         assert_eq!(
             row.datum_at(2).to_owned_datum(),
             Some(ScalarImpl::Timestamp(
-                str_to_timestamp("2023-02-15 13:01:36").unwrap()
+                "2023-02-15 13:01:36".parse().unwrap()
             ))
         );
         assert_eq!(
@@ -181,7 +201,7 @@ mod tests {
         assert_eq!(
             row.datum_at(4).to_owned_datum(),
             Some(ScalarImpl::Timestamp(
-                str_to_timestamp("2022-10-13 12:12:54").unwrap()
+                "2022-10-13 12:12:54".parse().unwrap()
             ))
         );
         assert_eq!(
@@ -215,7 +235,12 @@ mod tests {
             SourceColumnDesc::simple("win_rate", DataType::Float64, 5.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -245,7 +270,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
+                    "2018-01-01 00:00:01".parse().unwrap()
                 )))
             );
             assert_eq!(
@@ -264,7 +289,12 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int32, 1.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = CanalJsonParser::new(
+            descs.clone(),
+            Default::default(),
+            &JsonProperties::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 

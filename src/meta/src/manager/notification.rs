@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
@@ -30,18 +29,19 @@ use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
 use crate::model::{FragmentId, NotificationVersion as Version};
-use crate::storage::MetaStore;
+use crate::storage::MetaStoreRef;
 
 pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;
-pub type NotificationManagerRef<S> = Arc<NotificationManager<S>>;
+pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
+/// NOTE(kwannoel): This is just ignored, used in background DDL
+pub const IGNORED_NOTIFICATION_VERSION: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub enum LocalNotification {
     WorkerNodeDeleted(WorkerNode),
     WorkerNodeActivated(WorkerNode),
-    CompactionTaskNeedCancel(CompactTask),
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
@@ -72,20 +72,17 @@ struct Task {
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
-pub struct NotificationManager<S> {
+pub struct NotificationManager {
     core: Arc<Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
     /// The current notification version.
     current_version: Mutex<Version>,
-    meta_store: Arc<S>,
+    meta_store: MetaStoreRef,
 }
 
-impl<S> NotificationManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(meta_store: Arc<S>) -> Self {
+impl NotificationManager {
+    pub async fn new(meta_store: MetaStoreRef) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
@@ -107,7 +104,7 @@ where
         Self {
             core: core_clone,
             task_tx,
-            current_version: Mutex::new(Version::new(&*meta_store).await),
+            current_version: Mutex::new(Version::new(&meta_store).await),
             meta_store,
         }
     }
@@ -143,7 +140,7 @@ where
         info: Info,
     ) -> NotificationVersion {
         let mut version_guard = self.current_version.lock().await;
-        version_guard.increase_version(&*self.meta_store).await;
+        version_guard.increase_version(&self.meta_store).await;
         let version = version_guard.version();
         self.notify(target, operation, info, Some(version));
         version
@@ -409,11 +406,11 @@ mod tests {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-    use crate::storage::MemStore;
+    use crate::storage::{MemStore, MetaStoreBoxExt};
 
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
-        let mgr = NotificationManager::new(MemStore::new().into()).await;
+        let mgr = NotificationManager::new(MemStore::new().into_ref()).await;
         let worker_key1 = WorkerKey(HostAddress {
             host: "a".to_string(),
             port: 1,

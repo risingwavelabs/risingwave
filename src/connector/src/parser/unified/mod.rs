@@ -14,22 +14,48 @@
 
 //! Unified parsers for both normal events or CDC events of multiple message formats
 
+use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
+
+use self::avro::AvroAccess;
+use self::bytes::BytesAccess;
+use self::json::JsonAccess;
+use self::protobuf::ProtobufAccess;
+use crate::source::SourceColumnDesc;
 
 pub mod avro;
 pub mod bytes;
 pub mod debezium;
 pub mod json;
 pub mod maxwell;
+pub mod protobuf;
 pub mod upsert;
 pub mod util;
 
-pub type AccessResult = std::result::Result<Datum, AccessError>;
+pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
 /// Access a certain field in an object according to the path
 pub trait Access {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
+}
+
+pub enum AccessImpl<'a, 'b> {
+    Avro(AvroAccess<'a, 'b>),
+    Bytes(BytesAccess<'a>),
+    Protobuf(ProtobufAccess),
+    Json(JsonAccess<'a, 'b>),
+}
+
+impl Access for AccessImpl<'_, '_> {
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        match self {
+            Self::Avro(accessor) => accessor.access(path, type_expected),
+            Self::Bytes(accessor) => accessor.access(path, type_expected),
+            Self::Protobuf(accessor) => accessor.access(path, type_expected),
+            Self::Json(accessor) => accessor.access(path, type_expected),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,11 +65,12 @@ pub enum ChangeEventOperation {
 }
 
 /// Methods to access a CDC event.
+#[auto_impl(&)]
 pub trait ChangeEvent {
     /// Access the operation type.
     fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;
     /// Access the field after the operation.
-    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult;
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult;
 }
 
 impl<A> ChangeEvent for (ChangeEventOperation, A)
@@ -54,21 +81,27 @@ where
         Ok(self.0)
     }
 
-    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult {
-        self.1.access(&[name], Some(type_expected))
+    fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult {
+        self.1.access(&[desc.name.as_str()], Some(&desc.data_type))
     }
 }
 
 #[derive(Error, Debug)]
 pub enum AccessError {
-    #[error("Undefined {name} at {path}")]
+    #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
-    #[error("TypeError {expected} expected, got {got} {value}")]
+    #[error("Expected type `{expected}` but got `{got}` for `{value}`")]
     TypeError {
         expected: String,
         got: String,
         value: String,
     },
+    #[error("Unsupported data type `{ty}`")]
+    UnsupportedType { ty: String },
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }

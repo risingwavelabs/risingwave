@@ -14,20 +14,20 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::literal_parsing;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::expr::{ExprDisplay, ExprType};
+use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
-    func_type: ExprType,
-    return_type: DataType,
-    inputs: Vec<ExprImpl>,
+    pub(super) func_type: ExprType,
+    pub(super) return_type: DataType,
+    pub(super) inputs: Vec<ExprImpl>,
 }
 
 fn debug_binary_op(
@@ -81,6 +81,8 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::BitwiseAnd => debug_binary_op(f, "&", &self.inputs),
                 ExprType::BitwiseOr => debug_binary_op(f, "|", &self.inputs),
                 ExprType::BitwiseXor => debug_binary_op(f, "#", &self.inputs),
+                ExprType::ArrayContains => debug_binary_op(f, "@>", &self.inputs),
+                ExprType::ArrayContained => debug_binary_op(f, "<@", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
                     let mut builder = f.debug_tuple(&func_name);
@@ -101,12 +103,8 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = infer_type(func_type, &mut inputs)?;
-        Ok(Self {
-            func_type,
-            return_type,
-            inputs,
-        })
+        let return_type = infer_type(func_type.into(), &mut inputs)?;
+        Ok(Self::new_unchecked(func_type, inputs, return_type))
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
@@ -116,12 +114,16 @@ impl FunctionCall {
         target: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
-        if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+        if let ExprImpl::Parameter(expr) = child
+            && !expr.has_infer()
+        {
             // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
             return Ok(());
         }
-        if let ExprImpl::FunctionCall(func) = child && func.func_type == ExprType::Row {
+        if let ExprImpl::FunctionCall(func) = child
+            && func.func_type == ExprType::Row
+        {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
             // types, they will be handled in `cast_ok`.
@@ -133,10 +135,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| {
-                    let s = scalar.as_utf8();
-                    literal_parsing(&target, s)
-                })
+                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();
@@ -153,12 +152,7 @@ impl FunctionCall {
         } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             // Always Ok below. Safe to mutate `child`.
             let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
-            *child = Self {
-                func_type: ExprType::Cast,
-                return_type: target,
-                inputs: vec![owned],
-            }
-            .into();
+            *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
             Ok(())
         } else {
             Err(CastError(format!(
@@ -170,7 +164,7 @@ impl FunctionCall {
 
     /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
     /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
-    /// is castible to VARCHAR. It's to simply the casting rules.
+    /// is castable to VARCHAR. It's to simply the casting rules.
     fn cast_row_expr(
         func: &mut FunctionCall,
         target_type: DataType,
@@ -224,15 +218,6 @@ impl FunctionCall {
         match expr_type {
             ExprType::Some | ExprType::All => {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
-
-                if return_type != DataType::Boolean {
-                    return Err(ErrorCode::BindError(format!(
-                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
-                        return_type
-                    ))
-                    .into());
-                }
-
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
             ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
@@ -291,6 +276,12 @@ impl FunctionCall {
             return_type,
             inputs,
         })
+    }
+
+    pub fn is_pure(&self) -> bool {
+        let mut a = ImpureAnalyzer { impure: false };
+        a.visit_function_call(self);
+        !a.impure
     }
 }
 
@@ -372,6 +363,12 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
             }
+            ExprType::ArrayContains => {
+                explain_verbose_binary_op(f, "@>", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayContained => {
+                explain_verbose_binary_op(f, "<@", &that.inputs, self.input_schema)
+            }
             ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)
             }
@@ -432,12 +429,6 @@ pub struct CastError(String);
 
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_string())
-    }
-}
-
-impl From<CastError> for RwError {
-    fn from(value: CastError) -> Self {
-        ErrorCode::from(value).into()
+        ErrorCode::BindError(value.to_report_string())
     }
 }

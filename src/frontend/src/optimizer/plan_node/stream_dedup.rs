@@ -17,38 +17,39 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
-use super::generic::{self, GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanNode;
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDedup {
-    pub base: PlanBase,
-    logical: generic::Dedup<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Dedup<PlanRef>,
 }
 
 impl StreamDedup {
-    pub fn new(logical: generic::Dedup<PlanRef>) -> Self {
-        let input = logical.input.clone();
+    pub fn new(core: generic::Dedup<PlanRef>) -> Self {
+        let input = core.input.clone();
         // A dedup operator must be append-only.
         assert!(input.append_only());
 
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let base = PlanBase::new_stream_with_core(
+            &core,
             input.distribution().clone(),
             true,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
-        StreamDedup { base, logical }
+        StreamDedup { base, core }
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        let schema = self.logical.schema();
+        let schema = self.core.schema();
         let mut builder =
             TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
 
@@ -56,7 +57,7 @@ impl StreamDedup {
             builder.add_column(field);
         });
 
-        self.logical.dedup_cols.iter().for_each(|idx| {
+        self.core.dedup_cols.iter().for_each(|idx| {
             builder.add_order_column(*idx, OrderType::ascending());
         });
 
@@ -70,17 +71,17 @@ impl StreamDedup {
 }
 
 // assert!(self.base.append_only());
-impl_distill_by_unit!(StreamDedup, logical, "StreamAppendOnlyDedup");
+impl_distill_by_unit!(StreamDedup, core, "StreamAppendOnlyDedup");
 
 impl PlanTreeNodeUnary for StreamDedup {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -94,7 +95,7 @@ impl StreamNode for StreamDedup {
         PbNodeBody::AppendOnlyDedup(DedupNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
-                .logical
+                .core
                 .dedup_cols
                 .iter()
                 .map(|idx| *idx as _)
@@ -104,3 +105,5 @@ impl StreamNode for StreamDedup {
 }
 
 impl ExprRewritable for StreamDedup {}
+
+impl ExprVisitable for StreamDedup {}

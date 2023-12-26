@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// Mapping from sql name to system locale groups.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
-pub const PG_COLLATION_TABLE_NAME: &str = "pg_collation";
 pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "collname"),
@@ -32,3 +32,12 @@ pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "colliculocale"),
     (DataType::Varchar, "collversion"),
 ];
+
+/// Mapping from sql name to system locale groups.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
+pub static PG_COLLATION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_collation",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_COLLATION_COLUMNS,
+    sql: infer_dummy_view_sql(PG_COLLATION_COLUMNS),
+});

@@ -53,6 +53,7 @@ pub enum StatementType {
     CREATE_INDEX,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    COMMENT,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -66,12 +67,16 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    ALTER_DATABASE,
+    ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
     ALTER_MATERIALIZED_VIEW,
     ALTER_SINK,
     ALTER_SOURCE,
+    ALTER_FUNCTION,
+    ALTER_CONNECTION,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
@@ -91,6 +96,9 @@ pub enum StatementType {
     COMMIT,
     ROLLBACK,
     SET_TRANSACTION,
+    CANCEL_COMMAND,
+    WAIT,
+    KILL,
 }
 
 impl std::fmt::Display for StatementType {
@@ -256,7 +264,7 @@ impl StatementType {
             Statement::Grant { .. } => Ok(StatementType::GRANT_PRIVILEGE),
             Statement::Revoke { .. } => Ok(StatementType::REVOKE_PRIVILEGE),
             Statement::Describe { .. } => Ok(StatementType::DESCRIBE),
-            Statement::ShowCreateObject { .. } | Statement::ShowObjects(_) => {
+            Statement::ShowCreateObject { .. } | Statement::ShowObjects { .. } => {
                 Ok(StatementType::SHOW_COMMAND)
             }
             Statement::Drop(stmt) => match stmt.object_type {
@@ -277,6 +285,7 @@ impl StatementType {
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
             Statement::Flush => Ok(StatementType::FLUSH),
+            Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),
         }
     }
@@ -320,6 +329,7 @@ impl StatementType {
                 | StatementType::INSERT_RETURNING
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
+                | StatementType::CANCEL_COMMAND
         )
     }
 
@@ -388,7 +398,7 @@ where
         }
 
         if let Some(callback) = self.callback.take() {
-            callback.await.map_err(PsqlError::ExecuteError)?;
+            callback.await.map_err(PsqlError::SimpleQueryError)?;
         }
         Ok(())
     }

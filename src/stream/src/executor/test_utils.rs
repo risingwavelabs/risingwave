@@ -34,11 +34,11 @@ pub mod prelude {
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_expr::expr::build_from_pretty;
     pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
 
     pub use crate::common::table::state_table::StateTable;
+    pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
 }
@@ -67,6 +67,10 @@ impl MessageSender {
         if stop {
             barrier = barrier.with_stop();
         }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    pub fn send_barrier(&self, barrier: Barrier) {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
@@ -263,15 +267,25 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 // FIXME: implement on any `impl MessageStream` if the analyzer works well.
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
+pub mod expr {
+    use risingwave_expr::expr::NonStrictExpression;
+
+    pub fn build_from_pretty(s: impl AsRef<str>) -> NonStrictExpression {
+        NonStrictExpression::for_test(risingwave_expr::expr::build_from_pretty(s))
+    }
+}
+
 pub mod agg_executor {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use futures::future;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{AggCall, AggKind};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_expr::aggregate::{AggCall, AggKind};
+    use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -280,11 +294,34 @@ pub mod agg_executor {
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
-    use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, HashAggExecutor, PkIndices,
-        SimpleAggExecutor,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
+        PkIndices, SimpleAggExecutor,
     };
+
+    /// Generate agg executor's schema from `input`, `agg_calls` and `group_key_indices`.
+    /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.
+    pub fn generate_agg_schema(
+        input: &dyn Executor,
+        agg_calls: &[AggCall],
+        group_key_indices: Option<&[usize]>,
+    ) -> Schema {
+        let aggs = agg_calls
+            .iter()
+            .map(|agg| Field::unnamed(agg.return_type.clone()));
+
+        let fields = if let Some(key_indices) = group_key_indices {
+            let keys = key_indices
+                .iter()
+                .map(|idx| input.schema().fields[*idx].clone());
+
+            keys.chain(aggs).collect()
+        } else {
+            aggs.collect()
+        };
+
+        Schema { fields }
+    }
 
     /// Create state storage for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
@@ -304,30 +341,34 @@ pub mod agg_executor {
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
                 let mut upstream_columns = Vec::new();
+                let mut order_columns = Vec::new();
 
                 let mut next_column_id = 0;
-                let mut add_column = |upstream_idx: usize, data_type: DataType, order_type: OrderType| {
+                let mut add_column = |upstream_idx: usize, data_type: DataType, order_type: Option<OrderType>| {
                     upstream_columns.push(upstream_idx);
                     column_descs.push(ColumnDesc::unnamed(
                         ColumnId::new(next_column_id),
                         data_type,
                     ));
+                    if let Some(order_type) = order_type {
+                        order_columns.push(ColumnOrder::new(upstream_idx as _, order_type));
+                        order_types.push(order_type);
+                    }
                     next_column_id += 1;
-                    order_types.push(order_type);
                 };
 
                 for idx in group_key_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
+                    add_column(*idx, input_fields[*idx].data_type(), None);
                 }
 
                 add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
-                    OrderType::descending()
+                    Some(OrderType::descending())
                 } else {
-                    OrderType::ascending()
+                    Some(OrderType::ascending())
                 });
 
                 for idx in pk_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
+                    add_column(*idx, input_fields[*idx].data_type(), Some(OrderType::ascending()));
                 }
 
                 let state_table = StateTable::new_without_distribution(
@@ -338,7 +379,7 @@ pub mod agg_executor {
                     (0..order_types.len()).collect(),
                 ).await;
 
-                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */
@@ -347,7 +388,7 @@ pub mod agg_executor {
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {
-                AggStateStorage::ResultValue
+                AggStateStorage::Value
             }
             _ => {
                 panic!("no need to mock other agg kinds here");
@@ -355,8 +396,8 @@ pub mod agg_executor {
         }
     }
 
-    /// Create result state table for agg executor.
-    pub async fn create_result_table<S: StateStore>(
+    /// Create intermediate state table for agg executor.
+    pub async fn create_intermediate_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
@@ -386,7 +427,7 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution(
+        StateTable::new_without_distribution_inconsistent_op(
             store,
             table_id,
             column_descs,
@@ -426,7 +467,7 @@ pub mod agg_executor {
             )
         }
 
-        let result_table = create_result_table(
+        let intermediate_state_table = create_intermediate_state_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
@@ -435,25 +476,33 @@ pub mod agg_executor {
         )
         .await;
 
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: format!("HashAggExecutor {:X}", executor_id),
+        };
+
         HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx: ActorContext::create(123),
-            pk_indices,
-            executor_id,
+            info,
 
             extreme_cache_size,
 
             agg_calls,
             row_count_index,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
+                max_dirty_groups_heap_size: 64 << 20,
                 emit_on_window_close,
             },
         })
@@ -472,23 +521,20 @@ pub mod agg_executor {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let mut storages = Vec::with_capacity(agg_calls.iter().len());
-        for (idx, agg_call) in agg_calls.iter().enumerate() {
-            storages.push(
-                create_agg_state_storage(
-                    store.clone(),
-                    TableId::new(idx as u32),
-                    agg_call,
-                    &[],
-                    &pk_indices,
-                    input.as_ref(),
-                    is_append_only,
-                )
-                .await,
+        let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
+            create_agg_state_storage(
+                store.clone(),
+                TableId::new(idx as u32),
+                agg_call,
+                &[],
+                &pk_indices,
+                input.as_ref(),
+                is_append_only,
             )
-        }
+        }))
+        .await;
 
-        let result_table = create_result_table(
+        let intermediate_state_table = create_intermediate_state_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
@@ -497,21 +543,28 @@ pub mod agg_executor {
         )
         .await;
 
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: format!("SimpleAggExecutor {:X}", executor_id),
+        };
+
         SimpleAggExecutor::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx,
-            pk_indices,
-            executor_id,
+            info,
 
             extreme_cache_size: 1024,
 
             agg_calls,
             row_count_index,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()

@@ -82,7 +82,12 @@ pub(crate) fn derive_pk(
     columns: &[ColumnCatalog],
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
-    let stream_key = input.logical_pk().iter().copied().unique().collect_vec();
+    let stream_key = input
+        .expect_stream_key()
+        .iter()
+        .copied()
+        .unique()
+        .collect_vec();
     let schema = input.schema();
 
     // Assert the uniqueness of column names and IDs, including hidden columns.

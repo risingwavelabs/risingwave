@@ -104,9 +104,9 @@
       sum(l_extendedprice) as sum_base_price,
       sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
       sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
-      round(avg(l_quantity), 4) as avg_qty,
-      round(avg(l_extendedprice), 4) as avg_price,
-      round(avg(l_discount), 4) as avg_disc,
+      avg(l_quantity) as avg_qty,
+      avg(l_extendedprice) as avg_price,
+      avg(l_discount) as avg_disc,
       count(*) as count_order
     from
       lineitem
@@ -117,7 +117,8 @@
       l_linestatus
     order by
       l_returnflag,
-      l_linestatus;
+      l_linestatus
+    LIMIT 1;
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -171,7 +172,7 @@
           n_name,
           s_name,
           p_partkey
-    limit 100;
+    LIMIT 100;
   expected_outputs:
   - batch_plan
   - stream_plan
@@ -204,7 +205,7 @@
     order by
       revenue desc,
       o_orderdate
-    limit 10;
+    LIMIT 10;
   expected_outputs:
   - stream_plan
   - stream_dist_plan
@@ -235,7 +236,8 @@
     group by
       o_orderpriority
     order by
-      o_orderpriority;
+      o_orderpriority
+    LIMIT 1;
   expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_dist_plan
@@ -269,7 +271,8 @@
     group by
       n_name
     order by
-      revenue desc;
+      revenue desc
+    LIMIT 1;
   expected_outputs:
   - stream_plan
   - logical_plan
@@ -337,7 +340,8 @@
     order by
       supp_nation,
       cust_nation,
-      l_year;
+      l_year
+    LIMIT 1;
   expected_outputs:
   - stream_dist_plan
   - optimized_logical_plan_for_batch
@@ -350,10 +354,10 @@
   sql: |
     select
       o_year,
-      round(sum(case
+      sum(case
         when nation = 'IRAN' then volume
         else 0
-      end) / sum(volume), 6) as mkt_share
+      end) / sum(volume) as mkt_share
     from
       (
         select
@@ -384,7 +388,8 @@
     group by
       o_year
     order by
-      o_year;
+      o_year
+    LIMIT 1;
   expected_outputs:
   - batch_plan
   - stream_plan
@@ -398,7 +403,7 @@
     select
       nation,
       o_year,
-      round(sum(amount), 2) as sum_profit
+      sum(amount) as sum_profit
     from
       (
         select
@@ -426,7 +431,8 @@
       o_year
     order by
       nation,
-      o_year desc;
+      o_year desc
+    LIMIT 1;
   expected_outputs:
   - stream_plan
   - batch_plan
@@ -468,7 +474,7 @@
       c_comment
     order by
       revenue desc
-    limit 20;
+    LIMIT 20;
   expected_outputs:
   - stream_plan
   - batch_plan
@@ -506,7 +512,8 @@
           and n_name = 'ARGENTINA'
       )
     order by
-      value desc;
+      value desc
+    LIMIT 1;
   expected_outputs:
   - stream_dist_plan
   - batch_plan
@@ -544,7 +551,8 @@
     group by
         l_shipmode
     order by
-        l_shipmode;
+        l_shipmode
+    LIMIT 1;
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -574,7 +582,8 @@
       c_count
     order by
       custdist desc,
-      c_count desc;
+      c_count desc
+    LIMIT 1;
   expected_outputs:
   - batch_plan
   - stream_dist_plan
@@ -638,7 +647,8 @@
           revenue0
       )
     order by
-      s_suppkey;
+      s_suppkey
+    LIMIT 1;
   expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
@@ -677,7 +687,8 @@
       supplier_cnt desc,
       p_brand,
       p_type,
-      p_size;
+      p_size
+    LIMIT 1;
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -689,7 +700,7 @@
   - create_tables
   sql: |
     select
-      ROUND(sum(l_extendedprice) / 7.0, 16) as avg_yearly
+      sum(l_extendedprice) / 7.0 as avg_yearly
     from
       lineitem,
       part
@@ -805,42 +816,49 @@
   - create_tables
   sql: |
     select
-      s_name,
-      s_address
+    	s_name,
+    	s_address
     from
-      supplier,
-      nation
+    	supplier,
+    	nation
     where
-      s_suppkey in (
-        select
-          ps_suppkey
-        from
-          partsupp
-        where
-          ps_partkey in (
-            select
-              p_partkey
-            from
-              part
-            where
-              p_name like 'forest%'
-          )
-          and ps_availqty > (
-            select
-              0.5 * sum(l_quantity)
-            from
-              lineitem
-            where
-              l_partkey = ps_partkey
-              and l_suppkey = ps_suppkey
-              and l_shipdate >= date '1994-01-01'
-              and l_shipdate < date '1994-01-01' + interval '1' year
-          )
-      )
-      and s_nationkey = n_nationkey
-      and n_name = 'KENYA'
+    	s_suppkey in (
+    		select
+    			ps_suppkey
+    		from
+    			partsupp,
+    			(
+    				select
+    					l_partkey agg_partkey,
+    					l_suppkey agg_suppkey,
+    					0.5 * sum(l_quantity) AS agg_quantity
+    				from
+    					lineitem
+    				where
+    					l_shipdate >= date '1994-01-01'
+    					and l_shipdate < date '1994-01-01' + interval '1' year
+    				group by
+    					l_partkey,
+    					l_suppkey
+    			) agg_lineitem
+    		where
+    			agg_partkey = ps_partkey
+    			and agg_suppkey = ps_suppkey
+    			and ps_partkey in (
+    				select
+    					p_partkey
+    				from
+    					part
+    				where
+    					p_name like 'forest%'
+    			)
+    			and ps_availqty > agg_quantity
+    	)
+    	and s_nationkey = n_nationkey
+    	and n_name = 'KENYA'
     order by
-      s_name;
+    	s_name
+    LIMIT 1;
   expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_dist_plan
@@ -937,7 +955,8 @@
     group by
       cntrycode
     order by
-      cntrycode;
+      cntrycode
+    LIMIT 1;
   expected_outputs:
   - logical_plan
   - stream_plan

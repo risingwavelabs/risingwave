@@ -55,21 +55,19 @@ impl AwsEc2Client {
             .send()
             .await
             .map_err(|e| {
-                MetaError::from(anyhow!(
+                anyhow!(
                     "Failed to delete VPC endpoint. endpoint_id {vpc_endpoint_id}, error: {:?}, aws_request_id: {:?}",
                     e.message(),
                     e.meta().extra("aws_request_id")
-                ))
+                )
             })?;
 
-        if let Some(ret) = output.unsuccessful() {
-            if !ret.is_empty() {
-                return Err(MetaError::from(anyhow!(
-                    "Failed to delete VPC endpoint {}, error: {:?}",
-                    vpc_endpoint_id,
-                    ret
-                )));
-            }
+        if !output.unsuccessful().is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "Failed to delete VPC endpoint {}, error: {:?}",
+                vpc_endpoint_id,
+                output.unsuccessful()
+            )));
         }
         Ok(())
     }
@@ -167,18 +165,19 @@ impl AwsEc2Client {
             .send()
             .await
             .map_err(|e| {
-                MetaError::from(anyhow!(
+                anyhow!(
                     "Failed to check availability of VPC endpoint. endpoint_id: {vpc_endpoint_id}, error: {:?}, aws_request_id: {:?}",
                     e.message(),
                     e.meta().extra("aws_request_id")
-                ))
+                )
             })?;
 
         match output.vpc_endpoints {
             Some(endpoints) => {
-                let endpoint = endpoints.into_iter().exactly_one().map_err(|_| {
-                    MetaError::from(anyhow!("More than one VPC endpoint found with the same ID"))
-                })?;
+                let endpoint = endpoints
+                    .into_iter()
+                    .exactly_one()
+                    .map_err(|_| anyhow!("More than one VPC endpoint found with the same ID"))?;
                 if let Some(state) = endpoint.state {
                     match state {
                         State::Available => {
@@ -210,19 +209,17 @@ impl AwsEc2Client {
             .send()
             .await
             .map_err(|e| {
-                MetaError::from(anyhow!(
+                anyhow!(
                     "Failed to describe VPC endpoint service, error: {:?}, aws_request_id: {:?}",
                     e.message(),
                     e.meta().extra("aws_request_id")
-                ))
+                )
             })?;
 
         match output.service_details {
             Some(details) => {
                 let detail = details.into_iter().exactly_one().map_err(|_| {
-                    MetaError::from(anyhow!(
-                        "More than one VPC endpoint service found with the same name"
-                    ))
+                    anyhow!("More than one VPC endpoint service found with the same name")
                 })?;
                 if let Some(azs) = detail.availability_zones {
                     service_azs.extend(azs.into_iter());
@@ -255,9 +252,9 @@ impl AwsEc2Client {
             .send()
             .await
             .map_err(|e| {
-                MetaError::from(anyhow!("Failed to describe subnets for vpc_id {vpc_id}. error: {:?}, aws_request_id: {:?}",
+                anyhow!("Failed to describe subnets for vpc_id {vpc_id}. error: {:?}, aws_request_id: {:?}",
                     e.message(),
-                    e.meta().extra("aws_request_id")))
+                    e.meta().extra("aws_request_id"))
             })?;
 
         let subnets = output
@@ -315,24 +312,22 @@ impl AwsEc2Client {
             .send()
             .await
             .map_err(|e| {
-                MetaError::from(anyhow!(
+                anyhow!(
                     "Failed to create vpc endpoint: vpc_id {vpc_id}, \
                 service_name {service_name}. error: {:?}, aws_request_id: {:?}",
                     e.message(),
                     e.meta().extra("aws_request_id")
-                ))
+                )
             })?;
 
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();
 
-        if let Some(dns_entries) = endpoint.dns_entries() {
-            dns_entries.iter().for_each(|e| {
-                if let Some(dns_name) = e.dns_name() {
-                    dns_names.push(dns_name.to_string());
-                }
-            });
-        }
+        endpoint.dns_entries().iter().for_each(|e| {
+            if let Some(dns_name) = e.dns_name() {
+                dns_names.push(dns_name.to_string());
+            }
+        });
 
         Ok((
             endpoint.vpc_endpoint_id().unwrap_or_default().to_string(),

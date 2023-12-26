@@ -119,7 +119,7 @@ impl Utf8Array {
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct Utf8ArrayBuilder {
     bytes: BytesArrayBuilder,
 }
@@ -372,7 +372,7 @@ mod tests {
                     None => NULL_VAL_FOR_HASH.hash(state),
                 })
         });
-        let hashes = hash_finish(&mut states[..]);
+        let hashes = hash_finish(&states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 30);

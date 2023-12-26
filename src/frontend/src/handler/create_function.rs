@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -38,21 +39,27 @@ pub async fn handle_create_function(
     params: CreateFunctionBody,
 ) -> Result<RwPgResponse> {
     if or_replace {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE OR REPLACE FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE OR REPLACE FUNCTION");
     }
     if temporary {
-        return Err(ErrorCode::NotImplemented(
-            "CREATE TEMPORARY FUNCTION".to_string(),
-            None.into(),
-        )
-        .into());
+        bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
     let language = match params.language {
-        Some(lang) => lang.real_value().to_lowercase(),
+        Some(lang) => {
+            let lang = lang.real_value().to_lowercase();
+            match &*lang {
+                "python" | "java" => lang,
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "language {} is not supported",
+                        lang
+                    ))
+                    .into())
+                }
+            }
+        }
+        // Empty language is acceptable since we only require the external server implements the
+        // correct protocol.
         None => "".to_string(),
     };
     let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
@@ -129,7 +136,7 @@ pub async fn handle_create_function(
         arg_types
             .iter()
             .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-            .try_collect()?,
+            .try_collect::<_, Fields, _>()?,
     );
     let returns = arrow_schema::Schema::new(match kind {
         Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],

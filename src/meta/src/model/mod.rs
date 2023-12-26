@@ -24,18 +24,17 @@ mod user;
 use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use barrier::*;
-pub use catalog::*;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
 pub use notification::*;
 use prost::Message;
 pub use stream::*;
-pub use user::*;
 
 use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
 
@@ -48,9 +47,10 @@ pub type DispatcherId = u64;
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
 
-pub trait Transactional {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
+#[async_trait]
+pub trait Transactional<TXN> {
+    async fn upsert_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
+    async fn delete_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
 }
 
 mod private {
@@ -203,11 +203,12 @@ for_all_metadata_models!(impl_metadata_model_marker);
 
 /// `Transactional` defines operations supported in a transaction.
 /// Read operations can be supported if necessary.
-impl<T> Transactional for T
+#[async_trait]
+impl<T> Transactional<Transaction> for T
 where
-    T: MetadataModel,
+    T: MetadataModel + Sync,
 {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         trx.put(
             Self::cf_name(),
             self.key()?.encode_to_vec(),
@@ -216,7 +217,7 @@ where
         Ok(())
     }
 
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+    async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
         Ok(())
     }
@@ -225,11 +226,12 @@ where
 /// Trait that wraps a local memory value and applies the change to the local memory value on
 /// `commit` or leaves the local memory value untouched on `abort`.
 pub trait ValTransaction: Sized {
+    type TXN;
     /// Commit the change to local memory value
     fn commit(self);
 
     /// Apply the change (upsert or delete) to `txn`
-    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()>;
+    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()>;
 
     /// Abort the `VarTransaction` and leave the local memory value untouched
     fn abort(self) {
@@ -243,26 +245,28 @@ pub trait ValTransaction: Sized {
 /// When `commit` is called, the change to `new_value` will be applied to the `orig_value_ref`
 /// When `abort` is called, the `VarTransaction` is dropped and the local memory value is
 /// untouched.
-pub struct VarTransaction<'a, T: Transactional> {
+pub struct VarTransaction<'a, TXN, T: Transactional<TXN>> {
     orig_value_ref: &'a mut T,
     new_value: Option<T>,
+    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, T> VarTransaction<'a, T>
+impl<'a, TXN, T> VarTransaction<'a, TXN, T>
 where
-    T: Transactional,
+    T: Transactional<TXN>,
 {
     /// Create a `VarTransaction` that wraps a raw variable
-    pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, T> {
+    pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, TXN, T> {
         VarTransaction {
             // lazy initialization
             new_value: None,
             orig_value_ref: val_ref,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: Transactional> Deref for VarTransaction<'a, T> {
+impl<'a, TXN, T: Transactional<TXN>> Deref for VarTransaction<'a, TXN, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -273,9 +277,9 @@ impl<'a, T: Transactional> Deref for VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for VarTransaction<'a, T>
+impl<'a, TXN, T> DerefMut for VarTransaction<'a, TXN, T>
 where
-    T: Clone + Transactional,
+    T: Clone + Transactional<TXN>,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         if self.new_value.is_none() {
@@ -285,21 +289,23 @@ where
     }
 }
 
-impl<'a, T> ValTransaction for VarTransaction<'a, T>
+impl<'a, TXN, T> ValTransaction for VarTransaction<'a, TXN, T>
 where
-    T: Transactional + PartialEq,
+    T: Transactional<TXN> + PartialEq,
 {
+    type TXN = TXN;
+
     fn commit(self) {
         if let Some(new_value) = self.new_value {
             *self.orig_value_ref = new_value;
         }
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
+    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
         if let Some(new_value) = &self.new_value {
             // Apply the change to `txn` only when the value is modified
             if *self.orig_value_ref != *new_value {
-                new_value.upsert_in_transaction(txn)
+                new_value.upsert_in_transaction(txn).await
             } else {
                 Ok(())
             }
@@ -418,25 +424,27 @@ enum BTreeMapOp<V> {
 /// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
 /// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
 /// `tree_ref`.
-pub struct BTreeMapTransaction<'a, K: Ord, V> {
+pub struct BTreeMapTransaction<'a, K: Ord, V, TXN = Transaction> {
     /// A reference to the original `BTreeMap`. All access to this field should be immutable,
     /// except when we commit the staging changes to the original map.
     tree_ref: &'a mut BTreeMap<K, V>,
     /// Store all the staging changes that will be applied to the original map on commit
     staging: BTreeMap<K, BTreeMapOp<V>>,
+    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
-    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V> {
+impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
+    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V, TXN> {
         Self {
             tree_ref,
             staging: BTreeMap::default(),
+            _phantom: PhantomData,
         }
     }
 
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
     #[allow(dead_code)]
-    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V>> {
+    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V, TXN>> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, None)
     }
 
@@ -447,17 +455,25 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         &mut self,
         key: K,
         default_val: V,
-    ) -> BTreeMapEntryTransaction<'_, K, V> {
+    ) -> BTreeMapEntryTransaction<'_, K, V, TXN> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
             .expect("default value is provided and should return `Some`")
     }
 
     /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
-    pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<'_, K, V> {
+    pub fn new_entry_insert_txn(
+        &mut self,
+        key: K,
+        val: V,
+    ) -> BTreeMapEntryTransaction<'_, K, V, TXN> {
         BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        self.tree_ref
+    }
+
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
         self.tree_ref
     }
 
@@ -549,21 +565,23 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
-    for BTreeMapTransaction<'a, K, V>
+impl<'a, K: Ord + Debug, V: Transactional<TXN> + Clone, TXN> ValTransaction
+    for BTreeMapTransaction<'a, K, V, TXN>
 {
+    type TXN = TXN;
+
     fn commit(self) {
         self.commit_memory();
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
+    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
         // Add the staging operation to txn
         for (k, op) in &self.staging {
             match op {
-                BTreeMapOp::Insert(v) => v.upsert_in_transaction(txn)?,
+                BTreeMapOp::Insert(v) => v.upsert_in_transaction(txn).await?,
                 BTreeMapOp::Delete => {
                     if let Some(v) = self.tree_ref.get(k) {
-                        v.delete_in_transaction(txn)?;
+                        v.delete_in_transaction(txn).await?;
                     }
                 }
             }
@@ -573,24 +591,26 @@ impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
 }
 
 /// Transaction wrapper for a `BTreeMap` entry value of given `key`
-pub struct BTreeMapEntryTransaction<'a, K, V> {
+pub struct BTreeMapEntryTransaction<'a, K, V, TXN> {
     tree_ref: &'a mut BTreeMap<K, V>,
     pub key: K,
     pub new_value: V,
+    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
+impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapEntryTransaction<'a, K, V, TXN> {
     /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
     /// If the tree does not contain `key`, the `default_val` will be used as the initial value
     pub fn new_insert(
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
         value: V,
-    ) -> BTreeMapEntryTransaction<'a, K, V> {
+    ) -> BTreeMapEntryTransaction<'a, K, V, TXN> {
         BTreeMapEntryTransaction {
             new_value: value,
             tree_ref,
             key,
+            _phantom: PhantomData,
         }
     }
 
@@ -604,7 +624,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
         default_val: Option<V>,
-    ) -> Option<BTreeMapEntryTransaction<'a, K, V>> {
+    ) -> Option<BTreeMapEntryTransaction<'a, K, V, TXN>> {
         tree_ref
             .get(&key)
             .cloned()
@@ -613,11 +633,12 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
                 new_value: orig_value,
                 tree_ref,
                 key,
+                _phantom: PhantomData,
             })
     }
 }
 
-impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
+impl<'a, K, V, TXN> Deref for BTreeMapEntryTransaction<'a, K, V, TXN> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -625,24 +646,26 @@ impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K, V> DerefMut for BTreeMapEntryTransaction<'a, K, V> {
+impl<'a, K, V, TXN> DerefMut for BTreeMapEntryTransaction<'a, K, V, TXN> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.new_value
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction
-    for BTreeMapEntryTransaction<'a, K, V>
+impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction
+    for BTreeMapEntryTransaction<'a, K, V, TXN>
 {
+    type TXN = TXN;
+
     fn commit(self) {
         self.tree_ref.insert(self.key, self.new_value);
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
+    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)
             || *self.tree_ref.get(&self.key).unwrap() != self.new_value
         {
-            self.new_value.upsert_in_transaction(txn)?
+            self.new_value.upsert_in_transaction(txn).await?
         }
         Ok(())
     }
@@ -661,8 +684,9 @@ mod tests {
 
     const TEST_CF: &str = "test-cf";
 
-    impl Transactional for TestTransactional {
-        fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+    #[async_trait]
+    impl Transactional<Transaction> for TestTransactional {
+        async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
             trx.put(
                 TEST_CF.to_string(),
                 self.key.as_bytes().into(),
@@ -671,14 +695,14 @@ mod tests {
             Ok(())
         }
 
-        fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
             trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
             Ok(())
         }
     }
 
-    #[test]
-    fn test_simple_var_transaction_commit() {
+    #[tokio::test]
+    async fn test_simple_var_transaction_commit() {
         let mut kv = TestTransactional {
             key: "key",
             value: "original",
@@ -687,7 +711,7 @@ mod tests {
         num_txn.value = "modified";
         assert_eq!(num_txn.value, "modified");
         let mut txn = Transaction::default();
-        num_txn.apply_to_txn(&mut txn).unwrap();
+        num_txn.apply_to_txn(&mut txn).await.unwrap();
         let txn_op = txn.get_operations();
         assert_eq!(1, txn_op.len());
         assert!(matches!(
@@ -717,8 +741,8 @@ mod tests {
         assert_eq!("original", kv.value);
     }
 
-    #[test]
-    fn test_tree_map_transaction_commit() {
+    #[tokio::test]
+    async fn test_tree_map_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
         map.insert(
             "to-remove".to_string(),
@@ -800,7 +824,7 @@ mod tests {
         );
 
         let mut txn = Transaction::default();
-        map_txn.apply_to_txn(&mut txn).unwrap();
+        map_txn.apply_to_txn(&mut txn).await.unwrap();
         let txn_ops = txn.get_operations();
         assert_eq!(5, txn_ops.len());
         for op in txn_ops {
@@ -860,8 +884,8 @@ mod tests {
         assert_eq!(map_copy, map);
     }
 
-    #[test]
-    fn test_tree_map_entry_update_transaction_commit() {
+    #[tokio::test]
+    async fn test_tree_map_entry_update_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
         map.insert(
             "first".to_string(),
@@ -875,7 +899,7 @@ mod tests {
         let mut first_entry_txn = map_txn.new_entry_txn("first".to_string()).unwrap();
         first_entry_txn.value = "first-value";
         let mut txn = Transaction::default();
-        first_entry_txn.apply_to_txn(&mut txn).unwrap();
+        first_entry_txn.apply_to_txn(&mut txn).await.unwrap();
         let txn_ops = txn.get_operations();
         assert_eq!(1, txn_ops.len());
         assert!(
@@ -885,8 +909,8 @@ mod tests {
         assert_eq!("first-value", map.get("first").unwrap().value);
     }
 
-    #[test]
-    fn test_tree_map_entry_insert_transaction_commit() {
+    #[tokio::test]
+    async fn test_tree_map_entry_insert_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
 
         let mut map_txn = BTreeMapTransaction::new(&mut map);
@@ -898,7 +922,7 @@ mod tests {
             },
         );
         let mut txn = Transaction::default();
-        first_entry_txn.apply_to_txn(&mut txn).unwrap();
+        first_entry_txn.apply_to_txn(&mut txn).await.unwrap();
         let txn_ops = txn.get_operations();
         assert_eq!(1, txn_ops.len());
         assert!(

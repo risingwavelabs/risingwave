@@ -18,9 +18,9 @@ use std::hash::Hash;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
-use super::{stream, EqJoinPredicate};
+use super::{stream, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;
@@ -42,6 +42,12 @@ mod source;
 pub use source::*;
 mod scan;
 pub use scan::*;
+mod sys_scan;
+pub use sys_scan::*;
+
+mod cdc_scan;
+pub use cdc_scan::*;
+
 mod union;
 pub use union::*;
 mod top_n;
@@ -64,6 +70,8 @@ mod insert;
 pub use insert::*;
 mod limit;
 pub use limit::*;
+mod max_one_row;
+pub use max_one_row::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
@@ -84,24 +92,23 @@ macro_rules! impl_distill_unit_from_fields {
 }
 pub(super) use impl_distill_unit_from_fields;
 
+#[auto_impl::auto_impl(&)]
 pub trait GenericPlanRef: Eq + Hash {
+    fn id(&self) -> PlanNodeId;
     fn schema(&self) -> &Schema;
-    fn logical_pk(&self) -> &[usize];
+    fn stream_key(&self) -> Option<&[usize]>;
     fn functional_dependency(&self) -> &FunctionalDependencySet;
     fn ctx(&self) -> OptimizerContextRef;
 }
 
+#[auto_impl::auto_impl(&)]
+pub trait PhysicalPlanRef: GenericPlanRef {
+    fn distribution(&self) -> &Distribution;
+}
+
 pub trait GenericPlanNode {
-    /// return (schema, `logical_pk`, fds)
-    fn logical_properties(&self) -> (Schema, Option<Vec<usize>>, FunctionalDependencySet) {
-        (
-            self.schema(),
-            self.logical_pk(),
-            self.functional_dependency(),
-        )
-    }
     fn functional_dependency(&self) -> FunctionalDependencySet;
     fn schema(&self) -> Schema;
-    fn logical_pk(&self) -> Option<Vec<usize>>;
+    fn stream_key(&self) -> Option<Vec<usize>>;
     fn ctx(&self) -> OptimizerContextRef;
 }

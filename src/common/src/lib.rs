@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(drain_filter)]
+#![expect(
+    refining_impl_trait,
+    reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
+)]
+#![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(map_try_insert)]
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(portable_simd)]
 #![feature(array_chunks)]
 #![feature(inline_const_pat)]
@@ -40,6 +40,13 @@
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
+#![feature(map_entry_replace)]
+#![feature(negative_impls)]
+#![feature(bound_map)]
+#![feature(array_methods)]
+
+#[cfg_attr(not(test), expect(unused_extern_crates))]
+extern crate self as risingwave_common;
 
 #[macro_use]
 pub mod jemalloc;
@@ -49,6 +56,7 @@ pub mod error;
 pub mod array;
 #[macro_use]
 pub mod util;
+pub mod acl;
 pub mod buffer;
 pub mod cache;
 pub mod cast;
@@ -58,18 +66,20 @@ pub mod constants;
 pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
+pub mod log;
 pub mod memory;
+pub mod metrics;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
-pub mod transaction;
-
-pub mod metrics;
 pub mod test_utils;
+pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
+
+pub mod range;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(madsim)]
+
 use std::io::Write;
 
-use anyhow::Result;
 use clap::Parser;
 use itertools::Itertools;
-use madsim::runtime::Handle;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 use tokio::time::Duration;
 
@@ -44,7 +44,7 @@ fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
         .name(format!("compute-{idx}"))
         .ip([192, 168, 3, idx as u8].into())
         .cores(config.compute_node_cores)
-        .init(move || risingwave_compute::start(opts.clone(), prometheus::Registry::new()))
+        .init(move || risingwave_compute::start(opts.clone()))
         .build();
 }
 
@@ -62,6 +62,7 @@ checkpoint_frequency = 1
 
 [server]
 telemetry_enabled = false
+metrics_level = \"Disabled\"
         "
             .as_bytes(),
         )
@@ -81,7 +82,7 @@ telemetry_enabled = false
     }
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_serving_cluster_availability() {
     let config = cluster_config_no_compute_nodes();
     let mut cluster = Cluster::start(config).await.unwrap();

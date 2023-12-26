@@ -1,0 +1,22 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table items_sold (brand varchar, size varchar, sales int);
+
+statement ok
+insert into items_sold values ('Foo', 'L', 10),('Foo', 'M', 20),('Bar', 'M', 15),('Bar', 'L', '5');
+
+query TTI rowsort
+SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP (brand, size);
+----
+Bar L 5
+Bar M 15
+Bar NULL 20
+Foo L 10
+Foo M 20
+Foo NULL 30
+NULL NULL 50
+
+statement ok
+drop table items_sold;

@@ -41,12 +41,36 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         compact_task.task_status()
     )
     .unwrap();
+    writeln!(
+        s,
+        "Compaction task table_ids: {:?} ",
+        compact_task.existing_table_ids,
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| format!("[id: {}, {}KB]", table.get_sst_id(), table.file_size / 1024))
+            .map(|table| {
+                if table.total_key_count != 0 {
+                    format!(
+                        "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
+                        table.get_sst_id(),
+                        table.object_id,
+                        table.file_size / 1024,
+                        (table.stale_key_count * 100 / table.total_key_count),
+                        (table.range_tombstone_count * 100 / table.total_key_count),
+                    )
+                } else {
+                    format!(
+                        "[id: {}, obj_id: {} {}KB]",
+                        table.get_sst_id(),
+                        table.object_id,
+                        table.file_size / 1024,
+                    )
+                }
+            })
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
@@ -72,54 +96,107 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         hex::encode(key_range.right.as_slice())
     };
 
-    if sstable_info.stale_key_count > 0 {
-        let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-            ratio,
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            s,
-            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
-            sstable_info.get_object_id(),
-            sstable_info.get_sst_id(),
-            left_str,
-            right_str,
-            sstable_info.table_ids,
-            sstable_info.file_size / 1024,
-        )
-        .unwrap();
+    let stale_ratio = (sstable_info.stale_key_count * 100)
+        .checked_div(sstable_info.total_key_count)
+        .unwrap_or(0);
+    let range_tombstone_ratio = (sstable_info.range_tombstone_count * 100)
+        .checked_div(sstable_info.total_key_count)
+        .unwrap_or(0);
+    writeln!(
+        s,
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, range_tombstone_count={} range_tombstone_ratio={}% bloom_filter_kind {:?}",
+        sstable_info.get_object_id(),
+        sstable_info.get_sst_id(),
+        left_str,
+        right_str,
+        sstable_info.table_ids,
+        sstable_info.file_size / 1024,
+        stale_ratio,
+        sstable_info.range_tombstone_count,
+        range_tombstone_ratio,
+        sstable_info.bloom_filter_kind,
+    )
+    .unwrap();
+}
+
+pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
+    let mut total_key_count = 0;
+    let mut total_file_count: u64 = 0;
+    let mut total_file_size = 0;
+    let mut total_uncompressed_file_size = 0;
+
+    for level in &task.input_ssts {
+        total_file_count += level.table_infos.len() as u64;
+
+        level.table_infos.iter().for_each(|sst| {
+            total_file_size += sst.get_file_size();
+            total_uncompressed_file_size += sst.get_uncompressed_file_size();
+            total_key_count += sst.total_key_count;
+        });
+    }
+
+    CompactTaskStatistics {
+        total_file_count,
+        total_key_count,
+        total_file_size,
+        total_uncompressed_file_size,
     }
 }
 
-pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize, u64) {
-    let mut total_memory_size = 0;
-    let mut total_file_count = 0;
-    let mut total_key_count = 0;
+#[derive(Debug)]
+pub struct CompactTaskStatistics {
+    pub total_file_count: u64,
+    pub total_key_count: u64,
+    pub total_file_size: u64,
+    pub total_uncompressed_file_size: u64,
+}
+
+pub fn estimate_memory_for_compact_task(
+    task: &CompactTask,
+    block_size: u64,
+    recv_buffer_size: u64,
+    sst_capacity: u64,
+    support_streaming_upload: bool,
+) -> u64 {
+    let mut result = 0;
+    // When building the SstableStreamIterator, sstable_syncable will fetch the SstableMeta and seek
+    // to the specified block and build the iterator. Since this operation is concurrent, the memory
+    // usage will need to take into account the size of the SstableMeta.
+    // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters).
+    let mut max_meta_ratio = 0;
+
+    // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
+    // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
+    // and tcp recv_buffer_size.
+    let max_input_stream_estimated_memory = block_size + recv_buffer_size;
+
+    // input
     for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-                total_key_count += table.total_key_count;
+        if level.level_type() == LevelType::Nonoverlapping {
+            let mut meta_size = 0;
+            for sst in &level.table_infos {
+                meta_size = std::cmp::max(meta_size, sst.file_size - sst.meta_offset);
+                max_meta_ratio = std::cmp::max(max_meta_ratio, meta_size * 100 / sst.file_size);
             }
+            result += max_input_stream_estimated_memory + meta_size;
         } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-                total_key_count += table.total_key_count;
+            for sst in &level.table_infos {
+                let meta_size = sst.file_size - sst.meta_offset;
+                result += max_input_stream_estimated_memory + meta_size;
+                max_meta_ratio = std::cmp::max(max_meta_ratio, meta_size * 100 / sst.file_size);
             }
         }
-
-        total_file_count += level.table_infos.len();
     }
 
-    (total_memory_size, total_file_count, total_key_count)
+    // output
+    // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
+    let estimated_meta_size = sst_capacity * max_meta_ratio / 100;
+    if support_streaming_upload {
+        result += estimated_meta_size + 2 * block_size
+    } else {
+        result += estimated_meta_size + sst_capacity; // Use sst_capacity to avoid BatchUploader
+                                                      // memory bursts.
+    }
+
+    result
 }

@@ -18,8 +18,10 @@ use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -28,39 +30,39 @@ use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
-    pub base: PlanBase,
-    logical: generic::Expand<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Expand<PlanRef>,
 }
 
 impl BatchExpand {
-    pub fn new(logical: generic::Expand<PlanRef>) -> Self {
-        let dist = match logical.input.distribution() {
+    pub fn new(core: generic::Expand<PlanRef>) -> Self {
+        let dist = match core.input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
-        BatchExpand { base, logical }
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
+        BatchExpand { base, core }
     }
 
     pub fn column_subsets(&self) -> &[Vec<usize>] {
-        &self.logical.column_subsets
+        &self.core.column_subsets
     }
 }
 
-impl_distill_by_unit!(BatchExpand, logical, "BatchExpand");
+impl_distill_by_unit!(BatchExpand, core, "BatchExpand");
 
 impl PlanTreeNodeUnary for BatchExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -98,3 +100,5 @@ impl ToLocalBatch for BatchExpand {
 }
 
 impl ExprRewritable for BatchExpand {}
+
+impl ExprVisitable for BatchExpand {}

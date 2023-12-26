@@ -21,14 +21,16 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
 use crate::expr::ExprImpl;
+use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -94,6 +96,9 @@ pub struct TableCatalog {
     /// on this to derive an append-only stream plan.
     pub append_only: bool,
 
+    /// The cardinality of the table.
+    pub cardinality: Cardinality,
+
     /// Owner of the table.
     pub owner: UserId,
 
@@ -114,8 +119,7 @@ pub struct TableCatalog {
     /// `None`.
     pub row_id_index: Option<usize>,
 
-    /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`.
+    /// The column indices which are stored in the state store's value with row-encoding.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
@@ -135,8 +139,56 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 
     /// Optional field specifies the distribution key indices in pk.
-    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    /// See <https://github.com/risingwavelabs/risingwave/issues/8377> for more information.
     pub dist_key_in_pk: Vec<usize>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub initialized_at_epoch: Option<Epoch>,
+
+    /// Indicate whether to use watermark cache for state table.
+    pub cleaned_by_watermark: bool,
+
+    /// Indicate whether to create table in background or foreground.
+    pub create_type: CreateType,
+
+    /// description of table, set by `comment on`.
+    pub description: Option<String>,
+
+    /// Incoming sinks, used for sink into table
+    pub incoming_sinks: Vec<SinkId>,
+}
+
+// How the stream job was created will determine
+// whether they are persisted.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CreateType {
+    Background,
+    Foreground,
+}
+
+#[cfg(test)]
+impl Default for CreateType {
+    fn default() -> Self {
+        Self::Foreground
+    }
+}
+
+impl CreateType {
+    fn from_prost(prost: PbCreateType) -> Self {
+        match prost {
+            PbCreateType::Background => Self::Background,
+            PbCreateType::Foreground => Self::Foreground,
+            PbCreateType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn to_prost(self) -> PbCreateType {
+        match self {
+            Self::Background => PbCreateType::Background,
+            Self::Foreground => PbCreateType::Foreground,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -221,6 +273,11 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
+        self
+    }
+
+    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
+        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -380,6 +437,14 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
+            cardinality: Some(self.cardinality.to_protobuf()),
+            initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
+            created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
+            cleaned_by_watermark: self.cleaned_by_watermark,
+            stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: self.create_type.to_prost().into(),
+            description: self.description.clone(),
+            incoming_sinks: self.incoming_sinks.clone(),
         }
     }
 
@@ -397,24 +462,29 @@ impl TableCatalog {
             .map(|c| c.name())
     }
 
-    pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+    pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {
         self.columns
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.is_default())
-            .map(|(i, c)| {
-                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
-                    c.column_desc.generated_or_default_column.clone().unwrap()
-                {
-                    (
-                        i,
-                        ExprImpl::from_expr_proto(&expr.unwrap())
-                            .expect("expr in default columns corrupted"),
-                    )
-                } else {
-                    unreachable!()
-                }
-            })
+            .filter(|(_, c)| c.is_generated())
+            .map(|(i, _)| i)
+    }
+
+    pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+        self.columns.iter().enumerate().filter_map(|(i, c)| {
+            if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                expr, ..
+            })) = c.column_desc.generated_or_default_column.as_ref()
+            {
+                Some((
+                    i,
+                    ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                        .expect("expr in default columns corrupted"),
+                ))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn has_generated_column(&self) -> bool {
@@ -427,6 +497,7 @@ impl From<PbTable> for TableCatalog {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
+        let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
@@ -479,6 +550,16 @@ impl From<PbTable> for TableCatalog {
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
             dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
+            cardinality: tb
+                .cardinality
+                .map(|c| Cardinality::from_protobuf(&c))
+                .unwrap_or_else(Cardinality::unknown),
+            created_at_epoch: tb.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
+            cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
+            create_type: CreateType::from_prost(create_type),
+            description: tb.description,
+            incoming_sinks: tb.incoming_sinks.clone(),
         }
     }
 }
@@ -506,8 +587,10 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::PbTable;
-    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
+    use risingwave_pb::plan_common::{
+        AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    };
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -553,6 +636,7 @@ mod tests {
             )]),
             fragment_id: 0,
             dml_fragment_id: None,
+            initialized_at_epoch: None,
             value_indices: vec![0],
             definition: "".into(),
             read_prefix_len_hint: 0,
@@ -565,6 +649,13 @@ mod tests {
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
+            cardinality: None,
+            created_at_epoch: None,
+            cleaned_by_watermark: false,
+            stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: PbCreateType::Foreground.into(),
+            description: Some("description".to_string()),
+            incoming_sinks: vec![],
         }
         .into();
 
@@ -590,7 +681,10 @@ mod tests {
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
                             type_name: ".test.Country".to_string(),
+                            description: None,
                             generated_or_default_column: None,
+                            additional_column_type: AdditionalColumnType::Normal,
+                            version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
                     }
@@ -615,6 +709,13 @@ mod tests {
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
                 dist_key_in_pk: vec![],
+                cardinality: Cardinality::unknown(),
+                created_at_epoch: None,
+                initialized_at_epoch: None,
+                cleaned_by_watermark: false,
+                create_type: CreateType::Foreground,
+                description: Some("description".to_string()),
+                incoming_sinks: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

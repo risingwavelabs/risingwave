@@ -13,6 +13,7 @@ export CARGO_MAKE_PRINT_TIME_SUMMARY=true
 export MINIO_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/minio
 export MCLI_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/mc
 export GCLOUD_DOWNLOAD_TGZ=https://ci-deps-dist.s3.amazonaws.com/google-cloud-cli-406.0.0-linux-x86_64.tar.gz
+export NEXTEST_HIDE_PROGRESS_BAR=true
 unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
@@ -40,7 +41,7 @@ export -f download-and-decompress-artifact
 # Arguments:
 #   $1: cargo build `profile` of the binaries
 #   $2: risedev-components `env` to use
-# 
+#
 # Download risingwave and risedev-dev, and put them in target/debug
 function download_and_prepare_rw() {
   echo "--- Download RisingWave binaries and prepare environment"

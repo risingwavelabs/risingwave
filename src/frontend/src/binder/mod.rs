@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::error::Result;
-use risingwave_common::session_config::SearchPath;
+use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
@@ -27,6 +28,7 @@ mod bind_param;
 mod create;
 mod delete;
 mod expr;
+mod for_system;
 mod insert;
 mod query;
 mod relation;
@@ -40,13 +42,13 @@ mod values;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
+pub use for_system::*;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, ResolveQualifiedNameErrorKind,
-    WindowTableFunctionKind,
+    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
@@ -101,7 +103,7 @@ pub struct Binder {
     /// and so on.
     next_share_id: ShareId,
 
-    session_config: HashMap<String, String>,
+    session_config: Arc<RwLock<ConfigMap>>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -136,25 +138,25 @@ pub struct Binder {
 pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
 
 impl ParameterTypes {
-    pub fn new(specified_param_types: Vec<DataType>) -> Self {
+    pub fn new(specified_param_types: Vec<Option<DataType>>) -> Self {
         let map = specified_param_types
             .into_iter()
             .enumerate()
-            .map(|(index, data_type)| ((index + 1) as u64, Some(data_type)))
+            .map(|(index, data_type)| ((index + 1) as u64, data_type))
             .collect::<HashMap<u64, Option<DataType>>>();
         Self(Arc::new(RwLock::new(map)))
     }
 
     pub fn has_infer(&self, index: u64) -> bool {
-        self.0.read().unwrap().get(&index).unwrap().is_some()
+        self.0.read().get(&index).unwrap().is_some()
     }
 
     pub fn read_type(&self, index: u64) -> Option<DataType> {
-        self.0.read().unwrap().get(&index).unwrap().clone()
+        self.0.read().get(&index).unwrap().clone()
     }
 
     pub fn record_new_param(&mut self, index: u64) {
-        self.0.write().unwrap().entry(index).or_insert(None);
+        self.0.write().entry(index).or_insert(None);
     }
 
     pub fn record_infer_type(&mut self, index: u64, data_type: DataType) {
@@ -162,19 +164,13 @@ impl ParameterTypes {
             !self.has_infer(index),
             "The parameter has been inferred, should not be inferred again."
         );
-        self.0
-            .write()
-            .unwrap()
-            .get_mut(&index)
-            .unwrap()
-            .replace(data_type);
+        self.0.write().get_mut(&index).unwrap().replace(data_type);
     }
 
     pub fn export(&self) -> Result<Vec<DataType>> {
         let types = self
             .0
             .read()
-            .unwrap()
             .clone()
             .into_iter()
             .sorted_by_key(|(index, _)| *index)
@@ -199,7 +195,11 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
+    fn new_inner(
+        session: &SessionImpl,
+        bind_for: BindFor,
+        param_types: Vec<Option<DataType>>,
+    ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
@@ -211,13 +211,8 @@ impl Binder {
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
-            session_config: session
-                .config()
-                .get_all()
-                .into_iter()
-                .map(|var| (var.name, var.setting))
-                .collect(),
-            search_path: session.config().get_search_path(),
+            session_config: session.shared_config(),
+            search_path: session.config().search_path(),
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
@@ -229,7 +224,10 @@ impl Binder {
         Self::new_inner(session, BindFor::Batch, vec![])
     }
 
-    pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
+    pub fn new_with_param_types(
+        session: &SessionImpl,
+        param_types: Vec<Option<DataType>>,
+    ) -> Binder {
         Self::new_inner(session, BindFor::Batch, param_types)
     }
 
@@ -247,7 +245,7 @@ impl Binder {
 
     pub fn new_for_stream_with_param_types(
         session: &SessionImpl,
-        param_types: Vec<DataType>,
+        param_types: Vec<Option<DataType>>,
     ) -> Binder {
         Self::new_inner(session, BindFor::Stream, param_types)
     }
@@ -366,6 +364,13 @@ impl Binder {
     }
 }
 
+/// The column name stored in [`BindContext`] for a column without an alias.
+pub const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";
+/// The table name stored in [`BindContext`] for a column group.
+const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";
+
 #[cfg(test)]
 pub mod test_utils {
     use risingwave_common::types::DataType;
@@ -379,14 +384,7 @@ pub mod test_utils {
     }
 
     #[cfg(test)]
-    pub fn mock_binder_with_param_types(param_types: Vec<DataType>) -> Binder {
+    pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 }
-
-/// The column name stored in [`BindContext`] for a column without an alias.
-pub const UNNAMED_COLUMN: &str = "?column?";
-/// The table name stored in [`BindContext`] for a subquery without an alias.
-const UNNAMED_SUBQUERY: &str = "?subquery?";
-/// The table name stored in [`BindContext`] for a column group.
-const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";

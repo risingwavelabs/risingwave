@@ -12,24 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(madsim), expect(unused_imports))]
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
-use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
-use rand::Rng;
+use rand::{thread_rng, Rng};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_pb::stream_plan::StreamNode;
+use serde::de::IntoDeserializer;
 
 use self::predicate::BoxedPredicate;
 use crate::cluster::Cluster;
@@ -106,7 +109,9 @@ pub mod predicate {
             // The rescheduling of no-shuffle downstreams must be derived from the most upstream
             // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
             !any(root(f), &|n| {
-                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                let Some(NodeBody::Merge(merge)) = &n.node_body else {
+                    return false;
+                };
                 merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
             })
         };
@@ -217,6 +222,7 @@ impl Fragment {
 
 impl Cluster {
     /// Locate fragments that satisfy all the predicates.
+    #[cfg_or_panic(madsim)]
     pub async fn locate_fragments(
         &mut self,
         predicates: impl IntoIterator<Item = BoxedPredicate>,
@@ -289,6 +295,7 @@ impl Cluster {
         self.locate_one_fragment([predicate::id(id)]).await
     }
 
+    #[cfg_or_panic(madsim)]
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let response = self
             .ctl
@@ -303,6 +310,7 @@ impl Cluster {
     }
 
     // update node schedulability
+    #[cfg_or_panic(madsim)]
     async fn update_worker_node_schedulability(
         &self,
         worker_ids: Vec<u32>,
@@ -340,6 +348,20 @@ impl Cluster {
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
+        self.reschedule_helper(plan, false).await
+    }
+
+    /// Same as reschedule, but resolve the no-shuffle upstream
+    pub async fn reschedule_resolve_no_shuffle(&mut self, plan: impl Into<String>) -> Result<()> {
+        self.reschedule_helper(plan, true).await
+    }
+
+    #[cfg_or_panic(madsim)]
+    async fn reschedule_helper(
+        &mut self,
+        plan: impl Into<String>,
+        resolve_no_shuffle_upstream: bool,
+    ) -> Result<()> {
         let plan = plan.into();
 
         let revision = self
@@ -356,15 +378,22 @@ impl Cluster {
 
         self.ctl
             .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from([
+                let revision = format!("{}", revision);
+                let mut v = vec![
                     "ctl",
                     "meta",
                     "reschedule",
                     "--plan",
                     plan.as_ref(),
                     "--revision",
-                    &format!("{}", revision),
-                ]);
+                    &revision,
+                ];
+
+                if resolve_no_shuffle_upstream {
+                    v.push("--resolve-no-shuffle");
+                }
+
+                let opts = risingwave_ctl::CliOpts::parse_from(v);
                 risingwave_ctl::start(opts).await
             })
             .await??;
@@ -372,6 +401,54 @@ impl Cluster {
         Ok(())
     }
 
+    /// Pause all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn pause(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "pause"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
+    /// Resume all data sources in the cluster.
+    #[cfg_or_panic(madsim)]
+    pub async fn resume(&mut self) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "resume"]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+
+        Ok(())
+    }
+
+    /// Throttle a Mv in the cluster
+    #[cfg_or_panic(madsim)]
+    pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let mut command: Vec<String> = vec![
+                    "ctl".into(),
+                    "throttle".into(),
+                    "mv".into(),
+                    table_id.table_id.to_string(),
+                ];
+                if let Some(rate_limit) = rate_limit {
+                    command.push(rate_limit.to_string());
+                }
+                let opts = risingwave_ctl::CliOpts::parse_from(command);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
+        Ok(())
+    }
+
+    #[cfg_or_panic(madsim)]
     pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
         let revision = self
             .ctl

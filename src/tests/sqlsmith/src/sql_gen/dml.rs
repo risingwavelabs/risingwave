@@ -109,7 +109,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             };
             delete_statements
                 .into_iter()
-                .chain(insert_statements.into_iter())
+                .chain(insert_statements)
                 .collect()
         } else {
             let value_indices = (0..table.columns.len())

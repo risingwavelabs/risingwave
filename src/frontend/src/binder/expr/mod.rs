@@ -17,14 +17,16 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
+use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
-    TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
+    Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -34,45 +36,19 @@ mod subquery;
 mod value;
 
 impl Binder {
+    /// Bind an expression with `bind_expr_inner`, attach the original expression
+    /// to the error message.
+    ///
+    /// This may only be called at the root of the expression tree or when crossing
+    /// the boundary of a subquery. Otherwise, the source chain might be too deep
+    /// and confusing to the user.
+    // TODO(error-handling): use a dedicated error type during binding to make it clear.
     pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
-        // We use a different function instead `map_err` directly in `bind_expr_inner`, because in
-        // some cases, recursive error messages don't look good. Whole expr-level should be enough
-        // in most cases.
-        //
-        // e.g., too verbose:
-        //
-        // ```ignore
-        // Bind error: failed to bind expression: a1 + b1 = c1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1 + b1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1
-        //
-        // Caused by:
-        //   Item not found: Invalid column: a1
-        // ```
-        //
-        // confusing message with an unused subexpr, when the expr is rewritten while binding:
-        //
-        // ```ignore
-        // > create table t (v1 int);
-        // > select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
-        //
-        // Bind error: failed to bind expression: CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: v1 = true
-        //
-        // Caused by:
-        //   Feature is not yet implemented: Equal[Int32, Boolean]
-        // ```
         self.bind_expr_inner(expr.clone()).map_err(|e| {
-            RwError::from(ErrorCode::BindError(format!(
-                "failed to bind expression: {}\n\nCaused by:\n  {}",
-                expr, e
-            )))
+            RwError::from(ErrorCode::BindErrorRoot {
+                expr: expr.to_string(),
+                error: Box::new(e),
+            })
         })
     }
 
@@ -97,6 +73,17 @@ impl Binder {
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
                     // allow `session_user()` while we do.
                     self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                } else if let Some(ref lambda_args) = self.context.lambda_args {
+                    // We don't support capture, so if the expression is in the lambda context,
+                    // we'll not bind it for table columns.
+                    if let Some((arg_idx, arg_type)) = lambda_args.get(&ident.real_value()) {
+                        Ok(InputRef::new(*arg_idx, arg_type.clone()).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
                 } else {
                     self.bind_column(&[ident])
                 }
@@ -134,6 +121,12 @@ impl Binder {
             Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
             Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
             Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
+            Expr::IsJson {
+                expr,
+                negated,
+                item_type,
+                unique_keys: false,
+            } => self.bind_is_json(*expr, negated, item_type),
             Expr::Case {
                 operand,
                 conditions,
@@ -146,6 +139,12 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
                 list,
@@ -176,11 +175,9 @@ impl Binder {
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported expression {:?}", expr),
-                112.into(),
-            )
-            .into()),
+            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
+            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
 
@@ -192,12 +189,11 @@ impl Binder {
             vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
-            ErrorCode::NotImplemented(
-                format!(
-                    "function extract({} from {:?}) doesn't exist",
-                    field, arg_type
-                ),
-                112.into(),
+            not_implemented!(
+                issue = 112,
+                "function extract({} from {:?}) doesn't exist",
+                field,
+                arg_type
             )
         })?
         .into())
@@ -262,6 +258,32 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_is_json(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        item_type: JsonPredicateType,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![self.bind_expr_inner(expr)?];
+        // Avoid `JsonPredicateType::to_string` so that we decouple sqlparser from expr execution
+        let type_symbol = match item_type {
+            JsonPredicateType::Value => None,
+            JsonPredicateType::Array => Some("ARRAY"),
+            JsonPredicateType::Object => Some("OBJECT"),
+            JsonPredicateType::Scalar => Some("SCALAR"),
+        };
+        if let Some(s) = type_symbol {
+            args.push(ExprImpl::literal_varchar(s.into()));
+        }
+
+        let is_json = FunctionCall::new(ExprType::IsJson, args)?.into();
+        if negated {
+            Ok(FunctionCall::new(ExprType::Not, vec![is_json])?.into())
+        } else {
+            Ok(is_json)
+        }
+    }
+
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
@@ -273,13 +295,7 @@ impl Binder {
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported unary expression: {:?}", op),
-                    112.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
@@ -403,6 +419,41 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    pub(super) fn bind_similar_to(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pat: Expr,
+        esc_text: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pat = self.bind_expr_inner(pat)?;
+
+        let esc_inputs = if let Some(et) = esc_text {
+            let esc_text = self.bind_expr_inner(*et)?;
+            vec![pat, esc_text]
+        } else {
+            vec![pat]
+        };
+
+        let esc_call =
+            FunctionCall::new_unchecked(ExprType::SimilarToEscape, esc_inputs, DataType::Varchar);
+
+        let regex_call = FunctionCall::new_unchecked(
+            ExprType::RegexpEq,
+            vec![expr, esc_call.into()],
+            DataType::Boolean,
+        );
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![regex_call.into()], DataType::Boolean)
+        } else {
+            regex_call
+        };
+
+        Ok(func_call.into())
+    }
+
     pub(super) fn bind_case(
         &mut self,
         operand: Option<Box<Expr>>,
@@ -436,6 +487,11 @@ impl Binder {
         }
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
+        }
+        if inputs.iter().any(ExprImpl::has_table_function) {
+            return Err(
+                ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
+            );
         }
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
@@ -475,32 +531,30 @@ impl Binder {
             // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                let class_name = match &input {
-                    ExprImpl::Literal(literal)
-                        if literal.return_type() == DataType::Varchar
-                            && let Some(scalar) = literal.get_data() =>
-                    {
-                        match scalar {
-                            risingwave_common::types::ScalarImpl::Utf8(s) => s,
-                            _ => {
-                                return Err(ErrorCode::BindError(
-                                    "Unsupported input type".to_string(),
-                                )
-                                .into())
-                            }
-                        }
-                    }
-                    ExprImpl::Literal(literal) if literal.return_type().is_int() => {
-                        return Ok(ExprImpl::Literal(literal.clone()))
-                    }
-                    _ => {
-                        return Err(
-                            ErrorCode::BindError("Unsupported input type".to_string()).into()
-                        )
-                    }
-                };
-                self.resolve_regclass(class_name)
-                    .map(|id| ExprImpl::literal_int(id as i32))
+                match input.return_type() {
+                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new_unchecked(
+                            ExprType::CastRegclass,
+                            vec![input],
+                            DataType::Int32,
+                        ),
+                    ))),
+                    DataType::Int32 => Ok(input),
+                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
+                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+                }
+            }
+            AstDataType::Regproc => {
+                let lhs = self.bind_expr_inner(expr)?;
+                let lhs_ty = lhs.return_type();
+                if lhs_ty == DataType::Varchar {
+                    // FIXME: Currently, we only allow VARCHAR to be casted to Regproc.
+                    // FIXME: Check whether it's a valid proc
+                    // FIXME: The return type should be casted to Regproc, but we don't have this type.
+                    Ok(lhs)
+                } else {
+                    Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
+                }
             }
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
@@ -515,6 +569,29 @@ impl Binder {
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
     }
+
+    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+        if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+            bail_not_implemented!("Collate collation other than `C` or `POSIX` is not implemented");
+        }
+
+        let bound_inner = self.bind_expr_inner(expr)?;
+        let ret_type = bound_inner.return_type();
+
+        match ret_type {
+            DataType::Varchar => {}
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                    format!("{} is not a collatable data type", ret_type),
+                    "The only built-in collatable data types are `varchar`, please check your type"
+                        .into(),
+                )
+                .into());
+            }
+        }
+
+        Ok(bound_inner)
+    }
 }
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
@@ -522,15 +599,11 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
         defs.iter()
             .map(|f| {
-                Ok(ColumnDesc {
-                    data_type: bind_data_type(&f.data_type)?,
-                    // Literals don't have `column_id`.
-                    column_id: ColumnId::new(0),
-                    name: f.name.real_value(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                    generated_or_default_column: None,
-                })
+                Ok(ColumnDesc::named(
+                    f.name.real_value(),
+                    ColumnId::new(0), // Literals don't have `column_id`.
+                    bind_data_type(&f.data_type)?,
+                ))
             })
             .collect::<Result<Vec<_>>>()?
     } else {
@@ -543,16 +616,14 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         field_descs,
         type_name: "".to_string(),
         generated_or_default_column: None,
+        description: None,
+        additional_column_type: AdditionalColumnType::Normal,
+        version: ColumnDescVersion::Pr13707,
     })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
-    let new_err = || {
-        ErrorCode::NotImplemented(
-            format!("unsupported data type: {:}", data_type),
-            None.into(),
-        )
-    };
+    let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt => DataType::Int16,
@@ -570,11 +641,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
-            return Err(ErrorCode::NotImplemented(
-                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
         AstDataType::Struct(types) => DataType::new_struct(
             types
@@ -594,7 +661,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
-                "jsonb" => DataType::Jsonb,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -606,7 +672,9 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             }
         }
         AstDataType::Bytea => DataType::Bytea,
+        AstDataType::Jsonb => DataType::Jsonb,
         AstDataType::Regclass
+        | AstDataType::Regproc
         | AstDataType::Uuid
         | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)

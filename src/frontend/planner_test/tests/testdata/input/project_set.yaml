@@ -93,3 +93,33 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+- name: set-returning function disallowed in CASE WHEN
+  sql: |
+    with a(a1) as (values (array[2]), (null)) select case when a1 is not null then unnest(a1) end from a;
+  expected_outputs:
+  - binder_error
+- name: set-returning function disallowed in COALESCE
+  sql: |
+    with a(a1) as (values (array[2]), (null)) select coalesce(unnest(a1), 0) from a;
+  expected_outputs:
+  - binder_error
+- name: set-returning function disallowed in JOIN ON
+  sql: |
+    with a(a1) as (values (array[2]), (null)), b(b1) as (select 2) select a1 from a join b on unnest(a1) = b1;
+  expected_outputs:
+  - binder_error
+- name: set-returning function disallowed in HAVING
+  sql: |
+    with a(a1) as (values (array[2]), (null)) select count(*) from a group by a1 having unnest(a1) < 5;
+  expected_outputs:
+  - binder_error
+- name: set-returning function disallowed in FILTER
+  sql: |
+    with a(a1) as (values (array[2]), (null)) select count(*) filter(where unnest(a1) < 3) from a;
+  expected_outputs:
+  - binder_error
+- name: set-returning function unsupported in GROUP BY yet
+  sql: |
+    with a(a1) as (values (array[2]), (null)) select count(*) from a group by unnest(a1);
+  expected_outputs:
+  - planner_error

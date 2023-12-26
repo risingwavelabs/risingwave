@@ -16,14 +16,14 @@ use std::collections::BTreeMap;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
 
+use crate::hummock::compaction::selector::level_selector::PickerInfo;
+use crate::hummock::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
-use crate::model::BTreeMapTransaction;
-use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub struct Compaction {
@@ -35,62 +35,7 @@ pub struct Compaction {
     pub deterministic_mode: bool,
 }
 
-impl Compaction {
-    /// Cancels all tasks assigned to `context_id`.
-    pub fn cancel_assigned_tasks_for_context_ids(
-        &mut self,
-        context_ids: &[HummockContextId],
-    ) -> (
-        BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
-        BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
-    ) {
-        let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut self.compact_task_assignment);
-        for &context_id in context_ids {
-            // Clean up compact_status.
-            for assignment in compact_task_assignment.tree_ref().values() {
-                if assignment.context_id != context_id {
-                    continue;
-                }
-                let task = assignment
-                    .compact_task
-                    .as_ref()
-                    .expect("compact_task shouldn't be None");
-                if let Some(mut compact_status) = compact_statuses.get_mut(task.compaction_group_id)
-                {
-                    compact_status.report_compact_task(
-                        assignment
-                            .compact_task
-                            .as_ref()
-                            .expect("compact_task shouldn't be None"),
-                    );
-                }
-            }
-            // Clean up compact_task_assignment.
-            let task_ids_to_remove = compact_task_assignment
-                .tree_ref()
-                .iter()
-                .filter_map(|(task_id, v)| {
-                    if v.context_id == context_id {
-                        Some(*task_id)
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec();
-            for task_id in task_ids_to_remove {
-                compact_task_assignment.remove(task_id);
-            }
-        }
-        (compact_statuses, compact_task_assignment)
-    }
-}
-
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     #[named]
     pub async fn get_assigned_compact_task_num(&self) -> u64 {
         read_lock!(self, compaction)
@@ -100,18 +45,9 @@ where
     }
 
     #[named]
-    pub async fn get_assigned_tasks_number(&self, context_id: HummockContextId) -> u64 {
-        read_lock!(self, compaction)
-            .await
-            .compact_task_assignment
-            .values()
-            .filter(|s| s.context_id == context_id)
-            .count() as u64
-    }
-
-    #[named]
     pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
         let compaction = read_lock!(self, compaction).await;
+
         compaction
             .compaction_statuses
             .iter()
@@ -137,88 +73,29 @@ where
                 .collect(),
         )
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use risingwave_hummock_sdk::CompactionGroupId;
-    use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, InputLevel, SstableInfo};
-
-    use crate::hummock::compaction::CompactStatus;
-    use crate::hummock::manager::compaction::Compaction;
-
-    #[tokio::test]
-    async fn test_cancel_assigned_tasks_for_context_ids() {
-        let mut compaction = Compaction::default();
-
-        let group_id = 0 as CompactionGroupId;
-        let task_id = 111;
-        let compact_task = CompactTask {
-            task_id,
-            input_ssts: vec![InputLevel {
-                level_idx: 0,
-                ..Default::default()
-            }],
-            target_level: 1,
-            ..Default::default()
+    #[named]
+    pub async fn get_compaction_scores(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<PickerInfo> {
+        let (status, levels, config) = {
+            let compaction = read_lock!(self, compaction).await;
+            let versioning = read_lock!(self, versioning).await;
+            let config_manager = self.compaction_group_manager.read().await;
+            match (
+                compaction.compaction_statuses.get(&compaction_group_id),
+                versioning.current_version.levels.get(&compaction_group_id),
+                config_manager.try_get_compaction_group_config(compaction_group_id),
+            ) {
+                (Some(cs), Some(v), Some(cf)) => (cs.to_owned(), v.to_owned(), cf),
+                _ => {
+                    return vec![];
+                }
+            }
         };
-        let mut compact_status = CompactStatus::new(group_id, 6);
-        compact_status.level_handlers[0].add_pending_task(
-            compact_task.task_id,
-            compact_task.target_level as usize,
-            &[SstableInfo {
-                object_id: 1,
-                sst_id: 1,
-                ..Default::default()
-            }],
-        );
-        compaction
-            .compaction_statuses
-            .insert(group_id, compact_status);
-        compaction.compact_task_assignment.insert(
-            task_id,
-            CompactTaskAssignment {
-                compact_task: Some(compact_task),
-                context_id: 11,
-            },
-        );
-
-        // irrelevant context id
-        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[22]);
-        compact_status.commit_memory();
-        assignment.commit_memory();
-        assert_eq!(
-            compaction
-                .compaction_statuses
-                .get(&group_id)
-                .unwrap()
-                .level_handlers[0]
-                .pending_tasks_ids(),
-            vec![task_id]
-        );
-        assert_eq!(
-            compaction
-                .compact_task_assignment
-                .get(&task_id)
-                .unwrap()
-                .context_id,
-            11
-        );
-
-        // target context id
-        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[11]);
-        compact_status.commit_memory();
-        assignment.commit_memory();
-        assert_eq!(
-            compaction
-                .compaction_statuses
-                .get(&group_id)
-                .unwrap()
-                .level_handlers[0]
-                .pending_tasks_ids()
-                .len(),
-            0
-        );
-        assert_eq!(compaction.compact_task_assignment.len(), 0);
+        let dynamic_level_core = DynamicLevelSelectorCore::new(config.compaction_config);
+        let ctx = dynamic_level_core.get_priority_levels(&levels, &status.level_handlers);
+        ctx.score_levels
     }
 }

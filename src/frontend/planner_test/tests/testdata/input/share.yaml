@@ -86,3 +86,11 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- id: self_join_with_temporal_filter_one_side
+  before:
+  - create_sources
+  sql: |
+    select A.id as a_id, B.id as b_id, A.date_time as A_ts, B.date_time as B_ts from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2 and A.date_time > now() - INTERVAL '1' SECOND;
+  expected_outputs:
+  - batch_plan
+  - stream_plan

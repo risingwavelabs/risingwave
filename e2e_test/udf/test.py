@@ -1,10 +1,25 @@
+# Copyright 2023 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import socket
 import struct
 import sys
+import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/udf/python")  # noqa
+sys.path.append("src/expr/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 
@@ -12,6 +27,12 @@ from risingwave.udf import udf, udtf, UdfServer
 @udf(input_types=[], result_type="INT")
 def int_42() -> int:
     return 42
+
+
+@udf(input_types=["INT"], result_type="INT")
+def sleep(s: int) -> int:
+    time.sleep(s)
+    return 0
 
 
 @udf(input_types=["INT", "INT"], result_type="INT")
@@ -63,6 +84,16 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     return dec
 
 
+@udf(input_types=["FLOAT8"], result_type="DECIMAL")
+def float_to_decimal(f: float) -> Decimal:
+    return Decimal(f)
+
+
+@udf(input_types=["DECIMAL", "DECIMAL"], result_type="DECIMAL")
+def decimal_add(a: Decimal, b: Decimal) -> Decimal:
+    return a + b
+
+
 @udf(input_types=["VARCHAR[]", "INT"], result_type="VARCHAR")
 def array_access(list: List[str], idx: int) -> Optional[str]:
     if idx == 0 or idx > len(list):
@@ -96,7 +127,9 @@ def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], in
 
 ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB".split(
     ","
-)
+) + [
+    "STRUCT<INT,INT>"
+]
 
 
 @udf(
@@ -118,6 +151,7 @@ def return_all(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -134,6 +168,7 @@ def return_all(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
@@ -156,6 +191,7 @@ def return_all_arrays(
     varchar,
     bytea,
     jsonb,
+    struct,
 ):
     return (
         bool,
@@ -172,18 +208,22 @@ def return_all_arrays(
         varchar,
         bytea,
         jsonb,
+        struct,
     )
 
 
 if __name__ == "__main__":
-    server = UdfServer(location="0.0.0.0:8815")
+    server = UdfServer(location="localhost:8815")
     server.add_function(int_42)
+    server.add_function(sleep)
     server.add_function(gcd)
     server.add_function(gcd3)
     server.add_function(series)
     server.add_function(split)
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
+    server.add_function(float_to_decimal)
+    server.add_function(decimal_add)
     server.add_function(array_access)
     server.add_function(jsonb_access)
     server.add_function(jsonb_concat)

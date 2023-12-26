@@ -20,6 +20,7 @@ use crate::row::Row;
 use crate::types::DataType;
 
 /// Type of a row change, without row data.
+#[derive(Debug, Copy, Clone)]
 pub enum RecordType {
     Insert,
     Delete,
@@ -60,16 +61,13 @@ impl<R: Row> Record<R> {
     pub fn to_stream_chunk(&self, data_types: &[DataType]) -> StreamChunk {
         match self {
             Record::Insert { new_row } => {
-                StreamChunk::from_rows(&[(Op::Insert, new_row.to_owned_row())], data_types)
+                StreamChunk::from_rows(&[(Op::Insert, new_row)], data_types)
             }
             Record::Delete { old_row } => {
-                StreamChunk::from_rows(&[(Op::Delete, old_row.to_owned_row())], data_types)
+                StreamChunk::from_rows(&[(Op::Delete, old_row)], data_types)
             }
             Record::Update { old_row, new_row } => StreamChunk::from_rows(
-                &[
-                    (Op::UpdateDelete, old_row.to_owned_row()),
-                    (Op::UpdateInsert, new_row.to_owned_row()),
-                ],
+                &[(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)],
                 data_types,
             ),
         }

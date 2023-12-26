@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
-    TableFunction, UserDefinedFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
+    Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 use crate::expr::Now;
 
@@ -27,6 +27,9 @@ pub trait ExprRewriter {
             ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner),
             ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
             ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
+            ExprImpl::FunctionCallWithLambda(inner) => {
+                self.rewrite_function_call_with_lambda(*inner)
+            }
             ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
             ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
@@ -37,6 +40,7 @@ pub trait ExprRewriter {
             ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
+
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
         let (func_type, inputs, ret) = func_call.decompose();
         let inputs = inputs
@@ -45,6 +49,16 @@ pub trait ExprRewriter {
             .collect();
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
+
+    fn rewrite_function_call_with_lambda(&mut self, func_call: FunctionCallWithLambda) -> ExprImpl {
+        let (func_type, inputs, lambda_arg, ret) = func_call.into_parts();
+        let inputs = inputs
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        FunctionCallWithLambda::new_unchecked(func_type, inputs, lambda_arg, ret).into()
+    }
+
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let (func_type, inputs, distinct, order_by, filter, direct_args) = agg_call.decompose();
         let inputs = inputs
@@ -57,21 +71,27 @@ pub trait ExprRewriter {
             .unwrap()
             .into()
     }
+
     fn rewrite_parameter(&mut self, parameter: Parameter) -> ExprImpl {
         parameter.into()
     }
+
     fn rewrite_literal(&mut self, literal: Literal) -> ExprImpl {
         literal.into()
     }
+
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         input_ref.into()
     }
+
     fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
         subquery.into()
     }
+
     fn rewrite_correlated_input_ref(&mut self, input_ref: CorrelatedInputRef) -> ExprImpl {
         input_ref.into()
     }
+
     fn rewrite_table_function(&mut self, table_func: TableFunction) -> ExprImpl {
         let TableFunction {
             args,
@@ -91,6 +111,7 @@ pub trait ExprRewriter {
         }
         .into()
     }
+
     fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
         let WindowFunction {
             args,
@@ -114,6 +135,7 @@ pub trait ExprRewriter {
         }
         .into()
     }
+
     fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
         let UserDefinedFunction { args, catalog } = udf;
         let args = args
@@ -122,6 +144,7 @@ pub trait ExprRewriter {
             .collect();
         UserDefinedFunction { args, catalog }.into()
     }
+
     fn rewrite_now(&mut self, now: Now) -> ExprImpl {
         now.into()
     }

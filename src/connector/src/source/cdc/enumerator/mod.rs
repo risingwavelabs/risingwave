@@ -12,44 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::connector_service::SourceType as PbSourceType;
-use risingwave_rpc_client::ConnectorClient;
+use risingwave_jni_core::call_static_method;
+use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_pb::connector_service::{
+    SourceCommonParam, SourceType, ValidateSourceRequest, ValidateSourceResponse,
+};
 
 use crate::source::cdc::{
-    CdcProperties, CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit, PostgresCdcSplit,
+    CdcProperties, CdcSourceTypeTrait, CdcSplitBase, Citus, DebeziumCdcSplit, MySqlCdcSplit, Mysql,
+    Postgres, PostgresCdcSplit,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub const DATABASE_SERVERS_KEY: &str = "database.servers";
 
 #[derive(Debug)]
-pub struct DebeziumSplitEnumerator {
+pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     /// The source_id in the catalog
     source_id: u32,
-    source_type: PbSourceType,
     worker_node_addrs: Vec<HostAddr>,
+    _phantom: PhantomData<T>,
 }
 
 #[async_trait]
-impl SplitEnumerator for DebeziumSplitEnumerator {
-    type Properties = CdcProperties;
-    type Split = DebeziumCdcSplit;
+impl<T: CdcSourceTypeTrait> SplitEnumerator for DebeziumSplitEnumerator<T>
+where
+    Self: ListCdcSplits<CdcSourceType = T>,
+{
+    type Properties = CdcProperties<T>;
+    type Split = DebeziumCdcSplit<T>;
 
     async fn new(
-        props: CdcProperties,
-        _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<DebeziumSplitEnumerator> {
-        tracing::debug!("start validate cdc properties");
-        let connector_client = ConnectorClient::new(&props.connector_node_addr).await?;
-
+        props: CdcProperties<T>,
+        context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<Self> {
         let server_addrs = props
-            .props
+            .properties
             .get(DATABASE_SERVERS_KEY)
             .map(|s| {
                 s.split(',')
@@ -59,68 +66,123 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
             .transpose()?
             .unwrap_or_default();
 
-        let source_type = props.get_source_type_pb()?;
-        // validate connector properties
-        connector_client
-            .validate_source_properties(
-                props.source_id as u64,
-                props.get_source_type_pb()?,
-                props.props,
-                props.table_schema,
-            )
-            .await?;
+        assert_eq!(
+            props.get_source_type_pb(),
+            SourceType::from(T::source_type())
+        );
 
-        tracing::debug!("validate properties success");
+        let source_id = context.info.source_id;
+        tokio::task::spawn_blocking(move || {
+            let mut env = JVM.get_or_init()?.attach_current_thread()?;
+
+            let validate_source_request = ValidateSourceRequest {
+                source_id: source_id as u64,
+                source_type: props.get_source_type_pb() as _,
+                properties: props.properties,
+                table_schema: Some(props.table_schema),
+                common_param: Some(SourceCommonParam {
+                    is_multi_table_shared: props.is_multi_table_shared,
+                }),
+            };
+
+            let validate_source_request_bytes =
+                env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
+
+            let validate_source_response_bytes = call_static_method!(
+                env,
+                {com.risingwave.connector.source.JniSourceValidateHandler},
+                {byte[] validate(byte[] validateSourceRequestBytes)},
+                &validate_source_request_bytes
+            )?;
+
+            let validate_source_response: ValidateSourceResponse = Message::decode(
+                risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?
+                    .deref(),
+            )?;
+
+            validate_source_response.error.map_or_else(
+                || Ok(()),
+                |err| {
+                    Err(anyhow!(format!(
+                        "source cannot pass validation: {}",
+                        err.error_message
+                    )))
+                },
+            )
+        })
+        .await
+        .map_err(|e| anyhow!("failed to validate source: {:?}", e))??;
+
+        tracing::debug!("validate cdc source properties success");
         Ok(Self {
-            source_id: props.source_id,
-            source_type,
+            source_id,
             worker_node_addrs: server_addrs,
+            _phantom: PhantomData,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<DebeziumCdcSplit>> {
-        match self.source_type {
-            PbSourceType::Mysql => {
-                // CDC source only supports single split
-                let split = MySqlCdcSplit {
-                    inner: CdcSplitBase::new(self.source_id, None),
-                };
-                let dbz_split = DebeziumCdcSplit {
-                    mysql_split: Some(split),
-                    pg_split: None,
-                };
-                Ok(vec![dbz_split])
-            }
-            PbSourceType::Postgres => {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<DebeziumCdcSplit<T>>> {
+        Ok(self.list_cdc_splits())
+    }
+}
+
+pub trait ListCdcSplits {
+    type CdcSourceType: CdcSourceTypeTrait;
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>>;
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
+    type CdcSourceType = Mysql;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        // CDC source only supports single split
+        let split = MySqlCdcSplit {
+            inner: CdcSplitBase::new(self.source_id, None),
+        };
+        let dbz_split = DebeziumCdcSplit {
+            mysql_split: Some(split),
+            pg_split: None,
+            _phantom: PhantomData,
+        };
+        vec![dbz_split]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
+    type CdcSourceType = Postgres;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        let split = PostgresCdcSplit {
+            inner: CdcSplitBase::new(self.source_id, None),
+            server_addr: None,
+        };
+        let dbz_split = DebeziumCdcSplit {
+            mysql_split: None,
+            pg_split: Some(split),
+            _phantom: Default::default(),
+        };
+        vec![dbz_split]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
+    type CdcSourceType = Citus;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        self.worker_node_addrs
+            .iter()
+            .enumerate()
+            .map(|(id, addr)| {
                 let split = PostgresCdcSplit {
-                    inner: CdcSplitBase::new(self.source_id, None),
-                    server_addr: None,
+                    inner: CdcSplitBase::new(id as u32, None),
+                    server_addr: Some(addr.to_string()),
                 };
-                let dbz_split = DebeziumCdcSplit {
+                DebeziumCdcSplit {
                     mysql_split: None,
                     pg_split: Some(split),
-                };
-                Ok(vec![dbz_split])
-            }
-            PbSourceType::Citus => {
-                let splits = self
-                    .worker_node_addrs
-                    .iter()
-                    .enumerate()
-                    .map(|(id, addr)| {
-                        let split = PostgresCdcSplit {
-                            inner: CdcSplitBase::new(id as u32, None),
-                            server_addr: Some(addr.to_string()),
-                        };
-                        DebeziumCdcSplit {
-                            mysql_split: None,
-                            pg_split: Some(split),
-                        }
-                    })
-                    .collect_vec();
-                Ok(splits)
-            }
-            _ => Err(anyhow!("unexpected source type")),
-        }
+                    _phantom: Default::default(),
+                }
+            })
+            .collect_vec()
     }
 }

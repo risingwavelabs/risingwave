@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -22,143 +21,56 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::common::UpsertMessage;
-use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
-use crate::parser::unified::upsert::UpsertChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
+use crate::parser::unified::AccessImpl;
+use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
+use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::schema::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
+// Default avro access builder
 #[derive(Debug)]
-pub struct AvroParser {
+pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
-    key_schema: Option<Arc<Schema>>,
-    schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
-    rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-    upsert_primary_key_column_name: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AvroParserConfig {
-    pub schema: Arc<Schema>,
-    pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
-    pub upsert_primary_key_column_name: Option<String>,
+    value: Option<Value>,
 }
 
-impl AvroParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
-        let schema_location = &avro_config.row_schema_location;
-        let enable_upsert = avro_config.enable_upsert;
-        let url = Url::parse(schema_location).map_err(|e| {
-            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
-        })?;
-        if avro_config.use_schema_registry {
-            let kafka_topic = &avro_config.topic;
-            let client = Client::new(url, &avro_config.client_config)?;
-            let resolver = ConfluentSchemaResolver::new(client);
-            let upsert_primary_key_column_name =
-                if enable_upsert && !avro_config.upsert_primary_key.is_empty() {
-                    Some(avro_config.upsert_primary_key.clone())
-                } else {
-                    None
-                };
-
-            Ok(Self {
-                schema: resolver
-                    .get_by_subject_name(&format!("{}-value", kafka_topic))
-                    .await?,
-                key_schema: if enable_upsert {
-                    Some(
-                        resolver
-                            .get_by_subject_name(&format!("{}-key", kafka_topic))
-                            .await?,
-                    )
-                } else {
-                    None
-                },
-                schema_resolver: Some(Arc::new(resolver)),
-                upsert_primary_key_column_name,
-            })
-        } else {
-            if enable_upsert {
-                return Err(RwError::from(InternalError(
-                    "avro upsert without schema registry is not supported".to_string(),
-                )));
-            }
-            let schema_content = match url.scheme() {
-                "file" => read_schema_from_local(url.path()),
-                "s3" => {
-                    read_schema_from_s3(&url, avro_config.aws_auth_props.as_ref().unwrap()).await
-                }
-                "https" | "http" => read_schema_from_http(&url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?;
-            let schema = Schema::parse_str(&schema_content).map_err(|e| {
-                RwError::from(InternalError(format!("Avro schema parse error {}", e)))
-            })?;
-            Ok(Self {
-                schema: Arc::new(schema),
-                key_schema: None,
-                schema_resolver: None,
-                upsert_primary_key_column_name: None,
-            })
-        }
-    }
-
-    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(
-            self.key_schema
-                .as_deref()
-                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
-        )
-    }
-
-    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(self.schema.as_ref())
+impl AccessBuilder for AvroAccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
+        Ok(AccessImpl::Avro(AvroAccess::new(
+            self.value.as_ref().unwrap(),
+            AvroParseOptions::default().with_schema(&self.schema),
+        )))
     }
 }
 
-// confluent_wire_format, kafka only, subject-name: "${topic-name}-value"
-impl AvroParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        config: AvroParserConfig,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+impl AvroAccessBuilder {
+    pub fn new(config: AvroParserConfig, encoding_type: EncodingType) -> Result<Self> {
         let AvroParserConfig {
             schema,
             key_schema,
             schema_resolver,
-            upsert_primary_key_column_name,
+            ..
         } = config;
         Ok(Self {
-            schema,
-            key_schema,
+            schema: match encoding_type {
+                EncodingType::Key => key_schema.map_or(
+                    Err(RwError::from(ProtocolError(
+                        "Avro with empty key schema".to_string(),
+                    ))),
+                    Ok,
+                )?,
+                EncodingType::Value => schema,
+            },
             schema_resolver,
-            rw_columns,
-            source_ctx,
-            upsert_primary_key_column_name,
+            value: None,
         })
-    }
-
-    /// The presence of a `key_schema` implies that upsert is enabled.
-    fn is_enable_upsert(&self) -> bool {
-        self.key_schema.is_some()
     }
 
     async fn parse_avro_value(
@@ -189,83 +101,96 @@ impl AvroParser {
             unreachable!("both schema_resolver and reader_schema not exist");
         }
     }
-
-    pub(crate) async fn parse_inner(
-        &self,
-        payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let (raw_key, raw_value) = if self.is_enable_upsert() {
-            let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
-                RwError::from(ProtocolError(format!(
-                    "extract payload err {:?}, you may need to check the 'upsert' parameter",
-                    e
-                )))
-            })?;
-            if !msg.record.is_empty() {
-                (Some(msg.primary_key), Some(msg.record))
-            } else {
-                (Some(msg.primary_key), None)
-            }
-        } else {
-            (None, Some(Cow::from(&payload)))
-        };
-
-        let avro_value = if let Some(payload) = raw_value {
-            self.parse_avro_value(payload.as_ref(), Some(&*self.schema))
-                .await?
-        } else {
-            None
-        };
-        let avro_key = if let Some(payload) = raw_key {
-            self.parse_avro_value(payload.as_ref(), self.key_schema.as_deref())
-                .await?
-        } else {
-            None
-        };
-
-        let mut accessor: UpsertChangeEvent<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
-            UpsertChangeEvent::default();
-        if let Some(key) = &avro_key {
-            accessor = accessor.with_key(AvroAccess::new(
-                key,
-                AvroParseOptions {
-                    schema: self.key_schema.as_deref(),
-                    ..Default::default()
-                },
-            ));
-        }
-
-        if let Some(value) = &avro_value {
-            accessor = accessor.with_value(AvroAccess::new(
-                value,
-                AvroParseOptions::default().with_schema(&self.schema),
-            ));
-        }
-
-        if let Some(pk) = &self.upsert_primary_key_column_name {
-            accessor = accessor.with_key_as_column_name(pk);
-        }
-
-        apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
-    }
 }
 
-impl ByteStreamSourceParser for AvroParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
+#[derive(Debug, Clone)]
+pub struct AvroParserConfig {
+    pub schema: Arc<Schema>,
+    pub key_schema: Option<Arc<Schema>>,
+    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+}
+
+impl AvroParserConfig {
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
+        let schema_location = &avro_config.row_schema_location;
+        let enable_upsert = avro_config.enable_upsert;
+        let url = handle_sr_list(schema_location.as_str())?;
+        if avro_config.use_schema_registry {
+            let client = Client::new(url, &avro_config.client_config)?;
+            let resolver = ConfluentSchemaResolver::new(client);
+
+            let subject_key = if enable_upsert {
+                Some(get_subject_by_strategy(
+                    &avro_config.name_strategy,
+                    avro_config.topic.as_str(),
+                    avro_config.key_record_name.as_deref(),
+                    true,
+                )?)
+            } else {
+                if let Some(name) = &avro_config.key_record_name {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "key.message = {name} not used",
+                    ))));
+                }
+                None
+            };
+            let subject_value = get_subject_by_strategy(
+                &avro_config.name_strategy,
+                avro_config.topic.as_str(),
+                avro_config.record_name.as_deref(),
+                false,
+            )?;
+            tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
+
+            Ok(Self {
+                schema: resolver.get_by_subject_name(&subject_value).await?,
+                key_schema: if let Some(subject_key) = subject_key {
+                    Some(resolver.get_by_subject_name(&subject_key).await?)
+                } else {
+                    None
+                },
+                schema_resolver: Some(Arc::new(resolver)),
+            })
+        } else {
+            if enable_upsert {
+                return Err(RwError::from(InternalError(
+                    "avro upsert without schema registry is not supported".to_string(),
+                )));
+            }
+            let url = url.first().unwrap();
+            let schema_content = match url.scheme() {
+                "file" => read_schema_from_local(url.path()),
+                "s3" => {
+                    read_schema_from_s3(url, avro_config.aws_auth_props.as_ref().unwrap()).await
+                }
+                "https" | "http" => read_schema_from_http(url).await,
+                scheme => Err(RwError::from(ProtocolError(format!(
+                    "path scheme {} is not supported",
+                    scheme
+                )))),
+            }?;
+            let schema = Schema::parse_str(&schema_content).map_err(|e| {
+                RwError::from(InternalError(format!("Avro schema parse error {}", e)))
+            })?;
+            Ok(Self {
+                schema: Arc::new(schema),
+                key_schema: None,
+                schema_resolver: None,
+            })
+        }
     }
 
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
+    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(
+            self.key_schema
+                .as_deref()
+                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
+        )
     }
 
-    async fn parse_one<'a>(
-        &'a mut self,
-        payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(self.schema.as_ref())
     }
 }
 
@@ -278,25 +203,30 @@ mod test {
     use std::ops::Sub;
     use std::path::PathBuf;
 
+    use apache_avro::schema::RecordSchema;
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::error;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
+    use risingwave_common::{error, try_match_expand};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
     use super::{
-        read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroParser,
+        read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroAccessBuilder,
         AvroParserConfig,
     };
-    use crate::aws_auth::AwsAuthProps;
+    use crate::common::AwsAuthProps;
+    use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{ParserProperties, SourceStreamChunkBuilder};
-    use crate::source::{SourceColumnDesc, SourceFormat};
+    use crate::parser::{
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
+    };
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -325,14 +255,9 @@ mod test {
     #[ignore]
     async fn test_load_schema_from_s3() {
         let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
-        let mut s3_config_props = HashMap::new();
-        s3_config_props.insert("region".to_string(), "ap-southeast-1".to_string());
         let url = Url::parse(&schema_location).unwrap();
-        let aws_auth_config = AwsAuthProps::from_pairs(
-            s3_config_props
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str())),
-        );
+        let aws_auth_config: AwsAuthProps =
+            serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
         let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
@@ -368,26 +293,38 @@ mod test {
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
-        AvroParserConfig::new(parser_config).await
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        AvroParserConfig::new(parser_config.encoding_config).await
     }
 
-    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
+    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<PlainParser> {
         let conf = new_avro_conf_from_local(file_name).await?;
-        AvroParser::new(Vec::default(), conf, Default::default())
+
+        Ok(PlainParser {
+            key_builder: None,
+            payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
+                conf,
+                EncodingType::Value,
+            )?),
+            rw_columns: Vec::default(),
+            source_ctx: Default::default(),
+        })
     }
 
     #[tokio::test]
     async fn test_avro_parser() {
-        let avro_parser = new_avro_parser_from_local("simple-schema.avsc")
+        let mut parser = new_avro_parser_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        let schema = &avro_parser.schema;
-        let record = build_avro_data(schema);
+        let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
+        let schema = builder.schema.clone();
+        let record = build_avro_data(&schema);
         assert_eq!(record.fields.len(), 11);
-        let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
+        let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Snappy);
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
@@ -396,7 +333,10 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser.parse_inner(input_data, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(input_data), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -517,12 +457,17 @@ mod test {
 
                 match build_field(inner_schema) {
                     None => {
-                        let index_of_union =
-                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&Value::Null, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(Value::Null)))
                     }
                     Some(value) => {
-                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&value, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(value)))
                     }
                 }
@@ -533,9 +478,9 @@ mod test {
 
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
-        if let Schema::Record {
+        if let Schema::Record(RecordSchema {
             name: _, fields, ..
-        } = schema.clone()
+        }) = schema.clone()
         {
             for field in &fields {
                 let value = build_field(&field.schema)
@@ -559,17 +504,17 @@ mod test {
     #[tokio::test]
     async fn test_new_avro_parser() {
         let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
     }
 
     #[tokio::test]
     async fn test_avro_union_type() {
-        let avro_parser = new_avro_parser_from_local("union-schema.avsc")
+        let parser = new_avro_parser_from_local("union-schema.avsc")
             .await
             .unwrap();
-        let schema = &avro_parser.schema;
+        let builder = try_match_expand!(&parser.payload_builder, AccessBuilderImpl::Avro).unwrap();
+        let schema = &builder.schema;
         let mut null_record = Record::new(schema).unwrap();
         null_record.put("id", Value::Int(5));
         null_record.put("age", Value::Union(0, Box::new(Value::Null)));
@@ -624,7 +569,7 @@ mod test {
                 Value::Union(0, Box::new(Value::Null)),
             ),
         ];
-        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        let null_record_value = reader.first().unwrap().as_ref().unwrap();
         match null_record_value {
             Value::Record(values) => {
                 assert_eq!(values, &null_record_expected)

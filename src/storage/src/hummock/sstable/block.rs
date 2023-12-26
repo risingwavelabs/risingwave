@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::Range;
@@ -24,6 +25,7 @@ use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
+use crate::hummock::sstable::utils;
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -151,8 +153,31 @@ pub struct Block {
     restart_points: Vec<RestartPoint>,
 }
 
+impl Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Block")
+            .field("data_len", &self.data_len)
+            .field("table_id", &self.table_id)
+            .field("restart_points", &self.restart_points)
+            .finish()
+    }
+}
+
 impl Block {
+    pub fn get_algorithm(buf: &Bytes) -> HummockResult<CompressionAlgorithm> {
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        Ok(compression)
+    }
+
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
+        Self::decode_with_copy(buf, uncompressed_capacity, false)
+    }
+
+    pub fn decode_with_copy(
+        buf: Bytes,
+        uncompressed_capacity: usize,
+        copy: bool,
+    ) -> HummockResult<Self> {
         // Verify checksum.
 
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
@@ -163,7 +188,13 @@ impl Block {
         let compressed_data = &buf[..buf.len() - 9];
 
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
+            CompressionAlgorithm::None => {
+                if copy {
+                    buf.slice(0..(buf.len() - 9))
+                } else {
+                    Bytes::copy_from_slice(&buf[0..(buf.len() - 9)])
+                }
+            }
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -455,7 +486,14 @@ impl BlockBuilder {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
                 KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
-                Ordering::Less
+                Ordering::Less,
+                "epoch: {}, table key: {}",
+                full_key.epoch_with_gap.pure_epoch(),
+                u64::from_be_bytes(
+                    full_key.user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
             );
         }
         // Update restart point if needed and calculate diff key.
@@ -474,7 +512,13 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = self.buf.len() as u32;
+            let offset = utils::checked_into_u32(self.buf.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert buf_len {} into u32 table {:?}",
+                    self.buf.len(),
+                    self.table_id,
+                )
+            });
 
             self.restart_points.push(offset);
 
@@ -539,21 +583,35 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B)
-    /// uncompressed: | compression method (1B) | crc32sum (4B) |
+    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B) | table id (4B)
+    /// uncompressed: | compression method (1B) | xxhash64 checksum (8B) |
     /// ```
     ///
     /// # Panics
     ///
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
-        assert!(self.entry_count > 0);
+        assert!(
+            self.entry_count > 0,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
 
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
 
-        self.buf.put_u32_le(self.restart_points.len() as u32);
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_len {} into u32 table {:?}",
+                    self.restart_points.len(),
+                    self.table_id,
+                )
+            }),
+        );
         for RestartPoint {
             offset,
             key_len_type,
@@ -570,48 +628,87 @@ impl BlockBuilder {
             self.buf.put_u8(value);
         }
 
-        self.buf
-            .put_u32_le(self.restart_points_type_index.len() as u32);
+        self.buf.put_u32_le(
+            utils::checked_into_u32(self.restart_points_type_index.len()).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert restart_points_type_index_len {} into u32 table {:?}",
+                    self.restart_points_type_index.len(),
+                    self.table_id,
+                )
+            }),
+        );
 
         self.buf.put_u32_le(self.table_id.unwrap());
-        match self.compression_algorithm {
-            CompressionAlgorithm::None => (),
+        if self.compression_algorithm != CompressionAlgorithm::None {
+            self.buf = Self::compress(&self.buf[..], self.compression_algorithm);
+        }
+
+        self.compression_algorithm.encode(&mut self.buf);
+        let checksum = xxhash64_checksum(&self.buf);
+        self.buf.put_u64_le(checksum);
+        assert!(
+            self.buf.len() < (u32::MAX) as usize,
+            "buf_len {} entry_count {} table {:?}",
+            self.buf.len(),
+            self.entry_count,
+            self.table_id
+        );
+
+        self.buf.as_ref()
+    }
+
+    pub fn compress_block(
+        buf: Bytes,
+        target_compression: CompressionAlgorithm,
+    ) -> HummockResult<Bytes> {
+        // Verify checksum.
+        let checksum = (&buf[buf.len() - 8..]).get_u64_le();
+        xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
+        // Decompress.
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        let compressed_data = &buf[..buf.len() - 9];
+        assert_eq!(compression, CompressionAlgorithm::None);
+        let mut writer = Self::compress(compressed_data, target_compression);
+
+        target_compression.encode(&mut writer);
+        let checksum = xxhash64_checksum(&writer);
+        writer.put_u64_le(checksum);
+        Ok(writer.freeze())
+    }
+
+    pub fn compress(buf: &[u8], compression_algorithm: CompressionAlgorithm) -> BytesMut {
+        match compression_algorithm {
+            CompressionAlgorithm::None => unreachable!(),
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
-                    .build(BytesMut::with_capacity(self.buf.len()).writer())
+                    .build(BytesMut::with_capacity(buf.len()).writer())
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
-                    .write_all(&self.buf[..])
+                    .write_all(buf)
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let (writer, result) = encoder.finish();
                 result.map_err(HummockError::encode_error).unwrap();
-                self.buf = writer.into_inner();
+                writer.into_inner()
             }
             CompressionAlgorithm::Zstd => {
                 let mut encoder =
-                    zstd::Encoder::new(BytesMut::with_capacity(self.buf.len()).writer(), 4)
+                    zstd::Encoder::new(BytesMut::with_capacity(buf.len()).writer(), 4)
                         .map_err(HummockError::encode_error)
                         .unwrap();
                 encoder
-                    .write_all(&self.buf[..])
+                    .write_all(buf)
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 let writer = encoder
                     .finish()
                     .map_err(HummockError::encode_error)
                     .unwrap();
-                self.buf = writer.into_inner();
+                writer.into_inner()
             }
-        };
-
-        self.compression_algorithm.encode(&mut self.buf);
-        let checksum = xxhash64_checksum(&self.buf);
-        self.buf.put_u64_le(checksum);
-
-        self.buf.as_ref()
+        }
     }
 
     /// Approximate block len (uncompressed).
@@ -635,6 +732,10 @@ impl BlockBuilder {
             debug_assert!(self.restart_points_type_index.is_empty());
             debug_assert!(self.last_key.is_empty());
         }
+    }
+
+    pub fn table_id(&self) -> Option<u32> {
+        self.table_id
     }
 }
 

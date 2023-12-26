@@ -19,7 +19,7 @@ use bytes::Bytes;
 use super::key_cmp::KeyComparator;
 use crate::key::{FullKey, UserKey};
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Default)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,

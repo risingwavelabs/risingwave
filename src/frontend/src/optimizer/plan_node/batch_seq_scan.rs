@@ -20,40 +20,46 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
-use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
-use risingwave_pb::plan_common::PbColumnDesc;
+use risingwave_pb::batch_plan::RowSeqScanNode;
 
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
-    pub base: PlanBase,
-    logical: generic::Scan,
+    pub base: PlanBase<Batch>,
+    core: generic::Scan,
     scan_ranges: Vec<ScanRange>,
+    limit: Option<u64>,
 }
 
 impl BatchSeqScan {
-    fn new_inner(logical: generic::Scan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
+    fn new_inner(
+        core: generic::Scan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+    ) -> Self {
         let order = if scan_ranges.len() > 1 {
             Order::any()
         } else {
-            logical.get_out_column_index_order()
+            core.get_out_column_index_order()
         };
-        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
+        let base = PlanBase::new_batch_with_core(&core, dist, order);
 
         {
             // validate scan_range
             scan_ranges.iter().for_each(|scan_range| {
                 assert!(!scan_range.is_full_table_scan());
                 let scan_pk_prefix_len = scan_range.eq_conds.len();
-                let order_len = logical.table_desc.order_column_indices().len();
+                let order_len = core.table_desc.order_column_indices().len();
                 assert!(
                     scan_pk_prefix_len < order_len
                         || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
@@ -64,53 +70,60 @@ impl BatchSeqScan {
 
         Self {
             base,
-            logical,
+            core,
             scan_ranges,
+            limit,
         }
     }
 
-    pub fn new(logical: generic::Scan, scan_ranges: Vec<ScanRange>) -> Self {
+    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
-        Self::new_inner(logical, Distribution::Single, scan_ranges)
+        Self::new_inner(core, Distribution::Single, scan_ranges, limit)
+    }
+
+    pub fn new_with_dist(
+        core: generic::Scan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+    ) -> Self {
+        Self::new_inner(core, dist, scan_ranges, limit)
     }
 
     fn clone_with_dist(&self) -> Self {
         Self::new_inner(
-            self.logical.clone(),
-            if self.logical.is_sys_table {
-                Distribution::Single
-            } else {
-                match self.logical.distribution_key() {
-                    None => Distribution::SomeShard,
-                    Some(distribution_key) => {
-                        if distribution_key.is_empty() {
-                            Distribution::Single
-                        } else {
-                            // For other batch operators, `HashShard` is a simple hashing, i.e.,
-                            // `target_shard = hash(dist_key) % shard_num`
-                            //
-                            // But MV is actually sharded by consistent hashing, i.e.,
-                            // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
-                            //
-                            // They are incompatible, so we just specify its distribution as
-                            // `SomeShard` to force an exchange is
-                            // inserted.
-                            Distribution::UpstreamHashShard(
-                                distribution_key,
-                                self.logical.table_desc.table_id,
-                            )
-                        }
+            self.core.clone(),
+            match self.core.distribution_key() {
+                None => Distribution::SomeShard,
+                Some(distribution_key) => {
+                    if distribution_key.is_empty() {
+                        Distribution::Single
+                    } else {
+                        // For other batch operators, `HashShard` is a simple hashing, i.e.,
+                        // `target_shard = hash(dist_key) % shard_num`
+                        //
+                        // But MV is actually sharded by consistent hashing, i.e.,
+                        // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
+                        //
+                        // They are incompatible, so we just specify its distribution as
+                        // `SomeShard` to force an exchange is
+                        // inserted.
+                        Distribution::UpstreamHashShard(
+                            distribution_key,
+                            self.core.table_desc.table_id,
+                        )
                     }
                 }
             },
             self.scan_ranges.clone(),
+            self.limit,
         )
     }
 
     /// Get a reference to the batch seq scan's logical.
     #[must_use]
-    pub fn logical(&self) -> &generic::Scan {
-        &self.logical
+    pub fn core(&self) -> &generic::Scan {
+        &self.core
     }
 
     pub fn scan_ranges(&self) -> &[ScanRange] {
@@ -119,8 +132,8 @@ impl BatchSeqScan {
 
     fn scan_ranges_as_strs(&self, verbose: bool) -> Vec<String> {
         let order_names = match verbose {
-            true => self.logical.order_names_with_table_prefix(),
-            false => self.logical.order_names(),
+            true => self.core.order_names_with_table_prefix(),
+            false => self.core.order_names(),
         };
         let mut range_strs = vec![];
 
@@ -146,6 +159,10 @@ impl BatchSeqScan {
             range_strs.push("...".to_string());
         }
         range_strs
+    }
+
+    pub fn limit(&self) -> &Option<u64> {
+        &self.limit
     }
 }
 
@@ -180,10 +197,10 @@ fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -
 
 impl Distill for BatchSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
-        vec.push(("columns", self.logical.columns_pretty(verbose)));
+        vec.push(("table", Pretty::from(self.core.table_name.clone())));
+        vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if !self.scan_ranges.is_empty() {
             let range_strs = self.scan_ranges_as_strs(verbose);
@@ -193,10 +210,14 @@ impl Distill for BatchSeqScan {
             ));
         }
 
+        if let Some(limit) = &self.limit {
+            vec.push(("limit", Pretty::display(limit)));
+        }
+
         if verbose {
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema,
+                input_schema: self.base.schema(),
             });
             vec.push(("distribution", dist));
         }
@@ -213,54 +234,41 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchPb for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_descs = self
-            .logical
-            .column_descs()
-            .iter()
-            .map(PbColumnDesc::from)
-            .collect();
-
-        if self.logical.is_sys_table {
-            NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_id: self.logical.table_desc.table_id.table_id,
-                column_descs,
-            })
-        } else {
-            NodeBody::RowSeqScan(RowSeqScanNode {
-                table_desc: Some(self.logical.table_desc.to_protobuf()),
-                column_ids: self
-                    .logical
-                    .output_column_ids()
-                    .iter()
-                    .map(ColumnId::get_id)
-                    .collect(),
-                scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
-                // To be filled by the scheduler.
-                vnode_bitmap: None,
-                ordered: !self.order().is_any(),
-                chunk_size: self
-                    .logical
-                    .chunk_size
-                    .map(|chunk_size| ChunkSize { chunk_size }),
-            })
-        }
+        NodeBody::RowSeqScan(RowSeqScanNode {
+            table_desc: Some(self.core.table_desc.to_protobuf()),
+            column_ids: self
+                .core
+                .output_column_ids()
+                .iter()
+                .map(ColumnId::get_id)
+                .collect(),
+            scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
+            // To be filled by the scheduler.
+            vnode_bitmap: None,
+            ordered: !self.order().is_any(),
+            limit: *self.limit(),
+        })
     }
 }
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist = if self.logical.is_sys_table {
-            Distribution::Single
-        } else if let Some(distribution_key) = self.logical.distribution_key()
+        let dist = if let Some(distribution_key) = self.core.distribution_key()
             && !distribution_key.is_empty()
         {
-            Distribution::UpstreamHashShard(distribution_key, self.logical.table_desc.table_id)
+            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
         } else {
             // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
             // scan.
             Distribution::SomeShard
         };
-        Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
+        Ok(Self::new_inner(
+            self.core.clone(),
+            dist,
+            self.scan_ranges.clone(),
+            self.limit,
+        )
+        .into())
     }
 }
 
@@ -270,8 +278,14 @@ impl ExprRewritable for BatchSeqScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.scan_ranges.clone()).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.scan_ranges.clone(), self.limit).into()
+    }
+}
+
+impl ExprVisitable for BatchSeqScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

@@ -23,7 +23,6 @@ use crate::executor::{AppendOnlyTopNExecutor, TopNExecutor};
 
 pub struct TopNExecutorBuilder<const APPEND_ONLY: bool>;
 
-#[async_trait::async_trait]
 impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONLY> {
     type Node = TopNNode;
 
@@ -54,10 +53,10 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
                 Ok($excutor::<_, $with_ties>::new(
                     input,
                     params.actor_context,
+                    params.info,
                     storage_key,
                     (node.offset as usize, node.limit as usize),
                     order_by,
-                    params.executor_id,
                     state_table,
                 )?
                 .boxed())

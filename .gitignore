@@ -73,3 +73,8 @@ simulation-it-test.tar.zst
 
 # hummock-trace
 .trace
+
+# spark binary
+e2e_test/iceberg/spark-*-bin*
+
+**/poetry.lock

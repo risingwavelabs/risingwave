@@ -15,38 +15,161 @@
 pub mod enumerator;
 pub mod source;
 pub mod split;
-
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
-use anyhow::anyhow;
 pub use enumerator::*;
-use risingwave_pb::connector_service::{SourceType, TableSchema};
-use serde::Deserialize;
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_pb::catalog::PbSource;
+use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::ExternalTableDesc;
+use simd_json::prelude::ArrayTrait;
 pub use source::*;
-pub use split::*;
 
-pub const MYSQL_CDC_CONNECTOR: &str = "mysql-cdc";
-pub const POSTGRES_CDC_CONNECTOR: &str = "postgres-cdc";
-pub const CITUS_CDC_CONNECTOR: &str = "citus-cdc";
+use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
+use crate::{for_all_classified_sources, impl_cdc_source_type};
 
-#[derive(Clone, Debug, Deserialize, Default)]
-pub struct CdcProperties {
-    /// Set by `ConnectorSource`
-    pub connector_node_addr: String,
-    /// Set by `SourceManager` when creating the source, used by `DebeziumSplitEnumerator`
-    pub source_id: u32,
-    /// Type of the cdc source, e.g. mysql, postgres
-    pub source_type: String,
-    /// Properties specified in the WITH clause by user
-    pub props: HashMap<String, String>,
+pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
+pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
+pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 
-    /// Schema of the source specified by users
-    pub table_schema: Option<TableSchema>,
+pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
+pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
+pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
+
+pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
+    const CDC_CONNECTOR_NAME: &'static str;
+    fn source_type() -> CdcSourceType;
 }
 
-impl CdcProperties {
-    pub fn get_source_type_pb(&self) -> anyhow::Result<SourceType> {
-        SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
-            .ok_or(anyhow!("unknown source type: {}", self.source_type))
+for_all_classified_sources!(impl_cdc_source_type);
+
+impl<'a> From<&'a str> for CdcSourceType {
+    fn from(name: &'a str) -> Self {
+        match name {
+            MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
+            POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
+            CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            _ => CdcSourceType::Unspecified,
+        }
+    }
+}
+
+impl CdcSourceType {
+    pub fn as_str_name(&self) -> &str {
+        match self {
+            CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Postgres => "Postgres",
+            CdcSourceType::Citus => "Citus",
+            CdcSourceType::Unspecified => "Unspecified",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CdcProperties<T: CdcSourceTypeTrait> {
+    /// Properties specified in the WITH clause by user
+    pub properties: HashMap<String, String>,
+
+    /// Schema of the source specified by users
+    pub table_schema: TableSchema,
+
+    /// Whether the properties is shared by multiple tables
+    pub is_multi_table_shared: bool,
+
+    pub _phantom: PhantomData<T>,
+}
+
+impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
+    fn try_from_hashmap(properties: HashMap<String, String>) -> anyhow::Result<Self> {
+        let is_multi_table_shared = properties
+            .get(CDC_SHARING_MODE_KEY)
+            .is_some_and(|v| v == "true");
+        Ok(CdcProperties {
+            properties,
+            table_schema: Default::default(),
+            // TODO(siyuan): use serde to deserialize input hashmap
+            is_multi_table_shared,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
+where
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
+{
+    type Split = DebeziumCdcSplit<T>;
+    type SplitEnumerator = DebeziumSplitEnumerator<T>;
+    type SplitReader = CdcSplitReader<T>;
+
+    const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
+
+    fn init_from_pb_source(&mut self, source: &PbSource) {
+        let pk_indices = source
+            .pk_column_ids
+            .iter()
+            .map(|&id| {
+                source
+                    .columns
+                    .iter()
+                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
+        let table_schema = PbTableSchema {
+            columns: source
+                .columns
+                .iter()
+                .flat_map(|col| &col.column_desc)
+                .cloned()
+                .collect(),
+            pk_indices,
+        };
+        self.table_schema = table_schema;
+        if let Some(info) = source.info.as_ref() {
+            self.is_multi_table_shared = info.cdc_source_job;
+        }
+    }
+
+    fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
+        let properties: HashMap<String, String> = table_desc
+            .connect_properties
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v))
+            .collect();
+
+        let table_schema = TableSchema {
+            columns: table_desc.columns.clone(),
+            pk_indices: table_desc.stream_key.clone(),
+        };
+
+        self.properties = properties;
+        self.table_schema = table_schema;
+        // properties are not shared, so mark it as false
+        self.is_multi_table_shared = false;
+    }
+}
+
+impl<T: CdcSourceTypeTrait> CdcProperties<T> {
+    pub fn get_source_type_pb(&self) -> SourceType {
+        SourceType::from(T::source_type())
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self
+                .table_schema
+                .columns
+                .iter()
+                .map(ColumnDesc::from)
+                .map(Field::from)
+                .collect(),
+        }
     }
 }

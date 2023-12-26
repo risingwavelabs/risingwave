@@ -30,7 +30,7 @@ This will create a `.tar.gz` file with the Connector Node and all its dependenci
 
 ```
 # unpack the tar file, the file name might vary depending on the version
-cd java/connector-node/assembly/target && tar xvf risingwave-connector-1.0.0.tar.gz 
+cd java/connector-node/assembly/target && tar xvf risingwave-connector-1.0.0.tar.gz
 # launch connector node service
 java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 ```
@@ -65,17 +65,17 @@ bash gen-stub.sh
 PYTHONPATH=proto python3 integration_tests.py
 ```
 
-Or you can use conda and install the necessary package `grpcio grpcio-tools psycopg2 psycopg2-binary`. 
+Or you can use conda and install the necessary package `grpcio grpcio-tools psycopg2 psycopg2-binary`.
 
 The connector service is the server and Python integration test is a client, which will send gRPC request and get response from the connector server. So when running integration_tests, remember to launch the connector service in advance. You can get the gRPC response and check messages or errors in client part. And check the detailed exception information on server side.
 
 ### Python file format
 
-We use `black` as the python file formatter. We can run `format-python.sh` to format the python files. 
+We use `black` as the python file formatter. We can run `format-python.sh` to format the python files.
 
 ### JDBC test
 
-We have integration tests that involve the use of several sinks, including file sink, jdbc sink, iceberg sink, and deltalake sink. If you wish to run these tests locally, you will need to configure both MinIO and PostgreSQL. 
+We have integration tests that involve the use of several sinks, including file sink, jdbc sink, iceberg sink, and deltalake sink. If you wish to run these tests locally, you will need to configure both MinIO and PostgreSQL.
 Downloading and launching MinIO is a straightforward process. For PostgreSQL, I recommend launching it using Docker. When setting up PostgreSQL, please ensure that the values for `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_USER` match the corresponding settings in the `integration_tests.py` file.
 
 ```shell
@@ -110,7 +110,7 @@ Currently, the following external sources and sinks depends on the connector nod
 ### Sources
 - CDC
 
-Creating a sink with external connectors above will check for the connector node service. If the service is not running, the creation will fail. 
+Creating a sink with external connectors above will check for the connector node service. If the service is not running, the creation will fail.
 
 ```sql
 CREATE SINK s1 FROM mv1 WITH (

@@ -16,9 +16,9 @@ use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use bytes::Bytes;
-use futures::stream;
+use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
@@ -28,12 +28,13 @@ use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::merge_sort::merge_sort;
+use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
-use crate::common::cache::{OrderedStateCache, StateCache, StateCacheFiller};
+use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 
 type CacheKey = (
@@ -57,6 +58,9 @@ fn row_to_cache_key<S: StateStore>(
     (timestamp_val.into(), pk.into())
 }
 
+// TODO(rc): need to make this configurable?
+const CACHE_CAPACITY: usize = 2048;
+
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
@@ -65,8 +69,8 @@ pub struct SortBuffer<S: StateStore> {
     /// The timestamp column to sort on.
     sort_column_index: usize,
 
-    /// Cache of buffer table. `TopNStateCache` also works, may switch to it if needed later.
-    cache: OrderedStateCache<CacheKey, OwnedRow>,
+    /// Cache of buffer table.
+    cache: TopNStateCache<CacheKey, OwnedRow>,
 
     _phantom: PhantomData<S>,
 }
@@ -82,20 +86,9 @@ impl<S: StateStore> SortBuffer<S> {
 
         Self {
             sort_column_index,
-            cache: OrderedStateCache::new(),
+            cache: TopNStateCache::new(CACHE_CAPACITY),
             _phantom: PhantomData,
         }
-    }
-
-    /// Recover a [`SortBuffer`] from a buffer table.
-    #[allow(dead_code)]
-    pub async fn recover(
-        sort_column_index: usize,
-        buffer_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Self> {
-        let mut this = Self::new(sort_column_index, buffer_table);
-        this.refill_cache(None, buffer_table).await?;
-        Ok(this)
     }
 
     /// Insert a new row into the buffer.
@@ -125,6 +118,18 @@ impl<S: StateStore> SortBuffer<S> {
         self.cache.insert(key, new_row.into_owned_row());
     }
 
+    /// Update a row in the buffer without giving the old value.
+    pub fn update_without_old_value(
+        &mut self,
+        new_row: impl Row,
+        buffer_table: &mut StateTable<S>,
+    ) {
+        buffer_table.update_without_old_value(&new_row);
+        let key = row_to_cache_key(self.sort_column_index, &new_row, buffer_table);
+        self.cache.delete(&key);
+        self.cache.insert(key, new_row.into_owned_row());
+    }
+
     /// Apply a change to the buffer, insert/delete/update.
     pub fn apply_change(&mut self, change: Record<impl Row>, buffer_table: &mut StateTable<S>) {
         match change {
@@ -148,19 +153,19 @@ impl<S: StateStore> SortBuffer<S> {
         watermark: ScalarImpl,
         buffer_table: &'a mut StateTable<S>,
     ) {
-        let mut last_timestamp = None;
+        let mut last_table_pk = None;
         loop {
             if !self.cache.is_synced() {
                 // Refill the cache, then consume from the cache, to ensure strong row ordering
                 // and prefetch for the next watermark.
-                self.refill_cache(last_timestamp.take(), buffer_table)
+                self.refill_cache(last_table_pk.take(), buffer_table)
                     .await?;
             }
 
             #[for_await]
             for res in self.consume_from_cache(watermark.as_scalar_ref_impl()) {
-                let ((timestamp_val, _), row) = res?;
-                last_timestamp = Some(timestamp_val.into_inner());
+                let row = res?;
+                last_table_pk = Some((&row).project(buffer_table.pk_indices()).into_owned_row());
                 yield row;
             }
 
@@ -176,13 +181,15 @@ impl<S: StateStore> SortBuffer<S> {
         buffer_table.update_watermark(watermark, true);
     }
 
-    #[try_stream(ok = (CacheKey, OwnedRow), error = StreamExecutorError)]
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
-        assert!(self.cache.is_synced());
-        while let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) {
+        while self.cache.is_synced() {
+            let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) else {
+                break;
+            };
             if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
                 let row = self.cache.delete(&key).unwrap();
-                yield (key, row);
+                yield row;
             } else {
                 break;
             }
@@ -192,34 +199,33 @@ impl<S: StateStore> SortBuffer<S> {
     /// Clear the cache and refill it with the current content of the buffer table.
     pub async fn refill_cache(
         &mut self,
-        last_timestamp: Option<ScalarImpl>,
+        last_table_pk: Option<OwnedRow>,
         buffer_table: &StateTable<S>,
     ) -> StreamExecutorResult<()> {
         let mut filler = self.cache.begin_syncing();
 
         let pk_range = (
-            last_timestamp
-                .as_ref()
-                .map(|v| Bound::Excluded([Some(v.as_scalar_ref_impl())]))
+            last_table_pk
+                .map(Bound::Excluded)
                 .unwrap_or(Bound::Unbounded),
             Bound::<row::Empty>::Unbounded,
         );
 
-        let streams =
+        let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_key_and_val_with_pk_range(
-                    &pk_range,
+                buffer_table.iter_with_vnode(
                     vnode,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    &pk_range,
+                    PrefetchOptions::new(filler.capacity().is_none(), false),
                 )
             }))
             .await?
             .into_iter()
-            .map(Box::pin);
+            .map(Box::pin)
+            .collect();
 
         #[for_await]
-        for kv in stream::select_all(streams) {
-            // NOTE: The rows may not appear in order.
+        for kv in merge_sort(streams).take(filler.capacity().unwrap_or(usize::MAX)) {
             let row = key_value_to_full_row(kv?, buffer_table)?;
             let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);
             filler.insert_unchecked(key, row);
@@ -233,11 +239,11 @@ impl<S: StateStore> SortBuffer<S> {
 /// Merge the key part and value part of a row into a full row. This is needed for state table with
 /// non-None value indices.
 fn key_value_to_full_row<S: StateStore>(
-    (key, value): (Bytes, OwnedRow),
+    keyed_row: KeyedRow<Bytes>,
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
     let Some(val_indices) = table.value_indices() else {
-        return Ok(value);
+        return Ok(keyed_row.into_owned_row());
     };
     let pk_indices = table.pk_indices();
     let indices: BTreeSet<_> = val_indices
@@ -249,13 +255,14 @@ fn key_value_to_full_row<S: StateStore>(
     assert!(indices.iter().copied().eq(0..len));
 
     let mut row = vec![None; len];
-    let key = deserialize_pk_with_vnode(&key, table.pk_serde())
-        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?
-        .1;
+    let key = table
+        .pk_serde()
+        .deserialize(keyed_row.key())
+        .context("failed to deserialize pk")?;
     for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
-    for (i, v) in value.into_iter().enumerate() {
+    for (i, v) in keyed_row.into_owned_row().into_iter().enumerate() {
         row[val_indices[i]] = v;
     }
     Ok(OwnedRow::new(row))

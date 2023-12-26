@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod over_window_merge_rule;
+pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
 pub use project_join_merge_rule::*;
 mod project_eliminate_rule;
@@ -68,11 +70,11 @@ pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
 mod over_window_to_agg_and_join_rule;
 pub use over_window_to_agg_and_join_rule::*;
-mod over_window_split_by_window_rule;
-pub use over_window_split_by_window_rule::*;
-mod over_agg_to_topn_rule;
+mod over_window_split_rule;
+pub use over_window_split_rule::*;
+mod over_window_to_topn_rule;
 pub use join_commute_rule::*;
-pub use over_agg_to_topn_rule::*;
+pub use over_window_to_topn_rule::*;
 mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
@@ -88,6 +90,7 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
@@ -123,6 +126,36 @@ mod project_join_separate_rule;
 pub use project_join_separate_rule::*;
 mod grouping_sets_to_expand_rule;
 pub use grouping_sets_to_expand_rule::*;
+mod apply_project_set_transpose_rule;
+pub use apply_project_set_transpose_rule::*;
+mod cross_join_eliminate_rule;
+pub use cross_join_eliminate_rule::*;
+mod table_function_to_project_set_rule;
+
+pub use table_function_to_project_set_rule::*;
+mod apply_topn_transpose_rule;
+pub use apply_topn_transpose_rule::*;
+mod apply_limit_transpose_rule;
+pub use apply_limit_transpose_rule::*;
+mod batch;
+pub use batch::batch_project_merge_rule::*;
+mod common_sub_expr_extract_rule;
+pub use common_sub_expr_extract_rule::*;
+mod apply_over_window_transpose_rule;
+pub use apply_over_window_transpose_rule::*;
+mod apply_expand_transpose_rule;
+pub use apply_expand_transpose_rule::*;
+mod expand_to_project_rule;
+pub use expand_to_project_rule::*;
+mod agg_group_by_simplify_rule;
+pub use agg_group_by_simplify_rule::*;
+mod apply_hop_window_transpose_rule;
+pub use apply_hop_window_transpose_rule::*;
+mod agg_call_merge_rule;
+pub use agg_call_merge_rule::*;
+mod values_extract_project_rule;
+pub use batch::batch_push_limit_to_scan_rule::*;
+pub use values_extract_project_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -131,6 +164,7 @@ macro_rules! for_all_rules {
               { ApplyAggTransposeRule }
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
+            , { ApplyProjectSetTransposeRule }
             , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
             , { ApplyShareEliminateRule }
@@ -149,12 +183,14 @@ macro_rules! for_all_rules {
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
-            , { OverWindowSplitByWindowRule }
+            , { OverWindowSplitRule }
+            , { OverWindowMergeRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
             , { UnionMergeRule }
             , { DagToTreeRule }
+            , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
@@ -175,6 +211,20 @@ macro_rules! for_all_rules {
             , { ApplyDedupTransposeRule }
             , { ProjectJoinSeparateRule }
             , { GroupingSetsToExpandRule }
+            , { CrossJoinEliminateRule }
+            , { ApplyTopNTransposeRule }
+            , { TableFunctionToProjectSetRule }
+            , { ApplyLimitTransposeRule }
+            , { CommonSubExprExtractRule }
+            , { BatchProjectMergeRule }
+            , { ApplyOverWindowTransposeRule }
+            , { ApplyExpandTransposeRule }
+            , { ExpandToProjectRule }
+            , { AggGroupBySimplifyRule }
+            , { ApplyHopWindowTransposeRule }
+            , { AggCallMergeRule }
+            , { ValuesExtractProjectRule }
+            , { BatchPushLimitToScanRule }
         }
     };
 }

@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::*;
@@ -41,11 +42,19 @@ impl StreamClient {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
-            .connect()
+            .monitored_connect(
+                "grpc-stream-client",
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
+            )
             .await?
             .tracing_injected();
 
-        Ok(Self(StreamServiceClient::new(channel)))
+        Ok(Self(
+            StreamServiceClient::new(channel).max_decoding_message_size(usize::MAX),
+        ))
     }
 }
 

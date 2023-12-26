@@ -25,11 +25,12 @@ pub async fn handle_drop_source(
     handler_args: HandlerArgs,
     name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -62,7 +63,7 @@ pub async fn handle_drop_source(
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_source(source.id).await?;
+    catalog_writer.drop_source(source.id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }

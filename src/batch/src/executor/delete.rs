@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -92,7 +93,7 @@ impl Executor for DeleteExecutor {
 }
 
 impl DeleteExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
@@ -100,6 +101,15 @@ impl DeleteExecutor {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
+        assert_eq!(
+            table_dml_handle
+                .column_descs()
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then_some(c.data_type.clone()))
+                .collect_vec(),
+            self.child.schema().data_types(),
+            "bad delete schema"
+        );
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
         write_handle.begin()?;

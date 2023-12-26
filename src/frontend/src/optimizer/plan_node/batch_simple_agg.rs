@@ -16,54 +16,59 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::{self, PlanAggCall};
+use super::batch::prelude::*;
+use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
-    pub base: PlanBase,
-    logical: generic::Agg<PlanRef>,
+    pub base: PlanBase<Batch>,
+    core: generic::Agg<PlanRef>,
 }
 
 impl BatchSimpleAgg {
-    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let input_dist = logical.input.distribution().clone();
-        let base = PlanBase::new_batch_from_logical(&logical, input_dist, Order::any());
-        BatchSimpleAgg { base, logical }
+    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+        let input_dist = core.input.distribution().clone();
+        let base = PlanBase::new_batch_with_core(&core, input_dist, Order::any());
+        BatchSimpleAgg { base, core }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        &self.logical.agg_calls
+        &self.core.agg_calls
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
-        let session_ctx = self.base.ctx.session_ctx();
-        session_ctx.config().get_enable_two_phase_agg()
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.logical.can_two_phase_agg() && self.two_phase_agg_enabled()
+        self.core.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 }
 
 impl PlanTreeNodeUnary for BatchSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(generic::Agg {
             input,
-            ..self.logical.clone()
+            ..self.core.clone()
         })
     }
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
-impl_distill_by_unit!(BatchSimpleAgg, logical, "BatchSimpleAgg");
+impl_distill_by_unit!(BatchSimpleAgg, core, "BatchSimpleAgg");
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -83,7 +88,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
             // insert total agg
             let total_agg_types = self
-                .logical
+                .core
                 .agg_calls
                 .iter()
                 .enumerate()
@@ -92,7 +97,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 })
                 .collect();
             let total_agg_logical =
-                generic::Agg::new(total_agg_types, self.logical.group_key.clone(), exchange);
+                generic::Agg::new(total_agg_types, self.core.group_key.clone(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self
@@ -134,8 +139,14 @@ impl ExprRewritable for BatchSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchSimpleAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

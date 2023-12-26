@@ -23,7 +23,8 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use crate::source::{SourceFormat, SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
+use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
+use crate::source::{SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
 
 pub enum FieldDesc {
     // field is invisible, generate None
@@ -35,7 +36,7 @@ pub struct DatagenEventGenerator {
     // fields_map: HashMap<String, FieldGeneratorImpl>,
     field_names: Vec<String>,
     fields_vec: Vec<FieldDesc>,
-    source_format: SourceFormat,
+    source_format: SpecificParserConfig,
     data_types: Vec<DataType>,
     offset: u64,
     split_id: SplitId,
@@ -53,7 +54,7 @@ impl DatagenEventGenerator {
     pub fn new(
         fields_vec: Vec<FieldDesc>,
         field_names: Vec<String>,
-        source_format: SourceFormat,
+        source_format: SpecificParserConfig,
         data_types: Vec<DataType>,
         rows_per_second: u64,
         offset: u64,
@@ -93,8 +94,11 @@ impl DatagenEventGenerator {
                 );
                 let mut msgs = Vec::with_capacity(num_rows_to_generate as usize);
                 'outer: for _ in 0..num_rows_to_generate {
-                    let payload = match self.source_format {
-                        SourceFormat::Json => {
+                    let payload = match (
+                        &self.source_format.protocol_config,
+                        &self.source_format.encoding_config,
+                    ) {
+                        (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
                             let mut map = serde_json::Map::with_capacity(self.fields_vec.len());
                             for (name, field_generator) in self
                                 .field_names
@@ -127,6 +131,7 @@ impl DatagenEventGenerator {
                         }
                     };
                     msgs.push(SourceMessage {
+                        key: None,
                         payload: Some(payload),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),
@@ -261,7 +266,13 @@ mod tests {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             vec!["c1".to_owned(), "c2".to_owned()],
-            SourceFormat::Json,
+            SpecificParserConfig {
+                protocol_config: ProtocolProperties::Plain,
+                encoding_config: EncodingProperties::Json(crate::parser::JsonProperties {
+                    use_schema_registry: false,
+                }),
+                key_encoding_config: None,
+            },
             data_types,
             rows_per_second,
             0,

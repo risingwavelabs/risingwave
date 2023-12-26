@@ -17,25 +17,40 @@ DASHBOARD_VERSION = "DASHBOARD_VERSION"
 # We use DASHBOARD_VERSION env variable to indicate whether to use a variable as the datasource
 DASHBOARD_DYNAMIC_SOURCE = "DASHBOARD_DYNAMIC_SOURCE"
 
-namespace_filter_enabled = os.environ.get(
-    NAMESPACE_FILTER_ENABLED, "") == "true"
+namespace_filter_enabled = os.environ.get(NAMESPACE_FILTER_ENABLED, "") == "true"
 if namespace_filter_enabled:
     print("Enable filter for namespace field in the generated prometheus query")
-risingwave_name_filter_enabled = os.environ.get(
-    RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
+risingwave_name_filter_enabled = (
+    os.environ.get(RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
+)
 if risingwave_name_filter_enabled:
     print("Enable filter for namespace_filter field in the generated prometheus query")
-dynamic_source_enabled = os.environ.get(
-    DASHBOARD_DYNAMIC_SOURCE, "") == "true"
+dynamic_source_enabled = os.environ.get(DASHBOARD_DYNAMIC_SOURCE, "") == "true"
 if dynamic_source_enabled:
     print("Enable use the datasource variable as the dashboard datasource")
+
+COMPONENT_LABEL = "job"
+COMPONENT_VARIABLE_LABEL = "Job"
+COMPONENT_VARIABLE = "job"
+NODE_LABEL = "instance"
+NODE_VARIABLE_LABEL = "Node"
+NODE_VARIABLE = "node"
+
+# Use different labels for role and instance when namespace filter enabled. (Kubernetes)
+if namespace_filter_enabled:
+    COMPONENT_LABEL = "risingwave_component"
+    COMPONENT_VARIABLE_LABEL = "Component"
+    COMPONENT_VARIABLE = "component"
+    NODE_LABEL = "pod"
+    NODE_VARIABLE_LABEL = "Pod"
+    NODE_VARIABLE = "pod"
 
 templating = Templating()
 if namespace_filter_enabled:
     templating = Templating(
         list=[
             {
-                "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+                "definition": 'label_values(up{risingwave_name=~".+"}, namespace)',
                 "description": "Kubernetes namespace.",
                 "hide": 0,
                 "includeAll": False,
@@ -44,20 +59,20 @@ if namespace_filter_enabled:
                 "name": "namespace",
                 "options": [],
                 "query": {
-                    "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
-                    "refId": "StandardVariableQuery"
+                    "query": 'label_values(up{risingwave_name=~".+"}, namespace)',
+                    "refId": "StandardVariableQuery",
                 },
                 "refresh": 2,
                 "regex": "",
                 "skipUrlSync": False,
                 "sort": 0,
-                "type": "query"
+                "type": "query",
             }
         ]
     )
 
-class Layout:
 
+class Layout:
     def __init__(self):
         self.x = 0
         self.y = 0
@@ -96,6 +111,7 @@ class Layout:
 
 
 class Panels:
+    # Common options for timeseries panels
     common_options = {
         "fillOpacity": 10,
         "interval": "1s",
@@ -108,31 +124,35 @@ class Panels:
         self.datasource = datasource
 
     def row(
-            self,
-            title,
+        self,
+        title,
     ):
         gridPos = self.layout.next_row()
         return RowPanel(title=title, gridPos=gridPos)
 
     def row_collapsed(self, title, panels):
         gridPos = self.layout.next_row()
-        return RowPanel(title=title,
-                        gridPos=gridPos,
-                        collapsed=True,
-                        panels=panels)
+        return RowPanel(title=title, gridPos=gridPos, collapsed=True, panels=panels)
 
     def target(self, expr, legendFormat, hide=False):
+        return Target(
+            expr=expr, legendFormat=legendFormat, datasource=self.datasource, hide=hide
+        )
+
+    def target_hidden(self, expr, legendFormat):
         return Target(expr=expr,
                       legendFormat=legendFormat,
                       datasource=self.datasource,
-                      hide=hide)
+                      hide=True)
 
     def table_target(self, expr, hide=False):
-        return Target(expr=expr,
-                      datasource=self.datasource,
-                      hide=hide,
-                      instant=True,
-                      format='table')
+        return Target(
+            expr=expr,
+            datasource=self.datasource,
+            hide=hide,
+            instant=True,
+            format="table",
+        )
 
     def timeseries(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -145,11 +165,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_count(self,
-                         title,
-                         description,
-                         targets,
-                         legendCols=["mean"]):
+    def timeseries_count(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -161,11 +177,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_percentage(self,
-                              title,
-                              description,
-                              targets,
-                              legendCols=["mean"]):
+    def timeseries_percentage(self, title, description, targets, legendCols=["mean"]):
         # Percentage should fall into 0.0-1.0
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
@@ -179,11 +191,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_latency(self,
-                           title,
-                           description,
-                           targets,
-                           legendCols=["mean"]):
+    def timeseries_latency(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -196,11 +204,22 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_actor_latency(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
+    def timeseries_latency_ms(self, title, description, targets, legendCols=["mean"]):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="ms",
+            legendCalcs=legendCols,
+            **self.common_options,
+        )
+
+    def timeseries_actor_latency(
+        self, title, description, targets, legendCols=["mean"]
+    ):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -213,11 +232,9 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_actor_latency_small(self,
-                                       title,
-                                       description,
-                                       targets,
-                                       legendCols=["mean"]):
+    def timeseries_actor_latency_small(
+        self, title, description, targets, legendCols=["mean"]
+    ):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
@@ -230,11 +247,9 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_query_per_sec(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
+    def timeseries_query_per_sec(
+        self, title, description, targets, legendCols=["mean"]
+    ):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -247,11 +262,9 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_bytes_per_sec(self,
-                                 title,
-                                 description,
-                                 targets,
-                                 legendCols=["mean"]):
+    def timeseries_bytes_per_sec(
+        self, title, description, targets, legendCols=["mean"]
+    ):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -264,11 +277,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_bytes(self,
-                         title,
-                         description,
-                         targets,
-                         legendCols=["mean"]):
+    def timeseries_bytes(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -306,11 +315,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_kilobytes(self,
-                             title,
-                             description,
-                             targets,
-                             legendCols=["mean"]):
+    def timeseries_kilobytes(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -323,11 +328,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_dollar(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
+    def timeseries_dollar(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -353,11 +354,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_actor_ops(self,
-                             title,
-                             description,
-                             targets,
-                             legendCols=["mean"]):
+    def timeseries_actor_ops(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -370,11 +367,9 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_actor_ops_small(self,
-                                   title,
-                                   description,
-                                   targets,
-                                   legendCols=["mean"]):
+    def timeseries_actor_ops_small(
+        self, title, description, targets, legendCols=["mean"]
+    ):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
@@ -387,11 +382,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_rowsps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
+    def timeseries_rowsps(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -404,11 +395,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_bytesps(self,
-                           title,
-                           description,
-                           targets,
-                           legendCols=["mean"]):
+    def timeseries_bytesps(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -483,8 +470,9 @@ class Panels:
     def table_info(self, title, description, targets, excluded_columns):
         gridPos = self.layout.next_half_width_graph()
         excludedByName = dict.fromkeys(excluded_columns, True)
-        transformations = [{"id": "organize", "options": {
-            "excludeByName": excludedByName}}]
+        transformations = [
+            {"id": "organize", "options": {"excludeByName": excludedByName}}
+        ]
         return Table(
             title=title,
             dataSource=self.datasource,
@@ -493,7 +481,7 @@ class Panels:
             gridPos=gridPos,
             showHeader=True,
             filterable=True,
-            transformations=transformations
+            transformations=transformations,
         )
 
     def sub_panel(self):
@@ -503,18 +491,20 @@ class Panels:
 def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=False):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
-        filters.append("namespace=~\"$namespace\"")
+        filters.append('namespace=~"$namespace"')
     if risingwave_name_filter_enabled:
-        filters.append("risingwave_name=~\"$instance\"")
+        filters.append('risingwave_name=~"$instance"')
     if table_id_filter_enabled:
-        filters.append("table_id=~\"$table\"")
+        # We use "%table|" instead of "%table" here to match empty string for the table_id filter
+        filters.append('table_id=~"$table|"')
     if node_filter_enabled:
-        filters.append("job=~\"$job\"")
-        filters.append("instance=~\"$node\"")
+        filters.append(f'{COMPONENT_LABEL}=~"${COMPONENT_VARIABLE}"')
+        filters.append(f'{NODE_LABEL}=~"${NODE_VARIABLE}"')
     if filters:
         return f"{name}{{{','.join(filters)}}}"
     else:
         return name
+
 
 def table_metric(name, filter=None):
     return metric(name, filter, True, True)
@@ -530,5 +520,5 @@ def quantile(f, percentiles):
         "max": ["1.0", "max"],
     }
     return list(
-        map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]),
-            percentiles))
+        map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]), percentiles)
+    )

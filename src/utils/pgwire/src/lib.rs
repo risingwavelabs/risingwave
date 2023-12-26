@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(io_error_other)]
 #![feature(lint_reasons)]
 #![feature(trait_alias)]
 #![feature(result_option_inspect)]
 #![feature(iterator_try_collect)]
 #![feature(trusted_len)]
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
+#![feature(lazy_cell)]
+#![feature(buf_read_has_data_left)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
 pub mod error_or_notice;
+pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
 pub mod pg_message;

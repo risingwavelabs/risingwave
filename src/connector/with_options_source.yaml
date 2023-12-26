@@ -1,0 +1,490 @@
+# THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+
+KafkaProperties:
+  fields:
+  - name: bytes.per.second
+    field_type: String
+    comments: This parameter is not intended to be exposed to users.  This parameter specifies only for one parallelism. The parallelism of kafka source  is equal to the parallelism passed into compute nodes. So users need to calculate  how many bytes will be consumed in total across all the parallelism by themselves.
+    required: false
+    alias: kafka.bytes.per.second
+  - name: max.num.messages
+    field_type: String
+    comments: This parameter is not intended to be exposed to users.  This parameter specifies only for one parallelism. The parallelism of kafka source  is equal to the parallelism passed into compute nodes. So users need to calculate  how many messages will be consumed in total across all the parallelism by themselves.
+    required: false
+    alias: kafka.max.num.messages
+  - name: scan.startup.mode
+    field_type: String
+    required: false
+    alias: kafka.scan.startup.mode
+  - name: scan.startup.timestamp.millis
+    field_type: String
+    required: false
+    alias: scan.startup.timestamp_millis
+  - name: upsert
+    field_type: String
+    comments: 'This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
+    required: false
+  - name: properties.bootstrap.server
+    field_type: String
+    required: true
+    alias: kafka.brokers
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    required: false
+  - name: topic
+    field_type: String
+    required: true
+    alias: kafka.topic
+  - name: properties.sync.call.timeout
+    field_type: Duration
+    required: false
+    default: 'Duration :: from_secs (5)'
+  - name: properties.security.protocol
+    field_type: String
+    comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
+    required: false
+  - name: properties.ssl.ca.location
+    field_type: String
+    comments: Path to CA certificate file for verifying the broker's key.
+    required: false
+  - name: properties.ssl.certificate.location
+    field_type: String
+    comments: Path to client's certificate file (PEM).
+    required: false
+  - name: properties.ssl.key.location
+    field_type: String
+    comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.password
+    field_type: String
+    comments: Passphrase of client's private key.
+    required: false
+  - name: properties.sasl.mechanism
+    field_type: String
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM and GSSAPI.
+    required: false
+  - name: properties.sasl.username
+    field_type: String
+    comments: SASL username for SASL/PLAIN and SASL/SCRAM.
+    required: false
+  - name: properties.sasl.password
+    field_type: String
+    comments: SASL password for SASL/PLAIN and SASL/SCRAM.
+    required: false
+  - name: properties.sasl.kerberos.service.name
+    field_type: String
+    comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
+    required: false
+  - name: properties.sasl.kerberos.keytab
+    field_type: String
+    comments: Path to client's Kerberos keytab file under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.principal
+    field_type: String
+    comments: Client's Kerberos principal name under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.kinit.cmd
+    field_type: String
+    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.kerberos.min.time.before.relogin
+    field_type: String
+    comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
+    required: false
+  - name: properties.sasl.oauthbearer.config
+    field_type: String
+    comments: Configurations for SASL/OAUTHBEARER.
+    required: false
+  - name: properties.message.max.bytes
+    field_type: usize
+    comments: Maximum Kafka protocol request message size. Due to differing framing overhead between  protocol versions the producer is unable to reliably enforce a strict max message limit at  produce time and may exceed the maximum size by one message in protocol ProduceRequests,  the broker will enforce the the topic's max.message.bytes limit
+    required: false
+  - name: properties.receive.message.max.bytes
+    field_type: usize
+    comments: Maximum Kafka protocol response message size. This serves as a safety precaution to avoid  memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes  + 512 to allow for protocol overhead; the value is adjusted automatically unless the  configuration property is explicitly set.
+    required: false
+  - name: properties.statistics.interval.ms
+    field_type: usize
+    required: false
+  - name: properties.client.id
+    field_type: String
+    comments: Client identifier
+    required: false
+  - name: properties.queued.min.messages
+    field_type: usize
+    comments: Minimum number of messages per topic+partition librdkafka tries to maintain in the local  consumer queue.
+    required: false
+  - name: properties.queued.max.messages.kbytes
+    field_type: usize
+    required: false
+  - name: properties.fetch.wait.max.ms
+    field_type: usize
+    comments: Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of  messages.
+    required: false
+  - name: properties.fetch.queue.backoff.ms
+    field_type: usize
+    comments: How long to postpone the next fetch request for a topic+partition in case the current fetch  queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been  exceeded. This property may need to be decreased if the queue thresholds are set low  and the application is experiencing long (~1s) delays between messages. Low values may  increase CPU utilization.
+    required: false
+  - name: properties.fetch.max.bytes
+    field_type: usize
+    comments: Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in  batches by the consumer and if the first message batch in the first non-empty partition of  the Fetch request is larger than this value, then the message batch will still be returned  to ensure the consumer can make progress. The maximum message batch size accepted by the  broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker  topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least  `message.max.bytes` (consumer config).
+    required: false
+  - name: properties.enable.auto.commit
+    field_type: bool
+    comments: 'Automatically and periodically commit offsets in the background.  Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.  To circumvent this behaviour set specific start offsets per partition in the call to assign().  default: true'
+    required: false
+KinesisProperties:
+  fields:
+  - name: scan.startup.mode
+    field_type: String
+    required: false
+    alias: kinesis.scan.startup.mode
+  - name: scan.startup.timestamp.millis
+    field_type: i64
+    required: false
+  - name: stream
+    field_type: String
+    required: true
+    alias: kinesis.stream.name
+  - name: aws.region
+    field_type: String
+    required: true
+    alias: kinesis.stream.region
+  - name: endpoint
+    field_type: String
+    required: false
+    alias: kinesis.endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    required: false
+    alias: kinesis.credentials.access
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    required: false
+    alias: kinesis.credentials.secret
+  - name: aws.credentials.session_token
+    field_type: String
+    required: false
+    alias: kinesis.credentials.session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    required: false
+    alias: kinesis.assumerole.arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    required: false
+    alias: kinesis.assumerole.external_id
+NatsProperties:
+  fields:
+  - name: server_url
+    field_type: String
+    required: true
+  - name: subject
+    field_type: String
+    required: true
+  - name: connect_mode
+    field_type: String
+    required: true
+  - name: username
+    field_type: String
+    required: false
+  - name: password
+    field_type: String
+    required: false
+  - name: jwt
+    field_type: String
+    required: false
+  - name: nkey
+    field_type: String
+    required: false
+  - name: max_bytes
+    field_type: i64
+    required: false
+  - name: max_messages
+    field_type: i64
+    required: false
+  - name: max_messages_per_subject
+    field_type: i64
+    required: false
+  - name: max_consumers
+    field_type: i32
+    required: false
+  - name: max_message_size
+    field_type: i32
+    required: false
+  - name: scan.startup.mode
+    field_type: String
+    required: false
+  - name: scan.startup.timestamp.millis
+    field_type: String
+    required: false
+    alias: scan.startup.timestamp_millis
+  - name: stream
+    field_type: String
+    required: true
+NexmarkPropertiesInner:
+  fields:
+  - name: nexmark.split.num
+    field_type: i32
+    required: false
+    default: identity_i32::<1>
+  - name: nexmark.event.num
+    field_type: u64
+    comments: The total event count of Bid + Auction + Person
+    required: false
+    default: 'u64 :: MAX'
+  - name: nexmark.table.type
+    field_type: EventType
+    required: false
+    default: None
+  - name: nexmark.max.chunk.size
+    field_type: u64
+    required: false
+    default: identity_u64::<1024>
+  - name: nexmark.use.real.time
+    field_type: bool
+    comments: The event time gap will be like the time gap in the generated data, default false
+    required: false
+    default: Default::default
+  - name: nexmark.min.event.gap.in.ns
+    field_type: u64
+    comments: Minimal gap between two events, default 100000, so that the default max throughput is 10000
+    required: false
+    default: identity_u64::<100_000>
+  - name: nexmark.active.people
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.in.flight.auctions
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.out.of.order.group.size
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.avg.person.byte.size
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.avg.auction.byte.size
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.avg.bid.byte.size
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.seller.ratio
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.auction.ratio
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.bidder.ratio
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.channel.ratio
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.event.id
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.event.number
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.num.categories
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.auction.id.lead
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.seller.ratio.2
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.auction.ratio.2
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.hot.bidder.ratio.2
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.person.proportion
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.auction.proportion
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.bid.proportion
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.auction.id
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.person.id
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.category.id
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.person.id.lead
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.sine.approx.steps
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.base.time
+    field_type: u64
+    required: false
+    default: None
+  - name: nexmark.us.states
+    field_type: String
+    required: false
+  - name: nexmark.us.cities
+    field_type: String
+    required: false
+  - name: nexmark.first.names
+    field_type: String
+    required: false
+  - name: nexmark.last.names
+    field_type: String
+    required: false
+  - name: nexmark.rate.shape
+    field_type: RateShape
+    required: false
+  - name: nexmark.rate.period
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.first.event.rate
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.events.per.sec
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.next.event.rate
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.us.per.unit
+    field_type: usize
+    required: false
+    default: None
+  - name: nexmark.threads
+    field_type: usize
+    required: false
+    default: None
+PubsubProperties:
+  fields:
+  - name: pubsub.split_count
+    field_type: u32
+    required: true
+  - name: pubsub.subscription
+    field_type: String
+    comments: pubsub subscription to consume messages from  The subscription should be configured with the `retain-on-ack` property to enable  message recovery within risingwave.
+    required: true
+  - name: pubsub.emulator_host
+    field_type: String
+    comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
+    required: false
+  - name: pubsub.credentials
+    field_type: String
+    comments: credentials JSON object encoded with base64  See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).  The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
+    required: false
+  - name: pubsub.start_offset
+    field_type: String
+    comments: '`start_offset` is a numeric timestamp, ideallly the publish timestamp of a message  in the subscription. If present, the connector will attempt to seek the subscription  to the timestamp and start consuming from there. Note that the seek operation is  subject to limitations around the message retention policy of the subscription. See  [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    required: false
+  - name: pubsub.start_snapshot
+    field_type: String
+    comments: '`start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek  to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism  in pub/sub because they guarantee retention of:  - All unacknowledged messages at the time of their creation.  - All messages created after their creation.  Besides retention guarantees, timestamps are also more precise than timestamp-based seeks.  See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for  more details.'
+    required: false
+PulsarProperties:
+  fields:
+  - name: scan.startup.mode
+    field_type: String
+    required: false
+    alias: pulsar.scan.startup.mode
+  - name: scan.startup.timestamp.millis
+    field_type: String
+    required: false
+    alias: scan.startup.timestamp_millis
+  - name: topic
+    field_type: String
+    required: true
+    alias: pulsar.topic
+  - name: service.url
+    field_type: String
+    required: true
+    alias: pulsar.service.url
+  - name: auth.token
+    field_type: String
+    required: false
+  - name: oauth.issuer.url
+    field_type: String
+    required: true
+  - name: oauth.credentials.url
+    field_type: String
+    required: true
+  - name: oauth.audience
+    field_type: String
+    required: true
+  - name: oauth.scope
+    field_type: String
+    required: false
+  - name: region
+    field_type: String
+    required: false
+  - name: endpoint
+    field_type: String
+    required: false
+    alias: endpoint_url
+  - name: access_key
+    field_type: String
+    required: false
+  - name: secret_key
+    field_type: String
+    required: false
+  - name: session_token
+    field_type: String
+    required: false
+  - name: arn
+    field_type: String
+    required: false
+  - name: external_id
+    field_type: String
+    comments: This field was added for kinesis. Not sure if it's useful for other connectors.  Please ignore it in the documentation for now.
+    required: false
+  - name: profile
+    field_type: String
+    required: false
+  - name: iceberg.enabled
+    field_type: bool
+    required: false
+  - name: iceberg.bucket
+    field_type: String
+    required: false
+    default: Default::default

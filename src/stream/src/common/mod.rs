@@ -15,10 +15,9 @@
 pub use builder::*;
 pub use column_mapping::*;
 
-// t
 mod builder;
 pub mod cache;
 mod column_mapping;
-pub mod log_store;
+pub mod log_store_impl;
 pub mod metrics;
 pub mod table;

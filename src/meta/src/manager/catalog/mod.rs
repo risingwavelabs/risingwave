@@ -17,7 +17,7 @@ mod fragment;
 mod user;
 mod utils;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
@@ -32,21 +32,25 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
+    Schema, Sink, Source, StreamJobStatus, Table, View,
 };
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
-use tracing::trace;
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
-use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::manager::{
+    IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, IGNORED_NOTIFICATION_VERSION,
+};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
+use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
 pub type DatabaseId = u32;
@@ -62,16 +66,25 @@ pub type FunctionId = u32;
 pub type UserId = u32;
 pub type ConnectionId = u32;
 
+pub enum RelationIdEnum {
+    Table(TableId),
+    Index(IndexId),
+    View(ViewId),
+    Sink(SinkId),
+    Source(SourceId),
+}
+
 /// `commit_meta_with_trx` is similar to `commit_meta`, but it accepts an external trx (transaction)
 /// and commits it.
 macro_rules! commit_meta_with_trx {
     ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
         {
             use tracing::Instrument;
+            use $crate::storage::meta_store::MetaStore;
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
-                    $val_txn.apply_to_txn(&mut $trx)?;
+                    $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
                 $manager.env.meta_store().txn($trx).await?;
@@ -104,16 +117,20 @@ macro_rules! commit_meta {
 }
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+use risingwave_pb::meta::table_fragments::State;
+use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
     refcnt_inc_connection, ReplaceTableExprRewriter,
 };
+use crate::rpc::ddl_controller::DropMode;
 
-pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
+pub type CatalogManagerRef = Arc<CatalogManager>;
 
 /// `CatalogManager` manages database catalog information and user information, including
 /// authentication and privileges.
@@ -121,8 +138,8 @@ pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 /// It only has some basic validation for the user information.
 /// Other authorization relate to the current session user should be done in Frontend before passing
 /// to Meta.
-pub struct CatalogManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct CatalogManager {
+    env: MetaSrvEnv,
     core: Mutex<CatalogManagerCore>,
 }
 
@@ -132,18 +149,15 @@ pub struct CatalogManagerCore {
 }
 
 impl CatalogManagerCore {
-    async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
         Ok(Self { database, user })
     }
 }
 
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl CatalogManager {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let core = Mutex::new(CatalogManagerCore::new(env.clone()).await?);
         let catalog_manager = Self { env, core };
         catalog_manager.init().await?;
@@ -153,19 +167,60 @@ where
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        self.source_backward_compat_check().await?;
         Ok(())
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
     }
+
+    /// This function is for maintaining backward compatibility with older source formats when `format_encode_options` is
+    /// merged into `with_properties`.
+    /// Context: <https://github.com/risingwavelabs/risingwave/pull/13762>.
+    ///
+    /// We identify a 'legacy' source based on two conditions:
+    /// 1. The `format_encode_options` in `source_info` is empty.
+    /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
+    async fn source_backward_compat_check(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let legacy_sources = sources
+            .tree_ref()
+            .iter()
+            .filter(|(_, source)| {
+                if let Some(source_info) = &source.info && source_info.format_encode_options.is_empty() {
+                    true
+                } else {
+                    false
+                }
+        })
+        .map(|t| t.1.clone())
+        .collect_vec();
+        for mut source in legacy_sources {
+            let connector = source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .unwrap_or(&String::default())
+                .to_owned();
+            if let Some(source_info) = source.info.as_mut() {
+                source_info
+                    .format_encode_options
+                    .extend(source.with_properties.iter().filter_map(|(k, v)| {
+                        should_copy_to_format_encode_options(k, &connector)
+                            .then_some((k.to_owned(), v.to_owned()))
+                    }))
+            }
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, sources)?;
+        Ok(())
+    }
 }
 
 // Database catalog related methods
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
+impl CatalogManager {
     async fn init_database(&self) -> MetaResult<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
@@ -250,7 +305,7 @@ where
 
         if database_core.has_creation_in_database(database_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target database, try again later".into(),
+                "Some relations are creating in the target database, try again later",
             ));
         }
 
@@ -505,12 +560,12 @@ where
         }
         if database_core.has_creation_in_schema(schema_id) {
             return Err(MetaError::permission_denied(
-                "Some relations are creating in the target schema, try again later".into(),
+                "Some relations are creating in the target schema, try again later",
             ));
         }
         if !database_core.schema_is_empty(schema_id) {
             return Err(MetaError::permission_denied(
-                "The schema is not empty, try dropping them first".into(),
+                "The schema is not empty, try dropping them first",
             ));
         }
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -567,53 +622,18 @@ where
         Ok(version)
     }
 
-    pub async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        database_core.ensure_view_id(view_id)?;
-
-        let user_core = &mut core.user;
-        let mut views = BTreeMapTransaction::new(&mut database_core.views);
-        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-
-        let view = views.remove(view_id).unwrap();
-
-        match database_core.relation_ref_count.get(&view_id) {
-            Some(ref_count) => Err(MetaError::permission_denied(format!(
-                "Fail to delete view `{}` because {} other relation(s) depend on it",
-                view.name, ref_count
-            ))),
-            None => {
-                let users_need_update =
-                    Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
-                commit_meta!(self, views, users)?;
-
-                user_core.decrease_ref(view.owner);
-
-                for &dependent_relation_id in &view.dependent_relations {
-                    database_core.decrease_ref_count(dependent_relation_id);
-                }
-
-                for user in users_need_update {
-                    self.notify_frontend(Operation::Update, Info::User(user))
-                        .await;
-                }
-                let version = self
-                    .notify_frontend_relation_info(Operation::Delete, RelationInfo::View(view))
-                    .await;
-
-                Ok(version)
-            }
-        }
-    }
-
     pub async fn create_function(&self, function: &Function) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         database_core.ensure_database_id(function.database_id)?;
         database_core.ensure_schema_id(function.schema_id)?;
-        database_core.check_function_duplicated(function)?;
+        database_core.check_function_duplicated(&(
+            function.database_id,
+            function.schema_id,
+            function.name.clone(),
+            function.arg_types.clone(),
+        ))?;
 
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
@@ -661,24 +681,32 @@ where
         Ok(version)
     }
 
+    /// Marks current relation as "creating" and add reference count to dependent relations.
+    /// And persists internal tables for background DDL progress tracking.
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
         match stream_job {
-            StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
-            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::MaterializedView(table) => {
+                self.start_create_table_procedure(table, internal_tables)
+                    .await
+            }
+            StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table).await
+                    self.start_create_table_procedure(table, internal_tables)
+                        .await
                 }
             }
+            StreamingJob::Source(source) => self.start_create_source_procedure(source).await,
         }
     }
 
@@ -729,7 +757,11 @@ where
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn start_create_table_procedure(
+        &self,
+        table: &Table,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -742,47 +774,250 @@ where
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
         let key = (table.database_id, table.schema_id, table.name.clone());
+
         database_core.check_relation_name_duplicated(&key)?;
 
-        if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
-        } else {
-            database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id, key);
-            for &dependent_relation_id in &table.dependent_relations {
-                database_core.increase_ref_count(dependent_relation_id);
-            }
-            user_core.increase_ref(table.owner);
-            Ok(())
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        assert!(
+            !tables.contains_key(&table.id),
+            "table must not already exist in meta"
+        );
+        for table in internal_tables {
+            tables.insert(table.id, table);
         }
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables)?;
+
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.increase_ref_count(dependent_relation_id);
+        }
+        user_core.increase_ref(table.owner);
+        Ok(())
+    }
+
+    fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
+        if let Some(t) = tables.get(&table.id)
+            && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
+        {
+        } else {
+            panic!("Table must be in creating procedure: {table:#?}")
+        }
+    }
+
+    pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
+        let core = self.core.lock().await;
+        let tables = &core.database.tables;
+        for id in table_ids {
+            assert_eq!(tables.get(&id), None,)
+        }
+    }
+
+    /// We clean the following tables:
+    /// 1. Those which belonged to incomplete Foreground jobs.
+    /// 2. Those which did not persist their table fragments, we can't recover these.
+    /// 3. Those which were only initialized, but not actually running yet.
+    /// 4. From 2, since we don't have internal table ids from the fragments,
+    ///    we can detect hanging table ids by just finding all internal ids
+    ///    with:
+    ///    1. `stream_job_status` = CREATING
+    ///    2. Not belonging to a background stream job.
+    ///    Clean up these hanging tables by the id.
+    pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let creating_tables: Vec<Table> = database_core.list_persisted_creating_tables();
+        tracing::debug!(
+            "creating_tables ids: {:#?}",
+            creating_tables.iter().map(|t| t.id).collect_vec()
+        );
+        let mut reserved_internal_tables = HashSet::new();
+        let mut tables_to_clean = vec![];
+        let mut internal_tables_to_clean = vec![];
+        for table in creating_tables {
+            tracing::trace!(
+                "checking table {} definition: {}, create_type: {:#?}, table_type: {:#?}",
+                table.id,
+                table.definition,
+                table.get_create_type().unwrap_or(CreateType::Foreground),
+                table.get_table_type().unwrap(),
+            );
+            // 1. Incomplete Foreground jobs
+            if table.create_type == CreateType::Foreground as i32
+                && table.table_type != TableType::Internal as i32
+            // || table.create_type == CreateType::Unspecified as i32
+            {
+                tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
+                tables_to_clean.push(table);
+                continue;
+            }
+            if table.table_type == TableType::Internal as i32 {
+                internal_tables_to_clean.push(table);
+                continue;
+            }
+
+            // 2. No table fragments
+            assert_ne!(table.table_type, TableType::Internal as i32);
+            match fragment_manager
+                .select_table_fragments_by_table_id(&table.id.into())
+                .await
+            {
+                Err(e) => {
+                    if e.is_fragment_not_found() {
+                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Ok(fragment) => {
+                    let fragment: TableFragments = fragment;
+                    // 3. For those in initial state (i.e. not running / created),
+                    // we should purge them.
+                    if fragment.state() == State::Initial {
+                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        assert_eq!(table.create_type, CreateType::Background as i32);
+                        // 4. Get all the corresponding internal tables, the rest we can purge.
+                        for id in fragment.internal_table_ids() {
+                            reserved_internal_tables.insert(id);
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        for t in internal_tables_to_clean {
+            if !reserved_internal_tables.contains(&t.id) {
+                tracing::debug!(
+                    "cleaning table_id for internal tables not reserved: {:#?}",
+                    t.id
+                );
+                tables_to_clean.push(t);
+            }
+        }
+
+        let mut tables_to_update = vec![];
+        for table in database_core.tables.values() {
+            if table.incoming_sinks.is_empty() {
+                continue;
+            }
+
+            if table
+                .incoming_sinks
+                .iter()
+                .all(|sink_id| database_core.sinks.contains_key(sink_id))
+            {
+                continue;
+            }
+
+            let mut table = table.clone();
+            table
+                .incoming_sinks
+                .retain(|sink_id| database_core.sinks.contains_key(sink_id));
+            tables_to_update.push(table);
+        }
+
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table in &tables_to_clean {
+            let table_id = table.id;
+            tracing::debug!("cleaning table_id: {}", table_id);
+            let table = tables.remove(table_id);
+            assert!(table.is_some(), "table_id {} missing", table_id)
+        }
+
+        for table in &tables_to_update {
+            let table_id = table.id;
+            if tables.contains_key(&table_id) {
+                tracing::debug!("updating sink target table_id: {}", table_id);
+                tables.insert(table_id, table.clone());
+            }
+        }
+
+        commit_meta!(self, tables)?;
+
+        if !tables_to_update.is_empty() {
+            let _ = self
+                .notify_frontend(
+                    Operation::Update,
+                    Info::RelationGroup(RelationGroup {
+                        relations: tables_to_update
+                            .into_iter()
+                            .map(|table| Relation {
+                                relation_info: RelationInfo::Table(table).into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
+        }
+
+        // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
+        // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
+        let event_logs = tables_to_clean
+            .iter()
+            .filter_map(|t| {
+                if t.table_type == TableType::Internal as i32 {
+                    return None;
+                }
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: t.id,
+                    name: t.name.to_owned(),
+                    definition: t.definition.to_owned(),
+                    error: "clear during recovery".to_string(),
+                };
+                Some(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ))
+            })
+            .collect_vec();
+        if !event_logs.is_empty() {
+            self.env.event_log_manager_ref().add_event_logs(event_logs);
+        }
+
+        let user_core = &mut core.user;
+        for table in &tables_to_clean {
+            // If table type is internal, no need to update the ref count OR
+            // user ref count.
+            if table.table_type != TableType::Internal as i32 {
+                // Recovered when init database manager.
+                for relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(*relation_id);
+                }
+                // Recovered when init user manager.
+                tracing::debug!("decrease ref for {}", table.id);
+                user_core.decrease_ref(table.owner);
+            }
+        }
+        Ok(())
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_table_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        table: &Table,
+        mut internal_tables: Vec<Table>,
+        mut table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        assert!(
-            !tables.contains_key(&table.id)
-                && database_core.in_progress_creation_tracker.contains(&key),
-            "table must be in creating procedure"
-        );
-        database_core.in_progress_creation_tracker.remove(&key);
-        database_core
-            .in_progress_creation_streaming_job
-            .remove(&table.id);
+        let tables = &mut database_core.tables;
+        if cfg!(not(test)) {
+            Self::assert_table_creating(tables, &table);
+        }
+        let mut tables = BTreeMapTransaction::new(tables);
 
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, tables)?;
 
+        tracing::debug!(id = ?table.id, "notifying frontend");
         let version = self
             .notify_frontend(
                 Operation::Add,
@@ -802,291 +1037,640 @@ where
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure(&self, table: &Table) {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        let user_core = &mut core.user;
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        assert!(
-            !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&key),
-            "table must be in creating procedure"
-        );
-
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
-        }
-        user_core.decrease_ref(table.owner);
-    }
-
-    /// return id of streaming jobs in the database which need to be dropped by stream manager.
-    pub async fn drop_table(
+    /// Used to cleanup states in stream manager.
+    /// It is required because failure may not necessarily happen in barrier,
+    /// e.g. when cordon nodes.
+    /// and we still need some way to cleanup the state.
+    ///
+    /// Returns false if `table_id` is not found.
+    pub async fn cancel_create_table_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-        fragment_manager: FragmentManagerRef<S>,
+    ) -> MetaResult<bool> {
+        let table = {
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table_id).cloned() else {
+                tracing::warn!(
+                    "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
+                    table_id
+                );
+                return Ok(false);
+            };
+            // `Unspecified` maps to Created state, due to backwards compatibility.
+            // `Created` states should not be cancelled.
+            if table
+                .get_stream_job_status()
+                .unwrap_or(StreamJobStatus::Created)
+                != StreamJobStatus::Creating
+            {
+                return Err(MetaError::invalid_parameter(format!(
+                    "table is not in creating state id={:#?}",
+                    table_id
+                )));
+            }
+
+            tracing::trace!("cleanup tables for {}", table.id);
+            let mut table_ids = vec![table.id];
+            table_ids.extend(internal_table_ids);
+
+            let tables = &mut database_core.tables;
+            let mut tables = BTreeMapTransaction::new(tables);
+            for table_id in table_ids {
+                let res = tables.remove(table_id);
+                assert!(res.is_some(), "table_id {} missing", table_id);
+            }
+            commit_meta!(self, tables)?;
+            table
+        };
+
+        {
+            let core = &mut self.core.lock().await;
+            {
+                let user_core = &mut core.user;
+                user_core.decrease_ref(table.owner);
+            }
+
+            {
+                let database_core = &mut core.database;
+                for &dependent_relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(dependent_relation_id);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
+    pub async fn drop_relation(
+        &self,
+        relation: RelationIdEnum,
+        fragment_manager: FragmentManagerRef,
+        drop_mode: DropMode,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let table = tables.remove(table_id);
-        if let Some(table) = table {
-            let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
+        // The deque holds all the relations we need to drop.
+        // As we traverse the relation DAG,
+        // more relations will be added and popped from this.
+        let mut deque = VecDeque::new();
+
+        // Relation dependencies is a DAG rather than a tree, so we need to use `HashSet` instead of
+        // `Vec` to record ids.
+        //         Sink
+        //          |
+        //        MView
+        //        /   \
+        //       View  |
+        //        \   /
+        //        Table
+
+        // `all_table_ids` are materialized view ids, table ids and index table ids.
+        let mut all_table_ids: HashSet<TableId> = HashSet::default();
+        let mut all_internal_table_ids: HashSet<TableId> = HashSet::default();
+        let mut all_index_ids: HashSet<IndexId> = HashSet::default();
+        let mut all_sink_ids: HashSet<SinkId> = HashSet::default();
+        let mut all_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_view_ids: HashSet<ViewId> = HashSet::default();
+        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
+
+        let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
+            let tables_depend_on = tables
                 .tree_ref()
                 .iter()
-                .filter(|(_, index)| index.primary_table_id == table_id)
-                .map(|(index_id, index)| (*index_id, index.index_table_id))
-                .unzip();
+                .filter_map(|(_, table)| {
+                    if table.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::Table(table.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
 
-            let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
-            for index_table_id in &index_table_ids {
-                let internal_table_ids = match fragment_manager
-                    .select_table_fragments_by_table_id(&(index_table_id.into()))
-                    .await
-                    .map(|fragments| fragments.internal_table_ids())
-                {
-                    Ok(v) => v,
-                    // Handle backwards compat with no state persistence.
-                    Err(_) => vec![],
-                };
+            let sinks_depend_on = sinks
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, sink)| {
+                    if sink.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::Sink(sink.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
 
-                // 1 should be used by table scan.
-                if internal_table_ids.len() == 1 {
-                    index_internal_table_ids.push(internal_table_ids[0]);
+            let views_depend_on = views
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, view)| {
+                    if view.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::View(view.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
+            // We don't need to output indexes because they have been handled by tables.
+            tables_depend_on
+                .into_iter()
+                .chain(sinks_depend_on)
+                .chain(views_depend_on)
+                .collect()
+        };
+
+        // Initial push into deque.
+        match relation {
+            RelationIdEnum::Table(table_id) => {
+                let table = tables.get(&table_id).cloned();
+                if let Some(table) = table {
+                    for incoming_sink in &table.incoming_sinks {
+                        let sink = sinks.get(incoming_sink).cloned();
+                        if let Some(sink) = sink {
+                            deque.push_back(RelationInfo::Sink(sink));
+                        }
+                    }
+
+                    deque.push_back(RelationInfo::Table(table));
                 } else {
-                    // backwards compatibility with indexes
-                    // without backfill state persisted.
-                    assert_eq!(internal_table_ids.len(), 0);
+                    bail!("table doesn't exist");
                 }
             }
-
-            if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
-                if ref_count > index_ids.len() {
-                    return Err(MetaError::permission_denied(format!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it",
-                        table.name, ref_count
-                    )));
+            RelationIdEnum::Index(index_id) => {
+                let index = indexes.get(&index_id).cloned();
+                if let Some(index) = index {
+                    deque.push_back(RelationInfo::Index(index));
+                } else {
+                    bail!("index doesn't exist");
                 }
             }
+            RelationIdEnum::Sink(sink_id) => {
+                let sink = sinks.get(&sink_id).cloned();
+                if let Some(sink) = sink {
+                    deque.push_back(RelationInfo::Sink(sink));
+                } else {
+                    bail!("sink doesn't exist");
+                }
+            }
+            RelationIdEnum::View(view_id) => {
+                let view = views.get(&view_id).cloned();
+                if let Some(view) = view {
+                    deque.push_back(RelationInfo::View(view));
+                } else {
+                    bail!("source doesn't exist");
+                }
+            }
+            RelationIdEnum::Source(source_id) => {
+                let source = sources.get(&source_id).cloned();
+                if let Some(source) = source {
+                    deque.push_back(RelationInfo::Source(source));
+                } else {
+                    bail!("view doesn't exist");
+                }
+            }
+        }
 
-            let indexes_removed = index_ids
+        // Drop cascade loop
+        while let Some(relation_info) = deque.pop_front() {
+            match relation_info {
+                RelationInfo::Table(table) => {
+                    let table_id: TableId = table.id;
+                    if !all_table_ids.insert(table_id) {
+                        continue;
+                    }
+
+                    let table_fragments = fragment_manager
+                        .select_table_fragments_by_table_id(&table_id.into())
+                        .await?;
+
+                    all_internal_table_ids.extend(table_fragments.internal_table_ids());
+
+                    let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
+                        .tree_ref()
+                        .iter()
+                        .filter(|(_, index)| index.primary_table_id == table_id)
+                        .map(|(index_id, index)| (*index_id, index.index_table_id))
+                        .unzip();
+
+                    all_index_ids.extend(index_ids.iter().cloned());
+                    all_table_ids.extend(index_table_ids.iter().cloned());
+
+                    for index_table_id in &index_table_ids {
+                        let internal_table_ids = match fragment_manager
+                            .select_table_fragments_by_table_id(&(index_table_id.into()))
+                            .await
+                            .map(|fragments| fragments.internal_table_ids())
+                        {
+                            Ok(v) => v,
+                            // Handle backwards compat with no state persistence.
+                            Err(_) => vec![],
+                        };
+
+                        // 1 should be used by table scan.
+                        if internal_table_ids.len() == 1 {
+                            all_internal_table_ids.insert(internal_table_ids[0]);
+                        } else {
+                            // backwards compatibility with indexes
+                            // without backfill state persisted.
+                            assert_eq!(internal_table_ids.len(), 0);
+                        }
+                    }
+
+                    let index_tables = index_table_ids
+                        .iter()
+                        .map(|index_table_id| tables.get(index_table_id).cloned().unwrap())
+                        .collect_vec();
+
+                    for index_table in &index_tables {
+                        if let Some(ref_count) =
+                            database_core.relation_ref_count.get(&index_table.id)
+                        {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete index table `{}` because {} other relation(s) depend on it",
+                                        index_table.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(index_table.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref_count) =
+                        database_core.relation_ref_count.get(&table_id).cloned()
+                    {
+                        if ref_count > index_ids.len() {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                        table.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in relations_depend_on(table.id as RelationId)
+                                    {
+                                        if let RelationInfo::Table(t) = &relation_info {
+                                            // Filter table belongs to index_table_ids.
+                                            if !index_table_ids.contains(&t.id) {
+                                                deque.push_back(relation_info);
+                                            }
+                                        } else {
+                                            deque.push_back(relation_info);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(
+                        associated_source_id,
+                    )) = table.optional_associated_source_id
+                    {
+                        all_source_ids.insert(associated_source_id);
+                    }
+                }
+                RelationInfo::Index(index) => {
+                    if !all_index_ids.insert(index.id) {
+                        continue;
+                    }
+                    all_table_ids.insert(index.index_table_id);
+
+                    let internal_table_ids = match fragment_manager
+                        .select_table_fragments_by_table_id(&(index.index_table_id.into()))
+                        .await
+                        .map(|fragments| fragments.internal_table_ids())
+                    {
+                        Ok(v) => v,
+                        // Handle backwards compat with no state persistence.
+                        Err(_) => vec![],
+                    };
+
+                    // 1 should be used by table scan.
+                    if internal_table_ids.len() == 1 {
+                        all_internal_table_ids.insert(internal_table_ids[0]);
+                    } else {
+                        // backwards compatibility with indexes
+                        // without backfill state persisted.
+                        assert_eq!(internal_table_ids.len(), 0);
+                    }
+
+                    if let Some(ref_count) = database_core
+                        .relation_ref_count
+                        .get(&index.index_table_id)
+                        .cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete index `{}` because {} other relation(s) depend on it",
+                                        index.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(index.index_table_id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                RelationInfo::Source(source) => {
+                    if !all_source_ids.insert(source.id) {
+                        continue;
+                    }
+
+                    // cdc source streaming job
+                    if let Some(info) = source.info
+                        && info.cdc_source_job
+                    {
+                        all_cdc_source_ids.insert(source.id);
+                        let source_table_fragments = fragment_manager
+                            .select_table_fragments_by_table_id(&source.id.into())
+                            .await?;
+                        all_internal_table_ids.extend(source_table_fragments.internal_table_ids());
+                    }
+
+                    if let Some(ref_count) =
+                        database_core.relation_ref_count.get(&source.id).cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete source `{}` because {} other relation(s) depend on it",
+                                        source.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(source.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                RelationInfo::View(view) => {
+                    if !all_view_ids.insert(view.id) {
+                        continue;
+                    }
+
+                    if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete view `{}` because {} other relation(s) depend on it",
+                                        view.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in relations_depend_on(view.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                RelationInfo::Sink(sink) => {
+                    if !all_sink_ids.insert(sink.id) {
+                        continue;
+                    }
+                    let table_fragments = fragment_manager
+                        .select_table_fragments_by_table_id(&sink.id.into())
+                        .await?;
+
+                    all_internal_table_ids.extend(table_fragments.internal_table_ids());
+
+                    if let Some(ref_count) = database_core.relation_ref_count.get(&sink.id).cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete sink `{}` because {} other relation(s) depend on it",
+                                        sink.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in relations_depend_on(sink.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let tables_removed = all_table_ids
+            .iter()
+            .map(|table_id| tables.remove(*table_id).unwrap())
+            .collect_vec();
+
+        let indexes_removed = all_index_ids
+            .iter()
+            .map(|index_id| indexes.remove(*index_id).unwrap())
+            .collect_vec();
+
+        let sources_removed = all_source_ids
+            .iter()
+            .map(|source_id| sources.remove(*source_id).unwrap())
+            .collect_vec();
+
+        let views_removed = all_view_ids
+            .iter()
+            .map(|view_id| views.remove(*view_id).unwrap())
+            .collect_vec();
+
+        let sinks_removed = all_sink_ids
+            .iter()
+            .map(|sink_id| sinks.remove(*sink_id).unwrap())
+            .collect_vec();
+
+        if !matches!(relation, RelationIdEnum::Sink(_)) {
+            let table_sinks = sinks_removed
                 .iter()
-                .map(|index_id| indexes.remove(*index_id).unwrap())
-                .collect_vec();
-            let index_tables = index_table_ids
-                .iter()
-                .map(|index_table_id| tables.remove(*index_table_id).unwrap())
-                .collect_vec();
-            let index_internal_tables = index_internal_table_ids
-                .iter()
-                .map(|index_internal_table_id| {
-                    tables
-                        .remove(*index_internal_table_id)
-                        .expect("internal index table should exist")
+                .filter(|sink| {
+                    if let Some(target_table) = sink.target_table {
+                        // Table sink but associated with the table
+                        if matches!(relation, RelationIdEnum::Table(table_id) if table_id == target_table) {
+                            false
+                        } else {
+                            // Table sink
+                            true
+                        }
+                    } else {
+                        // Normal sink
+                        false
+                    }
                 })
                 .collect_vec();
-            for index_table in &index_tables {
-                if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
-                    return Err(MetaError::permission_denied(format!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it",
-                        index_table.name, ref_count
-                    )));
-                }
-            }
 
-            let internal_tables = internal_table_ids
+            // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
+            if !table_sinks.is_empty() {
+                bail!(
+                    "Found {} sink(s) into table in dependency, please drop them manually",
+                    table_sinks.len()
+                );
+            }
+        }
+
+        let internal_tables = all_internal_table_ids
+            .iter()
+            .map(|internal_table_id| {
+                tables
+                    .remove(*internal_table_id)
+                    .expect("internal table should exist")
+            })
+            .collect_vec();
+
+        let users_need_update = {
+            // TODO: add sources, sinks and views
+            let table_to_drop_ids = all_table_ids
                 .iter()
-                .map(|internal_table_id| {
-                    tables
-                        .remove(*internal_table_id)
-                        .expect("internal table should exist")
-                })
+                .chain(&all_internal_table_ids)
+                .cloned()
                 .collect_vec();
 
-            let users_need_update = {
-                let table_to_drop_ids = index_table_ids
-                    .iter()
-                    .chain(&index_internal_table_ids)
-                    .chain(&internal_table_ids)
-                    .chain([&table_id])
-                    .collect_vec();
+            Self::update_user_privileges(
+                &mut users,
+                &table_to_drop_ids
+                    .into_iter()
+                    .map(Object::TableId)
+                    .chain(all_source_ids.into_iter().map(Object::SourceId))
+                    .chain(all_view_ids.into_iter().map(Object::ViewId))
+                    .chain(all_sink_ids.iter().cloned().map(Object::SinkId))
+                    .collect_vec(),
+            )
+        };
 
-                Self::update_user_privileges(
-                    &mut users,
-                    &table_to_drop_ids
-                        .into_iter()
-                        .map(|table_id| Object::TableId(*table_id))
-                        .collect_vec(),
-                )
-            };
+        commit_meta!(self, tables, indexes, sources, views, sinks, users)?;
 
-            commit_meta!(self, tables, indexes, users)?;
+        for index in &indexes_removed {
+            user_core.decrease_ref(index.owner);
+        }
 
-            indexes_removed.iter().for_each(|index| {
-                // index table and index.
-                user_core.decrease_ref_count(index.owner, 2);
-            });
+        // `tables_removed` contains both index table and mv.
+        for table in &tables_removed {
             user_core.decrease_ref(table.owner);
+        }
 
-            for index_table in &index_tables {
-                for dependent_relation_id in &index_table.dependent_relations {
-                    database_core.decrease_ref_count(*dependent_relation_id);
-                }
-            }
+        for source in &sources_removed {
+            user_core.decrease_ref(source.owner);
+            refcnt_dec_connection(database_core, source.connection_id);
+        }
 
-            for user in users_need_update {
-                self.notify_frontend(Operation::Update, Info::User(user))
-                    .await;
-            }
+        for view in &views_removed {
+            user_core.decrease_ref(view.owner);
+        }
 
+        for sink in &sinks_removed {
+            user_core.decrease_ref(sink.owner);
+        }
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        // decrease dependent relations
+        for table in &tables_removed {
             for dependent_relation_id in &table.dependent_relations {
                 database_core.decrease_ref_count(*dependent_relation_id);
             }
-
-            let version = self
-                .notify_frontend(
-                    Operation::Delete,
-                    Info::RelationGroup(RelationGroup {
-                        relations: indexes_removed
-                            .into_iter()
-                            .map(|index| Relation {
-                                relation_info: RelationInfo::Index(index).into(),
-                            })
-                            .chain(
-                                internal_tables
-                                    .into_iter()
-                                    .chain(index_tables.into_iter())
-                                    .chain(index_internal_tables.into_iter())
-                                    .map(|internal_table| Relation {
-                                        relation_info: RelationInfo::Table(internal_table).into(),
-                                    }),
-                            )
-                            .chain(vec![Relation {
-                                relation_info: RelationInfo::Table(table.to_owned()).into(),
-                            }])
-                            .collect_vec(),
-                    }),
-                )
-                .await;
-
-            let catalog_deleted_ids = index_table_ids
-                .into_iter()
-                .chain(std::iter::once(table_id))
-                .map(|id| id.into())
-                .collect_vec();
-
-            Ok((version, catalog_deleted_ids))
-        } else {
-            bail!("table doesn't exist");
         }
-    }
 
-    pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {
-        let guard = self.core.lock().await;
-        let index = guard.database.indexes.get(&index_id);
-        if let Some(index) = index {
-            Ok(index.index_table_id)
-        } else {
-            bail!("index doesn't exist");
-        }
-    }
-
-    pub async fn drop_index(
-        &self,
-        index_id: IndexId,
-        index_table_id: TableId,
-        internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<NotificationVersion> {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        database_core.ensure_index_id(index_id)?;
-
-        let user_core = &mut core.user;
-        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-
-        let index = indexes.remove(index_id).unwrap();
-        assert_eq!(index_table_id, index.index_table_id);
-
-        // drop index table
-        let table = tables.remove(index_table_id);
-        if let Some(table) = table {
-            match database_core
-                .relation_ref_count
-                .get(&index_table_id)
-                .cloned()
-            {
-                Some(ref_count) => Err(MetaError::permission_denied(format!(
-                    "Fail to delete table `{}` because {} other relation(s) depend on it",
-                    table.name, ref_count
-                ))),
-                None => {
-                    let internal_tables = internal_table_ids
-                        .iter()
-                        .map(|internal_table_id| {
-                            tables
-                                .remove(*internal_table_id)
-                                .expect("internal table should exist")
-                        })
-                        .collect_vec();
-
-                    let dependent_relations = table.dependent_relations.clone();
-
-                    let objects = iter::once(table.id)
-                        .chain(internal_table_ids)
-                        .map(Object::TableId)
-                        .collect_vec();
-
-                    let users_need_update = Self::update_user_privileges(&mut users, &objects);
-
-                    commit_meta!(self, tables, indexes, users)?;
-
-                    // index table and index.
-                    user_core.decrease_ref_count(index.owner, 2);
-
-                    for user in users_need_update {
-                        self.notify_frontend(Operation::Update, Info::User(user))
-                            .await;
-                    }
-
-                    for dependent_relation_id in dependent_relations {
-                        database_core.decrease_ref_count(dependent_relation_id);
-                    }
-
-                    let version = self
-                        .notify_frontend(
-                            Operation::Delete,
-                            Info::RelationGroup(RelationGroup {
-                                relations: vec![
-                                    Relation {
-                                        relation_info: RelationInfo::Table(table.to_owned()).into(),
-                                    },
-                                    Relation {
-                                        relation_info: RelationInfo::Index(index).into(),
-                                    },
-                                ]
-                                .into_iter()
-                                .chain(internal_tables.into_iter().map(|internal_table| Relation {
-                                    relation_info: RelationInfo::Table(internal_table).into(),
-                                }))
-                                .collect_vec(),
-                            }),
-                        )
-                        .await;
-
-                    Ok(version)
-                }
+        for view in &views_removed {
+            for dependent_relation_id in &view.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
             }
-        } else {
-            bail!("index table doesn't exist",)
         }
+
+        for sink in &sinks_removed {
+            if let Some(connection_id) = sink.connection_id {
+                // TODO(siyuan): wait for yezizp to refactor ref cnt
+                database_core.decrease_ref_count(connection_id);
+            }
+            for dependent_relation_id in &sink.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Delete,
+                Info::RelationGroup(RelationGroup {
+                    relations: indexes_removed
+                        .into_iter()
+                        .map(|index| Relation {
+                            relation_info: RelationInfo::Index(index).into(),
+                        })
+                        .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                            relation_info: RelationInfo::Table(internal_table).into(),
+                        }))
+                        .chain(tables_removed.into_iter().map(|table| Relation {
+                            relation_info: RelationInfo::Table(table).into(),
+                        }))
+                        .chain(sources_removed.into_iter().map(|source| Relation {
+                            relation_info: RelationInfo::Source(source).into(),
+                        }))
+                        .chain(views_removed.into_iter().map(|view| Relation {
+                            relation_info: RelationInfo::View(view).into(),
+                        }))
+                        .chain(sinks_removed.into_iter().map(|sink| Relation {
+                            relation_info: RelationInfo::Sink(sink).into(),
+                        }))
+                        .collect_vec(),
+                }),
+            )
+            .await;
+
+        let catalog_deleted_ids: Vec<StreamingJobId> = all_table_ids
+            .into_iter()
+            .map(|id| id.into())
+            .chain(all_sink_ids.into_iter().map(|id| id.into()))
+            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
+            .collect_vec();
+
+        Ok((version, catalog_deleted_ids))
     }
 
     pub async fn alter_table_name(
@@ -1327,6 +1911,544 @@ where
         .await
     }
 
+    pub async fn alter_schema_name(
+        &self,
+        schema_id: SchemaId,
+        schema_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_schema_id(schema_id)?;
+
+        // 1. validate new schema name.
+        let mut schema = database_core.schemas.get(&schema_id).unwrap().clone();
+        database_core.check_schema_duplicated(&(schema.database_id, schema_name.to_string()))?;
+
+        // 2. rename schema.
+        schema.name = schema_name.to_string();
+
+        // 3. update, commit and notify.
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        schemas.insert(schema_id, schema.clone());
+        commit_meta!(self, schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Schema(schema))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_database_name(
+        &self,
+        database_id: SchemaId,
+        database_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(database_id)?;
+
+        // 1. validate new database name.
+        let database_name = database_name.to_string();
+        let mut database = database_core.databases.get(&database_id).unwrap().clone();
+        database_core.check_database_duplicated(&database_name)?;
+
+        // 2. rename database.
+        database.name = database_name;
+
+        // 3. update, commit and notify.
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        databases.insert(database_id, database.clone());
+        commit_meta!(self, databases)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Database(database))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        let source_id = source.get_id();
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        let original_source = database_core.sources.get(&source_id).unwrap().clone();
+        if original_source.get_version() + 1 != source.get_version() {
+            bail!("source version is stale");
+        }
+
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        sources.insert(source_id, source.clone());
+        commit_meta!(self, sources)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Source(source))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_owner(
+        &self,
+        fragment_manager: FragmentManagerRef,
+        object: alter_owner_request::Object,
+        owner_id: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+
+        let relation_info;
+        match object {
+            alter_owner_request::Object::TableId(table_id) => {
+                database_core.ensure_table_id(table_id)?;
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+
+                let table = tables.tree_ref().get(&table_id).unwrap();
+                let old_owner_id = table.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                // associated source id.
+                let to_update_source_id = if let Some(
+                    OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
+                ) = &table.optional_associated_source_id
+                {
+                    Some(*associated_source_id)
+                } else {
+                    None
+                };
+
+                let mut to_update_table_ids = vec![table_id];
+                let mut to_update_internal_table_ids = vec![];
+
+                // indexes and index tables.
+                let (to_update_index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
+                    .tree_ref()
+                    .iter()
+                    .filter(|(_, index)| index.primary_table_id == table_id)
+                    .map(|(index_id, index)| (*index_id, index.index_table_id))
+                    .unzip();
+                to_update_table_ids.extend(index_table_ids);
+
+                // internal tables.
+                for id in &to_update_table_ids {
+                    let table_fragment = fragment_manager
+                        .select_table_fragments_by_table_id(&(id.into()))
+                        .await?;
+                    to_update_internal_table_ids.extend(table_fragment.internal_table_ids());
+                }
+
+                let mut relations = vec![];
+                // update owner.
+                for id in &to_update_table_ids {
+                    let mut table = tables.get_mut(*id).unwrap();
+                    assert_eq!(old_owner_id, table.owner);
+                    table.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone())),
+                    });
+                }
+                for index_id in &to_update_index_ids {
+                    let mut index = indexes.get_mut(*index_id).unwrap();
+                    assert_eq!(old_owner_id, index.owner);
+                    index.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Index(index.clone())),
+                    });
+                }
+                if let Some(associated_source_id) = &to_update_source_id {
+                    let mut source = sources.get_mut(*associated_source_id).unwrap();
+                    assert_eq!(old_owner_id, source.owner);
+                    source.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Source(source.clone())),
+                    });
+                }
+                for internal_table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(internal_table_id).unwrap();
+                    assert_eq!(old_owner_id, table.owner);
+                    table.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone())),
+                    });
+                }
+
+                commit_meta!(self, tables, indexes, sources)?;
+                let count = to_update_table_ids.len()
+                    + to_update_index_ids.len()
+                    + to_update_source_id.map_or(0, |_| 1);
+                user_core.decrease_ref_count(old_owner_id, count);
+                user_core.increase_ref_count(owner_id, count);
+                relation_info = Info::RelationGroup(RelationGroup { relations });
+            }
+            alter_owner_request::Object::ViewId(view_id) => {
+                database_core.ensure_view_id(view_id)?;
+                let mut views = BTreeMapTransaction::new(&mut database_core.views);
+                let mut view = views.get_mut(view_id).unwrap();
+                let old_owner_id = view.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                view.owner = owner_id;
+                relation_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::View(view.clone())),
+                    }],
+                });
+                commit_meta!(self, views)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
+            alter_owner_request::Object::SourceId(source_id) => {
+                database_core.ensure_source_id(source_id)?;
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut source = sources.get_mut(source_id).unwrap();
+                let old_owner_id = source.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                source.owner = owner_id;
+                relation_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::Source(source.clone())),
+                    }],
+                });
+                commit_meta!(self, sources)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
+            alter_owner_request::Object::SinkId(sink_id) => {
+                database_core.ensure_sink_id(sink_id)?;
+                let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                let mut sink = sinks.get_mut(sink_id).unwrap();
+                let old_owner_id = sink.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                sink.owner = owner_id;
+
+                let mut relations = vec![Relation {
+                    relation_info: Some(RelationInfo::Sink(sink.clone())),
+                }];
+
+                // internal tables
+                let internal_table_ids = fragment_manager
+                    .select_table_fragments_by_table_id(&(sink_id.into()))
+                    .await?
+                    .internal_table_ids();
+                for id in internal_table_ids {
+                    let mut table = tables.get_mut(id).unwrap();
+                    assert_eq!(old_owner_id, table.owner);
+                    table.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone())),
+                    });
+                }
+
+                relation_info = Info::RelationGroup(RelationGroup { relations });
+                commit_meta!(self, sinks, tables)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
+            alter_owner_request::Object::DatabaseId(database_id) => {
+                database_core.ensure_database_id(database_id)?;
+                let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+                let mut database = databases.get_mut(database_id).unwrap();
+                let old_owner_id = database.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                database.owner = owner_id;
+                relation_info = Info::Database(database.clone());
+                let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+                let mut user = users.get_mut(owner_id).unwrap();
+                let new_grant_privilege = GrantPrivilege {
+                    object: Some(Object::DatabaseId(database_id)),
+                    action_with_opts: vec![{
+                        ActionWithGrantOption {
+                            action: Action::Connect as _,
+                            with_grant_option: false,
+                            granted_by: old_owner_id,
+                        }
+                    }],
+                };
+                if let Some(privilege) = user
+                    .grant_privileges
+                    .iter_mut()
+                    .find(|p| p.object == new_grant_privilege.object)
+                {
+                    Self::merge_privilege(privilege, &new_grant_privilege);
+                } else {
+                    user.grant_privileges.push(new_grant_privilege.clone());
+                }
+                let user_info = Info::User(user.clone());
+                commit_meta!(self, databases, users)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+                self.notify_frontend(Operation::Update, user_info).await;
+                let version = self.notify_frontend(Operation::Update, relation_info).await;
+                return Ok(version);
+            }
+            alter_owner_request::Object::SchemaId(schema_id) => {
+                database_core.ensure_schema_id(schema_id)?;
+                let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+                let mut schema = schemas.get_mut(schema_id).unwrap();
+                let old_owner_id = schema.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                schema.owner = owner_id;
+                relation_info = Info::Schema(schema.clone());
+                commit_meta!(self, schemas)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
+        };
+
+        let version = self.notify_frontend(Operation::Update, relation_info).await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_set_schema(
+        &self,
+        fragment_manager: FragmentManagerRef,
+        object: alter_set_schema_request::Object,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+
+        database_core.ensure_schema_id(new_schema_id)?;
+        let database_id = database_core
+            .schemas
+            .get(&new_schema_id)
+            .unwrap()
+            .get_database_id();
+
+        let mut relation_infos = Vec::new();
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                database_core.ensure_table_id(table_id)?;
+                let Table {
+                    name,
+                    optional_associated_source_id,
+                    schema_id,
+                    ..
+                } = database_core.tables.get(&table_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                // associated source id.
+                let to_update_source_id = if let Some(
+                    OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
+                ) = optional_associated_source_id
+                {
+                    Some(*associated_source_id)
+                } else {
+                    None
+                };
+
+                let mut to_update_table_ids = vec![table_id];
+                let mut to_update_internal_table_ids = vec![];
+
+                // indexes and index tables.
+                let (to_update_index_ids, index_table_ids): (Vec<_>, Vec<_>) = database_core
+                    .indexes
+                    .iter()
+                    .filter(|(_, index)| index.primary_table_id == table_id)
+                    .map(|(index_id, index)| (*index_id, index.index_table_id))
+                    .unzip();
+                to_update_table_ids.extend(index_table_ids);
+
+                // internal tables.
+                for table_id in &to_update_table_ids {
+                    let table_fragment = fragment_manager
+                        .select_table_fragments_by_table_id(&(table_id.into()))
+                        .await?;
+                    to_update_internal_table_ids.extend(table_fragment.internal_table_ids());
+                }
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_table_ids
+                    .into_iter()
+                    .chain(to_update_internal_table_ids)
+                {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                if let Some(source_id) = to_update_source_id {
+                    let mut source = sources.get_mut(source_id).unwrap();
+                    source.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                }
+
+                let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+                for index_id in to_update_index_ids {
+                    let mut index = indexes.get_mut(index_id).unwrap();
+                    index.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Index(index.clone())));
+                }
+
+                commit_meta!(self, tables, sources, indexes)?;
+            }
+            alter_set_schema_request::Object::ViewId(view_id) => {
+                database_core.ensure_view_id(view_id)?;
+                let View {
+                    name, schema_id, ..
+                } = database_core.views.get(&view_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut views = BTreeMapTransaction::new(&mut database_core.views);
+                let mut view = views.get_mut(view_id).unwrap();
+                view.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::View(view.clone())));
+                commit_meta!(self, views)?;
+            }
+            alter_set_schema_request::Object::SourceId(source_id) => {
+                database_core.ensure_source_id(source_id)?;
+                let Source {
+                    name, schema_id, ..
+                } = database_core.sources.get(&source_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut source = sources.get_mut(source_id).unwrap();
+                source.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                commit_meta!(self, sources)?;
+            }
+            alter_set_schema_request::Object::SinkId(sink_id) => {
+                database_core.ensure_sink_id(sink_id)?;
+                let Sink {
+                    name, schema_id, ..
+                } = database_core.sinks.get(&sink_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(sink_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+                let mut sink = sinks.get_mut(sink_id).unwrap();
+                sink.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Sink(sink.clone())));
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, sinks, tables)?;
+            }
+            alter_set_schema_request::Object::ConnectionId(connection_id) => {
+                database_core.ensure_connection_id(connection_id)?;
+                let Connection {
+                    name, schema_id, ..
+                } = database_core.connections.get(&connection_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_connection_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+                let mut connection = connections.get_mut(connection_id).unwrap();
+                connection.schema_id = new_schema_id;
+                let notify_info = Info::Connection(connection.clone());
+                commit_meta!(self, connections)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+            alter_set_schema_request::Object::FunctionId(function_id) => {
+                database_core.ensure_function_id(function_id)?;
+                let Function {
+                    name,
+                    arg_types,
+                    schema_id,
+                    ..
+                } = database_core.functions.get(&function_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_function_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                    arg_types.to_owned(),
+                ))?;
+                let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+                let mut function = functions.get_mut(function_id).unwrap();
+                function.schema_id = new_schema_id;
+                let notify_info = Info::Function(function.clone());
+                commit_meta!(self, functions)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: relation_infos
+                        .into_iter()
+                        .map(|relation_info| Relation { relation_info })
+                        .collect_vec(),
+                }),
+            )
+            .await;
+        Ok(version)
+    }
+
     pub async fn alter_index_name(
         &self,
         index_id: IndexId,
@@ -1352,6 +2474,7 @@ where
         // 2. rename index name.
         index.name = index_name.to_string();
         index_table.name = index_name.to_string();
+        index_table.definition = alter_relation_rename(&index_table.definition, index_name);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         indexes.insert(index_id, index.clone());
@@ -1413,10 +2536,12 @@ where
 
     pub async fn finish_create_source_procedure(
         &self,
-        source: &Source,
+        mut source: Source,
+        mut internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let key = (source.database_id, source.schema_id, source.name.clone());
         assert!(
@@ -1425,12 +2550,28 @@ where
             "source must be in creating procedure"
         );
         database_core.in_progress_creation_tracker.remove(&key);
-        sources.insert(source.id, source.clone());
 
-        commit_meta!(self, sources)?;
+        source.created_at_epoch = Some(Epoch::now().0);
+        sources.insert(source.id, source.clone());
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
+            tables.insert(table.id, table.clone());
+        }
+        commit_meta!(self, sources, tables)?;
 
         let version = self
-            .notify_frontend_relation_info(Operation::Add, RelationInfo::Source(source.to_owned()))
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: std::iter::once(Relation {
+                        relation_info: RelationInfo::Source(source.to_owned()).into(),
+                    })
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
             .await;
 
         Ok(version)
@@ -1451,43 +2592,6 @@ where
         user_core.decrease_ref(source.owner);
         refcnt_dec_connection(database_core, source.connection_id);
         Ok(())
-    }
-
-    pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        database_core.ensure_source_id(source_id)?;
-
-        let user_core = &mut core.user;
-        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
-        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-
-        let source = sources.remove(source_id).unwrap();
-
-        match database_core.relation_ref_count.get(&source_id) {
-            Some(ref_count) => Err(MetaError::permission_denied(format!(
-                "Fail to delete source `{}` because {} other relation(s) depend on it",
-                source.name, ref_count
-            ))),
-            None => {
-                let users_need_update =
-                    Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
-                commit_meta!(self, sources, users)?;
-
-                user_core.decrease_ref(source.owner);
-                refcnt_dec_connection(database_core, source.connection_id);
-
-                for user in users_need_update {
-                    self.notify_frontend(Operation::Update, Info::User(user))
-                        .await;
-                }
-                let version = self
-                    .notify_frontend_relation_info(Operation::Delete, RelationInfo::Source(source))
-                    .await;
-
-                Ok(version)
-            }
-        }
     }
 
     pub async fn start_create_table_procedure_with_source(
@@ -1527,9 +2631,9 @@ where
 
     pub async fn finish_create_table_procedure_with_source(
         &self,
-        source: &Source,
-        mview: &Table,
-        internal_tables: Vec<Table>,
+        source: Source,
+        mut mview: Table,
+        mut internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1560,8 +2664,10 @@ where
             .remove(&mview.id);
 
         sources.insert(source.id, source.clone());
+        mview.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(mview.id, mview.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, sources, tables)?;
@@ -1598,9 +2704,7 @@ where
         let table_key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             !database_core.sources.contains_key(&source.id)
-                && !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&source_key)
-                && database_core.has_in_progress_creation(&table_key),
+                && !database_core.tables.contains_key(&table.id),
             "table and source must be in creating procedure"
         );
 
@@ -1609,201 +2713,6 @@ where
         database_core.unmark_creating_streaming_job(table.id);
         user_core.decrease_ref_count(source.owner, 2); // source and table
         refcnt_dec_connection(database_core, source.connection_id);
-    }
-
-    /// return id of streaming jobs in the database which need to be dropped by stream manager.
-    /// NOTE: This method repeats a lot with `drop_table`. Might need refactor.
-    pub async fn drop_table_with_source(
-        &self,
-        source_id: SourceId,
-        table_id: TableId,
-        internal_table_ids: Vec<TableId>,
-        fragment_manager: FragmentManagerRef<S>,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
-        trace!(%source_id, %table_id, ?internal_table_ids, "drop table with source");
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        let user_core = &mut core.user;
-
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
-        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
-        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-
-        let mview = tables.remove(table_id);
-        let source = sources.remove(source_id);
-        match (mview, source) {
-            (Some(mview), Some(source)) => {
-                if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) =
-                    mview.optional_associated_source_id
-                {
-                    if associated_source_id != source_id {
-                        bail!("mview's associated source id doesn't match source id");
-                    }
-                } else {
-                    bail!("mview do not have associated source id");
-                }
-
-                // Check `ref_count`
-                let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
-                    .tree_ref()
-                    .iter()
-                    .filter(|(_, index)| index.primary_table_id == table_id)
-                    .map(|(index_id, index)| (*index_id, index.index_table_id))
-                    .unzip();
-
-                let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
-
-                for index_table_id in &index_table_ids {
-                    let internal_table_ids = match fragment_manager
-                        .select_table_fragments_by_table_id(&(index_table_id.into()))
-                        .await
-                        .map(|fragments| fragments.internal_table_ids())
-                    {
-                        Ok(v) => v,
-                        // Handle backwards compat with no state persistence.
-                        Err(_) => vec![],
-                    };
-
-                    // 1 should be used by table scan.
-                    if internal_table_ids.len() == 1 {
-                        index_internal_table_ids.push(internal_table_ids[0]);
-                    } else {
-                        // backwards compatibility with indexes
-                        // without backfill state persisted.
-                        assert_eq!(internal_table_ids.len(), 0);
-                    }
-                }
-
-                if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
-                    // Indexes are dependent on table. We can drop table only if its `ref_count` is
-                    // strictly equal to number of indexes.
-                    if ref_count > index_ids.len() {
-                        return Err(MetaError::permission_denied(format!(
-                            "Fail to delete table `{}` because {} other relation(s) depend on it",
-                            mview.name, ref_count
-                        )));
-                    }
-                }
-                if let Some(ref_count) = database_core.relation_ref_count.get(&source_id).cloned() {
-                    return Err(MetaError::permission_denied(format!(
-                        "Fail to delete source `{}` because {} other relation(s) depend on it",
-                        source.name, ref_count
-                    )));
-                }
-
-                let indexes_removed = index_ids
-                    .iter()
-                    .map(|index_id| indexes.remove(*index_id).unwrap())
-                    .collect_vec();
-                let index_tables = index_table_ids
-                    .iter()
-                    .map(|index_table_id| tables.remove(*index_table_id).unwrap())
-                    .collect_vec();
-                let index_internal_tables = index_internal_table_ids
-                    .iter()
-                    .map(|index_internal_table_id| {
-                        tables
-                            .remove(*index_internal_table_id)
-                            .expect("internal index table should exist")
-                    })
-                    .collect_vec();
-                for index_table in &index_tables {
-                    if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
-                        return Err(MetaError::permission_denied(format!(
-                            "Fail to delete table `{}` because {} other relation(s) depend on it",
-                            index_table.name, ref_count
-                        )));
-                    }
-                }
-
-                let internal_tables = internal_table_ids
-                    .iter()
-                    .copied()
-                    .map(|id| tables.remove(id).expect("internal table should exist"))
-                    .collect_vec();
-
-                let objects = [Object::SourceId(source_id), Object::TableId(table_id)]
-                    .into_iter()
-                    .chain(internal_table_ids.iter().map(|id| Object::TableId(*id)))
-                    .chain(index_table_ids.iter().map(|id| Object::TableId(*id)))
-                    .chain(
-                        index_internal_table_ids
-                            .iter()
-                            .map(|id| Object::TableId(*id)),
-                    )
-                    .collect_vec();
-
-                let users_need_update = Self::update_user_privileges(&mut users, &objects);
-
-                // Commit point
-                commit_meta!(self, tables, sources, indexes, users)?;
-
-                refcnt_dec_connection(database_core, source.connection_id);
-
-                indexes_removed.iter().for_each(|index| {
-                    user_core.decrease_ref_count(index.owner, 2); // index table and index
-                });
-
-                user_core.decrease_ref_count(mview.owner, 2); // source and mview.
-
-                for index_table in &index_tables {
-                    for dependent_relation_id in &index_table.dependent_relations {
-                        database_core.decrease_ref_count(*dependent_relation_id);
-                    }
-                }
-
-                for &dependent_relation_id in &mview.dependent_relations {
-                    database_core.decrease_ref_count(dependent_relation_id);
-                }
-                for user in users_need_update {
-                    self.notify_frontend(Operation::Update, Info::User(user))
-                        .await;
-                }
-
-                let version = self
-                    .notify_frontend(
-                        Operation::Delete,
-                        Info::RelationGroup(RelationGroup {
-                            relations: indexes_removed
-                                .into_iter()
-                                .map(|index| Relation {
-                                    relation_info: RelationInfo::Index(index).into(),
-                                })
-                                .chain(
-                                    internal_tables
-                                        .into_iter()
-                                        .chain(index_tables.into_iter())
-                                        .chain(index_internal_tables.into_iter())
-                                        .map(|internal_table| Relation {
-                                            relation_info: RelationInfo::Table(internal_table)
-                                                .into(),
-                                        }),
-                                )
-                                .chain(vec![
-                                    Relation {
-                                        relation_info: RelationInfo::Table(mview.to_owned()).into(),
-                                    },
-                                    Relation {
-                                        relation_info: RelationInfo::Source(source.to_owned())
-                                            .into(),
-                                    },
-                                ])
-                                .collect_vec(),
-                        }),
-                    )
-                    .await;
-
-                let catalog_deleted_ids = index_table_ids
-                    .into_iter()
-                    .chain(std::iter::once(table_id))
-                    .map(|id| id.into())
-                    .collect_vec();
-                Ok((version, catalog_deleted_ids))
-            }
-
-            _ => Err(MetaError::catalog_id_not_found("source", source_id)),
-        }
     }
 
     pub async fn start_create_index_procedure(
@@ -1847,8 +2756,7 @@ where
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
         assert!(
-            !database_core.indexes.contains_key(&index.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.indexes.contains_key(&index.id),
             "index must be in creating procedure"
         );
 
@@ -1863,9 +2771,9 @@ where
 
     pub async fn finish_create_index_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        index: &Index,
-        table: &Table,
+        mut internal_tables: Vec<Table>,
+        mut index: Index,
+        mut table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1884,9 +2792,13 @@ where
             .in_progress_creation_streaming_job
             .remove(&table.id);
 
+        index.stream_job_status = PbStreamJobStatus::Created.into();
         indexes.insert(index.id, index.clone());
+
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, indexes, tables)?;
@@ -1947,8 +2859,8 @@ where
 
     pub async fn finish_create_sink_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        sink: &Sink,
+        mut internal_tables: Vec<Table>,
+        mut sink: Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1966,8 +2878,10 @@ where
             .in_progress_creation_streaming_job
             .remove(&sink.id);
 
+        sink.stream_job_status = PbStreamJobStatus::Created.into();
         sinks.insert(sink.id, sink.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, sinks, tables)?;
@@ -1991,14 +2905,17 @@ where
         Ok(version)
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
+    pub async fn cancel_create_sink_procedure(
+        &self,
+        sink: &Sink,
+        target_table: &Option<(Table, Option<PbSource>)>,
+    ) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         assert!(
-            !database_core.sinks.contains_key(&sink.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.sinks.contains_key(&sink.id),
             "sink must be in creating procedure"
         );
 
@@ -2009,89 +2926,17 @@ where
         }
         user_core.decrease_ref(sink.owner);
         refcnt_dec_connection(database_core, sink.connection_id);
-    }
 
-    pub async fn drop_sink(
-        &self,
-        sink_id: SinkId,
-        internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<NotificationVersion> {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        database_core.ensure_sink_id(sink_id)?;
-
-        let user_core = &mut core.user;
-        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-
-        let sink = sinks.remove(sink_id).unwrap();
-        match database_core.relation_ref_count.get(&sink_id).cloned() {
-            Some(_) => bail!("No relation should depend on Sink"),
-            None => {
-                let dependent_relations = sink.dependent_relations.clone();
-
-                let objects = &[Object::SinkId(sink.id)]
-                    .into_iter()
-                    .chain(
-                        internal_table_ids
-                            .iter()
-                            .map(|table_id| Object::TableId(*table_id)),
-                    )
-                    .collect_vec();
-
-                let internal_tables = internal_table_ids
-                    .iter()
-                    .map(|internal_table_id| {
-                        tables
-                            .remove(*internal_table_id)
-                            .expect("internal table should exist")
-                    })
-                    .collect_vec();
-
-                let users_need_update = Self::update_user_privileges(&mut users, objects);
-
-                commit_meta!(self, sinks, tables, users)?;
-
-                if let Some(connection_id) = sink.connection_id {
-                    // TODO(siyuan): wait for yezizp to refactor ref cnt
-                    database_core.decrease_ref_count(connection_id);
-                }
-
-                user_core.decrease_ref(sink.owner);
-
-                for user in users_need_update {
-                    self.notify_frontend(Operation::Update, Info::User(user))
-                        .await;
-                }
-
-                for dependent_relation_id in dependent_relations {
-                    database_core.decrease_ref_count(dependent_relation_id);
-                }
-
-                let version = self
-                    .notify_frontend(
-                        Operation::Delete,
-                        Info::RelationGroup(RelationGroup {
-                            relations: vec![Relation {
-                                relation_info: RelationInfo::Sink(sink.to_owned()).into(),
-                            }]
-                            .into_iter()
-                            .chain(internal_tables.into_iter().map(|internal_table| Relation {
-                                relation_info: RelationInfo::Table(internal_table).into(),
-                            }))
-                            .collect_vec(),
-                        }),
-                    )
-                    .await;
-
-                Ok(version)
-            }
+        if let Some((table, source)) = target_table {
+            Self::cancel_replace_table_procedure_inner(source, table, core);
         }
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
-    pub async fn start_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn start_replace_table_procedure(&self, stream_job: &StreamingJob) -> MetaResult<()> {
+        let StreamingJob::Table(source, table, ..) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_database_id(table.database_id)?;
@@ -2114,6 +2959,13 @@ where
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in altering procedure");
         } else {
+            if let Some(source) = source {
+                let source_key = (source.database_id, source.schema_id, source.name.clone());
+                if database_core.has_in_progress_creation(&source_key) {
+                    bail!("source is in altering procedure");
+                }
+                database_core.mark_creating(&source_key);
+            }
             database_core.mark_creating(&key);
             Ok(())
         }
@@ -2122,19 +2974,39 @@ where
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn finish_replace_table_procedure(
         &self,
+        source: &Option<Source>,
         table: &Table,
-        table_col_index_mapping: ColIndexMapping,
+        table_col_index_mapping: Option<ColIndexMapping>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let key = (table.database_id, table.schema_id, table.name.clone());
+
         assert!(
             tables.contains_key(&table.id)
                 && database_core.in_progress_creation_tracker.contains(&key),
             "table must exist and be in altering procedure"
         );
+
+        if let Some(source) = source {
+            let source_key = (source.database_id, source.schema_id, source.name.clone());
+            assert!(
+                sources.contains_key(&source.id)
+                    && database_core
+                        .in_progress_creation_tracker
+                        .contains(&source_key),
+                "source must exist and be in altering procedure"
+            );
+            sources.insert(source.id, source.clone());
+            database_core
+                .in_progress_creation_tracker
+                .remove(&source_key);
+        }
 
         let index_ids: Vec<_> = indexes
             .tree_ref()
@@ -2145,24 +3017,40 @@ where
 
         let mut updated_indexes = vec![];
 
-        let expr_rewriter = ReplaceTableExprRewriter {
-            table_col_index_mapping: table_col_index_mapping.clone(),
-        };
+        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+            let expr_rewriter = ReplaceTableExprRewriter {
+                table_col_index_mapping,
+            };
 
-        for index_id in &index_ids {
-            let mut index = indexes.get_mut(*index_id).unwrap();
-            index
-                .index_item
-                .iter_mut()
-                .for_each(|x| expr_rewriter.rewrite_expr(x));
-            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            for index_id in &index_ids {
+                let mut index = indexes.get_mut(*index_id).unwrap();
+                index
+                    .index_item
+                    .iter_mut()
+                    .for_each(|x| expr_rewriter.rewrite_expr(x));
+                updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+            }
         }
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         database_core.in_progress_creation_tracker.remove(&key);
 
+        let mut table = table.clone();
+        table.stream_job_status = PbStreamJobStatus::Created.into();
+
+        if let Some(incoming_sink_id) = creating_sink_id {
+            table.incoming_sinks.push(incoming_sink_id);
+        }
+
+        if let Some(dropping_sink_id) = dropping_sink_id {
+            table
+                .incoming_sinks
+                .retain(|sink_id| *sink_id != dropping_sink_id);
+        }
+
         tables.insert(table.id, table.clone());
-        commit_meta!(self, tables, indexes)?;
+
+        commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
         let version = self
@@ -2170,9 +3058,12 @@ where
                 Operation::Update,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        relation_info: RelationInfo::Table(table).into(),
                     }]
                     .into_iter()
+                    .chain(source.iter().map(|source| Relation {
+                        relation_info: RelationInfo::Source(source.to_owned()).into(),
+                    }))
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
                     }))
@@ -2185,8 +3076,24 @@ where
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
-    pub async fn cancel_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn cancel_replace_table_procedure(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<()> {
+        let StreamingJob::Table(source, table, ..) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
         let core = &mut *self.core.lock().await;
+
+        Self::cancel_replace_table_procedure_inner(source, table, core);
+        Ok(())
+    }
+
+    fn cancel_replace_table_procedure_inner(
+        source: &Option<PbSource>,
+        table: &Table,
+        core: &mut CatalogManagerCore,
+    ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
@@ -2198,10 +3105,60 @@ where
             "table must exist and must be in altering procedure"
         );
 
+        if let Some(source) = source {
+            let source_key = (source.database_id, source.schema_id, source.name.clone());
+            assert!(
+                database_core.sources.contains_key(&source.id)
+                    && database_core.has_in_progress_creation(&source_key),
+                "source must exist and must be in altering procedure"
+            );
+
+            database_core.unmark_creating(&source_key);
+        }
+
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
-        Ok(())
+    }
+
+    pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+
+        database_core.ensure_database_id(comment.database_id)?;
+        database_core.ensure_schema_id(comment.schema_id)?;
+        database_core.ensure_table_id(comment.table_id)?;
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+
+        // unwrap is safe because the table id was ensured before
+        let mut table = tables.get_mut(comment.table_id).unwrap();
+        if let Some(col_idx) = comment.column_index {
+            let column = table
+                .columns
+                .get_mut(col_idx as usize)
+                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
+            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
+                anyhow!(
+                    "column desc at index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column_desc.description = comment.description;
+        } else {
+            table.description = comment.description;
+        }
+
+        let new_table = table.clone();
+
+        commit_meta!(self, tables)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Table(new_table))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn list_connections(&self) -> Vec<Connection> {
@@ -2216,12 +3173,42 @@ where
         self.core.lock().await.database.list_tables()
     }
 
+    /// Lists table catalogs for mviews, without their internal tables.
+    pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_creating_background_mvs()
+    }
+
+    /// Lists table catalogs for all tables with `stream_job_status=CREATING`.
+    pub async fn list_persisted_creating_tables(&self) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_persisted_creating_tables()
+    }
+
     pub async fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.core.lock().await.database.get_all_table_options()
     }
 
-    pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
-        self.core.lock().await.database.list_table_ids(schema_id)
+    pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_readonly_table_ids(schema_id)
+    }
+
+    pub async fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_dml_table_ids(schema_id)
     }
 
     pub async fn list_sources(&self) -> Vec<Source> {
@@ -2230,6 +3217,14 @@ where
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.core.lock().await.database.list_source_ids(schema_id)
+    }
+
+    pub async fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.core
+            .lock()
+            .await
+            .database
+            .get_table_name_and_type_mapping()
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
@@ -2251,11 +3246,15 @@ where
         infos
             .into_iter()
             .flat_map(|info| {
-                guard.database.find_creating_streaming_job_id(&(
-                    info.database_id,
-                    info.schema_id,
-                    info.name,
-                ))
+                let relation_key = &(info.database_id, info.schema_id, info.name);
+                guard
+                    .database
+                    .find_creating_streaming_job_id(relation_key)
+                    .or_else(|| {
+                        guard
+                            .database
+                            .find_persisted_creating_table_id(relation_key)
+                    })
             })
             .collect_vec()
     }
@@ -2278,6 +3277,15 @@ where
             .await
     }
 
+    pub async fn table_is_created(&self, table_id: TableId) -> bool {
+        let guard = self.core.lock().await;
+        return if let Some(table) = guard.database.tables.get(&table_id) {
+            table.get_stream_job_status() != Ok(StreamJobStatus::Creating)
+        } else {
+            false
+        };
+    }
+
     pub async fn get_tables(&self, table_ids: &[TableId]) -> Vec<Table> {
         let mut tables = vec![];
         let guard = self.core.lock().await;
@@ -2290,13 +3298,66 @@ where
         }
         tables
     }
+
+    pub async fn get_created_table_ids(&self) -> Vec<u32> {
+        let guard = self.core.lock().await;
+        guard
+            .database
+            .tables
+            .values()
+            .filter(|table| table.get_stream_job_status() != Ok(StreamJobStatus::Creating))
+            .map(|table| table.id)
+            .collect()
+    }
+
+    // TODO: replace *_count with SQL
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn source_count(&self) -> usize {
+        self.core.lock().await.database.sources.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn table_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::Table as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn materialized_view_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::MaterializedView as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn index_count(&self) -> usize {
+        self.core.lock().await.database.indexes.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn sink_count(&self) -> usize {
+        self.core.lock().await.database.sinks.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn function_count(&self) -> usize {
+        self.core.lock().await.database.functions.len()
+    }
 }
 
 // User related methods
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
+impl CatalogManager {
     async fn init_user(&self) -> MetaResult<()> {
         let core = &mut self.core.lock().await.user;
         for (user, id) in [

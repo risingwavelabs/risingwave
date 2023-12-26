@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -19,7 +20,7 @@ use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
-use crate::expr::{CorrelatedId, Depth};
+use crate::expr::{align_types, CorrelatedId, Depth};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`s via set operators (e.g. union).
@@ -134,11 +135,11 @@ impl Binder {
             } => {
                 match op {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
-                        let left = Box::new(self.bind_set_expr(*left)?);
+                        let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
                         self.context.cte_to_relation = new_context.cte_to_relation.clone();
-                        let right = Box::new(self.bind_set_expr(*right)?);
+                        let mut right = self.bind_set_expr(*right)?;
 
                         if left.schema().fields.len() != right.schema().fields.len() {
                             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -146,6 +147,33 @@ impl Binder {
                                 op
                             ))
                             .into());
+                        }
+
+                        // Handle type alignment for select union select
+                        // E.g. Select 1 UNION ALL Select NULL
+                        if let (BoundSetExpr::Select(l_select), BoundSetExpr::Select(r_select)) =
+                            (&mut left, &mut right)
+                        {
+                            for (i, (l, r)) in l_select
+                                .select_items
+                                .iter_mut()
+                                .zip_eq_fast(r_select.select_items.iter_mut())
+                                .enumerate()
+                            {
+                                let Ok(column_type) = align_types(vec![l, r].into_iter()) else {
+                                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                                        "{} types {} and {} cannot be matched. Columns' name are `{}` and `{}`.",
+                                        op,
+                                        l_select.schema.fields[i].data_type,
+                                        r_select.schema.fields[i].data_type,
+                                        l_select.schema.fields[i].name,
+                                        r_select.schema.fields[i].name,
+                                    ))
+                                        .into());
+                                };
+                                l_select.schema.fields[i].data_type = column_type.clone();
+                                r_select.schema.fields[i].data_type = column_type;
+                            }
                         }
 
                         for (a, b) in left
@@ -156,14 +184,14 @@ impl Binder {
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "{} types {} of column {} is different from types {} of column {}",
+                                    "{} types {} and {} cannot be matched. Columns' name are {} and {}.",
                                     op,
                                     a.data_type.prost_type_name().as_str_name(),
-                                    a.name,
                                     b.data_type.prost_type_name().as_str_name(),
+                                    a.name,
                                     b.name,
                                 ))
-                                    .into());
+                                .into());
                             }
                         }
 
@@ -171,11 +199,7 @@ impl Binder {
                             match op {
                                 SetOperator::Union => {}
                                 SetOperator::Intersect | SetOperator::Except => {
-                                    return Err(ErrorCode::NotImplemented(
-                                        format!("{} all", op),
-                                        None.into(),
-                                    )
-                                    .into())
+                                    bail_not_implemented!("{} all", op);
                                 }
                             }
                         }
@@ -189,8 +213,8 @@ impl Binder {
                         Ok(BoundSetExpr::SetOperation {
                             op: op.into(),
                             all,
-                            left,
-                            right,
+                            left: Box::new(left),
+                            right: Box::new(right),
                         })
                     }
                 }

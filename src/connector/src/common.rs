@@ -14,26 +14,136 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::Write;
+use std::time::Duration;
 
+use anyhow::{anyhow, Ok};
+use async_nats::jetstream::consumer::DeliverPolicy;
+use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
+use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
+use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
-use serde_derive::{Deserialize, Serialize};
+use risingwave_common::error::ErrorCode::InvalidParameterValue;
+use risingwave_common::error::{anyhow_error, RwError};
+use serde_derive::Deserialize;
 use serde_with::json::JsonString;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
+use tempfile::NamedTempFile;
+use time::OffsetDateTime;
+use url::Url;
+use with_options::WithOptions;
 
-use crate::aws_auth::AwsAuthProps;
-
+use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::deserialize_duration_from_string;
+use crate::sink::SinkError;
+use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
 }
 
+use aws_config::default_provider::region::DefaultRegionChain;
+use aws_config::sts::AssumeRoleProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_types::region::Region;
+use aws_types::SdkConfig;
+
+/// A flatten config map for aws auth.
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct AwsAuthProps {
+    pub region: Option<String>,
+    #[serde(alias = "endpoint_url")]
+    pub endpoint: Option<String>,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub session_token: Option<String>,
+    pub arn: Option<String>,
+    /// This field was added for kinesis. Not sure if it's useful for other connectors.
+    /// Please ignore it in the documentation for now.
+    pub external_id: Option<String>,
+    pub profile: Option<String>,
+}
+
+impl AwsAuthProps {
+    async fn build_region(&self) -> anyhow::Result<Region> {
+        if let Some(region_name) = &self.region {
+            Ok(Region::new(region_name.clone()))
+        } else {
+            let mut region_chain = DefaultRegionChain::builder();
+            if let Some(profile_name) = &self.profile {
+                region_chain = region_chain.profile_name(profile_name);
+            }
+
+            Ok(region_chain
+                .build()
+                .region()
+                .await
+                .ok_or_else(|| anyhow::format_err!("region should be provided"))?)
+        }
+    }
+
+    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+        if self.access_key.is_some() && self.secret_key.is_some() {
+            Ok(SharedCredentialsProvider::new(
+                aws_credential_types::Credentials::from_keys(
+                    self.access_key.as_ref().unwrap(),
+                    self.secret_key.as_ref().unwrap(),
+                    self.session_token.clone(),
+                ),
+            ))
+        } else {
+            Err(anyhow!(
+                "Both \"access_key\" and \"secret_access\" are required."
+            ))
+        }
+    }
+
+    async fn with_role_provider(
+        &self,
+        credential: SharedCredentialsProvider,
+    ) -> anyhow::Result<SharedCredentialsProvider> {
+        if let Some(role_name) = &self.arn {
+            let region = self.build_region().await?;
+            let mut role = AssumeRoleProvider::builder(role_name)
+                .session_name("RisingWave")
+                .region(region);
+            if let Some(id) = &self.external_id {
+                role = role.external_id(id);
+            }
+            let provider = role.build_from_provider(credential).await;
+            Ok(SharedCredentialsProvider::new(provider))
+        } else {
+            Ok(credential)
+        }
+    }
+
+    pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
+        let region = self.build_region().await?;
+        let credentials_provider = self
+            .with_role_provider(self.build_credential_provider()?)
+            .await?;
+        let mut config_loader = aws_config::from_env()
+            .region(region)
+            .credentials_provider(credentials_provider);
+
+        if let Some(endpoint) = self.endpoint.as_ref() {
+            config_loader = config_loader.endpoint_url(endpoint);
+        }
+
+        Ok(config_loader.load().await)
+    }
+}
+
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -45,10 +155,20 @@ pub struct KafkaCommon {
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
+    #[serde(
+        rename = "properties.sync.call.timeout",
+        deserialize_with = "deserialize_duration_from_string",
+        default = "default_kafka_sync_call_timeout"
+    )]
+    pub sync_call_timeout: Duration,
+
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
     /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
+
+    #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    ssl_endpoint_identification_algorithm: Option<String>,
 
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
@@ -102,6 +222,59 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+
+    #[serde(flatten)]
+    pub rdkafka_properties: RdKafkaPropertiesCommon,
+}
+
+const fn default_kafka_sync_call_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct RdKafkaPropertiesCommon {
+    /// Maximum Kafka protocol request message size. Due to differing framing overhead between
+    /// protocol versions the producer is unable to reliably enforce a strict max message limit at
+    /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+    /// the broker will enforce the the topic's max.message.bytes limit
+    #[serde(rename = "properties.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub message_max_bytes: Option<usize>,
+
+    /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
+    /// memory exhaustion in case of protocol hickups. This value must be at least fetch.max.bytes
+    /// + 512 to allow for protocol overhead; the value is adjusted automatically unless the
+    /// configuration property is explicitly set.
+    #[serde(rename = "properties.receive.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub receive_message_max_bytes: Option<usize>,
+
+    #[serde(rename = "properties.statistics.interval.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub statistics_interval_ms: Option<usize>,
+
+    /// Client identifier
+    #[serde(rename = "properties.client.id")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub client_id: Option<String>,
+}
+
+impl RdKafkaPropertiesCommon {
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.statistics_interval_ms {
+            c.set("statistics.interval.ms", v.to_string());
+        }
+        if let Some(v) = self.message_max_bytes {
+            c.set("message.max.bytes", v.to_string());
+        }
+        if let Some(v) = self.receive_message_max_bytes {
+            c.set("receive.message.max.bytes", v.to_string());
+        }
+        if let Some(v) = self.client_id.as_ref() {
+            c.set("client.id", v);
+        }
+    }
 }
 
 impl KafkaCommon {
@@ -123,6 +296,15 @@ impl KafkaCommon {
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
+        }
+        if let Some(ssl_endpoint_identification_algorithm) =
+            self.ssl_endpoint_identification_algorithm.as_ref()
+        {
+            // accept only `none` and `http` here, let the sdk do the check
+            config.set(
+                "ssl.endpoint.identification.algorithm",
+                ssl_endpoint_identification_algorithm,
+            );
         }
 
         // SASL mechanism
@@ -167,9 +349,104 @@ impl KafkaCommon {
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
+
+    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        self.rdkafka_properties.set_client(c);
+    }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct PulsarCommon {
+    #[serde(rename = "topic", alias = "pulsar.topic")]
+    pub topic: String,
+
+    #[serde(rename = "service.url", alias = "pulsar.service.url")]
+    pub service_url: String,
+
+    #[serde(rename = "auth.token")]
+    pub auth_token: Option<String>,
+
+    #[serde(flatten)]
+    pub oauth: Option<PulsarOauthCommon>,
+}
+
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct PulsarOauthCommon {
+    #[serde(rename = "oauth.issuer.url")]
+    pub issuer_url: String,
+
+    #[serde(rename = "oauth.credentials.url")]
+    pub credentials_url: String,
+
+    #[serde(rename = "oauth.audience")]
+    pub audience: String,
+
+    #[serde(rename = "oauth.scope")]
+    pub scope: Option<String>,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+}
+
+impl PulsarCommon {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+        let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
+        let mut temp_file = None;
+        if let Some(oauth) = &self.oauth {
+            let url = Url::parse(&oauth.credentials_url)?;
+            match url.scheme() {
+                "s3" => {
+                    let credentials =
+                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
+                    let mut f = NamedTempFile::new()?;
+                    f.write_all(&credentials)?;
+                    f.as_file().sync_all()?;
+                    temp_file = Some(f);
+                }
+                "file" => {}
+                _ => {
+                    return Err(RwError::from(InvalidParameterValue(String::from(
+                        "invalid credentials_url, only file url and s3 url are supported",
+                    )))
+                    .into());
+                }
+            }
+
+            let auth_params = OAuth2Params {
+                issuer_url: oauth.issuer_url.clone(),
+                credentials_url: if temp_file.is_none() {
+                    oauth.credentials_url.clone()
+                } else {
+                    let mut raw_path = temp_file
+                        .as_ref()
+                        .unwrap()
+                        .path()
+                        .to_str()
+                        .unwrap()
+                        .to_string();
+                    raw_path.insert_str(0, "file://");
+                    raw_path
+                },
+                audience: Some(oauth.audience.clone()),
+                scope: oauth.scope.clone(),
+            };
+
+            pulsar_builder = pulsar_builder
+                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
+        } else if let Some(auth_token) = &self.auth_token {
+            pulsar_builder = pulsar_builder.with_auth(Authentication {
+                name: "token".to_string(),
+                data: Vec::from(auth_token.as_str()),
+            });
+        }
+
+        let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
+        drop(temp_file);
+        Ok(res)
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -221,11 +498,187 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct NatsCommon {
+    #[serde(rename = "server_url")]
+    pub server_url: String,
+    #[serde(rename = "subject")]
+    pub subject: String,
+    #[serde(rename = "connect_mode")]
+    pub connect_mode: String,
+    #[serde(rename = "username")]
+    pub user: Option<String>,
+    #[serde(rename = "password")]
+    pub password: Option<String>,
+    #[serde(rename = "jwt")]
+    pub jwt: Option<String>,
+    #[serde(rename = "nkey")]
+    pub nkey: Option<String>,
+    #[serde(rename = "max_bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_bytes: Option<i64>,
+    #[serde(rename = "max_messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_messages: Option<i64>,
+    #[serde(rename = "max_messages_per_subject")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_messages_per_subject: Option<i64>,
+    #[serde(rename = "max_consumers")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_consumers: Option<i32>,
+    #[serde(rename = "max_message_size")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_message_size: Option<i32>,
+}
+
+impl NatsCommon {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
+        let mut connect_options = async_nats::ConnectOptions::new();
+        match self.connect_mode.as_str() {
+            "user_and_password" => {
+                if let (Some(v_user), Some(v_password)) =
+                    (self.user.as_ref(), self.password.as_ref())
+                {
+                    connect_options =
+                        connect_options.user_and_password(v_user.into(), v_password.into())
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is user_and_password, but user or password is empty"
+                    ));
+                }
+            }
+
+            "credential" => {
+                if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
+                    connect_options = connect_options
+                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
+                        .expect("failed to parse static creds")
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is credential, but nkey or jwt is empty"
+                    ));
+                }
+            }
+            "plain" => {}
+            _ => {
+                return Err(anyhow_error!(
+                    "nats connect mode only accept user_and_password/credential/plain"
+                ));
+            }
+        };
+
+        let servers = self.server_url.split(',').collect::<Vec<&str>>();
+        let client = connect_options
+            .connect(
+                servers
+                    .iter()
+                    .map(|url| url.parse())
+                    .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
+            )
+            .await
+            .map_err(|e| SinkError::Nats(anyhow_error!("build nats client error: {:?}", e)))?;
+        Ok(client)
+    }
+
+    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+        let client = self.build_client().await?;
+        let jetstream = async_nats::jetstream::new(client);
+        Ok(jetstream)
+    }
+
+    pub(crate) async fn build_consumer(
+        &self,
+        stream: String,
+        split_id: String,
+        start_sequence: NatsOffset,
+    ) -> anyhow::Result<
+        async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
+    > {
+        let context = self.build_context().await?;
+        let stream = self.build_or_get_stream(context.clone(), stream).await?;
+        let subject_name = self
+            .subject
+            .replace(',', "-")
+            .replace(['.', '>', '*', ' ', '\t'], "_");
+        let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
+        let mut config = jetstream::consumer::pull::Config {
+            ack_policy: jetstream::consumer::AckPolicy::None,
+            ..Default::default()
+        };
+
+        let deliver_policy = match start_sequence {
+            NatsOffset::Earliest => DeliverPolicy::All,
+            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::SequenceNumber(v) => {
+                let parsed = v.parse::<u64>()?;
+                DeliverPolicy::ByStartSequence {
+                    start_sequence: 1 + parsed,
+                }
+            }
+            NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)?,
+            },
+            NatsOffset::None => DeliverPolicy::All,
+        };
+        let consumer = stream
+            .get_or_create_consumer(&name, {
+                config.deliver_policy = deliver_policy;
+                config
+            })
+            .await?;
+        Ok(consumer)
+    }
+
+    pub(crate) async fn build_or_get_stream(
+        &self,
+        jetstream: jetstream::Context,
+        stream: String,
+    ) -> anyhow::Result<jetstream::stream::Stream> {
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
+        let mut config = jetstream::stream::Config {
+            name: stream,
+            max_bytes: 1000000,
+            subjects,
+            ..Default::default()
+        };
+        if let Some(v) = self.max_bytes {
+            config.max_bytes = v;
+        }
+        if let Some(v) = self.max_messages {
+            config.max_messages = v;
+        }
+        if let Some(v) = self.max_messages_per_subject {
+            config.max_messages_per_subject = v;
+        }
+        if let Some(v) = self.max_consumers {
+            config.max_consumers = v;
+        }
+        if let Some(v) = self.max_message_size {
+            config.max_message_size = v;
+        }
+        let stream = jetstream.get_or_create_stream(config).await?;
+        Ok(stream)
+    }
+
+    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+        let creds = format!(
+            "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
+                         ************************* IMPORTANT *************************\n\
+                         NKEY Seed printed below can be used to sign and prove identity.\n\
+                         NKEYs are sensitive and should be treated as secrets.\n\n\
+                         -----BEGIN USER NKEY SEED-----\n{}\n------END USER NKEY SEED------\n\n\
+                         *************************************************************",
+            jwt, seed
+        );
+        Ok(creds)
+    }
 }

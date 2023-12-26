@@ -43,9 +43,9 @@ async fn test_read_version_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut read_version = HummockReadVersion::new(pinned_version);
     let mut epoch = 1;
     let table_id = 0;
+    let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version);
 
     {
         // single imm
@@ -54,6 +54,7 @@ async fn test_read_version_basic() {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items,
             size,
             vec![],
@@ -92,6 +93,7 @@ async fn test_read_version_basic() {
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
+                0,
                 sorted_items,
                 size,
                 vec![],
@@ -264,9 +266,12 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version)));
     let epoch = 1;
     let table_id = 0;
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+        TableId::from(table_id),
+        pinned_version,
+    )));
 
     {
         // single imm
@@ -275,6 +280,7 @@ async fn test_read_filter_basic() {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items,
             size,
             vec![],
@@ -311,13 +317,10 @@ async fn test_read_filter_basic() {
 
         // build for local
         {
-            let hummock_read_snapshot = read_filter_for_local(
-                epoch,
-                TableId::from(table_id),
-                &key_range,
-                read_version.clone(),
-            )
-            .unwrap();
+            let key_range = key_range.clone();
+            let (_, hummock_read_snapshot) =
+                read_filter_for_local(epoch, TableId::from(table_id), key_range, &read_version)
+                    .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
@@ -329,10 +332,11 @@ async fn test_read_filter_basic() {
 
         // build for batch
         {
+            let key_range = key_range.clone();
             let read_version_vec = vec![read_version];
 
-            let hummock_read_snapshot =
-                read_filter_for_batch(epoch, TableId::from(table_id), &key_range, read_version_vec)
+            let (_, hummock_read_snapshot) =
+                read_filter_for_batch(epoch, TableId::from(table_id), key_range, read_version_vec)
                     .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());

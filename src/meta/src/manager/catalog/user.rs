@@ -16,13 +16,13 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::user::UserInfo;
 
 use super::database::DatabaseManager;
 use super::UserId;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub struct UserManager {
@@ -34,10 +34,7 @@ pub struct UserManager {
 }
 
 impl UserManager {
-    pub async fn new<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        database: &DatabaseManager,
-    ) -> MetaResult<Self> {
+    pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
@@ -56,7 +53,13 @@ impl UserManager {
             .chain(database.sources.values().map(|source| source.owner))
             .chain(database.sinks.values().map(|sink| sink.owner))
             .chain(database.indexes.values().map(|index| index.owner))
-            .chain(database.tables.values().map(|table| table.owner))
+            .chain(
+                database
+                    .tables
+                    .values()
+                    .filter(|table| table.table_type() != TableType::Internal)
+                    .map(|table| table.owner),
+            )
             .chain(database.views.values().map(|view| view.owner))
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
@@ -88,7 +91,7 @@ impl UserManager {
                 for option in &grant_privilege_item.action_with_opts {
                     self.user_grant_relation
                         .entry(option.get_granted_by())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(*user_id);
                 }
             }
@@ -115,7 +118,11 @@ impl UserManager {
     pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
         match self.catalog_create_ref_count.entry(user_id) {
             Entry::Occupied(mut o) => {
-                assert!(*o.get_mut() >= count);
+                assert!(
+                    *o.get() >= count,
+                    "Attempted to decrease ref_count by {} but current ref_count is only {}. UserId: {:?}",
+                    count, *o.get(), user_id
+                );
                 *o.get_mut() -= count;
                 if *o.get() == 0 {
                     o.remove_entry();
@@ -135,7 +142,7 @@ mod tests {
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
     use crate::model::{BTreeMapTransaction, ValTransaction};
-    use crate::storage::{MemStore, Transaction};
+    use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
@@ -402,7 +409,7 @@ mod tests {
         // Release all privileges with object.
         let user_core = &mut catalog_manager.core.lock().await.user;
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-        CatalogManager::<MemStore>::update_user_privileges(&mut users, &[object]);
+        CatalogManager::update_user_privileges(&mut users, &[object]);
         commit_meta!(&catalog_manager, users)?;
         let user = user_core.user_info.get(&test_user_id).unwrap();
         assert!(user.grant_privileges.is_empty());

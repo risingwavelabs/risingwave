@@ -14,15 +14,19 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::OwnedRow;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_settings` stores settings.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-settings.html`]
-pub const PG_SETTINGS_TABLE_NAME: &str = "pg_settings";
 pub const PG_SETTINGS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
     &[(DataType::Varchar, "name"), (DataType::Varchar, "setting")];
 
-pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
+/// The catalog `pg_settings` stores settings.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-settings.html`]
+pub static PG_SETTINGS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_settings",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_SETTINGS_COLUMNS,
+    sql: infer_dummy_view_sql(PG_SETTINGS_COLUMNS),
+});

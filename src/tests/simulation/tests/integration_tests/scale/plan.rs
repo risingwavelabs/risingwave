@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -26,7 +27,7 @@ use risingwave_pb::meta::PbReschedule;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -38,10 +39,7 @@ async fn test_resize_normal() -> Result<()> {
         .await?;
 
     let join_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("hashJoin"),
-            identity_contains("materialize"),
-        ])
+        .locate_one_fragment([identity_contains("hashJoin")])
         .await?;
 
     let join_fragment_id = join_fragment.inner.fragment_id;
@@ -65,6 +63,7 @@ async fn test_resize_normal() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_workers,
+                    ..Default::default()
                 },
             )]),
         }))
@@ -91,7 +90,7 @@ async fn test_resize_normal() -> Result<()> {
 
     Ok(())
 }
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_single() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -129,12 +128,12 @@ async fn test_resize_single() -> Result<()> {
         .collect();
 
     let prev_workers = workers
-        .drain_filter(|worker| {
+        .extract_if(|worker| {
             worker
                 .parallel_units
                 .iter()
                 .map(|parallel_unit| parallel_unit.id)
-                .contains(&used_parallel_unit_id)
+                .contains(used_parallel_unit_id)
         })
         .collect_vec();
 
@@ -147,6 +146,7 @@ async fn test_resize_single() -> Result<()> {
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: vec![prev_worker.id],
+                    ..Default::default()
                 },
             )]),
         }))
@@ -173,7 +173,7 @@ async fn test_resize_single() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_single_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -197,7 +197,10 @@ async fn test_resize_single_failed() -> Result<()> {
     let upstream_fragment_id = upstream_fragment.inner.fragment_id;
 
     let downstream_fragment = cluster
-        .locate_one_fragment([identity_contains("chain"), identity_contains("materialize")])
+        .locate_one_fragment([
+            identity_contains("StreamTableScan"),
+            identity_contains("materialize"),
+        ])
         .await?;
 
     let downstream_fragment_id = downstream_fragment.inner.fragment_id;
@@ -221,6 +224,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_a.id],
+                        ..Default::default()
                     },
                 ),
                 (
@@ -228,6 +232,7 @@ async fn test_resize_single_failed() -> Result<()> {
                     WorkerChanges {
                         include_worker_ids: vec![],
                         exclude_worker_ids: vec![worker_b.id],
+                        ..Default::default()
                     },
                 ),
             ]),
@@ -238,7 +243,7 @@ async fn test_resize_single_failed() -> Result<()> {
 
     Ok(())
 }
-#[madsim::test]
+#[tokio::test]
 async fn test_resize_no_shuffle() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -265,12 +270,12 @@ async fn test_resize_no_shuffle() -> Result<()> {
     session
         .run(
             "create materialized view mv7 as select mv1.v as mv1v, mv5.v as mv5v from mv1
-join mv5 on mv1.v = mv5.v;",
+join mv5 on mv1.v = mv5.v limit 1;",
         )
         .await?;
 
     let chain_fragments: [_; 8] = cluster
-        .locate_fragments([identity_contains("chain")])
+        .locate_fragments([identity_contains("StreamTableScan")])
         .await?
         .try_into()
         .unwrap();
@@ -298,6 +303,7 @@ join mv5 on mv1.v = mv5.v;",
                 WorkerChanges {
                     include_worker_ids: vec![],
                     exclude_worker_ids: removed_worker_ids,
+                    ..Default::default()
                 },
             )]),
         }))
@@ -310,7 +316,8 @@ join mv5 on mv1.v = mv5.v;",
     let top_materialize_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("topn"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("hashJoin"),
         ])
         .await?;

@@ -15,17 +15,17 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+use tokio::time::sleep;
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_source() -> Result<()> {
     nexmark_source_inner(false).await
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn nexmark_source_with_watermark() -> Result<()> {
     nexmark_source_inner(true).await
 }

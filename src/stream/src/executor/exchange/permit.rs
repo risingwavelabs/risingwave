@@ -113,7 +113,7 @@ pub struct Sender {
     permits: Arc<Permits>,
 
     /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
-    /// acquire these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with
+    /// acquire these permits. `BATCHED_PERMITS` is subtracted to avoid deadlock with
     /// batching.
     max_chunk_permits: usize,
 }

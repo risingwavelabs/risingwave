@@ -3,7 +3,7 @@ version: "3"
 x-airflow-common:
   &airflow-common
   image: apache/airflow:2.6.2-python3.10
-  build: 
+  build:
     context: .
     target: airflow
   environment:
@@ -26,9 +26,9 @@ x-airflow-common:
       condition: service_healthy
 x-spark-common:
   &spark-air
-  build: 
+  build:
     context: .
-    target: spark   
+    target: spark
 
 services:
   spark:
@@ -49,30 +49,18 @@ services:
   presto:
     build: ./presto-with-iceberg
     container_name: presto
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -96,20 +84,16 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   prepare_mysql:
     image: mysql:8.0
-    depends_on: 
+    depends_on:
       - mysql
     command:
       - /bin/sh
       - -c
       - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
     volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"      
+      - "./mysql_prepare.sql:/mysql_prepare.sql"
     container_name: prepare_mysql
     restart: on-failure
   datagen:
@@ -175,7 +159,7 @@ services:
       _AIRFLOW_WWW_USER_PASSWORD: 'airflow'
 
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

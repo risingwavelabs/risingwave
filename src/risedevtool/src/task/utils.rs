@@ -19,9 +19,6 @@ use itertools::Itertools;
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
 
-#[allow(dead_code)]
-pub(crate) const DEFAULT_QUERY_LOG_PATH: &str = ".risingwave/log/";
-
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {
@@ -50,7 +47,7 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
         [tempo] => {
             cmd.env(
                 "RW_TRACING_ENDPOINT",
-                format!("http://{}:{}", tempo.otlp_address, tempo.otlp_port),
+                format!("http://{}:{}", tempo.address, tempo.otlp_port),
             );
         }
         _ => {
@@ -119,27 +116,32 @@ pub fn add_hummock_backend(
         ([], [], [opendal]) => {
             if opendal.engine == "hdfs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
+                .arg(format!("hummock+hdfs://{}", opendal.namenode));
             }
             else if opendal.engine == "gcs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+gcs://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+gcs://{}", opendal.bucket));
+            }
+            else if opendal.engine == "obs"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+obs://{}", opendal.bucket));
             }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+oss://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+oss://{}", opendal.bucket));
             }
             else if opendal.engine == "webhdfs"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+webhdfs://{}@{}", opendal.namenode, opendal.root));
+                .arg(format!("hummock+webhdfs://{}", opendal.namenode));
             }
             else if opendal.engine == "azblob"{
                 cmd.arg("--state-store")
-                .arg(format!("hummock+azblob://{}@{}", opendal.bucket, opendal.root));
+                .arg(format!("hummock+azblob://{}", opendal.bucket));
             }
             else if opendal.engine == "fs"{
+                println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg(format!("hummock+fs://{}@{}", opendal.namenode, opendal.root));
+                .arg(format!("hummock+fs://{}", opendal.bucket));
             }
             else{
                 unimplemented!()

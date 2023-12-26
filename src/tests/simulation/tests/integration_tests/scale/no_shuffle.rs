@@ -15,10 +15,10 @@
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 
-#[madsim::test]
+#[tokio::test]
 async fn test_delta_join() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -48,7 +48,10 @@ async fn test_delta_join() -> Result<()> {
         .await?;
     assert_eq!(lookup_fragments.len(), 2, "failed to plan delta join");
     let union_fragment = cluster
-        .locate_one_fragment([identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("union"),
+            no_identity_contains("materialize"), // skip union for table
+        ])
         .await?;
 
     let mut test_times = 0;
@@ -120,7 +123,7 @@ async fn test_delta_join() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -136,6 +139,34 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
 
     cluster.reschedule(fragment.reschedule([0], [])).await?;
     cluster.reschedule(fragment.reschedule([], [0])).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resolve_no_shuffle_upstream() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (v int);").await?;
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+
+    let fragment = cluster
+        .locate_one_fragment([identity_contains("StreamTableScan")])
+        .await?;
+
+    let result = cluster.reschedule(fragment.reschedule([0], [])).await;
+
+    assert!(result.is_err());
+
+    cluster
+        .reschedule_resolve_no_shuffle(fragment.reschedule([0], []))
+        .await?;
+    cluster
+        .reschedule_resolve_no_shuffle(fragment.reschedule([], [0]))
+        .await?;
 
     Ok(())
 }

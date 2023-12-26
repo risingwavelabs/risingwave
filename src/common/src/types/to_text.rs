@@ -16,7 +16,7 @@ use std::fmt::{Result, Write};
 use std::num::FpCategory;
 
 use super::{DataType, DatumRef, ScalarRefImpl};
-use crate::for_all_scalar_variants;
+use crate::dispatch_scalar_ref_variants;
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
@@ -193,24 +193,15 @@ impl ToText for &[u8] {
     }
 }
 
-macro_rules! impl_totext_for_scalar {
-    ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty }),*) => {
-        impl ToText for ScalarRefImpl<'_> {
-            fn write<W: Write>(&self, f: &mut W) -> Result {
-                match self {
-                    $(ScalarRefImpl::$variant_name(v) => v.write(f),)*
-                }
-            }
+impl ToText for ScalarRefImpl<'_> {
+    fn write<W: Write>(&self, f: &mut W) -> Result {
+        dispatch_scalar_ref_variants!(self, v, { v.write(f) })
+    }
 
-            fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
-                match self {
-                    $(ScalarRefImpl::$variant_name(v) => v.write_with_type(ty, f),)*
-                }
-            }
-        }
-    };
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
+        dispatch_scalar_ref_variants!(self, v, { v.write_with_type(ty, f) })
+    }
 }
-for_all_scalar_variants! { impl_totext_for_scalar }
 
 impl ToText for DatumRef<'_> {
     fn write<W: Write>(&self, f: &mut W) -> Result {

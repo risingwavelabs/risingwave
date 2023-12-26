@@ -17,20 +17,23 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    OrderBy, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -48,7 +51,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: Agg<PlanRef>,
 }
 
@@ -57,9 +60,9 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let mut logical = self.core.clone();
-        logical.input = stream_input;
-        let local_agg = StreamStatelessSimpleAgg::new(logical);
+        let mut core = self.core.clone();
+        core.input = stream_input;
+        let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(
@@ -165,23 +168,25 @@ impl LogicalAgg {
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let mut logical = self.core.clone();
+        let mut core = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        logical.input = input;
-        Ok(new_stream_simple_agg(logical).into())
+        core.input = input;
+        Ok(new_stream_simple_agg(core).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Ok(new_stream_hash_agg(logical, None).into())
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(new_stream_hash_agg(core, None).into())
     }
 
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution();
         debug_assert!(*input_dist != Distribution::Broadcast);
 
@@ -222,8 +227,11 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?
+                RequiredDist::shard_by_key(
+                    stream_input.schema().len(),
+                    stream_input.expect_stream_key(),
+                )
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
             };
@@ -260,7 +268,7 @@ impl LogicalAgg {
 /// build the plan like `LogicalAgg - LogicalProject`.
 /// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
 /// having clause.
-struct LogicalAggBuilder {
+pub struct LogicalAggBuilder {
     /// the builder of the input Project
     input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
@@ -283,30 +291,15 @@ impl LogicalAggBuilder {
     fn new(group_by: GroupBy, input_schema_len: usize) -> Result<Self> {
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let (group_key, grouping_sets) = match group_by {
-            GroupBy::GroupKey(group_key) => {
-                let group_key = group_key
-                    .into_iter()
-                    .map(|expr| input_proj_builder.add_expr(&expr))
-                    .try_collect()
-                    .map_err(|err| {
-                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                    })?;
-                (group_key, vec![])
-            }
-            GroupBy::GroupingSets(grouping_sets) => {
+        let mut gen_group_key_and_grouping_sets =
+            |grouping_sets: Vec<Vec<ExprImpl>>| -> Result<(IndexSet, Vec<IndexSet>)> {
                 let grouping_sets: Vec<IndexSet> = grouping_sets
                     .into_iter()
                     .map(|set| {
                         set.into_iter()
                             .map(|expr| input_proj_builder.add_expr(&expr))
                             .try_collect()
-                            .map_err(|err| {
-                                ErrorCode::NotImplemented(
-                                    format!("{err} inside GROUP BY"),
-                                    None.into(),
-                                )
-                            })
+                            .map_err(|err| not_implemented!("{err} inside GROUP BY"))
                     })
                     .try_collect()?;
 
@@ -317,7 +310,40 @@ impl LogicalAggBuilder {
                         acc.union(&x.to_bitset()).collect()
                     });
 
-                (IndexSet::from_iter(group_key.ones()), grouping_sets)
+                Ok((IndexSet::from_iter(group_key.ones()), grouping_sets))
+            };
+
+        let (group_key, grouping_sets) = match group_by {
+            GroupBy::GroupKey(group_key) => {
+                let group_key = group_key
+                    .into_iter()
+                    .map(|expr| input_proj_builder.add_expr(&expr))
+                    .try_collect()
+                    .map_err(|err| not_implemented!("{err} inside GROUP BY"))?;
+                (group_key, vec![])
+            }
+            GroupBy::GroupingSets(grouping_sets) => gen_group_key_and_grouping_sets(grouping_sets)?,
+            GroupBy::Rollup(rollup) => {
+                // Convert rollup to grouping sets.
+                let grouping_sets = (0..=rollup.len())
+                    .map(|n| {
+                        rollup
+                            .iter()
+                            .take(n)
+                            .flat_map(|x| x.iter().cloned())
+                            .collect_vec()
+                    })
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
+            }
+            GroupBy::Cube(cube) => {
+                // Convert cube to grouping sets.
+                let grouping_sets = cube
+                    .into_iter()
+                    .powerset()
+                    .map(|x| x.into_iter().flatten().collect_vec())
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
             }
         };
 
@@ -336,13 +362,9 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new_with_grouping_sets(
-            self.agg_calls,
-            self.group_key,
-            self.grouping_sets,
-            logical_project.into(),
-        )
-        .into()
+        Agg::new(self.agg_calls, self.group_key, logical_project.into())
+            .with_grouping_sets(self.grouping_sets)
+            .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -423,6 +445,26 @@ impl LogicalAggBuilder {
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
 
+        if matches!(agg_kind, AggKind::Grouping) {
+            if self.grouping_sets.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GROUPING must be used in a query with grouping sets".into(),
+                    "try to use grouping sets instead".into(),
+                ));
+            }
+            if inputs.len() >= 32 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUPING must have fewer than 32 arguments".into(),
+                ));
+            }
+            if inputs.iter().any(|x| self.try_as_group_expr(x).is_none()) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "arguments to GROUPING must be grouping expressions of the associated query level"
+                        .into(),
+                ));
+            }
+        }
+
         let inputs: Vec<_> = inputs
             .iter()
             .map(|expr| {
@@ -430,9 +472,7 @@ impl LogicalAggBuilder {
                 Ok(InputRef::new(index, expr.return_type()))
             })
             .try_collect()
-            .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
-            })?;
+            .map_err(|err: &'static str| not_implemented!("{err} inside aggregation calls"))?;
 
         let order_by: Vec<_> = order_by
             .sort_exprs
@@ -443,10 +483,7 @@ impl LogicalAggBuilder {
             })
             .try_collect()
             .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(
-                    format!("{err} inside aggregation calls order by"),
-                    None.into(),
-                )
+                not_implemented!("{err} inside aggregation calls order by")
             })?;
 
         match agg_kind {
@@ -454,8 +491,9 @@ impl LogicalAggBuilder {
             AggKind::Avg => {
                 assert_eq!(inputs.len(), 1);
 
-                let left_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                let left_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[inputs[0].return_type()])
+                    .unwrap();
                 let left_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: left_return_type,
@@ -467,8 +505,9 @@ impl LogicalAggBuilder {
                 });
                 let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
-                let right_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[inputs[0].return_type()]).unwrap();
+                let right_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[inputs[0].return_type()])
+                    .unwrap();
                 let right_ref = self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,
                     return_type: right_return_type,
@@ -510,9 +549,9 @@ impl LogicalAggBuilder {
                     .add_expr(&squared_input_expr)
                     .unwrap();
 
-                let sum_of_squares_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
-                        .unwrap();
+                let sum_of_squares_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[squared_input_expr.return_type()])
+                    .unwrap();
 
                 let sum_of_squares_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -530,8 +569,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // after that, we compute sum
-                let sum_return_type =
-                    AggCall::infer_return_type(AggKind::Sum, &[input.return_type()]).unwrap();
+                let sum_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Sum, &[input.return_type()])
+                    .unwrap();
 
                 let sum_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Sum,
@@ -546,8 +586,9 @@ impl LogicalAggBuilder {
                 .unwrap();
 
                 // then, we compute count
-                let count_return_type =
-                    AggCall::infer_return_type(AggKind::Count, &[input.return_type()]).unwrap();
+                let count_return_type = FUNCTION_REGISTRY
+                    .get_return_type(AggKind::Count, &[input.return_type()])
+                    .unwrap();
 
                 let count_expr = ExprImpl::from(self.push_agg_call(PlanAggCall {
                     agg_kind: AggKind::Count,
@@ -647,7 +688,6 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-
             _ => Ok(self
                 .push_agg_call(PlanAggCall {
                     agg_kind,
@@ -691,6 +731,33 @@ impl ExprRewriter for LogicalAggBuilder {
         }
     }
 
+    /// When there is an `WindowFunction` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
+    fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
+        let WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..
+        } = window_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let partition_by = partition_by
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let order_by = order_by.rewrite_expr(self);
+        WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..window_func
+        }
+        .into()
+    }
+
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
@@ -713,10 +780,13 @@ impl ExprRewriter for LogicalAggBuilder {
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
         if subquery.is_correlated(0) {
-            self.error = Some(ErrorCode::NotImplemented(
-                "correlated subquery in HAVING or SELECT with agg".into(),
-                2275.into(),
-            ));
+            self.error = Some(
+                not_implemented!(
+                    issue = 2275,
+                    "correlated subquery in HAVING or SELECT with agg",
+                )
+                .into(),
+            );
         }
         subquery.into()
     }
@@ -787,7 +857,7 @@ impl LogicalAgg {
         &self.core.grouping_sets
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         self.core.decompose()
     }
 
@@ -826,8 +896,9 @@ impl LogicalAgg {
             .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
 
-        let new_agg =
-            Agg::new_with_grouping_sets(agg_calls, group_key.clone(), grouping_sets, input);
+        let new_agg = Agg::new(agg_calls, group_key.clone(), input)
+            .with_grouping_sets(grouping_sets)
+            .with_enable_two_phase(self.core().enable_two_phase);
 
         // group_key remapping might cause an output column change, since group key actually is a
         // `FixedBitSet`.
@@ -852,13 +923,10 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new_with_grouping_sets(
-            self.agg_calls().to_vec(),
-            self.group_key().clone(),
-            self.grouping_sets().clone(),
-            input,
-        )
-        .into()
+        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+            .with_grouping_sets(self.grouping_sets().clone())
+            .with_enable_two_phase(self.core().enable_two_phase)
+            .into()
     }
 
     #[must_use]
@@ -887,6 +955,12 @@ impl ExprRewritable for LogicalAgg {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 
@@ -1024,11 +1098,7 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_batch_enable_sort_agg()
+        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()
@@ -1057,25 +1127,23 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_simple_agg(core: Agg<PlanRef>) -> StreamSimpleAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         for agg_call in self.agg_calls() {
             if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
-                return Err(ErrorCode::NotImplemented(
-                    format!("{} aggregation in materialized view", agg_call.agg_kind),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_kind);
             }
         }
         let eowc = ctx.emit_on_window_close();
@@ -1142,7 +1210,7 @@ impl ToStream for LogicalAgg {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
+        let out_col_change = ColIndexMapping::new(map, agg.schema().len());
         Ok((agg.into(), out_col_change))
     }
 }
@@ -1431,7 +1499,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let values = LogicalValues::new(
+        let values: LogicalValues = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields.clone(),
@@ -1457,12 +1525,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0].into());
-        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

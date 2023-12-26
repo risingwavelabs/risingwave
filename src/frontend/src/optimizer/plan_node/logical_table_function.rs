@@ -14,34 +14,42 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprRewriter, TableFunction};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    BatchTableFunction, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalGenerateSeries` implements Hop Table Function.
+/// `LogicalTableFunction` is a scalar/table function used as a relation (in the `FROM` clause).
+///
+/// If the function returns a struct, it will be flattened into multiple columns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub table_function: TableFunction,
+    pub with_ordinality: bool,
 }
 
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
-    pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
-        let schema = if let DataType::Struct(s) = table_function.return_type() {
+    pub fn new(
+        table_function: TableFunction,
+        with_ordinality: bool,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        let mut schema = if let DataType::Struct(s) = table_function.return_type() {
+            // If the function returns a struct, it will be flattened into multiple columns.
             Schema::from(&s)
         } else {
             Schema {
@@ -51,12 +59,22 @@ impl LogicalTableFunction {
                 )],
             }
         };
+        if with_ordinality {
+            schema
+                .fields
+                .push(Field::with_name(DataType::Int64, "ordinality"));
+        }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
         Self {
             base,
             table_function,
+            with_ordinality,
         }
+    }
+
+    pub fn table_function(&self) -> &TableFunction {
+        &self.table_function
     }
 }
 
@@ -69,11 +87,10 @@ impl Distill for LogicalTableFunction {
     }
 }
 
-// the leaf node don't need colprunable
 impl ColPrunable for LogicalTableFunction {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        let _ = required_cols;
-        self.clone().into()
+        // No pruning.
+        LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().copied()).into()
     }
 }
 
@@ -95,6 +112,15 @@ impl ExprRewritable for LogicalTableFunction {
     }
 }
 
+impl ExprVisitable for LogicalTableFunction {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.table_function
+            .args
+            .iter()
+            .for_each(|e| v.visit_expr(e));
+    }
+}
+
 impl PredicatePushdown for LogicalTableFunction {
     fn predicate_pushdown(
         &self,
@@ -107,26 +133,19 @@ impl PredicatePushdown for LogicalTableFunction {
 
 impl ToBatch for LogicalTableFunction {
     fn to_batch(&self) -> Result<PlanRef> {
-        Ok(BatchTableFunction::new(self.clone()).into())
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 }
 
 impl ToStream for LogicalTableFunction {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(
-            ErrorCode::NotImplemented("LogicalTableFunction::to_stream".to_string(), None.into())
-                .into(),
-        )
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented(
-            "LogicalTableFunction::logical_rewrite_for_stream".to_string(),
-            None.into(),
-        )
-        .into())
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 }

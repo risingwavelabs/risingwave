@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use std::convert::Into;
+use std::sync::LazyLock;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::types::DataType;
+
+use crate::catalog::system_catalog::BuiltinView;
 
 /// The catalog `pg_database` stores database.
 ///
@@ -33,44 +36,32 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// ```
 ///
 /// Ref: [`pg_database`](https://www.postgresql.org/docs/current/catalog-pg-database.html)
-
-pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
-
-pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "datname"),
-    // None
-    (DataType::Int32, "datdba"),
-    // 6
-    (DataType::Int32, "encoding"),
-    // 'C'
-    (DataType::Varchar, "datcollate"),
-    // 'C'
-    (DataType::Varchar, "datctype"),
-    // false
-    (DataType::Boolean, "datistemplate"),
-    // true
-    (DataType::Boolean, "datallowconn"),
-    // -1
-    (DataType::Int32, "datconnlimit"),
-    // 1663
-    (DataType::Int32, "dattablespace"),
-    // null
-    (DataType::Varchar, "datacl"),
-];
-
-pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
-    OwnedRow::new(vec![
-        Some(ScalarImpl::Int32(id as i32)),
-        Some(ScalarImpl::Utf8(name.into())),
-        None,
-        Some(ScalarImpl::Int32(6)),
-        Some(ScalarImpl::Utf8("C".into())),
-        Some(ScalarImpl::Utf8("C".into())),
-        Some(ScalarImpl::Bool(false)),
-        Some(ScalarImpl::Bool(true)),
-        Some(ScalarImpl::Int32(-1)),
-        Some(ScalarImpl::Int32(1663)),
-        None,
-    ])
-}
+pub static PG_DATABASE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_database",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "datname"),
+        (DataType::Int32, "datdba"),
+        (DataType::Int32, "encoding"),
+        (DataType::Varchar, "datcollate"),
+        (DataType::Varchar, "datctype"),
+        (DataType::Boolean, "datistemplate"),
+        (DataType::Boolean, "datallowconn"),
+        (DataType::Int32, "datconnlimit"),
+        (DataType::Int32, "dattablespace"),
+        (DataType::Varchar, "datacl"),
+    ],
+    sql: "SELECT id AS oid, \
+                 name AS datname, \
+                 owner AS datdba, \
+                 6 AS encoding, \
+                 'C' AS datcollate, \
+                 'C' AS datctype, \
+                 false AS datistemplate, \
+                 true AS datallowconn, \
+                 -1 AS datconnlimit, \
+                 1663 AS dattablespace, \
+                 acl AS datacl FROM rw_catalog.rw_databases"
+        .into(),
+});

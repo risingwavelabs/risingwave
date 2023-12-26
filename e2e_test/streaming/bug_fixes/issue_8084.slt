@@ -12,7 +12,7 @@ create materialized view mv as select t1.* from t as t1 full join t as t2 on t1.
 statement ok
 insert into t values(null);
 
-# TODO: https://github.com/risingwavelabs/risingwave/issues/8084 
+# TODO: https://github.com/risingwavelabs/risingwave/issues/8084
 query I
 select * from mv;
 ----

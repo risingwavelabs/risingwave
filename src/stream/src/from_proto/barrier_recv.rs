@@ -20,7 +20,6 @@ use crate::executor::BarrierRecvExecutor;
 
 pub struct BarrierRecvExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for BarrierRecvExecutorBuilder {
     type Node = BarrierRecvNode;
 
@@ -41,9 +40,6 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
-        Ok(
-            BarrierRecvExecutor::new(params.actor_context, barrier_receiver, params.executor_id)
-                .boxed(),
-        )
+        Ok(BarrierRecvExecutor::new(params.actor_context, params.info, barrier_receiver).boxed())
     }
 }

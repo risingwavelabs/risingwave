@@ -19,7 +19,7 @@ use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cordon_normal() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -78,7 +78,7 @@ async fn test_cordon_normal() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cordon_no_shuffle_failed() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();

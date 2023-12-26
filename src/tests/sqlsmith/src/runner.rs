@@ -108,7 +108,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -129,7 +129,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -385,7 +385,7 @@ async fn test_stream_queries<R: Rng>(
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
-    let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
+    let seed_files = ["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
@@ -454,7 +454,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
         drop_mview_table(mview, client).await;
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
+    let seed_files = ["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
@@ -473,7 +473,9 @@ fn validate_response(
         Ok(rows) => Ok((0, rows)),
         Err(e) => {
             // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(&e.to_string())
+            {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok((1, vec![]));
             }
@@ -509,16 +511,20 @@ async fn run_query_inner(
         ),
     };
     if let Err(e) = &response
-    && let Some(e) = e.as_db_error() {
+        && let Some(e) = e.as_db_error()
+    {
         if is_recovery_in_progress_error(&e.to_string()) {
             let tries = 5;
             let interval = 1;
-            for _ in 0..tries { // retry 5 times
+            for _ in 0..tries {
+                // retry 5 times
                 sleep(Duration::from_secs(interval)).await;
                 let query_task = client.simple_query(query);
                 let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
                 match response {
-                    Ok(Ok(r)) => { return Ok((0, r)); }
+                    Ok(Ok(r)) => {
+                        return Ok((0, r));
+                    }
                     Err(_) => bail!(
                         "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
                         query
@@ -538,7 +544,7 @@ async fn run_query_inner(
 /// Create the tables defined in testdata, along with some mviews.
 /// Just test number of rows for now.
 /// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
-/// with select * ORDER BY <all columns>.
+/// with `select * ORDER BY <all columns>`.
 async fn diff_stream_and_batch(
     rng: &mut impl Rng,
     mvs_and_base_tables: Vec<Table>,

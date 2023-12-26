@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::sleep;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
 const ROOT_TABLE_DROP: &str = "drop table t1;";
@@ -30,7 +30,7 @@ const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 static EXPECTED_NO_BACKFILL: LazyLock<String> = LazyLock::new(|| {
     (0..=255)
-        .map(|vnode| format!("{} NULL t", vnode))
+        .map(|vnode| format!("{} NULL t 0", vnode))
         .join("\n")
 });
 
@@ -46,7 +46,7 @@ async fn test_no_backfill_state(session: &mut Session) -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_snapshot_mv() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -77,7 +77,7 @@ async fn test_snapshot_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -98,7 +98,7 @@ async fn test_snapshot_mv() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_backfill_mv() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -124,7 +124,7 @@ async fn test_backfill_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -151,7 +151,7 @@ async fn test_backfill_mv() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_index_backfill() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -175,7 +175,10 @@ async fn test_index_backfill() -> Result<()> {
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("index"), no_identity_contains("chain")])
+        .locate_one_fragment([
+            identity_contains("index"),
+            no_identity_contains("StreamTableScan"),
+        ])
         .await?;
 
     let id = fragment.id();

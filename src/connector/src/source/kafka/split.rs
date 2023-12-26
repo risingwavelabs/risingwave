@@ -39,6 +39,11 @@ impl SplitMetaData for KafkaSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset.as_str().parse::<i64>().unwrap());
+        Ok(())
+    }
 }
 
 impl KafkaSplit {
@@ -54,15 +59,6 @@ impl KafkaSplit {
             start_offset,
             stop_offset,
         }
-    }
-
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self::new(
-            self.partition,
-            Some(start_offset.as_str().parse::<i64>().unwrap()),
-            self.stop_offset,
-            self.topic.clone(),
-        )
     }
 
     pub fn get_topic_and_partition(&self) -> (String, i32) {

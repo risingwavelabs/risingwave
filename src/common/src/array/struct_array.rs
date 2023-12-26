@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Write};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -28,8 +27,7 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, StructType, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -54,7 +52,7 @@ macro_rules! iter_fields_ref {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
@@ -113,7 +111,11 @@ impl ArrayBuilder for StructArrayBuilder {
 
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
-        for (a, o) in self.children_array.iter_mut().zip_eq_fast(&other.children) {
+        for (a, o) in self
+            .children_array
+            .iter_mut()
+            .zip_eq_fast(other.children.iter())
+        {
             a.append_array(o);
         }
         self.len += other.len();
@@ -146,10 +148,21 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
+impl EstimateSize for StructArrayBuilder {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self
+                .children_array
+                .iter()
+                .map(|a| a.estimated_heap_size())
+                .sum::<usize>()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructArray {
     bitmap: Bitmap,
-    children: Vec<ArrayRef>,
+    children: Box<[ArrayRef]>,
     type_: StructType,
     heap_size: usize,
 }
@@ -209,7 +222,7 @@ impl StructArray {
 
         Self {
             bitmap,
-            children,
+            children: children.into(),
             type_,
             heap_size,
         }
@@ -268,7 +281,7 @@ impl From<DataChunk> for StructArray {
         Self::new(
             StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
             chunk.columns().to_vec(),
-            chunk.vis().to_bitmap(),
+            chunk.visibility().clone(),
         )
     }
 }
@@ -280,13 +293,13 @@ pub struct StructValue {
 
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
     }
 }
 
@@ -374,14 +387,20 @@ impl PartialEq for StructRef<'_> {
     }
 }
 
+impl Eq for StructRef<'_> {}
+
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StructRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_fields_ref!(*self, lhs, {
             iter_fields_ref!(*other, rhs, {
-                if lhs.len() != rhs.len() {
-                    return None;
-                }
-                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
+                assert_eq!(lhs.len(), rhs.len());
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
@@ -406,6 +425,7 @@ impl Debug for StructRef<'_> {
 
 impl ToText for StructRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        let mut raw_text = String::new();
         iter_fields_ref!(*self, it, {
             write!(f, "(")?;
             let mut is_first = true;
@@ -415,7 +435,12 @@ impl ToText for StructRef<'_> {
                 } else {
                     write!(f, ",")?;
                 }
-                ToText::write(&x, f)?;
+                // print nothing for null
+                if x.is_some() {
+                    raw_text.clear();
+                    x.write(&mut raw_text)?;
+                    quote_if_need(&raw_text, f)?;
+                }
             }
             write!(f, ")")
         })
@@ -429,13 +454,30 @@ impl ToText for StructRef<'_> {
     }
 }
 
-impl Eq for StructRef<'_> {}
-
-impl Ord for StructRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two structs is deterministic.
-        self.partial_cmp(other).unwrap()
+/// Double quote a string if it contains any special characters.
+fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+    if !input.is_empty() // non-empty
+        && !input.contains([
+            '"', '\\', '(', ')', ',',
+            // PostgreSQL `array_isspace` includes '\x0B' but rust
+            // [`char::is_ascii_whitespace`] does not.
+            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+        ])
+    {
+        return writer.write_str(input);
     }
+
+    writer.write_char('"')?;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => writer.write_str("\"\"")?,
+            '\\' => writer.write_str("\\\\")?,
+            _ => writer.write_char(ch)?,
+        }
+    }
+
+    writer.write_char('"')
 }
 
 #[cfg(test)]
@@ -714,5 +756,24 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
         }
+    }
+
+    #[test]
+    fn test_quote() {
+        #[track_caller]
+        fn test(input: &str, quoted: &str) {
+            let mut actual = String::new();
+            quote_if_need(input, &mut actual).unwrap();
+            assert_eq!(quoted, actual);
+        }
+        test("abc", "abc");
+        test("", r#""""#);
+        test(" x ", r#"" x ""#);
+        test("a b", r#""a b""#);
+        test(r#"a"bc"#, r#""a""bc""#);
+        test(r#"a\bc"#, r#""a\\bc""#);
+        test("{1}", "{1}");
+        test("{1,2}", r#""{1,2}""#);
+        test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
     }
 }

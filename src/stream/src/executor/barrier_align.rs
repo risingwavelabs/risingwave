@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult, Watermark};
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
 pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
@@ -44,9 +44,17 @@ pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
     actor_id: ActorId,
+    fragment_id: FragmentId,
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
+    let fragment_id = fragment_id.to_string();
+    let left_join_barrier_align_duration = metrics
+        .join_barrier_align_duration
+        .with_label_values(&[&actor_id, &fragment_id, "left"]);
+    let right_join_barrier_align_duration = metrics
+        .join_barrier_align_duration
+        .with_label_values(&[&actor_id, &fragment_id, "right"]);
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -105,9 +113,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "right"])
+                            right_join_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -131,9 +137,7 @@ pub async fn barrier_align(
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
-                            metrics
-                                .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "left"])
+                            left_join_barrier_align_duration
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -159,7 +163,7 @@ mod tests {
         left: BoxedMessageStream,
         right: BoxedMessageStream,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(left, right, 0, 0, Arc::new(StreamingMetrics::unused()))
     }
 
     #[tokio::test]

@@ -35,6 +35,26 @@ where
     visit_inner(stream_node, &mut f)
 }
 
+/// A utility for to accessing the [`StreamNode`]. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont<F>(stream_node: &mut StreamNode, mut f: F)
+where
+    F: FnMut(&mut StreamNode) -> bool,
+{
+    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
+    where
+        F: FnMut(&mut StreamNode) -> bool,
+    {
+        if !f(stream_node) {
+            return;
+        }
+        for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(stream_node, &mut f)
+}
+
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
 pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
@@ -61,7 +81,6 @@ fn visit_stream_node_tables_inner<F>(
         }};
     }
 
-    #[allow(unused_macros)]
     macro_rules! optional {
         ($table:expr, $name:expr) => {
             if let Some(table) = &mut $table {
@@ -89,20 +108,22 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.right_degree_table, "HashJoinDegreeRight");
             }
             NodeBody::DynamicFilter(node) => {
-                always!(node.left_table, "DynamicFilterLeft");
+                if node.condition_always_relax {
+                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
+                } else {
+                    always!(node.left_table, "DynamicFilterLeft");
+                }
+
                 always!(node.right_table, "DynamicFilterRight");
             }
 
             // Aggregation
             NodeBody::HashAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "HashAggResult");
+                always!(node.intermediate_state_table, "HashAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("HashAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("HashAggCall{}", call_idx));
                         }
@@ -114,13 +135,10 @@ fn visit_stream_node_tables_inner<F>(
             }
             NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "SimpleAggResult");
+                always!(node.intermediate_state_table, "SimpleAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("SimpleAggCall{}", call_idx));
                         }
@@ -152,6 +170,11 @@ fn visit_stream_node_tables_inner<F>(
             NodeBody::Source(node) => {
                 if let Some(source) = &mut node.source_inner {
                     always!(source.state_table, "Source");
+                }
+            }
+            NodeBody::StreamFsFetch(node) => {
+                if let Some(source) = &mut node.node_inner {
+                    always!(source.state_table, "FsFetch");
                 }
             }
 
@@ -196,9 +219,14 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "Sort");
             }
 
-            // Chain
-            NodeBody::Chain(node) => {
-                optional!(node.state_table, "Chain")
+            // Stream Scan
+            NodeBody::StreamScan(node) => {
+                optional!(node.state_table, "StreamScan")
+            }
+
+            // Stream Cdc Scan
+            NodeBody::StreamCdcScan(node) => {
+                always!(node.state_table, "StreamCdcScan")
             }
 
             // Note: add internal tables for new nodes here.
@@ -217,6 +245,7 @@ where
     visit_stream_node_tables_inner(stream_node, true, f)
 }
 
+#[allow(dead_code)]
 pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),

@@ -73,6 +73,15 @@ impl Topic {
             partition_index: Some(partition),
         })
     }
+
+    pub fn topic_str_without_partition(&self) -> Result<String> {
+        if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
+            let parts: Vec<&str> = self.topic.split(PARTITIONED_TOPIC_SUFFIX).collect();
+            Ok(parts[0].to_string())
+        } else {
+            Ok(self.topic.clone())
+        }
+    }
 }
 
 /// `get_partition_index` returns the partition index of the topic.
@@ -93,10 +102,10 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
 
 /// `parse_topic` parses a topic name into its components.
 /// The short topic name can be:
-/// - <topic>
-/// - <tenant>/<namespace>/<topic>
+/// - `<topic>`
+/// - `<tenant>/<namespace>/<topic>`
 /// The fully qualified topic name can be:
-/// <domain>://<tenant>/<namespace>/<topic>
+/// `<domain>://<tenant>/<namespace>/<topic>`
 pub fn parse_topic(topic: &str) -> Result<Topic> {
     let mut complete_topic = topic.to_string();
 

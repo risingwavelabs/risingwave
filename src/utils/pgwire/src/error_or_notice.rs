@@ -67,7 +67,7 @@ impl Severity {
     }
 }
 
-/// Code: the SQLSTATE code for the error (see https://www.postgresql.org/docs/current/errcodes-appendix.html).
+/// Code: the SQLSTATE code for the error (see <https://www.postgresql.org/docs/current/errcodes-appendix.html>).
 /// Not localizable. Always present.
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[allow(clippy::upper_case_acronyms)]

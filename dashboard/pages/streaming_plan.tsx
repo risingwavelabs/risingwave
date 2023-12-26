@@ -53,7 +53,7 @@ export interface PlanNodeDatum {
   children?: PlanNodeDatum[]
   operatorId: string | number
   node: StreamNode | DispatcherNode
-  extraInfo?: string
+  actor_ids?: string[]
 }
 
 function buildPlanNodeDependency(
@@ -94,7 +94,7 @@ function buildPlanNodeDependency(
 
   return d3.hierarchy({
     name: dispatcherName,
-    extraInfo: `Actor ${fragment.actors.map((a) => a.actorId).join(", ")}`,
+    actor_ids: fragment.actors.map((a) => a.actorId.toString()),
     children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
     node: dispatcherNode,

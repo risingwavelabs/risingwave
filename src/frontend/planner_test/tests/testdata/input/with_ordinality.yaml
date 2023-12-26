@@ -1,0 +1,64 @@
+# constant FROM
+- sql: |
+    select * from unnest(array[1,2,3]) WITH ORDINALITY;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+# lateral join
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY as foo;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY as foo(a);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: use alias columns explicitlity
+  sql: |
+    create table t(x int , arr int[]);
+    select x, arr, a, ord from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord,bar);
+  expected_outputs:
+    - binder_error
+# multiple with ordinality
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr) WITH ORDINALITY, unnest(arr) WITH ORDINALITY AS unnest_2(arr_2,ordinality_2);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+# constant FROM (scalar function)
+- sql: |
+    select * from abs(1) WITH ORDINALITY;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+# lateral join (scalar function)
+# FIXME: currently this panics due to CorrelatedInputRef in Values https://github.com/risingwavelabs/risingwave/issues/12231
+- sql: |
+    create table t(x int , arr int[]);
+    select * from t, abs(x) WITH ORDINALITY;
+  expected_outputs:
+    - batch_plan
+    - stream_error

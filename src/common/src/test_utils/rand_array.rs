@@ -135,7 +135,7 @@ impl RandValue for Int256 {
 
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        JsonbVal::dummy()
+        JsonbVal::null()
     }
 }
 
@@ -146,8 +146,8 @@ impl RandValue for StructValue {
 }
 
 impl RandValue for ListValue {
-    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        ListValue::new(vec![])
+    fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
+        ListValue::from_iter([rand.gen::<i16>()])
     }
 }
 
@@ -192,9 +192,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::interval_array::IntervalArray;
-    use crate::array::*;
-    use crate::for_all_variants;
+    use crate::for_all_array_variants;
 
     #[test]
     fn test_create_array() {
@@ -209,6 +207,6 @@ mod tests {
         };
     }
 
-        for_all_variants! { gen_rand_array }
+        for_all_array_variants! { gen_rand_array }
     }
 }

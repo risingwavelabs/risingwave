@@ -60,7 +60,7 @@ impl GenericPlanNode for Source {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         self.row_id_index.map(|idx| vec![idx])
     }
 
@@ -69,7 +69,7 @@ impl GenericPlanNode for Source {
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        let pk_indices = self.logical_pk();
+        let pk_indices = self.stream_key();
         match pk_indices {
             Some(pk_indices) => {
                 FunctionalDependencySet::with_key(self.column_catalog.len(), &pk_indices)

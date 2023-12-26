@@ -117,36 +117,30 @@ def load_stream_chunk_payload(input_file):
     return payloads
 
 
-def test_sink(prop, format, payload_input, table_schema):
+def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
+    sink_param = connector_service_pb2.SinkParam(
+        sink_id=0,
+        properties=prop,
+        table_schema=table_schema,
+    )
+
     # read input, Add StartSink request
     request_list = [
         connector_service_pb2.SinkWriterStreamRequest(
             start=connector_service_pb2.SinkWriterStreamRequest.StartSink(
                 format=format,
-                sink_param=connector_service_pb2.SinkParam(
-                    sink_id=0,
-                    properties=prop,
-                    table_schema=table_schema,
-                ),
+                sink_param=sink_param,
             )
         )
     ]
-
-    response_count = 1
 
     with grpc.insecure_channel("localhost:50051") as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         epoch = 1
         batch_id = 1
+        epoch_list = []
         # construct request
         for payload in payload_input:
-            request_list.append(
-                connector_service_pb2.SinkWriterStreamRequest(
-                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
-                        epoch=epoch
-                    )
-                )
-            )
             request_list.append(
                 connector_service_pb2.SinkWriterStreamRequest(
                     write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
@@ -162,57 +156,51 @@ def test_sink(prop, format, payload_input, table_schema):
                     )
                 )
             )
-            response_count += 1
+            epoch_list.append(epoch)
             epoch += 1
             batch_id += 1
         # send request
         response_iter = stub.SinkWriterStream(iter(request_list))
-        for req in request_list:
-            print("REQUEST", req)
-        for _ in range(response_count):
-            try:
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
-
-
-def validate_jdbc_sink(input_file):
-    conn = psycopg2.connect(
-        "dbname=test user=test password=connector host=localhost port=5432"
-    )
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM test")
-    rows = cur.fetchall()
-    expected = [list(row.values()) for batch in load_input(input_file) for row in batch]
-
-    def convert(b):
-        return [(item[1]["id"], item[1]["name"]) for item in b]
-
-    expected = convert(expected)
-
-    if len(rows) != len(expected):
-        print(
-            "Integration test failed: expected {} rows, but got {}".format(
-                len(expected), len(rows)
-            )
-        )
-        exit(1)
-    for i in range(len(rows)):
-        if len(rows[i]) != len(expected[i]):
-            print(
-                "Integration test failed: expected {} columns, but got {}".format(
-                    len(expected[i]), len(rows[i])
-                )
-            )
+        metadata_list = []
+        try:
+            response = next(response_iter)
+            assert response.HasField("start")
+            for epoch in epoch_list:
+                response = next(response_iter)
+                assert response.HasField("commit")
+                assert epoch == response.commit.epoch
+                metadata_list.append((epoch, response.commit.metadata))
+        except Exception as e:
+            print("Integration test failed: ", e)
             exit(1)
-        for j in range(len(rows[i])):
-            if rows[i][j] != expected[i][j]:
-                print(
-                    "Integration test failed: expected {} at row {}, column {}, but got {}".format(
-                        expected[i][j], i, j, rows[i][j]
+
+        if is_coordinated:
+            request_list = [
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    start=connector_service_pb2.SinkCoordinatorStreamRequest.StartCoordinator(
+                        param=sink_param
                     )
                 )
+            ]
+            request_list += [
+                connector_service_pb2.SinkCoordinatorStreamRequest(
+                    commit=connector_service_pb2.SinkCoordinatorStreamRequest.CommitMetadata(
+                        epoch=epoch, metadata=[metadata]
+                    )
+                )
+                for (epoch, metadata) in metadata_list
+            ]
+
+            response_iter = stub.SinkCoordinatorStream(iter(request_list))
+            try:
+                response = next(response_iter)
+                assert response.HasField("start")
+                for epoch, _ in metadata_list:
+                    response = next(response_iter)
+                    assert response.HasField("commit")
+                    assert epoch == response.commit.epoch
+            except Exception as e:
+                print("Integration test failed: ", e)
                 exit(1)
 
 
@@ -224,21 +212,9 @@ def test_file_sink(param):
     test_sink(prop, **param)
 
 
-def test_jdbc_sink(input_file, param):
-    prop = {
-        "connector": "jdbc",
-        "jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-        "table.name": "test",
-        "type": "upsert",
-    }
-    test_sink(prop, **param)
-    # validate results
-    validate_jdbc_sink(input_file)
-
-
 def test_elasticsearch_sink(param):
     prop = {
-        "connector": "elasticsearch-7",
+        "connector": "elasticsearch",
         "url": "http://127.0.0.1:9200",
         "index": "test",
     }
@@ -247,7 +223,7 @@ def test_elasticsearch_sink(param):
 
 def test_iceberg_sink(param):
     prop = {
-        "connector": "iceberg",
+        "connector": "iceberg_java",
         "type": "append-only",
         "warehouse.path": "s3a://bucket",
         "s3.endpoint": "http://127.0.0.1:9000",
@@ -256,12 +232,12 @@ def test_iceberg_sink(param):
         "database.name": "demo_db",
         "table.name": "demo_table",
     }
-    test_sink(prop, **param)
+    test_sink(prop, is_coordinated=True, **param)
 
 
 def test_upsert_iceberg_sink(param):
     prop = {
-        "connector": "iceberg",
+        "connector": "iceberg_java",
         "type": "upsert",
         "warehouse.path": "s3a://bucket",
         "s3.endpoint": "http://127.0.0.1:9000",
@@ -272,7 +248,7 @@ def test_upsert_iceberg_sink(param):
     }
     type = "iceberg"
     # need to make sure all ops as Insert
-    test_sink(prop, **param)
+    test_sink(prop, is_coordinated=True, **param)
 
 
 def test_deltalake_sink(param):
@@ -299,7 +275,6 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--file_sink", action="store_true", help="run file sink test")
-    parser.add_argument("--jdbc_sink", action="store_true", help="run jdbc sink test")
     parser.add_argument(
         "--stream_chunk_format_test",
         action="store_true",
@@ -356,8 +331,6 @@ if __name__ == "__main__":
 
     if args.file_sink:
         test_file_sink(param)
-    if args.jdbc_sink:
-        test_jdbc_sink(args.input_file, param)
     if args.iceberg_sink:
         test_iceberg_sink(param)
     if args.deltalake_sink:

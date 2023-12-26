@@ -31,6 +31,7 @@ pub struct NexmarkMessage {
 impl From<NexmarkMessage> for SourceMessage {
     fn from(msg: NexmarkMessage) -> Self {
         SourceMessage {
+            key: None,
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.split_id,

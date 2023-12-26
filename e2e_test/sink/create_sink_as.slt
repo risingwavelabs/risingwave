@@ -8,11 +8,21 @@ CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM t4;
 statement error
 CREATE SINK invalid_sink_query AS select * from t4 where v1 = invalid WITH (connector = 'blackhole');
 
+# Upsert jdbc sink must specify primary_key
+statement error
+CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
+    connector = 'jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name = 't4',
+    type = 'upsert'
+);
+
 statement ok
 CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
     connector = 'jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name = 't4',
+    primary_key = 'v1',
     type = 'upsert'
 );
 

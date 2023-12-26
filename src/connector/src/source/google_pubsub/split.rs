@@ -35,17 +35,6 @@ pub struct PubsubSplit {
     pub(crate) stop_offset: Option<String>,
 }
 
-impl PubsubSplit {
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self {
-            start_offset: Some(start_offset),
-            index: self.index,
-            subscription: self.subscription.clone(),
-            stop_offset: None,
-        }
-    }
-}
-
 impl SplitMetaData for PubsubSplit {
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
@@ -57,5 +46,10 @@ impl SplitMetaData for PubsubSplit {
 
     fn id(&self) -> SplitId {
         format!("{}-{}", self.subscription, self.index).into()
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset);
+        Ok(())
     }
 }

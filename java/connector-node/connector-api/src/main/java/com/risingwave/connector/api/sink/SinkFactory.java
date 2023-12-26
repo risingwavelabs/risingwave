@@ -22,4 +22,9 @@ public interface SinkFactory {
     SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties);
 
     void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
+
+    default SinkCoordinator createCoordinator(
+            TableSchema tableSchema, Map<String, String> tableProperties) {
+        throw new UnsupportedOperationException("not support create coordinator");
+    }
 }

@@ -13,9 +13,10 @@
 // limitations under the License.
 
 mod join_entry_state;
+mod join_row_set;
 
 use std::alloc::Global;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use futures::future::try_join;
@@ -26,6 +27,7 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -40,7 +42,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{ActorId, AtomicU64Ref};
+use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 type DegreeType = u64;
 
@@ -131,7 +133,7 @@ impl EstimateSize for HashValueWrapper {
 }
 
 impl HashValueWrapper {
-    const MESSAGE: &str = "the state should always be `Some`";
+    const MESSAGE: &'static str = "the state should always be `Some`";
 
     /// Take the value out of the wrapper. Panic if the value is `None`.
     pub fn take(&mut self) -> HashValueType {
@@ -157,67 +159,74 @@ type JoinHashMapInner<K> =
     ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
-    /// Metrics used by join executor
-    metrics: Arc<StreamingMetrics>,
     /// Basic information
-    actor_id: String,
-    join_table_id: String,
-    degree_table_id: String,
-    side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
     /// How many times have we miss the cache when insert row
     insert_cache_miss_count: usize,
+
+    // Metrics
+    join_lookup_total_count_metric: LabelGuardedIntCounter<5>,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter<5>,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<5>,
 }
 
 impl JoinHashMapMetrics {
     pub fn new(
-        metrics: Arc<StreamingMetrics>,
+        metrics: &StreamingMetrics,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
         degree_table_id: u32,
     ) -> Self {
+        let actor_id = actor_id.to_string();
+        let fragment_id = fragment_id.to_string();
+        let join_table_id = join_table_id.to_string();
+        let degree_table_id = degree_table_id.to_string();
+        let join_lookup_total_count_metric =
+            metrics.join_lookup_total_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_lookup_miss_count_metric =
+            metrics.join_lookup_miss_count.with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+        let join_insert_cache_miss_count_metrics = metrics
+            .join_insert_cache_miss_count
+            .with_guarded_label_values(&[
+                (side),
+                &join_table_id,
+                &degree_table_id,
+                &actor_id,
+                &fragment_id,
+            ]);
+
         Self {
-            metrics,
-            actor_id: actor_id.to_string(),
-            join_table_id: join_table_id.to_string(),
-            degree_table_id: degree_table_id.to_string(),
-            side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
+            join_lookup_total_count_metric,
+            join_lookup_miss_count_metric,
+            join_insert_cache_miss_count_metrics,
         }
     }
 
     pub fn flush(&mut self) {
-        self.metrics
-            .join_lookup_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-            ])
-            .inc_by(self.lookup_miss_count as u64);
-        self.metrics
-            .join_total_lookup_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-            ])
+        self.join_lookup_total_count_metric
             .inc_by(self.total_lookup_count as u64);
-        self.metrics
-            .join_insert_cache_miss_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-            ])
+        self.join_lookup_miss_count_metric
+            .inc_by(self.lookup_miss_count as u64);
+        self.join_insert_cache_miss_count_metrics
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
@@ -284,6 +293,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         side: &'static str,
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
@@ -333,8 +343,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             need_degree_table,
             pk_contained_in_jk,
             metrics: JoinHashMapMetrics::new(
-                metrics,
+                &metrics,
                 actor_id,
+                fragment_id,
                 side,
                 join_table_id,
                 degree_table_id,
@@ -402,22 +413,27 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self
-                .state
-                .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
+            let table_iter_fut =
+                self.state
+                    .table
+                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
+            let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::default(),
+            );
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             #[for_await]
             for (row, degree) in table_iter.zip(degree_table_iter) {
-                let (pk1, row) = row?;
-                let (pk2, degree) = degree?;
+                let row = row?;
+                let degree_row = degree?;
+                let pk1 = row.key();
+                let pk2 = degree_row.key();
                 debug_assert_eq!(
                     pk1, pk2,
                     "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
@@ -426,29 +442,31 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                let degree_i64 = degree
-                    .datum_at(degree.len() - 1)
+                let degree_i64 = degree_row
+                    .datum_at(degree_row.len() - 1)
                     .expect("degree should not be NULL");
                 entry_state.insert(
                     pk,
-                    JoinRow::new(row, degree_i64.into_int64() as u64).encode(),
+                    JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64).encode(),
                 );
             }
         } else {
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
             let table_iter = self
                 .state
                 .table
-                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_with_prefix(&key, sub_range, PrefetchOptions::default())
                 .await?;
 
             #[for_await]
-            for row in table_iter {
-                let row: OwnedRow = row?;
+            for entry in table_iter {
+                let row = entry?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
-                entry_state.insert(pk, JoinRow::new(row, 0).encode());
+                entry_state.insert(pk, JoinRow::new(row.into_owned_row(), 0).encode());
             }
         };
 
@@ -459,6 +477,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
         self.degree_state.table.commit(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.table.try_flush().await?;
+        self.degree_state.table.try_flush().await?;
         Ok(())
     }
 
@@ -610,5 +634,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn null_matched(&self) -> &K::Bitmap {
         &self.null_matched
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.state.table.table_id()
     }
 }

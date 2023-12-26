@@ -25,11 +25,12 @@ pub async fn handle_drop_view(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -56,7 +57,7 @@ pub async fn handle_drop_view(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_view(view_id).await?;
+    catalog_writer.drop_view(view_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_VIEW))
 }

@@ -58,8 +58,8 @@ function NavButton({
   return (
     <Link href={href}>
       <Button
-        colorScheme={match ? "teal" : "gray"}
-        color={match ? "teal.600" : "gray.500"}
+        colorScheme={match ? "blue" : "gray"}
+        color={match ? "blue.600" : "gray.500"}
         variant={match ? "outline" : "ghost"}
         width="full"
         justifyContent="flex-start"
@@ -77,7 +77,7 @@ function NavButton({
 
 function NavTitle({ children }: { children: React.ReactNode }) {
   return (
-    <Text mt={3} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+    <Text mt={3} textColor="blue.500" fontWeight="semibold" lineHeight="6">
       {children}
     </Text>
   )
@@ -99,13 +99,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <Box height="50px" width="full">
             <HStack spacing={0}>
               <Link href="/" passHref>
-                <a>
-                  <Image
-                    boxSize="50px"
-                    src="/risingwave.svg"
-                    alt="RisingWave Logo"
-                  />
-                </a>
+                <Image
+                  boxSize="50px"
+                  src="/risingwave.svg"
+                  alt="RisingWave Logo"
+                />
               </Link>
               <Text fontSize="xl">
                 <b>RisingWave</b> Dashboard
@@ -117,7 +115,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           </NavButton>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Catalog</NavTitle>
-            <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/sources/">Sources</NavButton>
             <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
@@ -125,6 +123,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/indexes/">Indexes</NavButton>
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
+            <NavButton href="/views/">Views</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Streaming</NavTitle>
@@ -142,6 +141,8 @@ function Layout({ children }: { children: React.ReactNode }) {
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Debug</NavTitle>
             <NavButton href="/await_tree/">Await Tree Dump</NavButton>
+            <NavButton href="/heap_profiling/">Heap Profiling</NavButton>
+            <NavButton href="/api/monitor/diagnose">Diagnose</NavButton>
           </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>

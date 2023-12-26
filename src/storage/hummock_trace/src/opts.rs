@@ -15,19 +15,22 @@
 use bincode::{Decode, Encode};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::TracedBytes;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedPrefetchOptions {
-    pub exhaust_iter: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
+    FileFileCache,
     NotFill,
 }
 
@@ -93,7 +96,10 @@ impl TracedReadOptions {
         Self {
             prefix_hint: Some(TracedBytes::from(vec![0])),
             ignore_range_tombstone: true,
-            prefetch_options: TracedPrefetchOptions { exhaust_iter: true },
+            prefetch_options: TracedPrefetchOptions {
+                prefetch: true,
+                for_large_query: true,
+            },
             cache_policy: TracedCachePolicy::Disable,
             retention_seconds: None,
             table_id: TracedTableId { table_id },
@@ -181,4 +187,39 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub struct TracedEpochPair {
+    pub curr: TracedHummockEpoch,
+    pub prev: TracedHummockEpoch,
+}
+
+impl From<EpochPair> for TracedEpochPair {
+    fn from(value: EpochPair) -> Self {
+        TracedEpochPair {
+            curr: value.curr,
+            prev: value.prev,
+        }
+    }
+}
+
+impl From<TracedEpochPair> for EpochPair {
+    fn from(value: TracedEpochPair) -> Self {
+        EpochPair {
+            curr: value.curr,
+            prev: value.prev,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub struct TracedInitOptions {
+    pub epoch: TracedEpochPair,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub struct TracedSealCurrentEpochOptions {
+    // The watermark is serialized into protobuf
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
 }

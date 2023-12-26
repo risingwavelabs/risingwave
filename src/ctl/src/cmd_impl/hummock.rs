@@ -23,9 +23,11 @@ mod list_version_deltas;
 mod pause_resume;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
+mod validate_version;
 
 pub use compaction_group::*;
 pub use list_version_deltas::*;
 pub use pause_resume::*;
 pub use trigger_full_gc::*;
 pub use trigger_manual_compaction::*;
+pub use validate_version::*;

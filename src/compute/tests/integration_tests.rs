@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 use std::sync::atomic::AtomicU64;
@@ -22,6 +22,7 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
@@ -40,6 +41,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -55,7 +57,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -90,7 +92,7 @@ impl BatchExecutor for SingleChunkExecutor {
 }
 
 impl SingleChunkExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         yield self.chunk.unwrap()
     }
@@ -131,7 +133,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     // Ensure the source exists.
-    let source_desc = source_builder.build().await.unwrap();
+    let source_desc = source_builder.build().unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -151,16 +153,10 @@ async fn test_table_materialize() -> StreamResult<()> {
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
-        .map(|(column_id, field)| ColumnDesc {
-            data_type: field.data_type,
-            column_id: *column_id,
-            name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-        })
+        .map(|(column_id, field)| ColumnDesc::named(field.name, *column_id, field.data_type))
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
+    let barrier_tx = Arc::new(barrier_tx);
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::create(0x3f3f3f);
@@ -169,34 +165,42 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
-        all_schema.clone(),
-        pk_indices.clone(),
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("SourceExecutor {:X}", 1),
+        },
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
         system_params_manager.get_params(),
-        1,
         SourceCtrlOpts::default(),
+        ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = DmlExecutor::new(
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("DmlExecutor {:X}", 2),
+        },
         Box::new(source_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        2,
         dml_manager.clone(),
         table_id,
         INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
+        1024,
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(
         actor_ctx,
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("RowIdGenExecutor {:X}", 3),
+        },
         Box::new(dml_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        3,
         row_id_index,
         vnodes,
     );
@@ -243,12 +247,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         false,
     ));
 
-    tokio::spawn(async move {
-        let mut stream = insert.execute();
-        let _ = stream.next().await.unwrap()?;
-        Ok::<_, RwError>(())
-    });
-
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = StorageTable::for_test(
@@ -268,13 +266,14 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "RowSeqExecutor2".to_string(),
         None,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let curr_epoch = 1919;
+    let mut curr_epoch = 1919;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -287,6 +286,18 @@ async fn test_table_materialize() -> StreamResult<()> {
             ..
         }) if epoch.curr == curr_epoch
     ));
+
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
+    tokio::spawn(async move {
+        let mut stream = insert.execute();
+        let _ = stream.next().await.unwrap()?;
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
+        Ok::<_, RwError>(())
+    });
 
     // Poll `Materialize`, should output the same insertion stream chunk.
     let message = materialize.next().await.unwrap()?;
@@ -307,12 +318,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         Message::Barrier(_) => panic!(),
     }
 
-    // Send a barrier and poll again, should write changes to storage.
-    let curr_epoch = 1920;
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch))
-        .unwrap();
-
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
@@ -330,6 +335,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 
@@ -362,9 +368,15 @@ async fn test_table_materialize() -> StreamResult<()> {
         false,
     ));
 
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
         let _ = stream.next().await.unwrap()?;
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
         Ok::<_, RwError>(())
     });
 
@@ -384,18 +396,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         Message::Barrier(_) => panic!(),
     }
 
-    // Send a barrier and poll again, should write changes to storage.
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch + 1))
-        .unwrap();
-
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch + 1
+        }) if epoch.curr == curr_epoch
     ));
 
     // Scan the table again, we are able to see the deletion now!
@@ -406,6 +413,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 
@@ -428,7 +436,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
-    let _column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let _column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
 
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
@@ -476,6 +484,7 @@ async fn test_row_seq_scan() -> Result<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
     ));
 

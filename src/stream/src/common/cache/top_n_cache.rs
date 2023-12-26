@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 
 /// Inner top-N cache structure for [`super::TopNStateCache`].
+#[derive(Clone)]
 pub struct TopNCache<K: Ord + EstimateSize, V: EstimateSize> {
     /// The capacity of the cache.
     capacity: usize,

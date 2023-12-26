@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
@@ -23,8 +24,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{CreateType, TableType};
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
+use crate::optimizer::property::Cardinality;
 use crate::utils::WithOptions;
 
 #[derive(Default)]
@@ -171,7 +173,16 @@ impl TableCatalogBuilder {
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
-            dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
+            dist_key_in_pk: self.dist_key_in_pk.unwrap_or_default(),
+            cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            cleaned_by_watermark: false,
+            // NOTE(kwannoel): This may not match the create type of the materialized table.
+            // It should be ignored for internal tables.
+            create_type: CreateType::Foreground,
+            description: None,
+            incoming_sinks: vec![],
         }
     }
 

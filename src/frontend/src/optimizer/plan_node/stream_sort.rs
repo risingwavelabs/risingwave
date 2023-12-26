@@ -16,35 +16,41 @@ use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamSort {
-    pub base: PlanBase,
+pub struct StreamEowcSort {
+    pub base: PlanBase<Stream>,
 
     input: PlanRef,
     sort_column_index: usize,
 }
 
-impl Distill for StreamSort {
+impl Distill for StreamEowcSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = vec![("sort_column_index", Pretty::debug(&self.sort_column_index))];
-        childless_record("StreamSort", fields)
+        let fields = vec![(
+            "sort_column",
+            Pretty::display(&FieldDisplay(&self.input.schema()[self.sort_column_index])),
+        )];
+        childless_record("StreamEowcSort", fields)
     }
 }
 
-impl StreamSort {
+impl StreamEowcSort {
     pub fn new(input: PlanRef, sort_column_index: usize) -> Self {
         assert!(input.watermark_columns().contains(sort_column_index));
 
         let schema = input.schema().clone();
-        let logical_pk = input.logical_pk().to_vec();
+        let stream_key = input.stream_key().map(|v| v.to_vec());
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
         let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
@@ -52,7 +58,7 @@ impl StreamSort {
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            logical_pk,
+            stream_key,
             fd_set,
             dist,
             true,
@@ -80,7 +86,7 @@ impl StreamSort {
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
         order_cols.insert(self.sort_column_index);
 
-        let dist_key = self.base.dist.dist_column_indices().to_vec();
+        let dist_key = self.base.distribution().dist_column_indices().to_vec();
         for idx in &dist_key {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
@@ -88,7 +94,7 @@ impl StreamSort {
             }
         }
 
-        for idx in self.input.logical_pk() {
+        for idx in self.input.expect_stream_key() {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
@@ -100,7 +106,7 @@ impl StreamSort {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSort {
+impl PlanTreeNodeUnary for StreamEowcSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -110,9 +116,9 @@ impl PlanTreeNodeUnary for StreamSort {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSort }
+impl_plan_tree_node_for_unary! { StreamEowcSort }
 
-impl StreamNode for StreamSort {
+impl StreamNode for StreamEowcSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         PbNodeBody::Sort(SortNode {
@@ -126,4 +132,6 @@ impl StreamNode for StreamSort {
     }
 }
 
-impl ExprRewritable for StreamSort {}
+impl ExprRewritable for StreamEowcSort {}
+
+impl ExprVisitable for StreamEowcSort {}

@@ -306,12 +306,12 @@ t
 query R
 SELECT abs(cosd(85) - 0.08715574274765817) < 1e-14;
 ----
-t 
+t
 
 query R
 SELECT abs(cosd(90) - 0.0) < 1e-14;
 ----
-t 
+t
 
 query R
 SELECT cosd(('Inf'))

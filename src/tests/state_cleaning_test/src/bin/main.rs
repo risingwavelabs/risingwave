@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use regex::Regex;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
@@ -153,10 +157,7 @@ async fn validate_case(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::default(),
-        prometheus::Registry::new(),
-    );
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::default());
 
     let opt = TestOptions::parse();
 
@@ -190,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
 
     let data_dir = PathBuf::from_str(manifest).unwrap().join("data");
 
-    let mut st = ReadDirStream::new(fs::read_dir(data_dir).await?)
+    ReadDirStream::new(fs::read_dir(data_dir).await?)
         .map(|path| async {
             let path = path?.path();
             let content = tokio::fs::read_to_string(&path).await?;
@@ -225,11 +226,9 @@ async fn main() -> anyhow::Result<()> {
 
             Ok::<_, anyhow::Error>(())
         })
-        .buffer_unordered(16);
-
-    while let Some(res) = st.next().await {
-        res?;
-    }
+        .buffer_unordered(16)
+        .try_collect::<()>()
+        .await?;
 
     Ok(())
 }

@@ -15,14 +15,13 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -31,6 +30,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -108,7 +108,7 @@ impl Executor for InsertExecutor {
 }
 
 impl InsertExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
@@ -121,6 +121,7 @@ impl InsertExecutor {
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
+        // Return the returning chunk.
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
@@ -146,6 +147,9 @@ impl InsertExecutor {
                 .map(|(_, column)| column)
                 .collect_vec();
 
+            // Construct the returning chunk, without the `row_id` column.
+            let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
+
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
@@ -153,16 +157,14 @@ impl InsertExecutor {
                 columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 
-            let stream_chunk =
-                StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
+            let stream_chunk = StreamChunk::with_visibility(vec![Op::Insert; cap], columns, vis);
 
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            let cardinality = stream_chunk.cardinality();
             write_handle.write_chunk(stream_chunk).await?;
 
-            Result::Ok(cardinality)
+            Result::Ok(returning_chunk)
         };
 
         let mut rows_inserted = 0;
@@ -170,16 +172,21 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            if self.returning {
-                yield data_chunk.clone();
-            }
             for chunk in builder.append_chunk(data_chunk) {
-                rows_inserted += write_txn_data(chunk).await?;
+                let chunk = write_txn_data(chunk).await?;
+                rows_inserted += chunk.cardinality();
+                if self.returning {
+                    yield chunk;
+                }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            rows_inserted += write_txn_data(chunk).await?;
+            let chunk = write_txn_data(chunk).await?;
+            rows_inserted += chunk.cardinality();
+            if self.returning {
+                yield chunk;
+            }
         }
 
         write_handle.end().await?;
@@ -224,8 +231,8 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .map(|IndexAndExpr { index: i, expr: e }| {
                     Ok((
                         i as usize,
-                        build_from_prost(&e.ok_or_else(|| anyhow!("expression is None"))?)
-                            .map_err(|e| anyhow!("failed to build expression: {}", e))?,
+                        build_from_prost(&e.context("expression is None")?)
+                            .context("failed to build expression")?,
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -388,13 +395,8 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    prefix_hint: None,
-                    ignore_range_tombstone: false,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await?;

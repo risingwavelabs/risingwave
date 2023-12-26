@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_plan::DmlNode;
 use risingwave_storage::StateStore;
 
@@ -25,7 +25,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct DmlExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for DmlExecutorBuilder {
     type Node = DmlNode;
 
@@ -38,17 +37,15 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.table_id);
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
-        let fields = column_descs.iter().map(Into::into).collect_vec();
-        let schema = Schema::new(fields);
+
         Ok(Box::new(DmlExecutor::new(
+            params.info,
             upstream,
-            schema,
-            params.pk_indices,
-            params.executor_id,
             params.env.dml_manager_ref(),
             table_id,
             node.table_version_id,
             column_descs,
+            params.env.config().developer.chunk_size,
         )))
     }
 }

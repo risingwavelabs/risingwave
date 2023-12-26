@@ -17,11 +17,11 @@ use std::time::Duration;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use itertools::Itertools;
-use madsim::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::Fragment;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 /// Common code for Nexmark chaos tests.
 ///
@@ -117,7 +117,7 @@ macro_rules! test {
     };
     ($query:ident, $after_scale_duration:expr) => {
         paste::paste! {
-            #[madsim::test]
+            #[tokio::test]
             async fn [< nexmark_chaos_ $query _single >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(
@@ -132,7 +132,7 @@ macro_rules! test {
                 .await
             }
 
-            #[madsim::test]
+            #[tokio::test]
             async fn [< nexmark_chaos_ $query _multiple >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(

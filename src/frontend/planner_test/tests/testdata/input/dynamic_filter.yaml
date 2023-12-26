@@ -21,6 +21,15 @@
   expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_error
+- name: With Simple Agg upstream materialized view on inner side
+  before:
+  - create_tables
+  sql: |
+    create materialized view max_v2 as select max(v2) max from t2;
+    select v1 from t1, max_v2 where v1 > max;
+  expected_outputs:
+  - optimized_logical_plan_for_stream
+  - stream_plan
 - name: |
     Output indices of Dynamic Filter
     TODO: currently implemented by adding a Project, https://github.com/risingwavelabs/risingwave/issues/3419

@@ -13,21 +13,21 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
@@ -36,20 +36,13 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Insert<PlanRef>,
 }
 
 impl LogicalInsert {
     pub fn new(core: generic::Insert<PlanRef>) -> Self {
-        let ctx = core.ctx();
-        let schema = if core.returning {
-            core.input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 
@@ -99,17 +92,27 @@ impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl Distill for LogicalInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
         childless_record("LogicalInsert", vec)
     }
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input = &self.core.input;
-        let required_cols: Vec<_> = (0..input.schema().len()).collect();
-        self.clone_with_input(input.prune_col(&required_cols, ctx))
-            .into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let pruned_input = {
+            let input = &self.core.input;
+            let required_cols: Vec<_> = (0..input.schema().len()).collect();
+            input.prune_col(&required_cols, ctx)
+        };
+
+        // No pruning.
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(pruned_input).into(),
+            required_cols.iter().copied(),
+        )
+        .into()
     }
 }
 
@@ -130,6 +133,15 @@ impl ExprRewritable for LogicalInsert {
     }
 }
 
+impl ExprVisitable for LogicalInsert {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
+    }
+}
+
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(
         &self,
@@ -143,9 +155,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut logical = self.core.clone();
-        logical.input = new_input;
-        Ok(BatchInsert::new(logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchInsert::new(core).into())
     }
 }
 

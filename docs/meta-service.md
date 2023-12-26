@@ -29,7 +29,7 @@ To fit into the key-value data model, metadata entries are serialized with Proto
 ## Types of Metadata
 ### Catalog
 
-Catalog is the metadata of relational tables in databases. 
+Catalog is the metadata of relational tables in databases.
 
 - **Database & Schema**: Namespace of database objects like in PostgreSQL.
 - **Table & Materialized Views**: Definition of tables & materialized views along with the columns on them.
@@ -43,14 +43,14 @@ Hummock, an LSM-Tree-based storage engine, stores the mapping from version to th
 
 ## Push on Updates
 
-There are 2 choices on how to distribute information across multiple nodes. 
+There are 2 choices on how to distribute information across multiple nodes.
 
-* *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing. 
+* *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing.
 * *Pull*: When data changes, the master node does nothing. Other nodes may not have the latest information, so they need to ask the master node every time.
 
 Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on frontend and compute nodes.
 
 ![Notification](./images/meta-service/notification.svg)
 
-`ObserverManager` will register itself to meta service on bootstrap and subscribe metadata it needs. Afterwards, once metadata changed, the meta node streams the changes to it, expecting all subscribers to acknowledge. 
+`ObserverManager` will register itself to meta service on bootstrap and subscribe metadata it needs. Afterwards, once metadata changed, the meta node streams the changes to it, expecting all subscribers to acknowledge.
 

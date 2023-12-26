@@ -13,13 +13,12 @@ enum BackupJobStatus {
   UNSPECIFIED = 0;
   RUNNING = 1;
   SUCCEEDED = 2;
-  // NOT_FOUND indicates one of these cases:
-  // - Invalid job id.
-  // - Job has failed.
-  // - Job has succeeded, but its resulted backup has been deleted later.
   NOT_FOUND = 3;
+  FAILED = 4;
 }
-message BackupMetaRequest {}
+message BackupMetaRequest {
+  optional string remarks = 1;
+}
 message BackupMetaResponse {
   uint64 job_id = 1;
 }
@@ -29,6 +28,7 @@ message GetBackupJobStatusRequest {
 message GetBackupJobStatusResponse {
   uint64 job_id = 1;
   BackupJobStatus job_status = 2;
+  string message = 3;
 }
 message DeleteMetaSnapshotRequest {
   repeated uint64 snapshot_ids = 1;
@@ -47,6 +47,8 @@ message MetaSnapshotMetadata {
   uint64 hummock_version_id = 2;
   uint64 max_committed_epoch = 3;
   uint64 safe_epoch = 4;
+  optional uint32 format_version = 5;
+  optional string remarks = 6;
 }
 
 service BackupService {

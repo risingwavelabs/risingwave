@@ -38,6 +38,22 @@ impl TempoService {
     fn tempo(&self) -> Result<Command> {
         Ok(Command::new(self.tempo_path()?))
     }
+
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        data_path: impl AsRef<Path>,
+        config_file_path: impl AsRef<Path>,
+    ) -> Result<()> {
+        cmd.arg("--storage.trace.backend")
+            .arg("local")
+            .arg("--storage.trace.local.path")
+            .arg(data_path.as_ref().join("blocks"))
+            .arg("--storage.trace.wal.path")
+            .arg(data_path.as_ref().join("wal"))
+            .arg("--config.file")
+            .arg(config_file_path.as_ref());
+        Ok(())
+    }
 }
 
 impl Task for TempoService {
@@ -60,14 +76,7 @@ impl Task for TempoService {
         fs_err::create_dir_all(&data_path)?;
 
         let mut cmd = self.tempo()?;
-        cmd.arg("--storage.trace.backend")
-            .arg("local")
-            .arg("--storage.trace.local.path")
-            .arg(data_path.join("blocks"))
-            .arg("--storage.trace.wal.path")
-            .arg(data_path.join("wal"))
-            .arg("--config.file")
-            .arg(config_file_path);
+        Self::apply_command_args(&mut cmd, &data_path, &config_file_path)?;
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

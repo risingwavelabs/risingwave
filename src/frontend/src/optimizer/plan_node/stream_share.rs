@@ -16,31 +16,38 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::Explain;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
-    pub base: PlanBase,
-    logical: generic::Share<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Share<PlanRef>,
 }
 
 impl StreamShare {
-    pub fn new(logical: generic::Share<PlanRef>) -> Self {
-        let input = logical.input.borrow().0.clone();
-        let dist = input.distribution().clone();
-        // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
-            dist,
-            input.append_only(),
-            input.emit_on_window_close(),
-            input.watermark_columns().clone(),
-        );
-        StreamShare { base, logical }
+    pub fn new(core: generic::Share<PlanRef>) -> Self {
+        let base = {
+            let input = core.input.borrow();
+            let dist = input.distribution().clone();
+            // Filter executor won't change the append-only behavior of the stream.
+            PlanBase::new_stream_with_core(
+                &core,
+                dist,
+                input.append_only(),
+                input.emit_on_window_close(),
+                input.watermark_columns().clone(),
+            )
+        };
+
+        StreamShare { base, core }
     }
 }
 
@@ -52,19 +59,19 @@ impl Distill for StreamShare {
 
 impl PlanTreeNodeUnary for StreamShare {
     fn input(&self) -> PlanRef {
-        self.logical.input.borrow().clone()
+        self.core.input.borrow().clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let logical = self.logical.clone();
-        logical.replace_input(input);
-        Self::new(logical)
+        let core = self.core.clone();
+        core.replace_input(input);
+        Self::new(core)
     }
 }
 
 impl StreamShare {
     pub fn replace_input(&self, plan: PlanRef) {
-        self.logical.replace_input(plan);
+        self.core.replace_input(plan);
     }
 }
 
@@ -78,7 +85,7 @@ impl StreamNode for StreamShare {
 
 impl StreamShare {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
-        let operator_id = self.base.id.0 as u32;
+        let operator_id = self.base.id().0 as u32;
 
         match state.get_share_stream_node(operator_id) {
             None => {
@@ -96,7 +103,13 @@ impl StreamShare {
                     identity: self.distill_to_string(),
                     node_body: Some(node_body),
                     operator_id: self.id().0 as _,
-                    stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+                    stream_key: self
+                        .stream_key()
+                        .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                       PlanRef::from(self.clone()).explain_to_string()))
+                        .iter()
+                        .map(|x| *x as u32)
+                        .collect(),
                     fields: self.schema().to_prost(),
                     append_only: self.append_only(),
                 };
@@ -111,3 +124,5 @@ impl StreamShare {
 }
 
 impl ExprRewritable for StreamShare {}
+
+impl ExprVisitable for StreamShare {}

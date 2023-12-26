@@ -16,7 +16,6 @@ package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
@@ -26,6 +25,7 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -74,17 +74,17 @@ public class JDBCSinkTest {
 
     static void testJDBCSync(JdbcDatabaseContainer<?> container, TestType testType)
             throws SQLException {
-        String tableName = "test";
+        String tableName = "test2";
         createMockTable(container.getJdbcUrl(), tableName, testType);
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -94,18 +94,19 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
+        sink.barrier(true);
 
         Statement stmt = conn.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT * FROM test");
-        int count;
-        for (count = 0; rs.next(); ) {
-            count++;
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            int count;
+            for (count = 0; rs.next(); ) {
+                count++;
+            }
+            assertEquals(1, count);
         }
-        assertEquals(1, count);
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
@@ -115,21 +116,24 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
-        stmt = conn.createStatement();
-        rs = stmt.executeQuery("SELECT * FROM test");
-        for (count = 0; rs.next(); ) {
-            count++;
+        sink.barrier(true);
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            int count;
+            for (count = 0; rs.next(); ) {
+                count++;
+            }
+            assertEquals(2, count);
         }
-        assertEquals(2, count);
+        stmt.close();
+        conn.close();
 
-        sink.sync();
+        sink.barrier(true);
         sink.drop();
     }
 
     static void testJDBCWrite(JdbcDatabaseContainer<?> container, TestType testType)
             throws SQLException {
-        String tableName = "test";
+        String tableName = "test1";
         createMockTable(container.getJdbcUrl(), tableName, testType);
 
         JDBCSink sink =
@@ -137,10 +141,11 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
+        Statement stmt = conn.createStatement();
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -158,7 +163,16 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                "I want to sleep".getBytes()),
+                                "I want to sleep".getBytes())));
+
+        // chunk will commit after sink.write()
+        try (var rs = stmt.executeQuery(String.format("SELECT COUNT(*) FROM %s", tableName))) {
+            assertTrue(rs.next());
+            assertEquals(2, rs.getInt(1));
+        }
+
+        sink.write(
+                List.of(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
@@ -186,30 +200,31 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
 
-        Statement stmt = conn.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT * FROM test");
-        rs.next();
+        try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
+            assertTrue(rs.next());
 
-        // check if rows are inserted
-        assertEquals(1, rs.getInt(1));
-        assertEquals("Clare", rs.getString(2));
-        assertEquals(new Date(2000000000).toString(), rs.getDate(3).toString());
-        assertEquals(new Time(2000000000).toString(), rs.getTime(4).toString());
-        assertEquals(new Timestamp(2000000000), rs.getTimestamp(5));
-        assertEquals(
-                "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}", rs.getString(6));
-        assertEquals("I want to eat", new String(rs.getBytes(7)));
-        assertFalse(rs.next());
+            // check if rows are inserted
+            assertEquals(1, rs.getInt(1));
+            assertEquals("Clare", rs.getString(2));
+            assertEquals(new Date(2000000000).toString(), rs.getDate(3).toString());
+            assertEquals(new Time(2000000000).toString(), rs.getTime(4).toString());
+            assertEquals(new Timestamp(2000000000), rs.getTimestamp(5));
+            assertEquals(
+                    "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
+                    rs.getString(6));
+            assertEquals("I want to eat", new String(rs.getBytes(7)));
+            assertFalse(rs.next());
+        }
 
-        sink.sync();
+        sink.barrier(true);
         stmt.close();
+        conn.close();
     }
 
     static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
             throws SQLException {
-        String tableName = "test";
+        String tableName = "test3";
         createMockTable(container.getJdbcUrl(), tableName, testType);
 
         JDBCSink sink =
@@ -219,11 +234,7 @@ public class JDBCSinkTest {
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(conn.isClosed());
     }
 
     @Test
@@ -237,8 +248,8 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         pg.start();
-        testJDBCSync(pg, TestType.TestPg);
         testJDBCWrite(pg, TestType.TestPg);
+        testJDBCSync(pg, TestType.TestPg);
         testJDBCDrop(pg, TestType.TestPg);
         pg.stop();
     }
@@ -254,8 +265,8 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         mysql.start();
-        testJDBCSync(mysql, TestType.TestMySQL);
         testJDBCWrite(mysql, TestType.TestMySQL);
+        testJDBCSync(mysql, TestType.TestMySQL);
         testJDBCDrop(mysql, TestType.TestMySQL);
         mysql.stop();
     }

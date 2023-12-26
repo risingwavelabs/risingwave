@@ -244,9 +244,9 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(_)
-                | FunctionArgExpr::WildcardOrWithExcept(None) => {}
-                FunctionArgExpr::WildcardOrWithExcept(Some(exprs)) => {
+                FunctionArgExpr::QualifiedWildcard(_, None) | FunctionArgExpr::Wildcard(None) => {}
+                FunctionArgExpr::QualifiedWildcard(_, Some(exprs))
+                | FunctionArgExpr::Wildcard(Some(exprs)) => {
                     for expr in exprs {
                         self.visit_expr(expr);
                     }
@@ -274,6 +274,7 @@ impl QueryRewriter<'_> {
             | Expr::IsNotFalse(expr)
             | Expr::IsUnknown(expr)
             | Expr::IsNotUnknown(expr)
+            | Expr::IsJson { expr, .. }
             | Expr::InList { expr, .. }
             | Expr::SomeOp(expr)
             | Expr::AllOp(expr)
@@ -307,6 +308,18 @@ impl QueryRewriter<'_> {
                 self.visit_expr(low);
                 self.visit_expr(high);
             }
+            Expr::SimilarTo {
+                expr,
+                pat,
+                esc_text,
+                ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+                if let Some(e) = esc_text {
+                    self.visit_expr(e);
+                }
+            }
 
             Expr::IsDistinctFrom(expr1, expr2)
             | Expr::IsNotDistinctFrom(expr1, expr2)
@@ -319,7 +332,9 @@ impl QueryRewriter<'_> {
                 self.visit_expr(expr2);
             }
             Expr::Function(function) => self.visit_function(function),
-            Expr::Exists(query) | Expr::Subquery(query) => self.visit_query(query),
+            Expr::Exists(query) | Expr::Subquery(query) | Expr::ArraySubquery(query) => {
+                self.visit_query(query)
+            }
 
             Expr::GroupingSets(exprs_vec) | Expr::Cube(exprs_vec) | Expr::Rollup(exprs_vec) => {
                 for exprs in exprs_vec {
@@ -334,6 +349,8 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr);
                 }
             }
+
+            Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
 
             // No need to visit.
             Expr::Identifier(_)
@@ -352,8 +369,8 @@ impl QueryRewriter<'_> {
             SelectItem::UnnamedExpr(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
-            SelectItem::QualifiedWildcard(_) | SelectItem::WildcardOrWithExcept(None) => {}
-            SelectItem::WildcardOrWithExcept(Some(exprs)) => {
+            SelectItem::QualifiedWildcard(_, None) | SelectItem::Wildcard(None) => {}
+            SelectItem::QualifiedWildcard(_, Some(exprs)) | SelectItem::Wildcard(Some(exprs)) => {
                 for expr in exprs {
                     self.visit_expr(expr);
                 }
@@ -396,7 +413,7 @@ impl ReplaceTableExprRewriter {
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
+    use super::*;
 
     #[test]
     fn test_alter_table_rename() {

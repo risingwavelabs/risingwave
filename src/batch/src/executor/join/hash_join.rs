@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::row::{repeat_n, RowExt};
@@ -33,6 +32,7 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{ChunkedData, JoinType, RowId};
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -221,7 +221,7 @@ struct RightNonEquiJoinState {
 }
 
 impl<K: HashKey> HashJoinExecutor<K> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let probe_data_types = self.probe_side_source.schema().data_types();
         let build_data_types = self.build_side_source.schema().data_types();
@@ -231,7 +231,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
-            let build_chunk = build_chunk?.compact();
+            let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
                 self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
@@ -252,8 +252,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
-            for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+            for (build_row_id, (build_key, visible)) in build_keys
+                .into_iter()
+                .zip_eq_fast(build_chunk.visibility().iter())
+                .enumerate()
+            {
                 self.shutdown_rx.check()?;
+                if !visible {
+                    continue;
+                }
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
@@ -303,7 +310,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             #[for_await]
             for chunk in stream {
                 for output_chunk in
-                    output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
+                    output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
                 {
                     yield output_chunk
                 }
@@ -324,12 +331,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
             };
             #[for_await]
             for chunk in stream {
-                yield chunk?.reorder_columns(&self.output_indices)
+                yield chunk?.project(&self.output_indices)
             }
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_inner_join(
         EquiJoinParams {
             probe_side,
@@ -348,7 +355,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -371,7 +385,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_inner_join_with_non_equi_condition(
         params: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -384,7 +398,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_left_outer_join(
         EquiJoinParams {
             probe_side,
@@ -404,7 +418,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
@@ -439,7 +460,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_left_outer_join_with_non_equi_condition(
         EquiJoinParams {
             probe_side,
@@ -466,7 +487,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state.found_matched = false;
                 non_equi_state
                     .first_output_row_id
@@ -520,7 +548,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
@@ -537,7 +565,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
                     if hash_map.get(probe_key).is_some() {
@@ -572,7 +607,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// 3. If we matched probe_row in spilled chunk,
     ///    stop appending its candidate rows,
     ///    to avoid matching it again in next spilled chunk.
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_left_semi_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
@@ -594,7 +629,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state
                     .first_output_row_id
                     .push(chunk_builder.buffered_count());
@@ -638,7 +680,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_left_anti_join_with_non_equi_condition(
         EquiJoinParams {
             probe_side,
@@ -662,7 +704,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     non_equi_state
@@ -714,7 +763,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_right_outer_join(
         EquiJoinParams {
             probe_side,
@@ -737,7 +786,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -767,7 +823,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_right_outer_join_with_non_equi_condition(
         EquiJoinParams {
             probe_side,
@@ -795,7 +851,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -838,7 +901,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
@@ -860,7 +923,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for probe_key in &probe_keys {
+            for (probe_key, visible) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -879,7 +948,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_right_semi_anti_join_with_non_equi_condition<const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
@@ -908,7 +977,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -950,7 +1026,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_full_outer_join(
         EquiJoinParams {
             probe_side,
@@ -974,7 +1050,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
@@ -1015,7 +1098,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_full_outer_join_with_non_equi_condition(
         EquiJoinParams {
             probe_side,
@@ -1049,7 +1132,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 left_non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     left_non_equi_state
@@ -1346,7 +1436,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn handle_remaining_build_rows_for_right_outer_join<'a>(
         chunk_builder: &'a mut DataChunkBuilder,
         build_side: &'a [DataChunk],
@@ -1372,7 +1462,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn handle_remaining_build_rows_for_right_semi_anti_join<'a, const ANTI_JOIN: bool>(
         chunk_builder: &'a mut DataChunkBuilder,
         build_side: &'a [DataChunk],
@@ -1471,7 +1561,7 @@ impl DataChunkMutator {
         for build_column in columns.split_off(probe_column_count) {
             // Is it really safe to use Arc::try_unwrap here?
             let mut array = Arc::try_unwrap(build_column).unwrap();
-            array.set_bitmap(filter.clone());
+            array.set_bitmap(array.null_bitmap() & filter);
             columns.push(array.into());
         }
 
@@ -1843,12 +1933,11 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
-    use prometheus::IntGauge;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
     use risingwave_common::memory::MemoryContext;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -1857,6 +1946,7 @@ mod tests {
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
     };
+    use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
     use crate::task::ShutdownToken;
@@ -1905,8 +1995,8 @@ mod tests {
     }
 
     fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
-        assert!(left.visibility().is_none());
-        assert!(right.visibility().is_none());
+        assert!(left.is_compacted());
+        assert!(right.is_compacted());
 
         if left.cardinality() != right.cardinality() {
             return false;
@@ -2067,7 +2157,7 @@ mod tests {
             };
 
             let mem_ctx =
-                MemoryContext::new(parent_mem_ctx, IntGauge::new("memory_usage", " ").unwrap());
+                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::<4>::test_int_gauge());
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
@@ -2108,7 +2198,7 @@ mod tests {
             right_executor: BoxedExecutor,
         ) {
             let parent_mem_context =
-                MemoryContext::root(IntGauge::new("total_memory_usage", " ").unwrap());
+                MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
 
             {
                 let join_executor = self.create_join_executor_with_chunk_size_and_executors(

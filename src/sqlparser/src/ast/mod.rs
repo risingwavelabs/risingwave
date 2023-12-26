@@ -13,6 +13,7 @@
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
 pub(crate) mod ddl;
+mod legacy_source;
 mod operator;
 mod query;
 mod statement;
@@ -32,17 +33,24 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
+    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
 };
-pub use self::operator::{BinaryOperator, UnaryOperator};
+pub use self::legacy_source::{
+    get_delimiter, AvroSchema, CompatibleSourceSchema, DebeziumAvroSchema, ProtobufSchema,
+};
+pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
     Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use self::value::{
+    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, TrimWhereField,
+    Value,
+};
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
@@ -178,7 +186,7 @@ impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
             Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
-            Some(q) if q == '[' => write!(f, "[{}]", self.value),
+            Some('[') => write!(f, "[{}]", self.value),
             None => f.write_str(&self.value),
             _ => panic!("unexpected quote style"),
         }
@@ -290,6 +298,16 @@ pub enum Expr {
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
     IsNotDistinctFrom(Box<Expr>, Box<Expr>),
+    /// ```text
+    /// IS [ NOT ] JSON [ VALUE | ARRAY | OBJECT | SCALAR ]
+    /// [ { WITH | WITHOUT } UNIQUE [ KEYS ] ]
+    /// ```
+    IsJson {
+        expr: Box<Expr>,
+        negated: bool,
+        item_type: JsonPredicateType,
+        unique_keys: bool,
+    },
     /// `[ NOT ] IN (val1, val2, ...)`
     InList {
         expr: Box<Expr>,
@@ -309,6 +327,13 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    SimilarTo {
+        expr: Box<Expr>,
+        negated: bool,
+        pat: Box<Expr>,
+        esc_text: Option<Box<Expr>>,
+    },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
         left: Box<Expr>,
@@ -320,7 +345,10 @@ pub enum Expr {
     /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
     AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
-    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
+    UnaryOp {
+        op: UnaryOperator,
+        expr: Box<Expr>,
+    },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
     Cast {
         expr: Box<Expr>,
@@ -338,29 +366,32 @@ pub enum Expr {
         timestamp: Box<Expr>,
         time_zone: String,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
-    Extract { field: String, expr: Box<Expr> },
-    /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
+    /// `EXTRACT(DateTimeField FROM <expr>)`
+    Extract {
+        field: String,
+        expr: Box<Expr>,
+    },
+    /// `SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])`
     Substring {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     Position {
         substring: Box<Expr>,
         string: Box<Expr>,
     },
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     Overlay {
         expr: Box<Expr>,
         new_substring: Box<Expr>,
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
+    /// `TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)`\
     /// Or\
-    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
+    /// `TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])`
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
@@ -377,11 +408,16 @@ pub enum Expr {
     /// A literal value, such as string, number, date or NULL
     Value(Value),
     /// Parameter Symbol e.g. `$1`, `$1::int`
-    Parameter { index: u64 },
+    Parameter {
+        index: u64,
+    },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString { data_type: DataType, value: String },
+    TypedString {
+        data_type: DataType,
+        value: String,
+    },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -409,16 +445,24 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
-    /// e.g. {1, 2, 3},
+    /// An array constructor `ARRAY[[2,3,4],[5,6,7]]`
     Array(Array),
-    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
-    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
+    ArraySubquery(Box<Query>),
+    /// A subscript expression `arr[1]`
+    ArrayIndex {
+        obj: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+    },
+    LambdaFunction {
+        args: Vec<Ident>,
+        body: Box<Expr>,
     },
 }
 
@@ -437,6 +481,23 @@ impl fmt::Display for Expr {
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
             Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
             Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
+            Expr::IsJson {
+                expr,
+                negated,
+                item_type,
+                unique_keys,
+            } => write!(
+                f,
+                "{} IS {}JSON{}{}",
+                expr,
+                if *negated { "NOT " } else { "" },
+                item_type,
+                if *unique_keys {
+                    " WITH UNIQUE KEYS"
+                } else {
+                    ""
+                },
+            ),
             Expr::InList {
                 expr,
                 list,
@@ -472,6 +533,24 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => {
+                write!(
+                    f,
+                    "{} {}SIMILAR TO {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pat,
+                )?;
+                if let Some(et) = esc_text {
+                    write!(f, "ESCAPE {}", et)?;
+                }
+                Ok(())
+            }
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -634,6 +713,15 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
+            Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
+            Expr::LambdaFunction { args, body } => {
+                write!(
+                    f,
+                    "|{}| {}",
+                    args.iter().map(ToString::to_string).join(", "),
+                    body
+                )
+            }
         }
     }
 }
@@ -799,7 +887,13 @@ pub enum ShowObject {
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
     Cluster,
+    Jobs,
+    ProcessList,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct JobIdents(pub Vec<u32>);
 
 impl fmt::Display for ShowObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -835,6 +929,8 @@ impl fmt::Display for ShowObject {
             ShowObject::Cluster => {
                 write!(f, "CLUSTER")
             }
+            ShowObject::Jobs => write!(f, "JOBS"),
+            ShowObject::ProcessList => write!(f, "PROCESSLIST"),
         }
     }
 }
@@ -939,15 +1035,26 @@ impl fmt::Display for ExplainOptions {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CdcTableInfo {
+    pub source_name: ObjectName,
+    pub external_table_name: String,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Statement {
     /// Analyze (Hive)
-    Analyze { table_name: ObjectName },
+    Analyze {
+        table_name: ObjectName,
+    },
     /// Truncate (Hive)
-    Truncate { table_name: ObjectName },
+    Truncate {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1020,6 +1127,10 @@ pub enum Statement {
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+        /// `FROM cdc_source TABLE database_name.table_name`
+        cdc_table_info: Option<CdcTableInfo>,
+        /// `INCLUDE a AS b INCLUDE c`
+        include_column_options: Vec<(Ident, Option<Ident>)>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1033,14 +1144,20 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource { stmt: CreateSourceStatement },
+    CreateSource {
+        stmt: CreateSourceStatement,
+    },
     /// CREATE SINK
-    CreateSink { stmt: CreateSinkStatement },
+    CreateSink {
+        stmt: CreateSinkStatement,
+    },
     /// CREATE CONNECTION
-    CreateConnection { stmt: CreateConnectionStatement },
+    CreateConnection {
+        stmt: CreateConnectionStatement,
+    },
     /// CREATE FUNCTION
     ///
-    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
     CreateFunction {
         or_replace: bool,
         temporary: bool,
@@ -1049,6 +1166,28 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+    },
+    /// CREATE AGGREGATE
+    ///
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
+    CreateAggregate {
+        or_replace: bool,
+        name: ObjectName,
+        args: Vec<OperateFunctionArg>,
+        /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
+        params: CreateFunctionBody,
+    },
+    /// ALTER DATABASE
+    AlterDatabase {
+        name: ObjectName,
+        operation: AlterDatabaseOperation,
+    },
+    /// ALTER SCHEMA
+    AlterSchema {
+        name: ObjectName,
+        operation: AlterSchemaOperation,
     },
     /// ALTER TABLE
     AlterTable {
@@ -1081,13 +1220,29 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterSourceOperation,
     },
+    /// ALTER FUNCTION
+    AlterFunction {
+        /// Function name
+        name: ObjectName,
+        args: Option<Vec<OperateFunctionArg>>,
+        operation: AlterFunctionOperation,
+    },
+    /// ALTER CONNECTION
+    AlterConnection {
+        /// Connection name
+        name: ObjectName,
+        operation: AlterConnectionOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
         name: ObjectName,
     },
     /// SHOW OBJECT COMMAND
-    ShowObjects(ShowObject),
+    ShowObjects {
+        object: ShowObject,
+        filter: Option<ShowStatementFilter>,
+    },
     /// SHOW CREATE COMMAND
     ShowCreateObject {
         /// Show create object type
@@ -1095,17 +1250,23 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    ShowTransactionIsolationLevel,
+    /// CANCEL JOBS COMMAND
+    CancelJobs(JobIdents),
+    /// KILL COMMAND
+    /// Kill process in the show processlist.
+    Kill(i32),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
     DropFunction {
         if_exists: bool,
         /// One or more function to drop
-        func_desc: Vec<DropFunctionDesc>,
+        func_desc: Vec<FunctionDesc>,
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
-    /// SET <variable>
+    /// `SET <variable>`
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
     /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
@@ -1113,16 +1274,22 @@ pub enum Statement {
     SetVariable {
         local: bool,
         variable: Ident,
-        value: Vec<SetVariableValue>,
+        value: SetVariableValue,
     },
-    /// SHOW <variable>
+    /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    ShowVariable { variable: Vec<Ident> },
+    ShowVariable {
+        variable: Vec<Ident>,
+    },
     /// `START TRANSACTION ...`
-    StartTransaction { modes: Vec<TransactionMode> },
+    StartTransaction {
+        modes: Vec<TransactionMode>,
+    },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    Begin { modes: Vec<TransactionMode> },
+    Begin {
+        modes: Vec<TransactionMode>,
+    },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1145,9 +1312,13 @@ pub enum Statement {
         comment: Option<String>,
     },
     /// `COMMIT [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Commit { chain: bool },
+    Commit {
+        chain: bool,
+    },
     /// `ROLLBACK [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Rollback { chain: bool },
+    Rollback {
+        chain: bool,
+    },
     /// CREATE SCHEMA
     CreateSchema {
         schema_name: ObjectName,
@@ -1178,11 +1349,17 @@ pub enum Statement {
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Deallocate { name: Ident, prepare: bool },
+    Deallocate {
+        name: Ident,
+        prepare: bool,
+    },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Execute { name: Ident, parameters: Vec<Expr> },
+    Execute {
+        name: Ident,
+        parameters: Vec<Expr>,
+    },
     /// `PREPARE name [ ( data_type [, ...] ) ] AS statement`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -1213,6 +1390,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
+    /// WAIT for ALL running stream jobs to finish.
+    /// It will block the current session the condition is met.
+    Wait,
 }
 
 impl fmt::Display for Statement {
@@ -1248,12 +1428,19 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects(show_object) => {
+            Statement::ShowObjects{ object: show_object, filter} => {
                 write!(f, "SHOW {}", show_object)?;
+                if let Some(filter) = filter {
+                    write!(f, " {}", filter)?;
+                }
                 Ok(())
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
+            Statement::ShowTransactionIsolationLevel => {
+                write!(f, "SHOW TRANSACTION ISOLATION LEVEL")?;
                 Ok(())
             }
             Statement::Insert {
@@ -1363,6 +1550,29 @@ impl fmt::Display for Statement {
                 write!(f, "{params}")?;
                 Ok(())
             }
+            Statement::CreateAggregate {
+                or_replace,
+                name,
+                args,
+                returns,
+                append_only,
+                params,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}AGGREGATE {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                write!(f, "({})", display_comma_separated(args))?;
+                if let Some(return_type) = returns {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
+                }
+                write!(f, "{params}")?;
+                Ok(())
+            }
             Statement::CreateView {
                 name,
                 or_replace,
@@ -1381,16 +1591,17 @@ impl fmt::Display for Statement {
                     if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
-                if let Some(emit_mode) = emit_mode {
-                    write!(f, " EMIT {}", emit_mode)?;
-                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if !columns.is_empty() {
                     write!(f, " ({})", display_comma_separated(columns))?;
                 }
-                write!(f, " AS {}", query)
+                write!(f, " AS {}", query)?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
+                Ok(())
             }
             Statement::CreateTable {
                 name,
@@ -1404,6 +1615,8 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 query,
+                cdc_table_info,
+                include_column_options,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1429,6 +1642,17 @@ impl fmt::Display for Statement {
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
                 }
+                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
+                    write!(f, " INCLUDE {}", display_comma_separated(
+                        include_column_options.iter().map(|(a, b)| {
+                            if let Some(b) = b {
+                                format!("{} AS {}", a, b)
+                            } else {
+                                a.to_string()
+                            }
+                        }).collect_vec().as_slice()
+                    ))?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1437,6 +1661,10 @@ impl fmt::Display for Statement {
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(info) = cdc_table_info {
+                    write!(f, " FROM {}", info.source_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1476,6 +1704,12 @@ impl fmt::Display for Statement {
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::AlterDatabase { name, operation } => {
+                write!(f, "ALTER DATABASE {} {}", name, operation)
+            }
+            Statement::AlterSchema { name, operation } => {
+                write!(f, "ALTER SCHEMA {} {}", name, operation)
+            }
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1490,6 +1724,16 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
+            }
+            Statement::AlterFunction { name, args, operation } => {
+                write!(f, "ALTER FUNCTION {}", name)?;
+                if let Some(args) = args {
+                    write!(f, "({})", display_comma_separated(args))?;
+                }
+                write!(f, " {}", operation)
+            }
+            Statement::AlterConnection { name, operation } => {
+                write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
@@ -1521,7 +1765,6 @@ impl fmt::Display for Statement {
                     f,
                     "{name} = {value}",
                     name = variable,
-                    value = display_comma_separated(value)
                 )
             }
             Statement::ShowVariable { variable } => {
@@ -1679,11 +1922,22 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
+            Statement::Wait => {
+                write!(f, "WAIT")
+            }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::CancelJobs(jobs) => {
+                write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
+                Ok(())
+            }
+            Statement::Kill(process_id) => {
+                write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
         }
@@ -1919,10 +2173,11 @@ pub enum FunctionArgExpr {
     /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, Vec<Ident>),
-    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(ObjectName),
-    /// An unqualified `*` or `* with (columns)`
-    WildcardOrWithExcept(Option<Vec<Expr>>),
+    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`, followed by optional
+    /// except syntax
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    /// An unqualified `*` or `* except (columns)`
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1939,11 +2194,25 @@ impl fmt::Display for FunctionArgExpr {
                         .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
-            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::WildcardOrWithExcept(w) => match w {
+            FunctionArgExpr::QualifiedWildcard(prefix, except) => match except {
                 Some(exprs) => write!(
                     f,
-                    "EXCEPT ({})",
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+
+            FunctionArgExpr::Wildcard(except) => match except {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
                     exprs
                         .iter()
                         .map(|v| v.to_string())
@@ -2244,12 +2513,12 @@ impl fmt::Display for DropFunctionOption {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
-pub struct DropFunctionDesc {
+pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,
 }
 
-impl fmt::Display for DropFunctionDesc {
+impl fmt::Display for FunctionDesc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if let Some(args) = &self.args {
@@ -2457,18 +2726,51 @@ impl fmt::Display for CreateFunctionUsing {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
-    Ident(Ident),
-    Literal(Value),
+    Single(SetVariableValueSingle),
+    List(Vec<SetVariableValueSingle>),
     Default,
+}
+
+impl From<SetVariableValueSingle> for SetVariableValue {
+    fn from(value: SetVariableValueSingle) -> Self {
+        SetVariableValue::Single(value)
+    }
 }
 
 impl fmt::Display for SetVariableValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SetVariableValue::*;
         match self {
+            Single(val) => write!(f, "{}", val),
+            List(list) => write!(f, "{}", display_comma_separated(list),),
+            Default => write!(f, "DEFAULT"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetVariableValueSingle {
+    Ident(Ident),
+    Literal(Value),
+}
+
+impl SetVariableValueSingle {
+    pub fn to_string_unquoted(&self) -> String {
+        match self {
+            Self::Literal(Value::SingleQuotedString(s))
+            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            _ => self.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SetVariableValueSingle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SetVariableValueSingle::*;
+        match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
-            Default => write!(f, "DEFAULT"),
         }
     }
 }

@@ -17,10 +17,11 @@ use std::cmp::min;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -61,7 +62,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
 }
 
 impl LimitExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
@@ -90,8 +91,8 @@ impl LimitExecutor {
             }
             // process chunk
             let mut new_vis;
-            if let Some(old_vis) = data_chunk.visibility() {
-                new_vis = old_vis.iter().collect_vec();
+            if !data_chunk.is_compacted() {
+                new_vis = data_chunk.visibility().iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
                     if skipped < self.offset {
                         skipped += 1;
@@ -112,7 +113,7 @@ impl LimitExecutor {
                 skipped += l;
             }
             yield data_chunk
-                .with_visibility(new_vis.into_iter().collect())
+                .with_visibility(new_vis.into_iter().collect::<Bitmap>())
                 .compact();
         }
     }
@@ -302,7 +303,8 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| {
-                mock_executor.add(x.with_visibility((x.column_at(1).as_bool()).iter().collect()))
+                mock_executor
+                    .add(x.with_visibility((x.column_at(1).as_bool()).iter().collect::<Bitmap>()))
             });
 
         let limit_executor = Box::new(LimitExecutor {

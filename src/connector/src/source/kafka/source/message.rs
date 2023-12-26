@@ -15,7 +15,6 @@
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 
-use crate::common::UpsertMessage;
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
@@ -26,26 +25,10 @@ pub struct KafkaMeta {
 }
 
 impl SourceMessage {
-    pub fn from_kafka_message_upsert(message: &BorrowedMessage<'_>) -> Self {
-        let encoded = bincode::serialize(&UpsertMessage {
-            primary_key: message.key().unwrap_or_default().into(),
-            record: message.payload().unwrap_or_default().into(),
-        })
-        .unwrap();
-        SourceMessage {
-            // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: Some(encoded),
-            offset: message.offset().to_string(),
-            split_id: message.partition().to_string().into(),
-            meta: SourceMeta::Kafka(KafkaMeta {
-                timestamp: message.timestamp().to_millis(),
-            }),
-        }
-    }
-
     pub fn from_kafka_message(message: &BorrowedMessage<'_>) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
+            key: message.key().map(|p| p.to_vec()),
             payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),

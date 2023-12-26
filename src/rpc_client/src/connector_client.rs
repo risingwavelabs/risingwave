@@ -12,29 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::type_name;
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
+use risingwave_pb::connector_service::sink_coordinator_stream_request::{
+    CommitMetadata, StartCoordinator,
+};
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
-    Barrier, BeginEpoch, Request as SinkRequest, StartSink, WriteBatch,
+    Barrier, Request as SinkRequest, StartSink, WriteBatch,
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
-use tokio::sync::mpsc::{channel, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
-use tonic::{Request, Status, Streaming};
+use tonic::Streaming;
 use tracing::error;
 
 use crate::error::{Result, RpcError};
+use crate::{BidiStreamHandle, BidiStreamReceiver, BidiStreamSender};
 
 #[derive(Clone, Debug)]
 pub struct ConnectorClient {
@@ -42,60 +44,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
-pub struct SinkWriterStreamHandle {
-    request_sender: Sender<SinkWriterStreamRequest>,
-    response_stream: BoxStream<'static, std::result::Result<SinkWriterStreamResponse, Status>>,
-}
+pub type SinkWriterRequestSender<REQ = SinkWriterStreamRequest> = BidiStreamSender<REQ>;
+pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
 
-impl Debug for SinkWriterStreamHandle {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(type_name::<Self>())
-    }
-}
+pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
+    BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
-impl SinkWriterStreamHandle {
-    pub fn new(
-        request_sender: Sender<SinkWriterStreamRequest>,
-        response_stream: BoxStream<'static, std::result::Result<SinkWriterStreamResponse, Status>>,
-    ) -> Self {
-        Self {
-            request_sender,
-            response_stream,
-        }
-    }
-
-    async fn next_response(&mut self) -> Result<SinkWriterStreamResponse> {
-        Ok(self
-            .response_stream
-            .next()
-            .await
-            .ok_or(RpcError::Internal(anyhow!("end of response stream")))??)
-    }
-
-    async fn send_request(&mut self, request: SinkWriterStreamRequest) -> Result<()> {
-        self.request_sender.send(request).await.map_err(|e| {
-            RpcError::Internal(anyhow!(
-                "unable to send request {:?}",
-                match e.0.request {
-                    Some(sink_writer_stream_request::Request::WriteBatch(write_batch)) => {
-                        format!(
-                            "WriteBatch(batch_id = {}, epoch = {})",
-                            write_batch.batch_id, write_batch.epoch
-                        )
-                    }
-                    req => format!("{:?}", req),
-                }
-            ))
-        })
-    }
-
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
-        })
-        .await
-    }
-
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::WriteBatch(WriteBatch {
@@ -107,30 +62,80 @@ impl SinkWriterStreamHandle {
         .await
     }
 
-    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+    pub async fn barrier(&mut self, epoch: u64, is_checkpoint: bool) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::Barrier(Barrier {
                 epoch,
-                is_checkpoint: false,
+                is_checkpoint,
             })),
         })
         .await
     }
+}
 
-    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::Barrier(Barrier {
-                epoch,
-                is_checkpoint: true,
-            })),
-        })
-        .await?;
+impl SinkWriterResponseReceiver {
+    pub async fn next_commit_response(&mut self) -> Result<CommitResponse> {
         match self.next_response().await? {
             SinkWriterStreamResponse {
                 response: Some(sink_writer_stream_response::Response::Commit(rsp)),
             } => Ok(rsp),
             msg => Err(RpcError::Internal(anyhow!(
                 "should get Sync response but get {:?}",
+                msg
+            ))),
+        }
+    }
+}
+
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
+    pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
+        self.request_sender
+            .write_batch(epoch, batch_id, payload)
+            .await
+    }
+
+    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+        self.request_sender.barrier(epoch, false).await
+    }
+
+    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
+        self.request_sender.barrier(epoch, true).await?;
+        self.response_stream.next_commit_response().await
+    }
+}
+
+pub type SinkCoordinatorStreamHandle =
+    BidiStreamHandle<SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse>;
+
+impl SinkCoordinatorStreamHandle {
+    pub async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        self.send_request(SinkCoordinatorStreamRequest {
+            request: Some(sink_coordinator_stream_request::Request::Commit(
+                CommitMetadata { epoch, metadata },
+            )),
+        })
+        .await?;
+        match self.next_response().await? {
+            SinkCoordinatorStreamResponse {
+                response:
+                    Some(sink_coordinator_stream_response::Response::Commit(
+                        sink_coordinator_stream_response::CommitResponse {
+                            epoch: response_epoch,
+                        },
+                    )),
+            } => {
+                if epoch == response_epoch {
+                    Ok(())
+                } else {
+                    Err(RpcError::Internal(anyhow!(
+                        "get different response epoch to commit epoch: {} {}",
+                        epoch,
+                        response_epoch
+                    )))
+                }
+            }
+            msg => Err(RpcError::Internal(anyhow!(
+                "should get Commit response but get {:?}",
                 msg
             ))),
         }
@@ -165,7 +170,6 @@ impl ConnectorClient {
             })?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5));
 
         let channel = {
@@ -175,11 +179,17 @@ impl ConnectorClient {
             }
             #[cfg(not(madsim))]
             {
-                endpoint.connect_lazy()
+                endpoint.monitored_connect_lazy(
+                    "grpc-connector-client",
+                    TcpConfig {
+                        tcp_nodelay: true,
+                        keepalive_duration: None,
+                    },
+                )
             }
         };
         Ok(Self {
-            rpc_client: ConnectorServiceClient::new(channel),
+            rpc_client: ConnectorServiceClient::new(channel).max_decoding_message_size(usize::MAX),
             endpoint: connector_endpoint.to_string(),
         })
     }
@@ -196,12 +206,8 @@ impl ConnectorClient {
         start_offset: Option<String>,
         properties: HashMap<String, String>,
         snapshot_done: bool,
+        common_param: SourceCommonParam,
     ) -> Result<Streaming<GetEventStreamResponse>> {
-        tracing::info!(
-            "start cdc source properties: {:?}, snapshot_done: {}",
-            properties,
-            snapshot_done
-        );
         Ok(self
             .rpc_client
             .clone()
@@ -211,6 +217,7 @@ impl ConnectorClient {
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
                 snapshot_done,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
@@ -230,6 +237,7 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        common_param: SourceCommonParam,
     ) -> Result<()> {
         let response = self
             .rpc_client
@@ -239,6 +247,7 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 properties,
                 table_schema,
+                common_param: Some(common_param),
             })
             .await
             .inspect_err(|err| {
@@ -259,37 +268,60 @@ impl ConnectorClient {
         sink_param: SinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
-        const SINK_WRITER_REQUEST_BUFFER_SIZE: usize = 16;
-        let (request_sender, request_receiver) = channel(SINK_WRITER_REQUEST_BUFFER_SIZE);
-
-        // Send initial request in case of the blocking receive call from creating streaming request
-        request_sender
-            .send(SinkWriterStreamRequest {
+        let mut rpc_client = self.rpc_client.clone();
+        let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
+            SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_param),
                     format: sink_payload_format as i32,
                 })),
-            })
-            .await
-            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+            },
+            |rx| async move {
+                rpc_client
+                    .sink_writer_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
+        )
+        .await?;
 
-        let mut response = self
-            .rpc_client
-            .clone()
-            .sink_writer_stream(Request::new(ReceiverStream::new(request_receiver)))
-            .await
-            .map_err(RpcError::GrpcStatus)?
-            .into_inner();
-
-        match response.next().await.ok_or(RpcError::Internal(anyhow!(
-            "get empty response from start sink request"
-        )))?? {
+        match first_rsp {
             SinkWriterStreamResponse {
                 response: Some(sink_writer_stream_response::Response::Start(_)),
-            } => Ok(SinkWriterStreamHandle {
-                response_stream: response.boxed(),
-                request_sender,
-            }),
+            } => Ok(handle),
+            msg => Err(RpcError::Internal(anyhow!(
+                "should get start response but get {:?}",
+                msg
+            ))),
+        }
+    }
+
+    pub async fn start_sink_coordinator_stream(
+        &self,
+        param: SinkParam,
+    ) -> Result<SinkCoordinatorStreamHandle> {
+        let mut rpc_client = self.rpc_client.clone();
+        let (handle, first_rsp) = SinkCoordinatorStreamHandle::initialize(
+            SinkCoordinatorStreamRequest {
+                request: Some(sink_coordinator_stream_request::Request::Start(
+                    StartCoordinator { param: Some(param) },
+                )),
+            },
+            |rx| async move {
+                rpc_client
+                    .sink_coordinator_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
+        )
+        .await?;
+
+        match first_rsp {
+            SinkCoordinatorStreamResponse {
+                response: Some(sink_coordinator_stream_response::Response::Start(_)),
+            } => Ok(handle),
             msg => Err(RpcError::Internal(anyhow!(
                 "should get start response but get {:?}",
                 msg

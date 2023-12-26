@@ -17,12 +17,8 @@
 
 use std::path::PathBuf;
 
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
-
-#[cfg(not(madsim))]
-fn main() {
-    println!("This binary is only available in simulation.");
-}
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -143,10 +139,15 @@ pub struct Args {
 
     #[arg(short, long)]
     e2e_extended_test: bool,
+
+    /// Background ddl
+    /// The probability of background ddl for a ddl query.
+    #[clap(long, default_value = "0.0")]
+    background_ddl_rate: f64,
 }
 
-#[cfg(madsim)]
-#[madsim::main]
+#[tokio::main]
+#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 
@@ -249,7 +250,7 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts).await;
+                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
             }
         })
         .await;

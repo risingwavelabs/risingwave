@@ -1,0 +1,129 @@
+control substitution on
+
+# create database and tables in mysql
+system ok
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+
+system ok
+mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
+
+# generate data to mysql
+system ok
+mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
+
+# create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+statement ok
+create source mysql_mytest with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'dbz',
+ password = '${MYSQL_PWD:}',
+ database.name = 'mytest',
+ server.id = '5601'
+);
+
+statement ok
+create table products_test ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.products';
+
+system ok
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Milk','Milk is a white liquid food');
+       INSERT INTO orders VALUES (default, '2023-11-28 15:08:22', 'Bob', 10.52, 100, false);"
+
+# check the fragment distribution
+query TT
+select distribution_type,flags from rw_fragments order by fragment_id;
+----
+SINGLE {SOURCE}
+HASH {MVIEW}
+SINGLE {STREAM_SCAN}
+SINGLE {CDC_FILTER}
+HASH {SOURCE,DML}
+
+statement ok
+CREATE TABLE IF NOT EXISTS mysql_all_types(
+    c_boolean boolean,
+    c_bit boolean,
+    c_tinyint smallint,
+    c_smallint smallint,
+    c_mediumint integer,
+    c_integer integer,
+    c_bigint bigint,
+    c_decimal decimal,
+    c_float real,
+    c_double double,
+    c_char_255 varchar,
+    c_varchar_10000 varchar,
+    c_binary_255 bytea,
+    c_varbinary_10000 bytea,
+    c_date date,
+    c_time time,
+    c_datetime timestamp,
+    c_timestamp timestamptz,
+    PRIMARY KEY (c_boolean,c_bigint,c_date)
+) from mysql_mytest table 'mytest.mysql_all_types';
+
+statement error
+create table non_exist ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.non_exist';
+
+
+statement ok
+create table orders_test (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) from mysql_mytest table 'mytest.orders';
+
+statement ok
+create materialized view products_test_cnt as select count(*) as cnt from products_test;
+
+statement ok
+create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
+
+system ok
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Juice', '100ml Juice');"
+
+sleep 5s
+
+# check ingestion results
+query I
+SELECT * from products_test_cnt
+----
+11
+
+query I
+SELECT * from orders_test_cnt
+----
+4
+
+query ITT
+SELECT * FROM products_test order by id limit 3
+----
+101 scooter Small 2-wheel scooter
+102 car battery 12V car battery
+103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
+
+query ITTT
+SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
+----
+10001 2020-07-30 10:08:22 Jark 102
+10002 2020-07-30 10:11:09 Sally 105
+10003 2020-07-30 12:00:30 Edward 106
+
+query IIIIITTTTTTTTT
+SELECT c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_float, c_double, c_char_255, c_varchar_10000, c_date, c_time, c_datetime, c_timestamp FROM mysql_all_types order by c_bigint;
+----
+-128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00
+NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d 1001-01-01 NULL 2000-01-01 00:00:00 NULL

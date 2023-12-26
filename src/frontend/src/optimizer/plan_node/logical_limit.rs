@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, LogicalTopN, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLimit {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub(super) core: generic::Limit<PlanRef>,
 }
 
@@ -83,6 +87,8 @@ impl ColPrunable for LogicalLimit {
 
 impl ExprRewritable for LogicalLimit {}
 
+impl ExprVisitable for LogicalLimit {}
+
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(
         &self,
@@ -104,11 +110,18 @@ impl ToBatch for LogicalLimit {
 }
 
 impl ToStream for LogicalLimit {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "The LIMIT clause can not appear alone in a streaming query. Please add an ORDER BY clause before the LIMIT"
-                .to_string(),
-        )))
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        // use the first column as an order to provide determinism for streaming queries.
+        let order = Order::new(vec![ColumnOrder::new(0, OrderType::ascending())]);
+        let topn = LogicalTopN::new(
+            self.input(),
+            self.limit(),
+            self.offset(),
+            false,
+            order,
+            vec![],
+        );
+        topn.to_stream(ctx)
     }
 
     fn logical_rewrite_for_stream(

@@ -1,0 +1,84 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table all_sales (salesperson_id int, customer_name varchar, amount int );
+
+statement ok
+create table salesperson (id int, name varchar );
+
+statement ok
+insert into salesperson values (1, 'Dylan'), (2, 'Galois'), (3, 'Tom');
+
+statement ok
+insert into all_sales values (1, 'A', 10),(1, 'B', 100),(1, 'C', 1000),(2, 'D', 5),(2, 'E', 50),(2, 'F', 500);
+
+query TIT rowsort
+SELECT
+  salesperson.name,
+  max_sale.amount,
+  max_sale_customer.customer_name
+FROM
+  salesperson,
+  -- calculate maximum size, cache it in transient derived table max_sale
+  LATERAL
+  (SELECT MAX(amount) AS amount
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id)
+  AS max_sale,
+  -- find customer, reusing cached maximum size
+  LATERAL
+  (SELECT customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    AND all_sales.amount =
+        -- the cached maximum size
+        max_sale.amount)
+  AS max_sale_customer;
+----
+Dylan 1000 C
+Galois 500 F
+
+query TIT rowsort
+SELECT
+  salesperson.name,
+  max_sale.amount,
+  max_sale.customer_name
+FROM
+  salesperson,
+  -- find maximum size and customer at same time
+  LATERAL
+  (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+  AS max_sale;
+----
+Dylan 1000 C
+Galois 500 F
+
+query TIT rowsort
+SELECT
+  salesperson.name,
+  max_sale.amount,
+  max_sale.customer_name
+FROM
+  salesperson left join
+  -- find maximum size and customer at same time
+  LATERAL
+  (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+  AS max_sale on true;
+----
+Dylan 1000 C
+Galois 500 F
+Tom NULL NULL
+
+statement ok
+drop table all_sales;
+
+statement ok
+drop table salesperson;
+

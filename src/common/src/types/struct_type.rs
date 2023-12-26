@@ -16,6 +16,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 
 use super::DataType;
@@ -117,6 +118,16 @@ impl StructType {
             .chain(std::iter::repeat("").take(self.0.field_types.len() - self.0.field_names.len()))
             .zip_eq_debug(self.0.field_types.iter())
     }
+
+    /// Compares the datatype with another, ignoring nested field names and metadata.
+    pub fn equals_datatype(&self, other: &StructType) -> bool {
+        if self.0.field_types.len() != other.0.field_types.len() {
+            return false;
+        }
+        (self.0.field_types.iter())
+            .zip_eq_fast(other.0.field_types.iter())
+            .all(|(a, b)| a.equals_datatype(b))
+    }
 }
 
 impl Display for StructType {
@@ -130,7 +141,7 @@ impl Display for StructType {
                 (self.0.field_types.iter())
                     .zip_eq_fast(self.0.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
-                    .join(",")
+                    .join(", ")
             )
         }
     }
@@ -143,10 +154,12 @@ impl FromStr for StructType {
         if s == "record" {
             return Ok(StructType::unnamed(Vec::new()));
         }
-        let s = s.trim_start_matches("struct<").trim_end_matches('>');
+        if !(s.starts_with("struct<") && s.ends_with('>')) {
+            return Err(anyhow!("expect struct<...>"));
+        };
         let mut field_types = Vec::new();
         let mut field_names = Vec::new();
-        for field in s.split(',') {
+        for field in s[7..s.len() - 1].split(',') {
             let field = field.trim();
             let mut iter = field.split_whitespace();
             let field_name = iter.next().unwrap();

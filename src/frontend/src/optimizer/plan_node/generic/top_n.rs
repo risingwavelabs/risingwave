@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
@@ -36,12 +36,13 @@ pub struct TopN<PlanRef> {
 }
 
 impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
-    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
+    /// Infers the state table catalog for [`super::super::StreamTopN`] and
+    /// [`super::super::StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
         schema: &Schema,
         ctx: OptimizerContextRef,
-        stream_key: &[usize],
+        input_stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         let columns_fields = schema.fields().to_vec();
@@ -63,17 +64,16 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             internal_table_catalog_builder.add_order_column(idx, OrderType::ascending());
             order_cols.insert(idx);
         });
-
         let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
+
         column_orders.iter().for_each(|order| {
             internal_table_catalog_builder.add_order_column(order.column_index, order.order_type);
             order_cols.insert(order.column_index);
         });
 
-        stream_key.iter().for_each(|idx| {
-            if !order_cols.contains(idx) {
+        input_stream_key.iter().for_each(|idx| {
+            if order_cols.insert(*idx) {
                 internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
-                order_cols.insert(*idx);
             }
         });
         if let Some(vnode_col_idx) = vnode_col_idx {
@@ -83,6 +83,22 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         internal_table_catalog_builder.build(
             self.input.distribution().dist_column_indices().to_vec(),
             read_prefix_len_hint,
+        )
+    }
+
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
+    pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
+        let (limit, with_ties) = match self.limit_attr {
+            TopNLimit::Simple(limit) => (limit, false),
+            TopNLimit::WithTies(limit) => (limit, true),
+        };
+        (
+            self.input,
+            limit,
+            self.offset,
+            with_ties,
+            self.order,
+            self.group_key,
         )
     }
 }
@@ -138,7 +154,11 @@ impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
             vec.push(("with_ties", Pretty::debug(&true)));
         }
         if !self.group_key.is_empty() {
-            vec.push(("group_key", Pretty::debug(&self.group_key)));
+            let f = |i| Pretty::display(&FieldDisplay(&self.input.schema()[i]));
+            vec.push((
+                "group_key",
+                Pretty::Array(self.group_key.iter().copied().map(f).collect()),
+            ));
         }
         childless_record(name, vec)
     }
@@ -149,14 +169,20 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        // We can use the group key as the stream key when there is at most one record for each
-        // value of the group key.
-        if self.limit_attr.max_one_row() {
-            Some(self.group_key.clone())
-        } else {
-            Some(self.input.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        let input_stream_key = self.input.stream_key()?;
+        let mut stream_key = self.group_key.clone();
+        if !self.limit_attr.max_one_row() {
+            for i in input_stream_key {
+                if !stream_key.contains(i) {
+                    stream_key.push(*i);
+                }
+            }
         }
+        // else: We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+
+        Some(stream_key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -168,7 +194,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 }
 
-/// [`Limit`] is used to specify the number of records to return.
+/// `Limit` is used to specify the number of records to return.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TopNLimit {
     /// The number of records returned is exactly the same as the number after `LIMIT` in the SQL
@@ -203,7 +229,7 @@ impl TopNLimit {
         }
     }
 
-    /// Whether this [`Limit`] returns at most one record for each value. Only `LIMIT 1` without
+    /// Whether this `Limit` returns at most one record for each value. Only `LIMIT 1` without
     /// `WITH TIES` satisfies this condition.
     pub fn max_one_row(&self) -> bool {
         match self {

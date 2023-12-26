@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::is_system_schema;
-use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
@@ -82,17 +82,11 @@ pub async fn handle_drop_schema(
             }
         }
         Some(DropMode::Cascade) => {
-            return Err(ErrorCode::NotImplemented(
-                "drop schema with cascade mode".to_string(),
-                6773.into(),
-            )
-            .into())
+            bail_not_implemented!(issue = 6773, "drop schema with cascade mode");
         }
     };
 
-    if session.user_id() != schema.owner() {
-        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-    }
+    session.check_privilege_for_drop_alter_db_schema(&schema)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_schema(schema.id()).await?;

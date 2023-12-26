@@ -17,16 +17,18 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     logical: LogicalTableFunction,
 }
 
@@ -39,7 +41,7 @@ impl BatchTableFunction {
     }
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }
@@ -91,5 +93,15 @@ impl ExprRewritable for BatchTableFunction {
                 .clone(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for BatchTableFunction {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.logical
+            .table_function
+            .args
+            .iter()
+            .for_each(|e| v.visit_expr(e));
     }
 }

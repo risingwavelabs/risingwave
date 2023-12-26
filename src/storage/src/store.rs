@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -19,31 +21,34 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
+use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions, TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
+    TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
-use crate::write_batch::WriteBatch;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }
@@ -68,8 +73,6 @@ pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
-pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
-
 pub trait StateStoreRead: StaticSendSync {
     type IterStream: StateStoreReadIterStream;
 
@@ -77,7 +80,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
@@ -89,7 +92,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// corresponding to the given `epoch`.
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + Send + '_;
@@ -105,7 +108,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -115,13 +118,13 @@ pub trait StateStoreReadExt: StaticSendSync {
 impl<S: StateStoreRead> StateStoreReadExt for S {
     async fn scan(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         limit: Option<usize>,
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.exhaust_iter = false;
+            read_options.prefetch_options.prefetch = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -149,18 +152,10 @@ pub trait StateStoreWrite: StaticSendSync {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
-
-    /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self>
-    where
-        Self: Sized,
-    {
-        WriteBatch::new(self, write_options)
-    }
 }
 
 #[derive(Default, Debug)]
@@ -169,6 +164,8 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    /// The collected table watermarks written by state tables.
+    pub table_watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -211,7 +208,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// The result is based on the latest written snapshot.
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
 
@@ -222,32 +219,44 @@ pub trait LocalStateStore: StaticSendSync {
     /// snapshot.
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
     fn flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
+    fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
 
-    fn init(&mut self, epoch: u64);
+    /// Initializes the state store with given `epoch` pair.
+    /// Typically we will use `epoch.curr` as the initialized epoch,
+    /// Since state table will begin as empty.
+    /// In some cases like replicated state table, state table may not be empty initially,
+    /// as such we need to wait for `epoch.prev` checkpoint to complete,
+    /// hence this interface is made async.
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -260,30 +269,49 @@ pub trait LocalStateStore: StaticSendSync {
     /// - true: `key_range` may or may not exist in storage.
     fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
+/// Since the streaming-read of object-storage may hung in some case, we still use sync short read
+/// for both batch-query and streaming process. So this configure is unused.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
-    pub exhaust_iter: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_exhaust_iter() -> Self {
-        Self { exhaust_iter: true }
+    pub fn prefetch_for_large_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: true,
+        }
+    }
+
+    pub fn prefetch_for_small_range_scan() -> Self {
+        Self {
+            prefetch: true,
+            for_large_query: false,
+        }
+    }
+
+    pub fn new(prefetch: bool, for_large_query: bool) -> Self {
+        Self {
+            prefetch,
+            for_large_query,
+        }
     }
 }
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -291,7 +319,8 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            prefetch: value.prefetch,
+            for_large_query: value.for_large_query,
         }
     }
 }
@@ -440,5 +469,101 @@ impl NewLocalOptions {
             },
             is_replicated: false,
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct InitOptions {
+    pub epoch: EpochPair,
+}
+
+impl InitOptions {
+    pub fn new_with_epoch(epoch: EpochPair) -> Self {
+        Self { epoch }
+    }
+}
+
+impl From<EpochPair> for InitOptions {
+    fn from(value: EpochPair) -> Self {
+        Self { epoch: value }
+    }
+}
+
+impl From<InitOptions> for TracedInitOptions {
+    fn from(value: InitOptions) -> Self {
+        TracedInitOptions {
+            epoch: value.epoch.into(),
+        }
+    }
+}
+
+impl From<TracedInitOptions> for InitOptions {
+    fn from(value: TracedInitOptions) -> Self {
+        InitOptions {
+            epoch: value.epoch.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SealCurrentEpochOptions {
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
+                (
+                    direction == WatermarkDirection::Ascending,
+                    watermarks
+                        .iter()
+                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .collect(),
+                )
+            }),
+        }
+    }
+}
+
+impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
+    fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
+        SealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
+                (
+                    if is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    watermarks
+                        .iter()
+                        .map(|serialized_watermark| {
+                            Message::decode(serialized_watermark.as_slice())
+                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .expect("should not failed")
+                        })
+                        .collect(),
+                )
+            }),
+        }
+    }
+}
+
+impl SealCurrentEpochOptions {
+    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
+        Self {
+            table_watermarks: Some((direction, watermarks)),
+        }
+    }
+
+    pub fn no_watermark() -> Self {
+        Self {
+            table_watermarks: None,
+        }
+    }
+
+    pub fn for_test() -> Self {
+        Self::no_watermark()
     }
 }

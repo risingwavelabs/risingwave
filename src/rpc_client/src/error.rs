@@ -12,28 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use anyhow::anyhow;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, RpcError>;
+pub type Result<T, E = RpcError> = std::result::Result<T, E>;
+
+// Re-export these types as they're commonly used together with `RpcError`.
+pub use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 
 #[derive(Error, Debug)]
 pub enum RpcError {
-    #[error("Transport error: {0}")]
-    TransportError(#[from] tonic::transport::Error),
-
-    #[error("gRPC error ({}): {}", .0.code(), .0.message())]
-    GrpcStatus(#[from] tonic::Status),
+    #[error(transparent)]
+    TransportError(Box<tonic::transport::Error>),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    GrpcStatus(Box<TonicStatusWrapper>),
+
+    #[error(transparent)]
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+}
+
+static_assertions::const_assert_eq!(std::mem::size_of::<RpcError>(), 16);
+
+impl From<tonic::transport::Error> for RpcError {
+    fn from(e: tonic::transport::Error) -> Self {
+        RpcError::TransportError(Box::new(e))
+    }
+}
+
+impl From<tonic::Status> for RpcError {
+    fn from(s: tonic::Status) -> Self {
+        RpcError::GrpcStatus(Box::new(TonicStatusWrapper::new(s)))
+    }
 }
 
 impl From<RpcError> for RwError {
     fn from(r: RpcError) -> Self {
         match r {
-            RpcError::GrpcStatus(status) => status.into(),
+            RpcError::GrpcStatus(status) => TonicStatusWrapper::into(*status),
             _ => ErrorCode::RpcError(r.into()).into(),
         }
     }

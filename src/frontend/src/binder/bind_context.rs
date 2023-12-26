@@ -19,6 +19,7 @@ use std::rc::Rc;
 use parse_display::Display;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::TableAlias;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
@@ -79,6 +80,8 @@ pub struct BindContext {
     /// Map the cte's name to its Relation::Subquery.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<(ShareId, BoundQuery, TableAlias)>>,
+    /// Current lambda functions's arguments
+    pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
@@ -296,7 +299,7 @@ impl BindContext {
             c
         }));
         for (k, v) in other.indices_of {
-            let entry = self.indices_of.entry(k).or_insert_with(Vec::new);
+            let entry = self.indices_of.entry(k).or_default();
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {

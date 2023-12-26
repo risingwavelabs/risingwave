@@ -23,14 +23,15 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
+    BatchSstableWriterFactory, CachePolicy, FileCache, HummockResult, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache, Xor16FilterBuilder,
+    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -89,7 +90,7 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
         block_capacity: 1024 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.001,
-        compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     }
 }
 
@@ -131,9 +132,13 @@ fn bench_builder(
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new(bucket.to_string(), metrics.clone())
-            .await
-            .monitored(metrics)
+        S3ObjectStore::new_with_config(
+            bucket.to_string(),
+            metrics.clone(),
+            ObjectStoreConfig::default(),
+        )
+        .await
+        .monitored(metrics)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
     let sstable_store = Arc::new(SstableStore::new(
@@ -142,7 +147,10 @@ fn bench_builder(
         64 << 20,
         128 << 20,
         0,
-        TieredCache::none(),
+        64 << 20,
+        FileCache::none(),
+        FileCache::none(),
+        None,
     ));
 
     let mut group = c.benchmark_group("bench_multi_builder");

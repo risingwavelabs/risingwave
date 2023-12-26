@@ -53,7 +53,7 @@ pub fn bench_join(
                                     right_chunk_num,
                                 )
                             },
-                            |e| execute_executor(e),
+                            execute_executor,
                             BatchSize::SmallInput,
                         );
                     },

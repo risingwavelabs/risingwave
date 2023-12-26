@@ -159,6 +159,12 @@ func main() {
 						Destination: &cfg.Kinesis.Region,
 					},
 					cli.StringFlag{
+						Name:        "endpoint",
+						Usage:       "The endpoint of this Kinesis stream",
+						Required:    false,
+						Destination: &cfg.Kinesis.Endpoint,
+					},
+					cli.StringFlag{
 						Name:        "name",
 						Usage:       "The Kinesis stream name",
 						Required:    true,
@@ -170,6 +176,34 @@ func main() {
 					return runCommand()
 				},
 				HelpName: "datagen kinesis",
+			},
+			{
+				Name: "s3",
+				Flags: []cli.Flag{
+					cli.StringFlag{
+						Name:        "region",
+						Usage:       "The region where the S3 bucket resides",
+						Required:    true,
+						Destination: &cfg.S3.Region,
+					},
+					cli.StringFlag{
+						Name:        "bucket",
+						Usage:       "The S3 bucket name",
+						Required:    true,
+						Destination: &cfg.S3.Bucket,
+					},
+					cli.StringFlag{
+						Name:        "endpoint",
+						Usage:       "The endpoint of this S3 bucket",
+						Required:    false,
+						Destination: &cfg.S3.Endpoint,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					cfg.Sink = "s3"
+					return runCommand()
+				},
+				HelpName: "datagen s3",
 			},
 		},
 		Flags: []cli.Flag{
@@ -204,6 +238,12 @@ func main() {
 				Usage:       "Whether the tail probability is high. If true We will use uniform distribution for randomizing values.",
 				Required:    false,
 				Destination: &cfg.HeavyTail,
+			},
+			cli.StringFlag{
+				Name:        "topic",
+				Usage:       "The topic to filter. If not specified, all topics will be used.",
+				Required:    false,
+				Destination: &cfg.Topic,
 			},
 		},
 	}

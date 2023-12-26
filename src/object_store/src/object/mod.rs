@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use prometheus::HistogramTimer;
-use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod mem;
 pub use mem::*;
@@ -27,6 +27,9 @@ pub use opendal_engine::*;
 
 pub mod s3;
 use await_tree::InstrumentAwait;
+use futures::stream::BoxStream;
+use futures::StreamExt;
+use risingwave_common::config::ObjectStoreConfig;
 pub use s3::*;
 
 pub mod error;
@@ -39,6 +42,8 @@ pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
+
+pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
 
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
@@ -54,12 +59,6 @@ pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
     vec_rem
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct BlockLocation {
-    pub offset: usize,
-    pub size: usize,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
     // Full path
@@ -67,17 +66,6 @@ pub struct ObjectMetadata {
     // Seconds since unix epoch.
     pub last_modified: f64,
     pub total_size: usize,
-}
-
-impl BlockLocation {
-    /// Generates the http bytes range specifier.
-    pub fn byte_range_specifier(&self) -> Option<String> {
-        Some(format!(
-            "bytes={}-{}",
-            self.offset,
-            self.offset + self.size - 1
-        ))
-    }
 }
 
 #[async_trait::async_trait]
@@ -100,13 +88,10 @@ pub trait ObjectStore: Send + Sync {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
 
-    /// If the `block_loc` is None, the whole object will be returned.
-    /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
+    /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
-
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes>;
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
     /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
@@ -114,8 +99,8 @@ pub trait ObjectStore: Send + Sync {
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>>;
+        read_range: Range<usize>,
+    ) -> ObjectResult<ObjectDataStream>;
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
@@ -134,9 +119,19 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics)
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
+
+    fn recv_buffer_size(&self) -> usize {
+        // 2MB
+        1 << 21
+    }
+
+    fn config(&self) -> Option<&ObjectStoreConfig> {
+        // TODO: remove option
+        None
+    }
 }
 
 pub enum ObjectStoreImpl {
@@ -207,16 +202,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read, dispatch_async, path, block_loc)
-    }
-
-    pub async fn readv(
-        &self,
-        path: &str,
-        block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
-        object_store_impl_method_body!(self, readv, dispatch_async, path, block_locs)
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        object_store_impl_method_body!(self, read, dispatch_async, path, range)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -229,7 +216,7 @@ impl ObjectStoreImpl {
     pub async fn streaming_read(
         &self,
         path: &str,
-        start_loc: Option<usize>,
+        start_loc: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
         object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
     }
@@ -247,7 +234,7 @@ impl ObjectStoreImpl {
         object_store_impl_method_body_slice!(self, delete_objects, dispatch_async, paths)
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         object_store_impl_method_body!(self, list, dispatch_async, prefix)
     }
 
@@ -266,49 +253,17 @@ impl ObjectStoreImpl {
         match self {
             ObjectStoreImpl::InMem(_) => true,
             ObjectStoreImpl::Opendal(store) => {
-                store
-                    .inner
-                    .op
-                    .info()
-                    .capability()
-                    .write_without_content_length
+                store.inner.op.info().native_capability().write_can_multi
             }
             ObjectStoreImpl::S3(_) => true,
         }
     }
 
-    pub fn set_opts(
-        &mut self,
-        streaming_read_timeout_ms: u64,
-        streaming_upload_timeout_ms: u64,
-        read_timeout_ms: u64,
-        upload_timeout_ms: u64,
-    ) {
+    pub fn recv_buffer_size(&self) -> usize {
         match self {
-            ObjectStoreImpl::InMem(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
-            ObjectStoreImpl::Opendal(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
-            ObjectStoreImpl::S3(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
+            ObjectStoreImpl::InMem(store) => store.recv_buffer_size(),
+            ObjectStoreImpl::Opendal(store) => store.recv_buffer_size(),
+            ObjectStoreImpl::S3(store) => store.recv_buffer_size(),
         }
     }
 }
@@ -318,7 +273,8 @@ fn try_update_failure_metric<T>(
     result: &ObjectResult<T>,
     operation_type: &'static str,
 ) {
-    if result.is_err() {
+    if let Err(e) = &result {
+        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -436,9 +392,8 @@ impl MonitoredStreamingUploader {
     }
 }
 
-type BoxedStreamingReader = Box<dyn AsyncRead + Unpin + Send + Sync>;
 pub struct MonitoredStreamingReader {
-    inner: BoxedStreamingReader,
+    inner: ObjectDataStream,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     operation_size: usize,
     media_type: &'static str,
@@ -446,10 +401,12 @@ pub struct MonitoredStreamingReader {
     streaming_read_timeout: Option<Duration>,
 }
 
+unsafe impl Sync for MonitoredStreamingReader {}
+
 impl MonitoredStreamingReader {
     pub fn new(
         media_type: &'static str,
-        handle: BoxedStreamingReader,
+        handle: ObjectDataStream,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         streaming_read_timeout: Option<Duration>,
     ) -> Self {
@@ -468,39 +425,42 @@ impl MonitoredStreamingReader {
         }
     }
 
-    pub async fn read_bytes(&mut self, buf: &mut [u8]) -> ObjectResult<usize> {
+    pub async fn read_bytes(&mut self) -> Option<ObjectResult<Bytes>> {
         let operation_type = "streaming_read_read_bytes";
-        let data_len = buf.len();
-        self.object_store_metrics.read_bytes.inc_by(data_len as u64);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type])
-            .observe(data_len as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
-        self.operation_size += data_len;
         let future = async {
             self.inner
-                .read_exact(buf)
+                .next()
                 .verbose_instrument_await("object_store_streaming_read_read_bytes")
                 .await
-                .map_err(|err| {
-                    ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
-                })
         };
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(ObjectError::internal("streaming_read read_bytes timeout"))
+                    Some(Err(ObjectError::internal(
+                        "streaming_read read_bytes timeout",
+                    )))
                 }),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        if let Some(ret) = &res {
+            try_update_failure_metric(&self.object_store_metrics, ret, operation_type);
+        }
+        if let Some(Ok(data)) = &res {
+            let data_len = data.len();
+            self.object_store_metrics.read_bytes.inc_by(data_len as u64);
+            self.object_store_metrics
+                .operation_size
+                .with_label_values(&[operation_type])
+                .observe(data_len as f64);
+            self.operation_size += data_len;
+        }
         res
     }
 }
@@ -543,13 +503,28 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self {
-            inner: store,
-            object_store_metrics,
-            streaming_read_timeout: None,
-            streaming_upload_timeout: None,
-            read_timeout: None,
-            upload_timeout: None,
+        if let Some(config) = store.config() {
+            Self {
+                object_store_metrics,
+                streaming_read_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_read_timeout_ms,
+                )),
+                streaming_upload_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_upload_timeout_ms,
+                )),
+                read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
+                upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
+                inner: store,
+            }
+        } else {
+            Self {
+                inner: store,
+                object_store_metrics,
+                streaming_read_timeout: None,
+                streaming_upload_timeout: None,
+                read_timeout: None,
+                upload_timeout: None,
+            }
         }
     }
 
@@ -559,6 +534,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
     pub fn inner(&self) -> &OS {
         &self.inner
+    }
+
+    pub fn mut_inner(&mut self) -> &mut OS {
+        &mut self.inner
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -622,7 +601,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let operation_type = "read";
         let _timer = self
             .object_store_metrics
@@ -631,15 +610,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .start_timer();
         let future = async {
             self.inner
-                .read(path, block_loc)
+                .read(path, range)
                 .verbose_instrument_await("object_store_read")
                 .await
-                .map_err(|err| {
-                    ObjectError::internal(format!(
-                        "read {:?} in block {:?} failed, error: {:?}",
-                        path, block_loc, err
-                    ))
-                })
         };
         let res = match self.read_timeout.as_ref() {
             None => future.await,
@@ -648,7 +621,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        if let Err(e) = &res && e.is_object_not_found_error() && !path.ends_with(".data") {
+            // Some not_found_error is expected, e.g. metadata backup's manifest.json.
+            // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
+        } else {
+            try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        }
 
         let data = res?;
         self.object_store_metrics
@@ -661,50 +639,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(data)
     }
 
-    pub async fn readv(
-        &self,
-        path: &str,
-        block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
-        let operation_type = "readv";
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
-            .start_timer();
-
-        let future = async {
-            self.inner
-                .readv(path, block_locs)
-                .verbose_instrument_await("object_store_readv")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout"))),
-        };
-
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
-
-        let data = res?;
-        let data_len = data.iter().map(|block| block.len()).sum::<usize>() as u64;
-        self.object_store_metrics.read_bytes.inc_by(data_len);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type])
-            .observe(data_len as f64);
-        Ok(data)
-    }
-
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
     /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
     /// of data into memory that is read from the stream.
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
+        range: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
         let operation_type = "streaming_read_start";
         let media_type = self.media_type();
@@ -713,12 +654,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_read(path, start_pos)
-                .verbose_instrument_await("object_store_streaming_read")
-                .await
-        };
+        let future = self
+            .inner
+            .streaming_read(path, range)
+            .verbose_instrument_await("object_store_streaming_read");
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
@@ -810,7 +749,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = "list";
         let _timer = self
             .object_store_metrics
@@ -835,30 +774,23 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    fn set_opts(
-        &mut self,
-        streaming_read_timeout_ms: u64,
-        streaming_upload_timeout_ms: u64,
-        read_timeout_ms: u64,
-        upload_timeout_ms: u64,
-    ) {
-        self.streaming_read_timeout = Some(Duration::from_millis(streaming_read_timeout_ms));
-        self.streaming_upload_timeout = Some(Duration::from_millis(streaming_upload_timeout_ms));
-        self.read_timeout = Some(Duration::from_millis(read_timeout_ms));
-        self.upload_timeout = Some(Duration::from_millis(upload_timeout_ms));
+    fn recv_buffer_size(&self) -> usize {
+        self.inner.recv_buffer_size()
     }
 }
 
-pub async fn parse_remote_object_store(
+pub async fn build_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
+    config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(
+            S3ObjectStore::new_with_config(
                 s3.strip_prefix("s3://").unwrap().to_string(),
                 metrics.clone(),
+                config,
             )
             .await
             .monitored(metrics),
@@ -866,7 +798,7 @@ pub async fn parse_remote_object_store(
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
-            let (namenode, root) = hdfs.split_once('@').unwrap();
+            let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
@@ -875,9 +807,18 @@ pub async fn parse_remote_object_store(
         }
         gcs if gcs.starts_with("gcs://") => {
             let gcs = gcs.strip_prefix("gcs://").unwrap();
-            let (bucket, root) = gcs.split_once('@').unwrap();
+            let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
+        obs if obs.starts_with("obs://") => {
+            let obs = obs.strip_prefix("obs://").unwrap();
+            let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
@@ -885,7 +826,7 @@ pub async fn parse_remote_object_store(
 
         oss if oss.starts_with("oss://") => {
             let oss = oss.strip_prefix("oss://").unwrap();
-            let (bucket, root) = oss.split_once('@').unwrap();
+            let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
@@ -894,16 +835,16 @@ pub async fn parse_remote_object_store(
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
-            let (endpoint, root) = webhdfs.split_once('@').unwrap();
+            let (namenode, root) = webhdfs.split_once('@').unwrap_or((webhdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_webhdfs_engine(endpoint.to_string(), root.to_string())
+                OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
             let azblob = azblob.strip_prefix("azblob://").unwrap();
-            let (container_name, root) = azblob.split_once('@').unwrap();
+            let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
@@ -912,27 +853,19 @@ pub async fn parse_remote_object_store(
         }
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
-            let (_, root) = fs.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(root.to_string())
+                OpendalObjectStore::new_fs_engine(fs.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
         }
 
-        s3_compatible if s3_compatible.starts_with("s3-compatible://") => ObjectStoreImpl::S3(
-            // For backward compatibility, s3-compatible is still reserved.
-            // todo: remove this after this change has been applied for downstream projects.
-            S3ObjectStore::new(
-                s3_compatible
-                    .strip_prefix("s3-compatible://")
-                    .unwrap()
-                    .to_string(),
-                metrics.clone(),
-            )
-            .await
-            .monitored(metrics),
-        ),
+        s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
+            tracing::error!("The s3 compatible mode has been unified with s3.");
+            tracing::error!("If you want to use s3 compatible storage, please set your access_key, secret_key and region to the environment variable AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
+            set your endpoint to the environment variable RW_S3_ENDPOINT.");
+            panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
+        }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
@@ -956,9 +889,12 @@ pub async fn parse_remote_object_store(
         }
         other => {
             unimplemented!(
-                "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
+                "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",
                 other
             )
         }
     }
 }
+
+pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
+pub type ObjectDataStream = BoxStream<'static, ObjectResult<Bytes>>;
