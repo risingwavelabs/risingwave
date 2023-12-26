@@ -1,6 +1,2 @@
-SELECT
-    *
-FROM
-    student_view
-limit
-    10;
+SELECT *
+FROM t_upsert;
