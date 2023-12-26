@@ -20,3 +20,6 @@ statement ok
 set rw_streaming_over_window_cache_policy = recent_last_n;
 
 include ./run_all.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = default;
