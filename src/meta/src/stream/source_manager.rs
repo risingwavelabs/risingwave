@@ -389,7 +389,7 @@ impl<T: SplitMetaData + Clone> Eq for ActorSplitsAssignment<T> {}
 
 impl<T: SplitMetaData + Clone> PartialEq<Self> for ActorSplitsAssignment<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.splits.len() == other.splits.len()
+        self.splits.len() == other.splits.len() && self.actor_id == other.actor_id
     }
 }
 
@@ -401,7 +401,13 @@ impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
 
 impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.splits.len().cmp(&self.splits.len())
+        // Note: this is reversed order, to make BinaryHeap a min heap.
+        other
+            .splits
+            .len()
+            .cmp(&self.splits.len())
+            // To make the BinaryHeap have a deterministic order
+            .then(other.actor_id.cmp(&self.actor_id))
     }
 }
 
@@ -460,7 +466,7 @@ where
         }
     }
 
-    let new_discovered_splits: HashSet<_> = discovered_split_ids
+    let new_discovered_splits: BTreeSet<_> = discovered_split_ids
         .into_iter()
         .filter(|split_id| !prev_split_ids.contains(split_id))
         .collect();
@@ -495,6 +501,8 @@ where
     }
 
     for split_id in new_discovered_splits {
+        // ActorSplitsAssignment's Ord is reversed, so this is min heap, i.e.,
+        // we get the assignment with the least splits here.
         let mut peek_ref = heap.peek_mut().unwrap();
         peek_ref
             .splits
@@ -1058,7 +1066,7 @@ mod tests {
                 &discovered_splits,
                 Default::default(),
             )
-            .map(BTreeMap::from_iter); // ensure deterministic result
+            .map(BTreeMap::from_iter); // ensure deterministic debug string
             expected.assert_debug_eq(&diff);
         }
 
@@ -1103,17 +1111,17 @@ mod tests {
                     {
                         0: [
                             TestSplit {
-                                id: 2,
+                                id: 0,
                             },
                         ],
                         1: [
                             TestSplit {
-                                id: 0,
+                                id: 1,
                             },
                         ],
                         2: [
                             TestSplit {
-                                id: 1,
+                                id: 2,
                             },
                         ],
                     },
@@ -1138,21 +1146,21 @@ mod tests {
                             TestSplit {
                                 id: 0,
                             },
+                            TestSplit {
+                                id: 3,
+                            },
                         ],
                         1: [
                             TestSplit {
                                 id: 1,
                             },
                             TestSplit {
-                                id: 3,
+                                id: 4,
                             },
                         ],
                         2: [
                             TestSplit {
                                 id: 2,
-                            },
-                            TestSplit {
-                                id: 4,
                             },
                         ],
                     },
