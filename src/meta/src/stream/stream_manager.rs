@@ -1045,7 +1045,9 @@ mod tests {
             self.catalog_manager
                 .start_create_table_procedure(&table, vec![])
                 .await?;
-            self.fragment_manager.start_create_table_fragments(table_fragments.clone()).await?;
+            self.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
+                .await?;
             self.global_stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
