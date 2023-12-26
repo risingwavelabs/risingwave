@@ -65,6 +65,10 @@ pub fn trigger_version_stat(
             .version_stats
             .with_label_values(&[&table_id, "total_value_size"])
             .set(stats.total_value_size);
+        metrics
+            .version_stats
+            .with_label_values(&[&table_id, "total_stale_key_count"])
+            .set(stats.total_stale_key_count);
     }
 }
 

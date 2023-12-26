@@ -28,6 +28,7 @@ pub struct TableStats {
     pub total_key_size: i64,
     pub total_value_size: i64,
     pub total_key_count: i64,
+    pub total_stale_key_count: i64,
 }
 
 impl From<&TableStats> for PbTableStats {
@@ -36,6 +37,7 @@ impl From<&TableStats> for PbTableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_stale_key_count: value.total_stale_key_count,
         }
     }
 }
@@ -52,6 +54,7 @@ impl From<&PbTableStats> for TableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_stale_key_count: value.total_stale_key_count,
         }
     }
 }
@@ -68,6 +71,7 @@ pub fn add_prost_table_stats(this: &mut PbTableStats, other: &PbTableStats) {
     this.total_key_size += other.total_key_size;
     this.total_value_size += other.total_value_size;
     this.total_key_count += other.total_key_count;
+    this.total_stale_key_count += other.total_stale_key_count;
 }
 
 pub fn add_prost_table_stats_map(this: &mut PbTableStatsMap, other: &PbTableStatsMap) {

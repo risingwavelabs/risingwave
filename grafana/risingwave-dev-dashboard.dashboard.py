@@ -2657,6 +2657,7 @@ def section_hummock_manager(outer_panels):
     total_key_size_filter = "metric='total_key_size'"
     total_value_size_filter = "metric='total_value_size'"
     total_key_count_filter = "metric='total_key_count'"
+    total_stale_key_count_filter = "metric='total_stale_key_count'"
     mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
@@ -2764,6 +2765,11 @@ def section_hummock_manager(outer_panels):
                     [
                         panels.target(
                             f"{table_metric('storage_version_stats', total_key_count_filter)}",
+                            "table{{table_id}} {{metric}}",
+                        ),
+
+                        panels.target(
+                            f"{table_metric('storage_version_stats', total_stale_key_count_filter)}",
                             "table{{table_id}} {{metric}}",
                         ),
                     ],

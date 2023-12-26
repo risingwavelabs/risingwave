@@ -1142,6 +1142,7 @@ async fn test_version_stats() {
         total_key_size: 1000,
         total_value_size: 100,
         total_key_count: 10,
+        total_stale_key_count: 5,
     };
     let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
     let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
@@ -1185,12 +1186,15 @@ async fn test_version_stats() {
     assert_eq!(table1_stats.total_key_count, 10);
     assert_eq!(table1_stats.total_value_size, 100);
     assert_eq!(table1_stats.total_key_size, 1000);
+    assert_eq!(table1_stats.total_stale_key_count, 5);
     assert_eq!(table2_stats.total_key_count, 20);
     assert_eq!(table2_stats.total_value_size, 200);
     assert_eq!(table2_stats.total_key_size, 2000);
+    assert_eq!(table2_stats.total_stale_key_count, 10);
     assert_eq!(table3_stats.total_key_count, 10);
     assert_eq!(table3_stats.total_value_size, 100);
     assert_eq!(table3_stats.total_key_size, 1000);
+    assert_eq!(table3_stats.total_stale_key_count, 5);
 
     // Report compaction
     hummock_manager
@@ -1213,6 +1217,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                total_stale_key_count: -5,
             },
         ),
         (
@@ -1221,6 +1226,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                total_stale_key_count: -5,
             },
         ),
     ]);
@@ -1241,9 +1247,11 @@ async fn test_version_stats() {
     assert_eq!(compact_table2_stats.total_key_count, 10);
     assert_eq!(compact_table2_stats.total_value_size, 100);
     assert_eq!(compact_table2_stats.total_key_size, 1000);
+    assert_eq!(compact_table2_stats.total_stale_key_count, 5);
     assert_eq!(compact_table3_stats.total_key_count, 0);
     assert_eq!(compact_table3_stats.total_value_size, 0);
     assert_eq!(compact_table3_stats.total_key_size, 0);
+    assert_eq!(compact_table3_stats.total_stale_key_count, 0);
 }
 
 #[tokio::test]

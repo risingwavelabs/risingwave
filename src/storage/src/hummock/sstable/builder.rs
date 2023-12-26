@@ -390,6 +390,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_metas.last_mut().unwrap().total_key_count += 1;
         if !is_new_user_key || value.is_delete() {
             self.block_metas.last_mut().unwrap().stale_key_count += 1;
+            self.last_table_stats.total_stale_key_count += 1;
         }
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;

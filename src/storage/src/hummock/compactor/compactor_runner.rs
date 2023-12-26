@@ -796,6 +796,7 @@ where
         if epoch <= task_config.watermark {
             watermark_can_see_last_key = true;
         }
+
         if drop {
             compaction_statistics.iter_drop_key_counts += 1;
 
@@ -809,6 +810,10 @@ where
                 last_table_stats.total_key_count -= 1;
                 last_table_stats.total_key_size -= last_key.encoded_len() as i64;
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
+
+                if !is_new_user_key || value.is_delete() {
+                    last_table_stats.total_stale_key_count -= 1;
+                }
             }
             iter.next()
                 .verbose_instrument_await("iter_next_in_drop")
@@ -839,6 +844,7 @@ where
             last_table_stats.total_key_count += 1;
             last_table_stats.total_key_size += iter_key.encoded_len() as i64;
             last_table_stats.total_value_size += 1;
+            last_table_stats.total_stale_key_count += 1;
             iter_key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
             is_new_user_key = false;
         }
