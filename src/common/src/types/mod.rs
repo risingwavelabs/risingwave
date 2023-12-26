@@ -931,8 +931,11 @@ impl ScalarImpl {
                 for s in str[1..str.len() - 1].split(',') {
                     if s.is_empty() {
                         continue;
+                    } else if s.eq_ignore_ascii_case("null") {
+                        builder.append_null();
+                    } else {
+                        builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                     }
-                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                 }
                 Self::List(ListValue::new(builder.finish()))
             }

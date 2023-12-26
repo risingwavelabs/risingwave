@@ -288,10 +288,14 @@ mod tests {
             build_from_pretty("$1:boolean"),
         );
         let (input, expected) = DataChunk::from_pretty(
-            "B[]   B
-             {}    f
-             {t,f} t
-             {f,t} t",
+            "B[]        B
+             .          .
+             {}         f
+             {NULL}     .
+             {NULL,f}   .
+             {NULL,t}   t
+             {t,f}      t
+             {f,t}      t", // <- regression test for #14214
         )
         .split_column_at(1);
 
@@ -315,10 +319,14 @@ mod tests {
             build_from_pretty("$1:boolean"),
         );
         let (input, expected) = DataChunk::from_pretty(
-            "B[]   B
-             {}    t
-             {f,f} f
-             {t}   t",
+            "B[]        B
+             .          .
+             {}         t
+             {NULL}     .
+             {NULL,t}   .
+             {NULL,f}   f
+             {f,f}      f
+             {t}        t", // <- regression test for #14214
         )
         .split_column_at(1);
 
