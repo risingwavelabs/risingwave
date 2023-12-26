@@ -16,9 +16,11 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
+use std::time::Instant;
 
 use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
+use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
@@ -119,7 +121,7 @@ impl UserDefinedFunction {
         .expect("failed to build record batch");
 
         let output: arrow_array::RecordBatch = match &self.imp {
-            UdfImpl::Wasm(runtime) => runtime.lock().await.call(&self.identifier, &input)?,
+            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
@@ -187,7 +189,14 @@ impl Build for UserDefinedFunction {
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
         let imp = match udf.language.as_str() {
-            "wasm" => UdfImpl::Wasm(get_or_create_wasm_runtime(&udf.link)?),
+            "wasm" => {
+                // Use `block_in_place` as an escape hatch to run async code here in sync context.
+                // Calling `block_on` directly will panic.
+                UdfImpl::Wasm(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(get_or_create_wasm_runtime(&udf.link))
+                })?)
+            }
             _ => UdfImpl::External(get_or_create_flight_client(&udf.link)?),
         };
 
@@ -238,45 +247,48 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
     }
 }
 
-type WasmRuntime = tokio::sync::Mutex<arrow_udf_wasm::Runtime>;
-
-#[cfg(not(madsim))]
 /// Get or create a wasm runtime.
 ///
-/// There is a global cache for runtimes, so that we can reuse the same runtime for the same wasm binary.
-pub(crate) fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> {
-    static RUNTIMES: LazyLock<std::sync::Mutex<HashMap<String, Weak<WasmRuntime>>>> =
+/// Runtimes returned by this function are cached inside for at least 60 seconds.
+/// Later calls with the same link will reuse the same runtime.
+#[cfg_or_panic(not(madsim))]
+pub async fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> {
+    // link -> (runtime, last_used_time)
+    static RUNTIMES: LazyLock<tokio::sync::Mutex<HashMap<String, (Arc<WasmRuntime>, Instant)>>> =
         LazyLock::new(Default::default);
 
-    let mut runtimes = RUNTIMES.lock().unwrap();
-    if let Some(runtime) = runtimes.get(link).and_then(|c| c.upgrade()) {
+    let mut runtimes = RUNTIMES.lock().await;
+    let now = Instant::now();
+    // evict unused runtimes for the past 60 seconds
+    runtimes.retain(|l, (rt, last_used_time)| {
+        l == link || Arc::strong_count(rt) > 1 || now.duration_since(*last_used_time).as_secs() < 60
+    });
+    if let Some((runtime, last_used_time)) = runtimes.get_mut(link) {
         // reuse existing runtime
-        return Ok(runtime);
+        *last_used_time = now;
+        return Ok(runtime.clone());
     }
+
     // create new runtime
     let (wasm_storage_url, object_name) = link
         .rsplit_once('/')
         .context("invalid link for wasm function")?;
-    // Use `block_in_place` as an escape hatch to run async code here in sync context.
-    // Calling `block_on` directly will panic.
-    let binary = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            // load wasm binary from object store
-            let object_store = build_remote_object_store(
-                wasm_storage_url,
-                Arc::new(ObjectStoreMetrics::unused()),
-                "Wasm Engine",
-                ObjectStoreConfig::default(),
-            )
-            .await;
-            object_store
-                .read(object_name, ..)
-                .await
-                .context("failed to load wasm binary from object storage")
-        })
-    })?;
+
+    // load wasm binary from object store
+    let object_store = build_remote_object_store(
+        wasm_storage_url,
+        Arc::new(ObjectStoreMetrics::unused()),
+        "Wasm Engine",
+        ObjectStoreConfig::default(),
+    )
+    .await;
+    let binary = object_store
+        .read(object_name, ..)
+        .await
+        .context("failed to load wasm binary from object storage")?;
+
     let runtime = arrow_udf_wasm::Runtime::new(&binary)?;
-    let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
-    runtimes.insert(link.into(), Arc::downgrade(&runtime));
+    let runtime = Arc::new(runtime);
+    runtimes.insert(link.into(), (runtime.clone(), Instant::now()));
     Ok(runtime)
 }

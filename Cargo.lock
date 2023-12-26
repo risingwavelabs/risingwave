@@ -634,7 +634,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-wasm"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf-wasm.git#92725b278dd88714a1ae1f4912caf0c3cf3a10fb"
+source = "git+https://github.com/risingwavelabs/arrow-udf-wasm.git?rev=04a2a83#04a2a838b5974abe9374717581d8bd12b051e418"
 dependencies = [
  "anyhow",
  "arrow-array 49.0.0",
@@ -9109,6 +9109,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arrow-schema 49.0.0",
+ "arrow-udf-wasm",
  "assert_matches",
  "async-recursion",
  "async-trait",

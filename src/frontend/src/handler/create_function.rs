@@ -14,10 +14,12 @@
 
 use anyhow::Context;
 use arrow_schema::Fields;
+use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::get_or_create_wasm_runtime;
 use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
@@ -169,36 +171,36 @@ pub async fn handle_create_function(
             }
         }
         "wasm" => {
+            identifier = wasm_identifier(&function_name, &arg_types, &return_type);
+
             link = match using {
-                CreateFunctionUsing::Link(link) => link,
+                CreateFunctionUsing::Link(link) => {
+                    let wasm_binary = get_or_create_wasm_runtime(&link).await?;
+                    check_wasm_function(&wasm_binary, &identifier).await?;
+                    link
+                }
                 CreateFunctionUsing::Base64(encoded) => {
-                    // upload wasm binary to object store
+                    // decode wasm binary from base64
                     use base64::prelude::{Engine, BASE64_STANDARD};
                     let wasm_binary = BASE64_STANDARD
                         .decode(encoded)
                         .context("invalid base64 encoding")?;
 
+                    let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
+                    check_wasm_function(&runtime, &identifier).await?;
+
                     let system_params = session.env().meta_client().get_system_params().await?;
                     let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
-
-                    // Note: it will panic if the url is invalid. We did a validation on meta startup.
-                    let object_store = build_remote_object_store(
+                    upload_wasm_binary(
                         system_params.wasm_storage_url(),
-                        Arc::new(ObjectStoreMetrics::unused()),
-                        "Wasm Engine",
-                        ObjectStoreConfig::default(),
+                        &object_name,
+                        wasm_binary.into(),
                     )
-                    .await;
-                    object_store
-                        .upload(&object_name, wasm_binary.into())
-                        .await
-                        .context("failed to upload wasm binary to object store")?;
+                    .await?;
 
                     format!("{}/{}", system_params.wasm_storage_url(), object_name)
                 }
             };
-
-            identifier = wasm_identifier(&function_name, &arg_types, &return_type);
         }
         _ => unreachable!("invalid language: {language}"),
     };
@@ -223,6 +225,41 @@ pub async fn handle_create_function(
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
 }
 
+/// Upload wasm binary to object store.
+async fn upload_wasm_binary(
+    wasm_storage_url: &str,
+    object_name: &str,
+    wasm_binary: Bytes,
+) -> Result<()> {
+    // Note: it will panic if the url is invalid. We did a validation on meta startup.
+    let object_store = build_remote_object_store(
+        wasm_storage_url,
+        Arc::new(ObjectStoreMetrics::unused()),
+        "Wasm Engine",
+        ObjectStoreConfig::default(),
+    )
+    .await;
+    object_store
+        .upload(&object_name, wasm_binary.into())
+        .await
+        .context("failed to upload wasm binary to object store")?;
+    Ok(())
+}
+
+/// Check if the function exists in the wasm binary.
+async fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
+    if !runtime.functions().contains(&identifier) {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
+            identifier,
+            runtime.functions().join("\n  ")
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// Generate the function identifier in wasm binary.
 fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType) -> String {
     format!(
         "{}({})->{}",
@@ -232,6 +269,7 @@ fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType) -> String {
     )
 }
 
+/// Convert a data type to string used in identifier.
 fn datatype_name(ty: &DataType) -> String {
     match ty {
         DataType::Boolean => "boolean".to_string(),
