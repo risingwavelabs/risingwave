@@ -262,3 +262,67 @@ impl Build for SomeAllExpression {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_some() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::Some,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]   B
+             {t,f} t
+             {f,t} t",
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_all() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::All,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]   B
+             {f,f} f
+             {t}   t",
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
+    }
+}
