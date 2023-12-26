@@ -166,7 +166,7 @@ impl ConfigExpander {
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),
                     "grafana" => ServiceConfig::Grafana(serde_yaml::from_str(&out_str)?),
                     "tempo" => ServiceConfig::Tempo(serde_yaml::from_str(&out_str)?),
-                    "opendal" => ServiceConfig::OpenDal(serde_yaml::from_str(&out_str)?),
+                    "opendal" => ServiceConfig::Opendal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),

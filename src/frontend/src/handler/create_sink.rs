@@ -25,7 +25,7 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_common::{bail, bail_not_implemented, catalog};
+use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -173,13 +173,23 @@ pub fn gen_sink_plan(
         }
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
-                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
-                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+            Some(t) => {
+                if !allow_old_sink_type_syntax(&connector) {
+                    return Err(ErrorCode::BindError(format!(
+                        "connector {} does not support `type = '...'`, please use syntax `FORMAT ... ENCODE ...` instead.",
+                        connector
+                    ))
+                    .into());
+                } else {
+                    SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
+                        session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                        if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                              f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+                        }
+                        f
+                    })
                 }
-                f
-            }),
+            }
             // Case C: no format + encode required
             None => None,
         },
@@ -245,7 +255,7 @@ pub fn gen_sink_plan(
             || sink_catalog.sink_type == SinkType::ForceAppendOnly)
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys.".to_string(),
+                "Only append-only sinks can sink to a table without primary keys. Please try to add \"FORMAT PLAIN ENCODE NATIVE\"".to_string(),
             )));
         }
 
@@ -318,10 +328,6 @@ pub async fn handle_create_sink(
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
-        if !table_catalog.incoming_sinks.is_empty() {
-            bail_not_implemented!(issue = 13818, "create sink into table with incoming sinks");
-        }
-
         check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
@@ -329,12 +335,11 @@ pub async fn handle_create_sink(
 
         table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
-        // for now we only support one incoming sink
-        assert!(table.incoming_sinks.is_empty());
-
-        for fragment in graph.fragments.values_mut() {
-            if let Some(node) = &mut fragment.node {
-                insert_merger_to_union(node);
+        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
+            for fragment in graph.fragments.values_mut() {
+                if let Some(node) = &mut fragment.node {
+                    insert_merger_to_union(node);
+                }
             }
         }
 
@@ -586,7 +591,8 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes) => {
+        E::Native => SinkEncode::Native,
+        e @ (E::Csv | E::Bytes) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -631,8 +637,16 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json,Encode::Template],
                     Format::Upsert => vec![Encode::Json,Encode::Template],
                 ),
+                "table" => hashmap!(
+                    Format::Plain => vec![Encode::Native],
+                    Format::Upsert => vec![Encode::Native],
+                ),
         ))
     });
+
+pub fn allow_old_sink_type_syntax(connector: &str) -> bool {
+    !matches!(connector, "table")
+}
 
 pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS

@@ -12,7 +12,5 @@ CREATE table user_behaviors (
     fields.user_id.kind = 'sequence',
     fields.user_id.start = '1',
     fields.user_id.end = '1000',
-    fields.user_name.kind = 'random',
-    fields.user_name.length = '10',
-    datagen.rows.per.second = '10'
+    datagen.rows.per.second = '100'
 ) FORMAT PLAIN ENCODE JSON;

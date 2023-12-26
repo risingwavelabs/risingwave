@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::vec;
 
 use fixedbitset::FixedBitSet;

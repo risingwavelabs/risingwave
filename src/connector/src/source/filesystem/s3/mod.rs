@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-mod enumerator;
+pub mod enumerator;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
@@ -24,7 +24,7 @@ use crate::source::SourceProperties;
 
 pub const S3_CONNECTOR: &str = "s3";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct S3Properties {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,

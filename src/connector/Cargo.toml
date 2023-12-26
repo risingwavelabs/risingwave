@@ -79,6 +79,7 @@ mysql_common = { version = "0.31", default-features = false, features = [
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
+opendal = { git = "https://github.com/apache/incubator-opendal", rev = "9a222e4d72b328a24d5775b1565292f4636bbe69" }
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
@@ -151,7 +152,6 @@ rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 syn = { version = "1", features = ["full"] }
-tempdir = "0.3.7"
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"

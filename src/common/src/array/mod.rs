@@ -465,6 +465,10 @@ impl ArrayBuilderImpl {
         dispatch_array_builder_variants!(self, inner, { inner.append(None) })
     }
 
+    pub fn append_n_null(&mut self, n: usize) {
+        dispatch_array_builder_variants!(self, inner, { inner.append_n(n, None) })
+    }
+
     /// Append a [`Datum`] or [`DatumRef`] multiple times,
     /// panicking if the datum's type does not match the array builder's type.
     pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {

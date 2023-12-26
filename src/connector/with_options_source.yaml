@@ -43,6 +43,9 @@ KafkaProperties:
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
+    required: false
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -222,7 +225,7 @@ NatsProperties:
   - name: stream
     field_type: String
     required: true
-NexmarkPropertiesInner:
+NexmarkProperties:
   fields:
   - name: nexmark.split.num
     field_type: i32

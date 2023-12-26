@@ -15,7 +15,7 @@
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_hummock_sdk::version::HummockVersion;
 
 use crate::error::BackupResult;
 use crate::{xxhash64_checksum, xxhash64_verify, MetaSnapshotId};

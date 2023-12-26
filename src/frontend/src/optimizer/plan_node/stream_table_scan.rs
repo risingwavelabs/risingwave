@@ -302,9 +302,8 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        // This refers to the output indices of the originating stream.
-        let upstream_table_catalog = self.get_upstream_state_table().clone();
         let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+            let upstream_table_catalog = self.get_upstream_state_table();
             Some(upstream_table_catalog.to_internal_table_prost())
         } else {
             None

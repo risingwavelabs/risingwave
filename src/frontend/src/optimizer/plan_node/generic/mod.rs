@@ -70,6 +70,8 @@ mod insert;
 pub use insert::*;
 mod limit;
 pub use limit::*;
+mod max_one_row;
+pub use max_one_row::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

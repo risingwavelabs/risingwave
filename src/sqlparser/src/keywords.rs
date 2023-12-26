@@ -120,6 +120,7 @@ define_keywords!(
     CHAIN,
     CHAR,
     CHARACTER,
+    CHARACTERISTICS,
     CHARACTER_LENGTH,
     CHAR_LENGTH,
     CHECK,
@@ -278,6 +279,7 @@ define_keywords!(
     IS,
     ISNULL,
     ISOLATION,
+    JOB,
     JOBS,
     JOIN,
     JSON,
@@ -598,6 +600,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::SET,
     Keyword::RETURNING,
     Keyword::EMIT,
+    Keyword::FORMAT,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`
