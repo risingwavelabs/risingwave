@@ -201,31 +201,43 @@ pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
 }
 
 pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
+    // cast rules:
+    // 1. implicit cast operations in PG are organized in 3 sequences,
+    //    with the reverse direction being assign cast operations.
+    //    https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
+    //    1. int2 -> int4 -> int8 -> numeric -> float4 -> float8
+    //    2. date -> timestamp -> timestamptz
+    //    3. time -> interval
+    // 2. any -> varchar is assign and varchar -> any is explicit
+    // 3. jsonb -> bool/number is explicit
+    // 4. int32 <-> bool is explicit
+    // 5. timestamp/timestamptz -> time is assign
+    // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
         // 123456789ABCDEF
-        ("  e            a", Boolean),     // 0
-        ("  iiiiii       a", Int16),       // 1
-        ("ea iiiii       a", Int32),       // 2
-        (" aa iiii       a", Int64),       // 3
-        (" aaa ii        a", Decimal),     // 4
-        (" aaaa i        a", Float32),     // 5
-        (" aaaaa         a", Float64),     // 6
-        ("      e        a", Int256),      // 7
-        ("          ii   a", Date),        // 8
-        ("            i  a", Time),        // 9
-        ("        aa i   a", Timestamp),   // A
-        ("        aaa    a", Timestamptz), // B
-        ("         a     a", Interval),    // C
-        ("eeeeeee        a", Jsonb),       // D
-        ("               a", Bytea),       // E
-        ("eeeeeeeeeeeeeee ", Varchar),     // F
+        (". e            a", Boolean),     // 0
+        (" .iiiiii       a", Int16),       // 1
+        ("ea.iiiii       a", Int32),       // 2
+        (" aa.iiii       a", Int64),       // 3
+        (" aaa.ii        a", Decimal),     // 4
+        (" aaaa.i        a", Float32),     // 5
+        (" aaaaa.        a", Float64),     // 6
+        ("      e.       a", Int256),      // 7
+        ("        .ii    a", Date),        // 8
+        ("        a.ia   a", Timestamp),   // 9
+        ("        aa.a   a", Timestamptz), // A
+        ("           .i  a", Time),        // B
+        ("           a.  a", Interval),    // C
+        ("eeeeeee      . a", Jsonb),       // D
+        ("              .a", Bytea),       // E
+        ("eeeeeeeeeeeeeee.", Varchar),     // F
     ];
     let mut map = BTreeMap::new();
     for (row, source) in CAST_TABLE {
         for ((_, target), c) in CAST_TABLE.iter().zip_eq_fast(row.bytes()) {
             let context = match c {
-                b' ' => continue,
+                b' ' | b'.' => continue,
                 b'i' => CastContext::Implicit,
                 b'a' => CastContext::Assign,
                 b'e' => CastContext::Explicit,
