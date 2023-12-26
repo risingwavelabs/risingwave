@@ -160,12 +160,17 @@ impl Expression for SomeAllExpression {
         );
 
         let func_results = self.func.eval(&data_chunk).await?;
-        let mut func_results_iter = func_results.as_bool().iter();
+        let bools = func_results.as_bool();
+        let mut offset = 0;
         Ok(Arc::new(
             num_array
                 .into_iter()
                 .map(|num| match num {
-                    Some(num) => self.resolve_bools(func_results_iter.by_ref().take(num)),
+                    Some(num) => {
+                        let range = offset..offset + num;
+                        offset += num;
+                        self.resolve_bools(range.map(|i| bools.value_at(i)))
+                    }
                     None => None,
                 })
                 .collect::<BoolArray>()
