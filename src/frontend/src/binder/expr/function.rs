@@ -200,10 +200,6 @@ impl Binder {
             expr
         }
 
-        let schema = self.first_valid_schema().unwrap();
-        let catalog = schema.get_function_by_name_args(&function_name, &inputs.iter().map(|arg| arg.return_type()).collect_vec());
-        println!("Current catalog: {:#?}", catalog);
-
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
@@ -212,7 +208,6 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
-            println!("INside udf!");
             use crate::catalog::function_catalog::FunctionKind::*;
             if func.language == "sql" {
                 // This represents the current user defined function is `language sql`
