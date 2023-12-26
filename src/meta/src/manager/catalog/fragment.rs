@@ -182,10 +182,9 @@ impl FragmentManager {
         // TODO(kwannoel): Can this be unified with `PlanVisitor`?
         fn has_backfill(stream_node: &StreamNode) -> bool {
             let is_backfill = if let Some(node) = &stream_node.node_body
-                && let Some(node) = node.as_stream_scan()
-            {
+            && let Some(node) = node.as_stream_scan() {
                 node.stream_scan_type == StreamScanType::Backfill as i32
-                    || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+                || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
             } else {
                 false
             };
@@ -714,12 +713,8 @@ impl FragmentManager {
                     visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             for input in &mut node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                    && dirty_sink_into_table_upstream_fragment_id
-                                        .contains(&merge_node.upstream_fragment_id)
-                                {
-                                    dirty_downstream_table_ids
-                                        .insert(*table_id, fragment.fragment_id);
+                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {
+                                    dirty_downstream_table_ids.insert(*table_id, fragment.fragment_id);
                                     return false;
                                 }
                             }
@@ -750,10 +745,7 @@ impl FragmentManager {
                 visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                && dirty_sink_into_table_upstream_fragment_id
-                                    .contains(&merge_node.upstream_fragment_id)
-                            {
+                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {
                                 false
                             } else {
                                 true
@@ -940,9 +932,7 @@ impl FragmentManager {
                     if let Some(node) = actor.nodes.as_mut() {
                         visit_stream_node(node, |node_body| {
                             if let NodeBody::Source(ref mut node) = node_body {
-                                if let Some(ref mut node_inner) = node.source_inner
-                                    && node_inner.source_id == source_id as u32
-                                {
+                                if let Some(ref mut node_inner) = node.source_inner && node_inner.source_id == source_id as u32 {
                                     node_inner.rate_limit = rate_limit;
                                     actor_to_apply.push(actor.actor_id);
                                 }

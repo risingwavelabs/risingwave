@@ -729,8 +729,14 @@ pub fn create_builder(
     if let Some(rate_limit) = rate_limit
         && rate_limit < chunk_size
     {
-        DataChunkBuilder::new(data_types, rate_limit)
+        DataChunkBuilder::new(
+            data_types,
+            rate_limit,
+        )
     } else {
-        DataChunkBuilder::new(data_types, chunk_size)
+        DataChunkBuilder::new(
+            data_types,
+            chunk_size,
+        )
     }
 }

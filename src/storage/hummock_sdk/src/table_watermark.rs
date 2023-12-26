@@ -465,10 +465,7 @@ impl PbTableWatermarks {
             .map(|w| w.epoch)
             .is_sorted());
         // ensure that the newly added watermarks have a later epoch than the previous latest epoch.
-        if let Some(prev_last_epoch_watermarks) = self.epoch_watermarks.last()
-            && let Some(new_first_epoch_watermarks) =
-                newly_added_watermarks.epoch_watermarks.first()
-        {
+        if let Some(prev_last_epoch_watermarks) = self.epoch_watermarks.last() && let Some(new_first_epoch_watermarks) = newly_added_watermarks.epoch_watermarks.first() {
             assert!(prev_last_epoch_watermarks.epoch < new_first_epoch_watermarks.epoch);
         }
         self.epoch_watermarks
@@ -509,20 +506,11 @@ impl PbTableWatermarks {
                 break;
             }
         }
-        while !unset_vnode.is_empty()
-            && let Some(epoch_watermark) = self.epoch_watermarks.pop()
-        {
+        while !unset_vnode.is_empty() && let Some(epoch_watermark) = self.epoch_watermarks.pop() {
             let mut new_vnode_watermarks = Vec::new();
             for vnode_watermark in &epoch_watermark.watermarks {
                 let mut set_vnode = Vec::new();
-                for vnode in Bitmap::from(
-                    vnode_watermark
-                        .vnode_bitmap
-                        .as_ref()
-                        .expect("should not be None"),
-                )
-                .iter_vnodes()
-                {
+                for vnode in Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should not be None")).iter_vnodes() {
                     if unset_vnode.remove(&vnode) {
                         set_vnode.push(vnode);
                     }
@@ -540,9 +528,7 @@ impl PbTableWatermarks {
                 }
             }
             if !new_vnode_watermarks.is_empty() {
-                if let Some(last_epoch_watermark) = result_epoch_watermark.last_mut()
-                    && last_epoch_watermark.epoch == safe_epoch
-                {
+                if let Some(last_epoch_watermark) = result_epoch_watermark.last_mut() && last_epoch_watermark.epoch == safe_epoch {
                     last_epoch_watermark.watermarks.extend(new_vnode_watermarks);
                 } else {
                     result_epoch_watermark.push(PbEpochNewWatermarks {
