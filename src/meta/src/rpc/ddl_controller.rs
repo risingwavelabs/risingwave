@@ -692,11 +692,6 @@ impl DdlController {
                 )
                 .await?;
 
-            // Add table fragments to meta store with state: `State::Initial`.
-            mgr.fragment_manager
-                .start_create_table_fragments(table_fragments.clone())
-                .await?;
-
             // Do some type-specific work for each type of stream job.
             match stream_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
@@ -1042,10 +1037,16 @@ impl DdlController {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
-        let result = self
-            .stream_manager
-            .create_streaming_job(table_fragments, ctx)
-            .await;
+        let result = try {
+            // Add table fragments to meta store with state: `State::Initial`.
+            mgr.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
+                .await?;
+
+            self.stream_manager
+                .create_streaming_job(table_fragments, ctx)
+                .await
+        };
 
         if let Err(e) = result {
             match stream_job.create_type() {
