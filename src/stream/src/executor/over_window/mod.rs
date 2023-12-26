@@ -14,7 +14,6 @@
 
 mod delta_btree_map;
 mod eowc;
-mod estimated_btree_map;
 mod general;
 mod over_partition;
 

@@ -23,6 +23,8 @@ pub mod vecdeque;
 pub use vecdeque::EstimatedVecDeque as VecDeque;
 pub mod hashmap;
 pub use hashmap::EstimatedHashMap as HashMap;
+pub mod btreemap;
+pub use btreemap::EstimatedBTreeMap as BTreeMap;
 
 mod private {
     use super::*;
