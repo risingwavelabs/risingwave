@@ -157,7 +157,7 @@ impl Binder {
         fn create_udf_context(
             binder: &mut Binder,
             args: &[FunctionArg],
-            catalog: &Arc<FunctionCatalog>,
+            _catalog: &Arc<FunctionCatalog>,
         ) {
             binder.udf_context = args
                 .iter()
