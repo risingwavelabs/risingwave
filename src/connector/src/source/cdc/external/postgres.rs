@@ -204,7 +204,7 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            postgres_row_to_owned_row(row, &self.rw_schema)
+            Ok::<_, anyhow::Error>(postgres_row_to_owned_row(row, &self.rw_schema))
         });
 
         pin_mut!(row_stream);
