@@ -1,1 +1,0 @@
-create table delta.`s3a://deltalake/delta-rust`(id int, name string) using delta

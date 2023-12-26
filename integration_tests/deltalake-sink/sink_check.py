@@ -8,27 +8,23 @@ query_sql = open("spark-script/query-table.sql").read()
 print("querying deltalake with sql: %s" % query_sql)
 
 query_output_file_name = "query_output.txt"
-# Wait docker image version
-# query_output_file_name_rust = "query_output_rust.txt"
 
 query_output_file = open(query_output_file_name, "wb")
-# query_output_file_rust = open(query_output_file_name_rust, "wb")
 
 subprocess.run(
     ["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "query-table"],
     check=True, stdout=query_output_file)
 query_output_file.close()
 
-# subprocess.run(
-#     ["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "query-table"],
-#     check=True, stdout=query_output_file_rust)
-# query_output_file_rust.close()
+with open(query_output_file_name, 'r') as file:
+    all_lines = file.readlines()
 
-output_content = open(query_output_file_name).read()
-# output_content_rust = open(query_output_file_name_rust).read()
+last_three_lines = all_lines[-3:]
 
-print(output_content)
-# print(output_content_rust)
+print("result", last_three_lines)
 
-assert len(output_content.strip()) > 1
-# assert len(output_content_rust.strip()) > 1
+line1, line2, line3 = last_three_lines
+
+assert line1.strip() == '1\ta'
+assert line2.strip() == '2\tb'
+assert line3.strip() == '3\tc'
