@@ -9,30 +9,18 @@ services:
     volumes:
       - "./spark-script:/spark-script"
     container_name: spark
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -41,10 +29,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 volumes:
   compute-node-0:
     external: false

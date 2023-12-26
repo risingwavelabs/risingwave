@@ -3,8 +3,6 @@ WITH (
      connector = 'datagen',
      fields.id.kind = 'sequence',
      fields.id.start = '1',
-     fields.id.end = '10000',
-     fields.name.kind = 'random',
-     fields.name.length = '10',
-     datagen.rows.per.second = '200'
+     fields.id.end = '100',
+     datagen.rows.per.second = '100'
  ) ROW FORMAT JSON;

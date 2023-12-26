@@ -1,7 +1,7 @@
 set -ex
 
 /opt/spark/bin/spark-sql --packages io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2\
-    --conf spark.jars.ivy=/spark-script/.ivy2 \
+    --conf "spark.driver.extraJavaOptions=-Divy.cache.dir=/tmp -Divy.home=/tmp" \
     --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
     --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
     --conf 'spark.hadoop.fs.s3a.access.key=hummockadmin' \
