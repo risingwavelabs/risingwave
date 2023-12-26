@@ -1045,7 +1045,7 @@ impl DdlController {
 
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
-                .await
+                .await?
         };
 
         if let Err(e) = result {
