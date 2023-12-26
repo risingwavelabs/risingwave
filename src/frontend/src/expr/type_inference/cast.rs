@@ -201,25 +201,25 @@ pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
 }
 
 pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
-    use DataTypeName as T;
+    use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
         // 123456789ABCDEF
-        ("  e            a", T::Boolean),     // 0
-        ("  iiiiii       a", T::Int16),       // 1
-        ("ea iiiii       a", T::Int32),       // 2
-        (" aa iiii       a", T::Int64),       // 3
-        (" aaa ii        a", T::Decimal),     // 4
-        (" aaaa i        a", T::Float32),     // 5
-        (" aaaaa         a", T::Float64),     // 6
-        ("      e        a", T::Int256),      // 7
-        ("          ii   a", T::Date),        // 8
-        ("            i  a", T::Time),        // 9
-        ("        aa i   a", T::Timestamp),   // A
-        ("        aaa    a", T::Timestamptz), // B
-        ("         a     a", T::Interval),    // C
-        ("eeeeeee        a", T::Jsonb),       // D
-        ("               a", T::Bytea),       // E
-        ("eeeeeeeeeeeeeee ", T::Varchar),     // F
+        ("  e            a", Boolean),     // 0
+        ("  iiiiii       a", Int16),       // 1
+        ("ea iiiii       a", Int32),       // 2
+        (" aa iiii       a", Int64),       // 3
+        (" aaa ii        a", Decimal),     // 4
+        (" aaaa i        a", Float32),     // 5
+        (" aaaaa         a", Float64),     // 6
+        ("      e        a", Int256),      // 7
+        ("          ii   a", Date),        // 8
+        ("            i  a", Time),        // 9
+        ("        aa i   a", Timestamp),   // A
+        ("        aaa    a", Timestamptz), // B
+        ("         a     a", Interval),    // C
+        ("eeeeeee        a", Jsonb),       // D
+        ("               a", Bytea),       // E
+        ("eeeeeeeeeeeeeee ", Varchar),     // F
     ];
     let mut map = BTreeMap::new();
     for (row, source) in CAST_TABLE {
