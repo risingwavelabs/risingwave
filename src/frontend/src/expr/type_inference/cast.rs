@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
 use itertools::Itertools as _;
+use parse_display::Display;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
-pub use risingwave_expr::sig::cast::*;
 
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
@@ -164,6 +167,75 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
         .map(|((src, target), ctx)| (*src, *target, *ctx))
         .collect_vec()
 }
+
+#[derive(Clone, Debug)]
+pub struct CastSig {
+    pub from_type: DataTypeName,
+    pub to_type: DataTypeName,
+    pub context: CastContext,
+}
+
+/// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
+/// that allows explicit casts, but not vice versa. See details in
+/// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
+#[derive(Clone, Copy, Debug, Display, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CastContext {
+    #[display("i")]
+    Implicit,
+    #[display("a")]
+    Assign,
+    #[display("e")]
+    Explicit,
+}
+
+pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
+
+pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
+    CAST_MAP
+        .iter()
+        .map(|((from_type, to_type), context)| CastSig {
+            from_type: *from_type,
+            to_type: *to_type,
+            context: *context,
+        })
+}
+
+pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
+    use DataTypeName as T;
+    const CAST_TABLE: &[(&str, DataTypeName)] = &[
+        // 123456789ABCDEF
+        ("  e            a", T::Boolean),     // 0
+        ("  iiiiii       a", T::Int16),       // 1
+        ("ea iiiii       a", T::Int32),       // 2
+        (" aa iiii       a", T::Int64),       // 3
+        (" aaa ii        a", T::Decimal),     // 4
+        (" aaaa i        a", T::Float32),     // 5
+        (" aaaaa         a", T::Float64),     // 6
+        ("      e        a", T::Int256),      // 7
+        ("          ii   a", T::Date),        // 8
+        ("            i  a", T::Time),        // 9
+        ("        aa i   a", T::Timestamp),   // A
+        ("        aaa    a", T::Timestamptz), // B
+        ("         a     a", T::Interval),    // C
+        ("eeeeeee        a", T::Jsonb),       // D
+        ("               a", T::Bytea),       // E
+        ("eeeeeeeeeeeeeee ", T::Varchar),     // F
+    ];
+    let mut map = BTreeMap::new();
+    for (row, source) in CAST_TABLE {
+        for ((_, target), c) in CAST_TABLE.iter().zip_eq_fast(row.bytes()) {
+            let context = match c {
+                b' ' => continue,
+                b'i' => CastContext::Implicit,
+                b'a' => CastContext::Assign,
+                b'e' => CastContext::Explicit,
+                _ => unreachable!("invalid cast table char"),
+            };
+            map.insert((*source, *target), context);
+        }
+    }
+    map
+});
 
 #[cfg(test)]
 mod tests {
