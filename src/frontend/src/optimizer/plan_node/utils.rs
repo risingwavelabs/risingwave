@@ -169,7 +169,6 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            redacted_definition: None,
             conflict_behavior: ConflictBehavior::NoCheck,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed

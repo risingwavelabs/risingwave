@@ -579,7 +579,6 @@ pub(crate) mod tests {
             row_id_index: None,
             value_indices: vec![0, 1, 2],
             definition: "".to_string(),
-            redacted_definition: None,
             conflict_behavior: ConflictBehavior::NoCheck,
             read_prefix_len_hint: 0,
             version: None,

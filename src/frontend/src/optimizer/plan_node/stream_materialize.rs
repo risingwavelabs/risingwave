@@ -223,7 +223,6 @@ impl StreamMaterialize {
         // assert: `stream_key` is a subset of `table_pk`
 
         let read_prefix_len_hint = table_pk.len();
-        let redacted_definition = crate::handler::try_redact_sql(&definition);
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -255,7 +254,6 @@ impl StreamMaterialize {
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
             incoming_sinks: vec![],
-            redacted_definition,
         })
     }
 

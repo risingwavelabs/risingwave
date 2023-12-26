@@ -541,7 +541,6 @@ mod tests {
             row_id_index: Some(0),
             value_indices: vec![0],
             definition: "".into(),
-            redacted_definition: None,
             handle_pk_conflict_behavior: 0,
             read_prefix_len_hint: 1,
             version: None,

@@ -34,8 +34,10 @@ pub struct S3Properties {
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
     #[serde(rename = "s3.credentials.access", default)]
+    #[mark_redaction(rename = "s3.credentials.access")]
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
+    #[mark_redaction(rename = "s3.credentials.secret")]
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
