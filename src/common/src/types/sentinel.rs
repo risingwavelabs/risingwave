@@ -16,6 +16,12 @@ use enum_as_inner::EnumAsInner;
 
 use crate::estimate_size::EstimateSize;
 
+/// [`Sentinelled<T>`] wraps type `T` to provide smallest (smaller than any normal `T` value) and largest
+/// (larger than ant normal `T` value) sentinel value for `T`.
+///
+/// Sentinel is a very common technique used to simplify tree/list/array algorithms. The main idea is to
+/// insert sentinel node to the beginning or/and the end, so that algorithms don't need to handle complex
+/// edge cases.
 #[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum Sentinelled<T> {
     Smallest,
