@@ -872,7 +872,7 @@ impl ScalarImpl {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(str.to_string().into()),
             DataType::Boolean => {
-                Self::Bool(bool::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+                Self::Bool(str_to_bool(str).map_err(|_| FromSqlError::from_text(str))?)
             }
             DataType::Int16 => {
                 Self::Int16(i16::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
