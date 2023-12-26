@@ -225,7 +225,7 @@ NatsProperties:
   - name: stream
     field_type: String
     required: true
-NexmarkPropertiesInner:
+NexmarkProperties:
   fields:
   - name: nexmark.split.num
     field_type: i32
