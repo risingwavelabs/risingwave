@@ -73,7 +73,7 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                     column_desc: ColumnDesc::named_with_additional_column(
                         name,
                         id,
-                        DataType::Int64,
+                        DataType::Varchar,
                         AdditionalColumnType::Partition,
                     ),
                     is_hidden: false,
@@ -87,7 +87,7 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                     column_desc: ColumnDesc::named_with_additional_column(
                         name,
                         id,
-                        DataType::Int64,
+                        DataType::Varchar,
                         AdditionalColumnType::Offset,
                     ),
                     is_hidden: false,
@@ -110,52 +110,128 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
 }
 
 fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
-    vec![(
-        "key",
-        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            ColumnCatalog {
-                column_desc: ColumnDesc::named_with_additional_column(
-                    name,
-                    id,
-                    DataType::Bytea,
-                    AdditionalColumnType::Key,
-                ),
-                is_hidden: false,
-            }
-        }),
-    )]
+    vec![
+        (
+            "key",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Bytea,
+                        AdditionalColumnType::Key,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "partition",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Partition,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "offset",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Offset,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+    ]
 }
 
 fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
-    vec![(
-        "key",
-        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            ColumnCatalog {
-                column_desc: ColumnDesc::named_with_additional_column(
-                    name,
-                    id,
-                    DataType::Bytea,
-                    AdditionalColumnType::Key,
-                ),
-                is_hidden: false,
-            }
-        }),
-    )]
+    vec![
+        (
+            "key",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Bytea,
+                        AdditionalColumnType::Key,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "partition",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Partition,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "offset",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Offset,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+    ]
 }
 
 fn s3_compatible_column_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
-    vec![(
-        "file",
-        Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-            ColumnCatalog {
-                column_desc: ColumnDesc::named_with_additional_column(
-                    name,
-                    id,
-                    DataType::Varchar,
-                    AdditionalColumnType::Filename,
-                ),
-                is_hidden: false,
-            }
-        }),
-    )]
+    vec![
+        (
+            "file",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Filename,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+        (
+            "offset",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Varchar,
+                        AdditionalColumnType::Offset,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
+    ]
 }

@@ -25,7 +25,7 @@ use futures_async_stream::try_stream;
 use tokio_retry;
 
 use crate::parser::ParserConfig;
-use crate::source::kinesis::source::message::KinesisMessage;
+use crate::source::kinesis::source::message::from_kinesis_record;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
@@ -138,12 +138,7 @@ impl CommonSplitReader for KinesisSplitReader {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
                     let chunk = (resp.records().iter())
-                        .map(|r| {
-                            SourceMessage::from(KinesisMessage::new(
-                                self.shard_id.clone(),
-                                r.clone(),
-                            ))
-                        })
+                        .map(|r| from_kinesis_record(r, self.split_id.clone()))
                         .collect::<Vec<SourceMessage>>();
                     if chunk.is_empty() {
                         tokio::time::sleep(Duration::from_millis(200)).await;

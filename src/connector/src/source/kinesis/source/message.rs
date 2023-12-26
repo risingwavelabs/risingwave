@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use aws_sdk_kinesis::types::Record;
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
@@ -33,6 +35,27 @@ impl From<KinesisMessage> for SourceMessage {
             split_id: msg.shard_id,
             meta: SourceMeta::Empty,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct KinesisMeta {
+    // from `approximate_arrival_timestamp` of type `Option<aws_smithy_types::DateTime>`
+    timestamp: Option<i64>,
+}
+
+pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
+    SourceMessage {
+        key: Some(value.partition_key.into_bytes()),
+        payload: Some(value.data.into_inner()),
+        offset: value.sequence_number.clone(),
+        split_id,
+        meta: SourceMeta::Kinesis(KinesisMeta {
+            timestamp: value
+                .approximate_arrival_timestamp
+                // todo: review if safe to unwrap
+                .map(|dt| dt.to_millis().unwrap()),
+        }),
     }
 }
 

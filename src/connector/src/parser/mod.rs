@@ -31,7 +31,7 @@ use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{Datum, Scalar};
+use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
@@ -349,12 +349,25 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap(),
                     ))
                 }
+                (_, &AdditionalColumnType::Partition) => {
+                    // the meta info does not involve spec connector
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
+                    ));
+                }
+                (_, &AdditionalColumnType::Offset) => {
+                    // the meta info does not involve spec connector
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
+                    ));
+                }
                 (
                     _,
-                    &AdditionalColumnType::Partition
-                    | &AdditionalColumnType::Filename
-                    | &AdditionalColumnType::Offset
-                    | &AdditionalColumnType::Header,
+                    &AdditionalColumnType::Filename | &AdditionalColumnType::Header,
                     // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
                     // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
                 ) => Err(AccessError::Other(anyhow!(

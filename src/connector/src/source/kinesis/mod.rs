@@ -18,6 +18,7 @@ pub mod split;
 
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::common::KinesisCommon;
