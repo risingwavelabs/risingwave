@@ -103,6 +103,8 @@ services:
       - doris-be-server
     volumes:
       - ..:/risingwave
+    command: >
+      sh -c "sudo sysctl -w vm.max_map_count=2000000"
     networks:
       mynetwork:
         ipv4_address: 172.121.0.4
@@ -185,12 +187,14 @@ services:
     platform: linux/amd64
     image: apache/doris:2.0.0_alpha-fe-x86_64
     hostname: doris-fe-server
+    command: >
+      sh -c "sudo sysctl -w vm.max_map_count=2000000"
     environment:
      - FE_SERVERS=fe1:172.121.0.2:9010
      - FE_ID=1
     ports:
-      - "18030:8030"
-      - "19030:9030"
+      - "8030:8030"
+      - "9030:9030"
     networks:
       mynetwork:
         ipv4_address: 172.121.0.2
@@ -199,13 +203,15 @@ services:
     platform: linux/amd64
     image: apache/doris:2.0.0_alpha-be-x86_64
     hostname: doris-be-server
+    command: >
+      sh -c "sudo sysctl -w vm.max_map_count=2000000"
     environment:
      - FE_SERVERS=fe1:172.121.0.2:9010
      - BE_ADDR=172.121.0.3:9050
     depends_on:
       - doris-fe-server
     ports:
-      - "19050:9050"
+      - "9050:9050"
     networks:
       mynetwork:
         ipv4_address: 172.121.0.3

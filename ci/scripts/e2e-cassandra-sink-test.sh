@@ -57,6 +57,7 @@ if cat ./query_result.csv | awk -F "," '{
 else
   cat ./query_result.csv
   echo "The output is not as expected."
+  exit 1
 fi
 
 echo "--- Kill cluster"
