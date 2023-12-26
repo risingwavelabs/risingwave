@@ -12510,6 +12510,7 @@ dependencies = [
  "aws-sigv4",
  "aws-smithy-runtime",
  "aws-smithy-types",
+ "axum",
  "base64 0.21.4",
  "bit-vec",
  "bitflags 2.4.0",
@@ -12541,6 +12542,7 @@ dependencies = [
  "getrandom",
  "governor",
  "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
  "hashbrown 0.14.0",
  "hmac",
  "hyper",
@@ -12632,6 +12634,7 @@ dependencies = [
  "url",
  "uuid",
  "whoami",
+ "zeroize",
 ]
 
 [[package]]
