@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
+use futures::stream::FuturesUnordered;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{CreateType, Table};
@@ -395,46 +397,58 @@ impl GlobalStreamManager {
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        for (worker_id, actors) in &building_worker_actors {
-            let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(worker_node).await?;
-
-            client
-                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos_to_broadcast.clone(),
-                })
-                .await?;
-
+        building_worker_actors.iter().map(|(worker_id, actors)| {
             let stream_actors = actors
                 .iter()
                 .map(|actor_id| actor_map[actor_id].clone())
                 .collect::<Vec<_>>();
+            let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
+            let actor_infos_to_broadcast = &actor_infos_to_broadcast;
+            async move {
+                let client = self.env.stream_client_pool().get(worker_node).await?;
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: stream_actors.clone(),
-                })
-                .await?;
-        }
+                client
+                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
+                        info: actor_infos_to_broadcast.clone(),
+                    })
+                    .await?;
+
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+                client
+                    .update_actors(UpdateActorsRequest {
+                        request_id,
+                        actors: stream_actors.clone(),
+                    })
+                    .await?;
+
+                Ok(()) as MetaResult<_>
+            }
+        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        for (worker_id, actors) in building_worker_actors {
-            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(worker_node).await?;
+        building_worker_actors
+            .iter()
+            .map(|(worker_id, actors)| async move {
+                let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-            client
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: actors,
-                })
-                .await?;
-        }
+                let client = self.env.stream_client_pool().get(worker_node).await?;
+
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors.clone(),
+                    })
+                    .await?;
+
+                Ok(()) as MetaResult<()>
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_collect::<()>()
+            .await?;
 
         Ok(())
     }

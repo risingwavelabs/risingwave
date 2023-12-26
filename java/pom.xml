@@ -56,6 +56,7 @@
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/risingwave-sink-mock-flink</module>
+        <module>connector-node/tracing</module>
     </modules>
 
     <properties>
@@ -70,6 +71,7 @@
         <module.version>0.1.0-SNAPSHOT</module.version>
         <spotless.version>2.27.1</spotless.version>
         <log4j.version>2.20.0</log4j.version>
+        <slf4j.version>2.0.9</slf4j.version>
         <commons.cli.version>1.5.0</commons.cli.version>
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
@@ -99,6 +101,11 @@
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-core</artifactId>
                 <version>${log4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>commons-cli</groupId>
@@ -219,6 +226,11 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>java-binding</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>tracing</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

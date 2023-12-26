@@ -24,6 +24,7 @@ mod insert;
 mod join;
 mod limit;
 mod managed;
+mod max_one_row;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -55,6 +56,7 @@ pub use insert::*;
 pub use join::*;
 pub use limit::*;
 pub use managed::*;
+pub use max_one_row::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
@@ -231,6 +233,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
+            NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuidler,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,

@@ -22,7 +22,7 @@ use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -578,7 +578,17 @@ impl HummockEventHandler {
                 }
             }
 
-            HummockEvent::LocalSealEpoch { .. } => {}
+            HummockEvent::LocalSealEpoch {
+                epoch,
+                opts,
+                table_id,
+                ..
+            } => {
+                if let Some((direction, watermarks)) = opts.table_watermarks {
+                    self.uploader
+                        .add_table_watermarks(epoch, table_id, watermarks, direction)
+                }
+            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
@@ -603,10 +613,9 @@ impl HummockEventHandler {
 
                 let instance_id = self.generate_instance_id();
 
-                info_in_release!(
+                debug!(
                     "new read version registered: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
 
                 {
@@ -640,10 +649,9 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
-                info_in_release!(
+                debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
-                    table_id,
-                    instance_id
+                    table_id, instance_id
                 );
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
