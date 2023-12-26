@@ -47,9 +47,11 @@ enum FieldRedactionAction {
 /// # Example
 ///
 /// ```
+/// use mark_redaction_derive::MarkRedaction;
+///
 /// #[derive(MarkRedaction)]
 /// struct Bar {
-///     #[mark_redaction(rename("bar.a"))]
+///     #[mark_redaction(rename = "bar.a")]
 ///     a: i32,
 ///     b: i32,
 /// }
@@ -58,7 +60,7 @@ enum FieldRedactionAction {
 /// struct Foo {
 ///     #[mark_redaction]
 ///     a: i32,
-///     #[mark_redaction(rename("foo.b"), alias = "foo.b_2")]
+///     #[mark_redaction(rename = "foo.b", alias = "foo.b_2")]
 ///     b: i32,
 ///     #[mark_redaction(alias = "foo.c")]
 ///     c: i32,
@@ -67,8 +69,8 @@ enum FieldRedactionAction {
 ///     bar: Bar,
 /// }
 ///
-/// // Bar::remarks will return ["bar.a"].
-/// // Foo::remarks will return ["a", "foo.b", "foo.b_2", "c", "foo.c", "bar.a"].
+/// // Bar::marks() will return ["bar.a"].
+/// // Foo::marks() will return ["a", "foo.b", "foo.b_2", "c", "foo.c", "bar.a"].
 /// ```
 #[proc_macro_derive(MarkRedaction, attributes(mark_redaction))]
 pub fn mark_redaction(input: TokenStream) -> TokenStream {
