@@ -16,7 +16,7 @@ create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, r
 statement ok
 create table t (v int);
 
-query t
+query T
 select parallelism from table_parallelism where name = 't';
 ----
 AUTO
@@ -24,12 +24,12 @@ AUTO
 statement ok
 alter table t set parallelism = 2;
 
-query t
+query T
 select parallelism from table_parallelism where name = 't';
 ----
 FIXED(2)
 
-query i
+query I
 select parallelism from rw_fragments;
 ----
 2
@@ -38,7 +38,7 @@ select parallelism from rw_fragments;
 statement ok
 alter table t set parallelism = auto;
 
-query t
+query T
 select parallelism from table_parallelism where name = 't';
 ----
 AUTO
@@ -46,7 +46,7 @@ AUTO
 statement ok
 create materialized view m_simple as select * from t;
 
-query t
+query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
 AUTO
@@ -54,7 +54,7 @@ AUTO
 statement ok
 alter materialized view m_simple set parallelism = 3;
 
-query t
+query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
 AUTO
@@ -62,7 +62,7 @@ AUTO
 statement ok
 create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;
 
-query t
+query T
 select parallelism from mview_parallelism where name = 'm_join';
 ----
 AUTO
@@ -70,7 +70,7 @@ AUTO
 statement ok
 alter materialized view m_join set parallelism = 3;
 
-query t
+query T
 select parallelism from mview_parallelism where name = 'm_join';
 ----
 FIXED(3)
@@ -78,7 +78,7 @@ FIXED(3)
 statement ok
 create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v with ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
 
-query t
+query T
 select parallelism from sink_parallelism where name = 's';
 ----
 AUTO
@@ -86,7 +86,7 @@ AUTO
 statement ok
 alter sink s set parallelism = 4;
 
-query t
+query T
 select parallelism from sink_parallelism where name = 's';
 ----
 FIXED(4)
@@ -109,10 +109,47 @@ set streaming_parallelism to 2;
 statement ok
 create table t (v1 int);
 
-query t
+query T
 select parallelism from table_parallelism where name = 't';
 ----
 FIXED(2)
 
 statement ok
 drop table t;
+
+statement ok
+set streaming_parallelism to auto;
+
+statement ok
+create table t (v1 int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism to 0;
+
+statement ok
+create table t (v1 int);
+
+query T
+select parallelism from table_parallelism where name = 't';
+----
+AUTO
+
+statement ok
+drop table t;
+
+statement ok
+drop view table_parallelism;
+
+statement ok
+drop view mview_parallelism;
+
+statement ok
+drop view sink_parallelism;

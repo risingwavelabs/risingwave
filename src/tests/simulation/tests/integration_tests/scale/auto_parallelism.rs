@@ -505,6 +505,10 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     ))
     .await;
 
+    // helper views
+    session.run("create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;").await?;
+    session.run("create view mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;").await?;
+
     session.run("create table t(v int);").await?;
 
     // single fragment downstream
@@ -518,7 +522,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .await?;
 
     session
-        .run("select parallelism from rw_tables")
+        .run("select parallelism from table_parallelism")
         .await?
         .assert_result_eq("AUTO");
 
@@ -544,12 +548,12 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .await?;
 
     session
-        .run("select parallelism from rw_tables")
+        .run("select parallelism from table_parallelism")
         .await?
         .assert_result_eq("CUSTOM");
 
     session
-        .run("select parallelism from rw_materialized_views where name = 'm_simple'")
+        .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
         .assert_result_eq("AUTO");
 
@@ -574,12 +578,12 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     // Therefore, any low-level modifications to this fragment will only be passed up to the highest level through the NO_SHUFFLE relationship and then passed back down.
     // Hence, the parallelism of `m_simple` should still be equivalent to AUTO of 0 fragment.
     session
-        .run("select parallelism from rw_materialized_views where name = 'm_simple'")
+        .run("select parallelism from mview_parallelism where name = 'm_simple'")
         .await?
         .assert_result_eq("AUTO");
 
     session
-        .run("select parallelism from rw_materialized_views where name = 'm_join'")
+        .run("select parallelism from mview_parallelism where name = 'm_join'")
         .await?
         .assert_result_eq("AUTO");
 
@@ -597,7 +601,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .await?;
 
     session
-        .run("select parallelism from rw_materialized_views where name = 'm_join'")
+        .run("select parallelism from mview_parallelism where name = 'm_join'")
         .await?
         .assert_result_eq("CUSTOM");
 
