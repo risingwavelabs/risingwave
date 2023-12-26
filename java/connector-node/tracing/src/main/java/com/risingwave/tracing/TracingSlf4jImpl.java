@@ -27,6 +27,6 @@ public class TracingSlf4jImpl {
     public static final int TRACE = 4;
 
     public static void event(String name, int level, String message) {
-        Binding.tracingSlf4jEvent(name, level, message);
+        Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
     }
 }

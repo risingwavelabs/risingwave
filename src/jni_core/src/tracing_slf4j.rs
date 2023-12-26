@@ -23,11 +23,15 @@ use crate::{execute_and_catch, EnvParam};
 #[no_mangle]
 pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEvent(
     env: EnvParam<'_>,
+    thread_name: JString<'_>,
     class_name: JString<'_>,
     level: jint,
     message: JString<'_>,
 ) {
     execute_and_catch(env, move |env| {
+        let thread_name = env.get_string(&thread_name)?;
+        let thread_name: Cow<'_, str> = (&thread_name).into();
+
         let class_name = env.get_string(&class_name)?;
         let class_name: Cow<'_, str> = (&class_name).into();
 
@@ -39,7 +43,8 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
                 tracing::event!(
                     target: "risingwave_connector_node",
                     $lvl,
-                    class = class_name.as_ref(),
+                    thread = &*thread_name,
+                    class = &*class_name,
                     "{message}",
                 )
             };

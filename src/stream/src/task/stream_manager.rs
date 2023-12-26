@@ -427,7 +427,7 @@ impl LocalStreamManagerCore {
                 builder.worker_threads(worker_threads_num);
             }
             builder
-                .thread_name("risingwave-streaming-actor")
+                .thread_name("rw-streaming")
                 .enable_all()
                 .build()
                 .unwrap()
