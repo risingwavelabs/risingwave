@@ -149,6 +149,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
             .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("risingwave_connector_node", Level::INFO)
             .with_target("pgwire", Level::INFO)
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
