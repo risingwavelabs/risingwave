@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::estimate_size::EstimateSize;
+
+use crate::estimate_size::EstimateSize;
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum Sentinelled<T> {
