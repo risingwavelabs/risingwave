@@ -23,7 +23,6 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus};
 
-use super::ColumnId;
 use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, FunctionCall};
 use crate::user::UserId;
@@ -58,7 +57,7 @@ pub struct IndexCatalog {
     #[educe(Hash(ignore))]
     pub function_mapping: HashMap<FunctionCall, usize>,
 
-    pub original_columns: Vec<ColumnId>,
+    pub index_columns_len: u32,
 
     pub created_at_epoch: Option<Epoch>,
 
@@ -105,13 +104,6 @@ impl IndexCatalog {
             })
             .collect();
 
-        let original_columns = index_prost
-            .original_columns
-            .clone()
-            .into_iter()
-            .map(Into::into)
-            .collect();
-
         IndexCatalog {
             id: index_prost.id.into(),
             name: index_prost.name.clone(),
@@ -121,7 +113,7 @@ impl IndexCatalog {
             primary_to_secondary_mapping,
             secondary_to_primary_mapping,
             function_mapping,
-            original_columns,
+            index_columns_len: index_prost.index_columns_len,
             created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
         }
@@ -181,7 +173,7 @@ impl IndexCatalog {
                 .iter()
                 .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
-            original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
+            index_columns_len: self.index_columns_len,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             stream_job_status: PbStreamJobStatus::Creating.into(),

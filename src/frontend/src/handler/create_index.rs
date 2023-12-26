@@ -219,13 +219,7 @@ pub(crate) fn gen_create_index_plan(
     index_table_prost.owner = session.user_id();
     index_table_prost.dependent_relations = vec![table.id.table_id];
 
-    // FIXME: why sqlalchemy need these information?
-    let original_columns = index_table
-        .columns
-        .iter()
-        .map(|x| x.column_desc.column_id.get_id())
-        .collect();
-
+    let index_columns_len = index_columns_ordered_expr.len() as u32;
     let index_item = build_index_item(
         index_table.table_desc().into(),
         table.name(),
@@ -242,7 +236,7 @@ pub(crate) fn gen_create_index_plan(
         index_table_id: TableId::placeholder().table_id,
         primary_table_id: table.id.table_id,
         index_item,
-        original_columns,
+        index_columns_len,
         initialized_at_epoch: None,
         created_at_epoch: None,
         stream_job_status: PbStreamJobStatus::Creating.into(),
