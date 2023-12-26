@@ -14,7 +14,6 @@
 
 pub mod gcs_source;
 
-
 pub mod s3_source;
 
 use serde::Deserialize;
