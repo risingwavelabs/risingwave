@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 sea-orm = { version = "0.12.0", features = [
     "sqlx-mysql",
