@@ -50,7 +50,6 @@ impl AccessBuilder for JsonAccessBuilder {
         } else {
             self.value = Some(payload);
         }
-        tracing::warn!("{:#?}", self.value);
         let value = simd_json::to_borrowed_value(
             &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
         )
