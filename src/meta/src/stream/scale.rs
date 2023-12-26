@@ -1762,9 +1762,9 @@ impl ScaleController {
                             continue;
                         }
 
-                        let assigned = rebalance_units(worker_parallel_units.clone(), 1)?;
+                        let units = rebalance_units(&worker_parallel_units, 1, table_id)?;
 
-                        let chosen_target_parallel_unit_id = assigned
+                        let chosen_target_parallel_unit_id = units
                             .values()
                             .flatten()
                             .cloned()
@@ -1806,7 +1806,7 @@ impl ScaleController {
                             }
 
                             let rebalance_result =
-                                rebalance_units(worker_parallel_units.clone(), n)?;
+                                rebalance_units(&worker_parallel_units, n, table_id)?;
 
                             let target_parallel_unit_ids =
                                 rebalance_result.into_values().flatten().collect();
@@ -2591,55 +2591,60 @@ impl GlobalStreamManager {
 // We redistribute parallel units (which will be ensembles in the future) through a simple consistent hashing ring.
 // Note that we have added some simple logic here to ensure the consistency of the ratio between each slot,
 // especially when equal division is needed.
-fn rebalance_units(
-    slots: BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
+pub fn rebalance_units(
+    slots: &BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,
+    salt: u32,
 ) -> MetaResult<HashMap<WorkerId, BTreeSet<ParallelUnitId>>> {
-    let mut ch = ConsistentHashRing::new(1024);
+    let mut ch = ConsistentHashRing::new(salt);
 
-    for (worker_id, parallel_unit_ids) in &slots {
+    for (worker_id, parallel_unit_ids) in slots {
         ch.add_worker(*worker_id, parallel_unit_ids.len() as u32);
     }
 
     let target_distribution = ch.distribute_tasks(total_unit_size as u32)?;
 
     Ok(slots
-        .into_iter()
+        .iter()
         .map(|(worker_id, parallel_unit_ids)| {
             (
-                worker_id,
+                *worker_id,
                 parallel_unit_ids
-                    .into_iter()
+                    .iter()
                     .take(
                         target_distribution
-                            .get(&worker_id)
+                            .get(worker_id)
                             .cloned()
                             .unwrap_or_default() as usize,
                     )
+                    .cloned()
                     .collect::<BTreeSet<_>>(),
             )
         })
         .collect())
 }
 
-struct ConsistentHashRing {
+pub struct ConsistentHashRing {
     ring: BTreeMap<u64, u32>,
     capacities: BTreeMap<u32, u32>,
     virtual_nodes: u32,
+    salt: u32,
 }
 
 impl ConsistentHashRing {
-    fn new(virtual_nodes: u32) -> Self {
+    fn new(salt: u32) -> Self {
         ConsistentHashRing {
             ring: BTreeMap::new(),
             capacities: BTreeMap::new(),
-            virtual_nodes,
+            virtual_nodes: 1024,
+            salt,
         }
     }
 
-    fn hash<T: Hash>(t: &T) -> u64 {
+    fn hash<T: Hash, S: Hash>(key: T, salt: S) -> u64 {
         let mut hasher = DefaultHasher::new();
-        t.hash(&mut hasher);
+        salt.hash(&mut hasher);
+        key.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -2648,7 +2653,7 @@ impl ConsistentHashRing {
 
         for i in 0..virtual_nodes_count {
             let virtual_node_key = (id, i);
-            let hash = Self::hash(&virtual_node_key);
+            let hash = Self::hash(virtual_node_key, self.salt);
             self.ring.insert(hash, id);
         }
 
@@ -2673,7 +2678,7 @@ impl ConsistentHashRing {
 
         let mut task_distribution: BTreeMap<u32, u32> = BTreeMap::new();
         let mut task_hashes = (0..total_tasks)
-            .map(|task_idx| Self::hash(&task_idx))
+            .map(|task_idx| Self::hash(task_idx, self.salt))
             .collect_vec();
 
         // Sort task hashes to disperse them around the hash ring
@@ -2713,9 +2718,11 @@ impl ConsistentHashRing {
 mod tests {
     use super::*;
 
+    const DEFAULT_SALT: u32 = 42;
+
     #[test]
     fn test_single_worker_capacity() {
-        let mut ch = ConsistentHashRing::new(5);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
         ch.add_worker(1, 10);
 
         let total_tasks = 5;
@@ -2726,7 +2733,7 @@ mod tests {
 
     #[test]
     fn test_multiple_workers_even_distribution() {
-        let mut ch = ConsistentHashRing::new(10);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 1);
@@ -2742,7 +2749,7 @@ mod tests {
 
     #[test]
     fn test_weighted_distribution() {
-        let mut ch = ConsistentHashRing::new(10);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 2);
         ch.add_worker(2, 3);
@@ -2758,7 +2765,7 @@ mod tests {
 
     #[test]
     fn test_over_capacity() {
-        let mut ch = ConsistentHashRing::new(10);
+        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
 
         ch.add_worker(1, 1);
         ch.add_worker(2, 2);
@@ -2774,7 +2781,7 @@ mod tests {
     fn test_balance_distribution() {
         for mut worker_capacity in 1..10 {
             for workers in 3..10 {
-                let mut ring = ConsistentHashRing::new(1024);
+                let mut ring = ConsistentHashRing::new(DEFAULT_SALT);
 
                 for worker_id in 0..workers {
                     ring.add_worker(worker_id, worker_capacity);

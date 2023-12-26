@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Index;
 
+
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
@@ -298,6 +299,11 @@ impl ParallelUnitMapping {
     /// `new_uniform`.
     pub fn build(parallel_units: &[ParallelUnit]) -> Self {
         Self::new_uniform(parallel_units.iter().map(|pu| pu.id))
+    }
+
+    /// Create a uniform parallel unit mapping from the given parallel units ids
+    pub fn build_from_ids(parallel_unit_ids: &[ParallelUnitId]) -> Self {
+        Self::new_uniform(parallel_unit_ids.iter().cloned())
     }
 
     /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.

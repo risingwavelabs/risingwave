@@ -1100,7 +1100,7 @@ impl DdlController {
         let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
 
         let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, parallelism)?;
+            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1485,7 +1485,7 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
         let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, parallelism)?;
+            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
         let ActorGraphBuildResult {
             graph,

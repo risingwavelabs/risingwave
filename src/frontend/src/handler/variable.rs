@@ -65,10 +65,12 @@ pub fn handle_set(
     // special handle for streaming parallelism,
     if name
         .real_value()
-        .eq_ignore_ascii_case("streaming_parallelism") && string_val
+        .eq_ignore_ascii_case("streaming_parallelism")
+        && string_val
             .as_ref()
             .map(|val| val.eq_ignore_ascii_case("auto"))
-            .unwrap_or(false) {
+            .unwrap_or(false)
+    {
         string_val = None;
     }
 
