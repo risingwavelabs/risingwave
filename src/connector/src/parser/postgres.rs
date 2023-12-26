@@ -31,10 +31,10 @@ macro_rules! handle_list_data_type {
         let res = $row.try_get::<_, Option<Vec<$type>>>($i);
         match res {
             Ok(val) => {
-                val.map(|v| {
+                if let Some(v) = val {
                     v.into_iter()
                         .for_each(|val| $builder.append(Some(ScalarImpl::from(val))))
-                });
+                }
             }
             Err(err) => {
                 if let Ok(sc) = LOG_SUPPERSSER.check() {
@@ -51,10 +51,13 @@ macro_rules! handle_list_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty, $builder:expr, $rw_type:ty) => {
         let res = $row.try_get::<_, Option<Vec<$type>>>($i);
         match res {
-            Ok(val) => val.map(|v| {
-                v.into_iter()
-                    .for_each(|val| $builder.append(Some(ScalarImpl::from(<$rw_type>::from(val)))))
-            }),
+            Ok(val) => {
+                if let Some(v) = val {
+                    v.into_iter().for_each(|val| {
+                        $builder.append(Some(ScalarImpl::from(<$rw_type>::from(val))))
+                    })
+                }
+            }
             Err(err) => {
                 if let Ok(sc) = LOG_SUPPERSSER.check() {
                     tracing::error!(
@@ -64,7 +67,6 @@ macro_rules! handle_list_data_type {
                         sc
                     );
                 }
-                None
             }
         }
     };
@@ -242,14 +244,14 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                         DataType::Bytea => {
                             let res = row.try_get::<_, Option<Vec<Vec<u8>>>>(i);
                             match res {
-                                Ok(v) => {
-                                    v.map(|v| {
+                                Ok(val) => {
+                                    if let Some(v) = val {
                                         v.into_iter().for_each(|val| {
                                             builder.append(Some(ScalarImpl::from(
                                                 val.into_boxed_slice(),
                                             )))
                                         })
-                                    });
+                                    }
                                 }
                                 Err(err) => {
                                     if let Ok(sc) = LOG_SUPPERSSER.check() {
