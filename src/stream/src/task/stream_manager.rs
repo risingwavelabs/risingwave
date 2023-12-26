@@ -658,12 +658,7 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 self.config.unique_user_stream_errors,
             );
-            let vnode_bitmap = actor
-                .vnode_bitmap
-                .as_ref()
-                .map(|b| b.try_into())
-                .transpose()
-                .context("failed to decode vnode bitmap")?;
+            let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
