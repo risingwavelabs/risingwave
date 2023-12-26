@@ -160,7 +160,10 @@ async fn test_basic_inner(
         .unwrap();
 
     let epoch2 = epoch1 + 1;
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -218,7 +221,10 @@ async fn test_basic_inner(
         .unwrap();
 
     let epoch3 = epoch2 + 1;
-    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -249,7 +255,10 @@ async fn test_basic_inner(
         .await
         .unwrap();
 
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -481,7 +490,10 @@ async fn test_state_store_sync_inner(
     // );
 
     epoch += 1;
-    local.seal_current_epoch(epoch, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(
@@ -509,7 +521,10 @@ async fn test_state_store_sync_inner(
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // trigger a sync
     hummock_storage
@@ -975,7 +990,10 @@ async fn test_write_anytime_inner(
     assert_new_value(epoch1).await;
 
     let epoch2 = epoch1 + 1;
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
 
     // Write to epoch2
     local
@@ -989,7 +1007,10 @@ async fn test_write_anytime_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     // Assert epoch 1 unchanged
     assert_new_value(epoch1).await;
     // Assert epoch 2 correctness
@@ -1058,7 +1079,10 @@ async fn test_delete_get_inner(
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
 
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -1074,7 +1098,10 @@ async fn test_delete_get_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     let ssts = hummock_storage
         .seal_and_sync_epoch(epoch2)
         .await
@@ -1137,7 +1164,10 @@ async fn test_multiple_epoch_sync_inner(
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -1165,7 +1195,10 @@ async fn test_multiple_epoch_sync_inner(
             StorageValue::new_put("555"),
         ),
     ];
-    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     local
         .ingest_batch(
             batch3,
@@ -1177,7 +1210,10 @@ async fn test_multiple_epoch_sync_inner(
         )
         .await
         .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+    local
+        .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
+        .await
+        .unwrap();
     let test_get = || {
         let hummock_storage_clone = &hummock_storage;
         async move {

@@ -431,10 +431,6 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     table_id: TableId,
     is_consistent_op: bool,
     table_option: TableOption,
-
-    /// buffer the delete_ranges passed from `flush` and
-    /// write to `inner` on `seal_current_epoch`
-    delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
@@ -446,7 +442,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
-            delete_ranges: Vec::new(),
         }
     }
 
@@ -522,58 +517,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
-        self.delete_ranges.extend(delete_ranges);
-        Ok(0)
-    }
-
-    fn epoch(&self) -> u64 {
-        self.epoch.expect("should have set the epoch")
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.mem_table.is_dirty()
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
-        assert!(
-            self.epoch.replace(options.epoch.curr).is_none(),
-            "local state store of table id {:?} is init for more than once",
-            self.table_id
-        );
-        Ok(())
-    }
-
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        opts: SealCurrentEpochOptions,
-    ) -> StorageResult<()> {
-        let delete_ranges = {
-            let mut delete_ranges = self.delete_ranges.drain(..).collect_vec();
-            // when table_watermark is specified, ignore the
-            if let Some((direction, watermarks)) = opts.table_watermarks {
-                delete_ranges.extend(watermarks.iter().flat_map(|vnode_watermark| {
-                    let inner_range = match direction {
-                        WatermarkDirection::Ascending => {
-                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
-                        }
-                        WatermarkDirection::Descending => {
-                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
-                        }
-                    };
-                    vnode_watermark
-                        .vnode_bitmap()
-                        .iter_vnodes()
-                        .map(move |vnode| {
-                            let (start, end) =
-                                prefixed_range_with_vnode(inner_range.clone(), vnode);
-                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
-                        })
-                }))
-            }
-            delete_ranges
-        };
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)
@@ -639,7 +582,32 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     table_id: self.table_id,
                 },
             )
-            .await?;
+            .await
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch")
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        assert!(
+            self.epoch.replace(options.epoch.curr).is_none(),
+            "local state store of table id {:?} is init for more than once",
+            self.table_id
+        );
+        Ok(())
+    }
+
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        opts: SealCurrentEpochOptions,
+    ) -> StorageResult<()> {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -651,6 +619,39 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+        if let Some((direction, watermarks)) = opts.table_watermarks {
+            let delete_ranges = watermarks
+                .iter()
+                .flat_map(|vnode_watermark| {
+                    let inner_range = match direction {
+                        WatermarkDirection::Ascending => {
+                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                        }
+                        WatermarkDirection::Descending => {
+                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                        }
+                    };
+                    vnode_watermark
+                        .vnode_bitmap()
+                        .iter_vnodes()
+                        .map(move |vnode| {
+                            let (start, end) =
+                                prefixed_range_with_vnode(inner_range.clone(), vnode);
+                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                        })
+                })
+                .collect_vec();
+            self.inner
+                .ingest_batch(
+                    Vec::new(),
+                    delete_ranges,
+                    WriteOptions {
+                        epoch: self.epoch(),
+                        table_id: self.table_id,
+                    },
+                )
+                .await?;
+        }
         Ok(())
     }
 
