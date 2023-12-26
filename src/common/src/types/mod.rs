@@ -929,6 +929,9 @@ impl ScalarImpl {
                 }
                 let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
+                    if s.is_empty() {
+                        continue;
+                    }
                     builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                 }
                 Self::List(ListValue::new(builder.finish()))

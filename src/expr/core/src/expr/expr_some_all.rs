@@ -284,6 +284,7 @@ mod tests {
         );
         let (input, expected) = DataChunk::from_pretty(
             "B[]   B
+             {}    f
              {t,f} t
              {f,t} t",
         )
@@ -310,6 +311,7 @@ mod tests {
         );
         let (input, expected) = DataChunk::from_pretty(
             "B[]   B
+             {}    t
              {f,f} f
              {t}   t",
         )
