@@ -74,7 +74,7 @@ impl From<PbIndex> for ActiveModel {
             index_table_id: Set(pb_index.index_table_id as _),
             primary_table_id: Set(pb_index.primary_table_id as _),
             index_items: Set(pb_index.index_item.into()),
-            index_columns_len: Set(pb_index.index_columns_len),
+            index_columns_len: Set(pb_index.index_columns_len as _),
         }
     }
 }
