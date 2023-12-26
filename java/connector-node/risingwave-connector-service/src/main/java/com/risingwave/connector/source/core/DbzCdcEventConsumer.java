@@ -62,7 +62,6 @@ public class DbzCdcEventConsumer
         configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
         jsonConverter.configure(configs);
         this.converter = jsonConverter;
-        LOG.info("sourceId={}, heartbeatTopicPrefix={}", sourceId, heartbeatTopicPrefix);
     }
 
     private boolean isHeartbeatEvent(SourceRecord record) {
