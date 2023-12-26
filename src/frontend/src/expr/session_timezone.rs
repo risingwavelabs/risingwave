@@ -76,7 +76,7 @@ impl SessionTimezone {
     fn with_timezone(
         &self,
         func_type: ExprType,
-        inputs: &Vec<ExprImpl>,
+        inputs: &[ExprImpl],
         return_type: DataType,
     ) -> Option<ExprImpl> {
         match func_type {

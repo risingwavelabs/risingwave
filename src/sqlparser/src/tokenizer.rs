@@ -861,7 +861,7 @@ impl<'a> Tokenizer<'a> {
                 match chars.peek() {
                     Some('$') => {
                         chars.next();
-                        for (_, c) in value.chars().enumerate() {
+                        for c in value.chars() {
                             let next_char = chars.next();
                             if Some(c) != next_char {
                                 return self.tokenizer_error(format!(
