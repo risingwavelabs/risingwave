@@ -6,7 +6,7 @@ For Kafka key, it's '{schema_name}.{table_name}-key'.
 This script will retrieve a RisingWave table's schema,
 convert it to Avro schema, and register it to Confluent Schema Registry.
 
-Please note that not all RisingWave types are suppported due to the limitation
+Please note that not all RisingWave types are supported due to the limitation
 of Avro.
 """
 
