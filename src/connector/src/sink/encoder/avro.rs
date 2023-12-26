@@ -454,6 +454,81 @@ fn encode_field<D: MaybeData>(
     D::handle_union(value, opt_idx)
 }
 
+impl AvroEncoder {
+    pub fn suggest_schema<'rw>(
+        rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
+        root_name: &str,
+        namespace: &str,
+    ) -> anyhow::Result<String> {
+        use serde_json::{json, Value as J};
+
+        fn suggest_type(rw_type: &DataType) -> anyhow::Result<J> {
+            let avro_type = match rw_type {
+                DataType::Boolean => json!("boolean"),
+                DataType::Varchar => json!("string"),
+                DataType::Bytea => json!("bytes"),
+                DataType::Float32 => json!("float"),
+                DataType::Float64 => json!("double"),
+                DataType::Int32 => json!("int"),
+                DataType::Int64 => json!("long"),
+                DataType::Struct(_) => {
+                    anyhow::bail!("risingwave struct is anonymous while avro requires a name")
+                }
+                DataType::List(elem) => json!({
+                    "type": "array",
+                    "items": suggest_type(elem)?,
+                }),
+
+                DataType::Timestamptz => json!({
+                    "type": "long",
+                    "logicalType": "timestamp-micros",
+                }),
+                DataType::Timestamp => json!({
+                    "type": "long",
+                    "logicalType": "local-timestamp-micros",
+                }),
+                DataType::Date => json!({
+                    "type": "int",
+                    "logicalType": "date",
+                }),
+                DataType::Time => json!({
+                    "type": "long",
+                    "logicalType": "time-micros",
+                }),
+                DataType::Interval => anyhow::bail!("cannot suggest avro duration with name yet"),
+
+                DataType::Int16 => json!("int"),
+                DataType::Decimal => {
+                    anyhow::bail!("cannot suggest avro decimal precision / scale yet")
+                }
+                DataType::Jsonb => anyhow::bail!("cannot suggest json in avro yet"),
+                DataType::Serial | DataType::Int256 => {
+                    anyhow::bail!("risingwave {rw_type} unsupported yet")
+                }
+            };
+            Ok(json!(["null", avro_type]))
+        }
+
+        let fields: Vec<J> = rw_fields
+            .map(|(name, rw_type)| {
+                suggest_type(rw_type).map(|avro_type| {
+                    json!({
+                        "name": name,
+                        "type": avro_type,
+                    })
+                })
+            })
+            .try_collect()?;
+        let root = json!({
+            "name": root_name,
+            "namespace": namespace,
+            "type": "record",
+            "fields": fields,
+        });
+        Ok(root.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::Field;
@@ -872,6 +947,39 @@ mod tests {
             Value::Union(0, Value::TimestampMillis(1).into()),
         );
         test_ok(t, None, right, Value::Union(1, Value::Null.into()));
+    }
+
+    #[test]
+    fn test_encode_avro_suggest() {
+        use DataType as T;
+
+        let fields = vec![
+            Field::with_name(T::Boolean, "b"),
+            Field::with_name(T::Varchar, "s"),
+            Field::with_name(T::Bytea, "bs"),
+            Field::with_name(T::Float32, "f32"),
+            Field::with_name(T::Float64, "f64"),
+            Field::with_name(T::Int32, "i32"),
+            Field::with_name(T::Int64, "i64"),
+            Field::with_name(T::List(T::List(T::Timestamptz.into()).into()), "arr"),
+            Field::with_name(T::Timestamptz, "tsz"),
+            Field::with_name(T::Date, "dt"),
+            Field::with_name(T::Time, "tm"),
+        ];
+        let suggested = AvroEncoder::suggest_schema(
+            fields.iter().map(|f| (f.name.as_str(), &f.data_type)),
+            "root",
+            "test",
+        )
+        .unwrap();
+        let avro_schema = AvroSchema::parse_str(&suggested).unwrap();
+        AvroEncoder::new(
+            Schema::new(fields),
+            None,
+            avro_schema.into(),
+            AvroHeader::None,
+        )
+        .unwrap();
     }
 
     /// This just demonstrates bugs of the upstream [`apache_avro`], rather than our encoder.
