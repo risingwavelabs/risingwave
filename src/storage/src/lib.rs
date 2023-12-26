@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(arc_unwrap_or_clone)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
