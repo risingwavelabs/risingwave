@@ -944,7 +944,7 @@ dependencies = [
  "bytes",
  "fastrand 2.0.0",
  "http 0.2.9",
- "hyper",
+ "hyper 0.14.27",
  "time",
  "tokio",
  "tracing",
@@ -973,7 +973,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "pin-project-lite",
  "tracing",
 ]
@@ -1068,7 +1068,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "once_cell",
  "percent-encoding",
  "regex",
@@ -1152,7 +1152,7 @@ dependencies = [
  "crc32fast",
  "hex",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "md-5",
  "pin-project-lite",
  "sha1",
@@ -1184,7 +1184,7 @@ dependencies = [
  "bytes-utils",
  "futures-core",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
@@ -1224,8 +1224,8 @@ dependencies = [
  "bytes",
  "fastrand 2.0.0",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-rustls",
  "once_cell",
  "pin-project-lite",
@@ -1261,8 +1261,8 @@ dependencies = [
  "bytes-utils",
  "futures-core",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "itoa",
  "num-integer",
  "pin-project-lite",
@@ -1310,8 +1310,8 @@ dependencies = [
  "bytes",
  "futures-util",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "itoa",
  "matchit",
  "memchr",
@@ -1340,7 +1340,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "mime",
  "rustversion",
  "tower-layer",
@@ -2001,8 +2001,8 @@ dependencies = [
  "clickhouse-derive",
  "clickhouse-rs-cityhash-sys",
  "futures",
- "hyper",
- "hyper-tls",
+ "hyper 0.14.27",
+ "hyper-tls 0.5.0",
  "lz4",
  "sealed",
  "serde",
@@ -4165,7 +4165,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "dyn-clone",
- "hyper",
+ "hyper 0.14.27",
  "hyper-rustls",
  "log",
  "reqwest",
@@ -4565,6 +4565,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-body"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cac85db508abc24a2e48553ba12a996e87244a0395ce011e62b37158745d643"
+dependencies = [
+ "bytes",
+ "http 1.0.0",
+]
+
+[[package]]
+name = "http-body-util"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41cb79eb393015dadd30fc252023adb0b2400a0caee0fa2a077e6e21a551e840"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "http-range-header"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4600,7 +4623,7 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "httparse",
  "httpdate",
  "itoa",
@@ -4613,6 +4636,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb5aa53871fc917b1a9ed87b683a5d86db645e23acb32c2e0785a353e522fb75"
+dependencies = [
+ "bytes",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "pin-project-lite",
+ "tokio",
+ "want",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4620,7 +4657,7 @@ checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
  "http 0.2.9",
- "hyper",
+ "hyper 0.14.27",
  "log",
  "rustls",
  "rustls-native-certs",
@@ -4635,7 +4672,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbb958482e8c7be4bc3cf272a766a2b0bf1a6755e7a6ae777f017a31d11b13b1"
 dependencies = [
- "hyper",
+ "hyper 0.14.27",
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
@@ -4648,10 +4685,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper",
+ "hyper 0.14.27",
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "hyper-tls"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper 1.1.0",
+ "hyper-util",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdea9aac0dbe5a9240d68cfd9501e2db94222c6dc06843e06640b9e07f0fdc67"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "hyper 1.1.0",
+ "pin-project-lite",
+ "socket2 0.5.3",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -6156,7 +6229,7 @@ dependencies = [
  "chrono",
  "futures",
  "humantime",
- "hyper",
+ "hyper 0.14.27",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "percent-encoding",
@@ -7863,10 +7936,10 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-rustls",
- "hyper-tls",
+ "hyper-tls 0.5.0",
  "ipnet",
  "js-sys",
  "log",
@@ -8209,9 +8282,9 @@ dependencies = [
  "governor",
  "hex",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "humantime",
- "hyper",
+ "hyper 0.14.27",
  "hytra",
  "itertools 0.12.0",
  "itoa",
@@ -8306,7 +8379,7 @@ version = "1.5.0-alpha"
 dependencies = [
  "async-trait",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "madsim-tokio",
  "madsim-tonic",
  "prometheus",
@@ -8382,7 +8455,7 @@ dependencies = [
  "either",
  "futures",
  "futures-async-stream",
- "hyper",
+ "hyper 0.14.27",
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
@@ -8451,8 +8524,8 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "http 0.2.9",
- "hyper",
- "hyper-tls",
+ "hyper 0.14.27",
+ "hyper-tls 0.6.0",
  "icelake",
  "indexmap 1.9.3",
  "itertools 0.12.0",
@@ -8888,7 +8961,7 @@ dependencies = [
  "function_name",
  "futures",
  "hex",
- "hyper",
+ "hyper 0.14.27",
  "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
@@ -9026,9 +9099,9 @@ dependencies = [
  "either",
  "fail",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "hyper-rustls",
- "hyper-tls",
+ "hyper-tls 0.6.0",
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
@@ -9108,7 +9181,7 @@ dependencies = [
  "easy-ext",
  "either",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "itertools 0.12.0",
  "lru 0.10.1",
  "madsim-tokio",
@@ -11478,8 +11551,8 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
@@ -11508,8 +11581,8 @@ dependencies = [
  "bytes",
  "h2",
  "http 0.2.9",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
@@ -11566,7 +11639,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "http 0.2.9",
- "http-body",
+ "http-body 0.4.5",
  "http-range-header",
  "httpdate",
  "mime",
@@ -12395,7 +12468,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
  "hmac",
- "hyper",
+ "hyper 0.14.27",
  "indexmap 1.9.3",
  "itertools 0.10.5",
  "itertools 0.11.0",
@@ -12552,7 +12625,7 @@ dependencies = [
  "base64 0.13.1",
  "futures",
  "http 0.2.9",
- "hyper",
+ "hyper 0.14.27",
  "hyper-rustls",
  "itertools 0.10.5",
  "log",

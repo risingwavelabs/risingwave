@@ -63,7 +63,7 @@ hyper = { version = "0.14", features = [
     "http2",
     "stream",
 ] }
-hyper-tls = "0.5"
+hyper-tls = "0.6"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.12"
