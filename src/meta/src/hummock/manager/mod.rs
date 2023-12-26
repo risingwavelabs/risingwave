@@ -28,6 +28,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use prost::Message;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
@@ -1124,6 +1125,13 @@ impl HummockManager {
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
+                if task.encoded_len() > 1024 * 1024 * 4 {
+                    tracing::warn!(
+                        "compact task {} too larger task_content {:?}",
+                        task.task_id,
+                        task
+                    );
+                }
                 return Ok(Some(task));
             }
             assert!(
