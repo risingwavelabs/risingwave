@@ -41,7 +41,7 @@ services:
         pip install requests psycopg2 confluent_kafka
         python /datagen.py risingwave-standalone /prepare_data.sql
         python /avro_schema_create.py risingwave-standalone message_queue
-    restart: always
+    restart: on-failure
     container_name: datagen
 volumes:
   risingwave-standalone:
