@@ -9,6 +9,10 @@ create function add(INT, INT) returns int as $$select $1 + $2$$ language sql;
 statement ok
 create function sub(INT, INT) returns int as 'select $1 - $2' language sql;
 
+# Currently we can only support constant calling convention
+statement ok
+create function add_sub_binding() returns int as 'select add(1, 1) + sub(2, 2)' language sql;
+
 # Call the defined sql udf
 query I
 select add(1, -1);
@@ -20,10 +24,15 @@ select sub(1, 1);
 ----
 0
 
-query II
-select add(1, -1), sub(1, 1);
+query I
+select add_sub_binding();
 ----
-0 0
+2
+
+query III
+select add(1, -1), sub(1, 1), add_sub_binding();
+----
+0 0 2
 
 # Create a mock table
 statement ok
@@ -81,6 +90,9 @@ drop function add;
 
 statement ok
 drop function sub;
+
+statement ok
+drop function add_sub_binding;
 
 statement ok
 drop function add_sub;
