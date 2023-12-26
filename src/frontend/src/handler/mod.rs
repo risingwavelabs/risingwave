@@ -205,7 +205,7 @@ pub async fn handle(
             returns,
             params,
         } => {
-            if let Some(_) = params.using {
+            if params.using.is_some() {
                 // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
                     handler_args,

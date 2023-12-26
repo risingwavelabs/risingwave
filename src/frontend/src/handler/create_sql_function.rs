@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -23,11 +21,37 @@ use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
-use risingwave_udf::ArrowFlightUdfClient;
+use risingwave_sqlparser::parser::Parser;
 
 use super::*;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
+
+/// Simple type check for sql udf
+/// e.g., return type mismatch check, parameter type check, ..., etc.
+/// TODO: any existing module / function that can achieve the same functionality?
+fn _sql_udf_type_checker(ast: Vec<Statement>) -> Result<()> {
+    // Extract the expression out
+    let Statement::Query(query) = ast
+        .into_iter()
+        .exactly_one()
+        .expect("sql udf should contain only one statement")
+    else {
+        unreachable!("sql udf should contain a query statement");
+    };
+    let SetExpr::Select(select) = query.body else {
+        panic!("Invalid syntax");
+    };
+    let projection = select.projection;
+    let SelectItem::UnnamedExpr(_expr) = projection
+        .into_iter()
+        .exactly_one()
+        .expect("`projection` should contain only one `SelectItem`")
+    else {
+        unreachable!("`projection` should contain only one `SelectItem`");
+    };
+    todo!()
+}
 
 pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
@@ -55,19 +79,15 @@ pub async fn handle_create_sql_function(
 
     // SQL udf function supports both single quote (i.e., as 'select $1 + $2')
     // and double dollar (i.e., as $$select $1 + $2$$) for as clause
-    let mut identifier = "".to_string();
-    if let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_.clone() {
-        identifier = id;
-    }
-    if let Some(FunctionDefinition::DoubleDollarDef(id)) = params.as_ {
-        identifier = id;
-    }
-    if identifier.is_empty() {
-        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
-    }
+    let body = match &params.as_ {
+        Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
+        Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
+        None => {
+            return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into())
+        }
+    };
 
     // Sanity check for link, this must be none with sql udf function
-    let link = "".to_string();
     if let Some(CreateFunctionUsing::Link(_)) = params.using {
         return Err(ErrorCode::InvalidParameterValue(
             "USING must NOT be specified with sql udf function".to_string(),
@@ -132,33 +152,18 @@ pub async fn handle_create_sql_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    // check the service
-    // let client = ArrowFlightUdfClient::connect(&link)
-    //     .await
-    //     .map_err(|e| anyhow!(e))?;
-    // /// A helper function to create a unnamed field from data type.
-    // fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-    //     arrow_schema::Field::new("", data_type, true)
-    // }
-    // let args = arrow_schema::Schema::new(
-    //     arg_types
-    //         .iter()
-    //         .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-    //         .try_collect::<_, Fields, _>()?,
-    // );
-    // let returns = arrow_schema::Schema::new(match kind {
-    //     Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
-    //     Kind::Table(_) => vec![
-    //         arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-    //         to_field(return_type.clone().try_into()?),
-    //     ],
-    //     _ => unreachable!(),
-    // });
-    // client
-    //     .check(&identifier, &args, &returns)
-    //     .await
-    //     .map_err(|e| anyhow!(e))?;
+    // Parse function body here
+    // Note that the parsing here is just basic syntax / semantic check, the result will NOT be stored
+    // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
+    let Ok(_ast) = Parser::parse_sql(body.as_str()) else {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "invalid function definition, please recheck your function body in as clause"
+                .to_string(),
+        )
+        .into());
+    };
 
+    // Create the actual function, will be stored in function catalog
     let function = Function {
         id: FunctionId::placeholder().0,
         schema_id,
@@ -168,8 +173,8 @@ pub async fn handle_create_sql_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier,
-        link,
+        identifier: body,
+        link: "".to_string(),
         owner: session.user_id(),
     };
 

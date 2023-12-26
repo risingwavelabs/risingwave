@@ -15,11 +15,10 @@
 use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
-use maplit::hashmap;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -31,14 +30,14 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, BinaryOperator, Expr as ast_expr, Function, FunctionArg, FunctionArgExpr, Ident, Query,
-    SelectItem, SetExpr, Statement, Value as ast_value, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
+    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -55,64 +54,8 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_timestamp",
 ];
 
-/// Evaluate the value of expression from
-/// sql user defined function
-/// NOTE: the current implementation is very simple and
-/// acts as a prototype to illustrate the overall logic
-fn sql_udf_expr_evaluate(
-    query: Query,
-    param_index_mapping: &HashMap<String, usize>,
-    input: &Vec<FunctionArg>,
-) -> Result<ExprImpl> {
-    let SetExpr::Select(select) = query.body else {
-        panic!("Invalid syntax");
-    };
-    let projection = select.projection;
-    let SelectItem::UnnamedExpr(expr) = projection
-        .into_iter()
-        .exactly_one()
-        .expect("`projection` should contain only one `SelectItem`")
-    else {
-        unreachable!("`projection` should contain only one `SelectItem`");
-    };
-    println!("Current expr: {:#?}", expr);
-
-    /// Currently only support i32, just as a simple prototype
-    fn expr_inner(
-        expression: ast_expr,
-        map: &HashMap<String, usize>,
-        input: &Vec<FunctionArg>,
-    ) -> i32 {
-        if let ast_expr::Identifier(id) = expression {
-            let value = id.real_value();
-            let FunctionArg::Unnamed(FunctionArgExpr::Expr(ast_expr::Value(ast_value::Number(
-                number,
-            )))) = input[*map.get(&value).unwrap()].clone()
-            else {
-                panic!("Invalid syntax");
-            };
-            return number.parse::<i32>().unwrap();
-        }
-        let ast_expr::BinaryOp { left, op, right } = expression else {
-            panic!("Only `BinaryOp` is currently supported");
-        };
-        match op {
-            BinaryOperator::Plus => expr_inner(*left, map, input) + expr_inner(*right, map, input),
-            BinaryOperator::Minus => expr_inner(*left, map, input) - expr_inner(*right, map, input),
-            _ => panic!("Not supported!"),
-        }
-    }
-
-    Ok(ExprImpl::Literal(Box::new(Literal::new(
-        Some(expr_inner(expr, param_index_mapping, input).into()),
-        DataType::Int32,
-    ))))
-}
-
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        println!("Current function: {:#?}", f);
-
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
@@ -210,6 +153,57 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
+        /// TODO: add name related logic
+        fn create_udf_context(
+            binder: &mut Binder,
+            args: &[FunctionArg],
+            catalog: &Arc<FunctionCatalog>,
+        ) {
+            binder.udf_context = args
+                .iter()
+                .enumerate()
+                .map(|(i, current_arg)| {
+                    if let FunctionArg::Unnamed(arg) = current_arg {
+                        let FunctionArgExpr::Expr(e) = arg else {
+                            panic!("invalid syntax");
+                        };
+                        // if catalog.arg_names.is_some() {
+                        //     panic!("invalid syntax");
+                        // }
+                        return ("$".to_string() + &(i + 1).to_string(), e.clone());
+                    }
+                    panic!("invalid syntax");
+                })
+                .collect()
+        }
+
+        fn extract_udf_expression(ast: Vec<Statement>) -> AstExpr {
+            // Extract the expression out
+            let Statement::Query(query) = ast
+                .into_iter()
+                .exactly_one()
+                .expect("sql udf should contain only one statement")
+            else {
+                unreachable!("sql udf should contain a query statement");
+            };
+            let SetExpr::Select(select) = query.body else {
+                panic!("Invalid syntax");
+            };
+            let projection = select.projection;
+            let SelectItem::UnnamedExpr(expr) = projection
+                .into_iter()
+                .exactly_one()
+                .expect("`projection` should contain only one `SelectItem`")
+            else {
+                unreachable!("`projection` should contain only one `SelectItem`");
+            };
+            expr
+        }
+
+        let schema = self.first_valid_schema().unwrap();
+        let catalog = schema.get_function_by_name_args(&function_name, &inputs.iter().map(|arg| arg.return_type()).collect_vec());
+        println!("Current catalog: {:#?}", catalog);
+
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
@@ -218,38 +212,24 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
+            println!("INside udf!");
             use crate::catalog::function_catalog::FunctionKind::*;
-            println!("Current function kind: {:#?}", func.kind);
-            println!("Current function catalog: {:#?}", func);
-            let ast = risingwave_sqlparser::parser::Parser::parse_sql(&func.identifier.as_str()).unwrap();
-            println!("Current ast[0]: {:#?}", ast[0]);
-            let Statement::Query(query) = ast
-                .into_iter()
-                .exactly_one()
-                .expect("sql udf should contain only one statement")
-            else {
-                unreachable!("sql udf should contain a query statement");
-            };
-            println!("Current query: {:#?}", query);
-            if func.link.is_empty() {
+            if func.language == "sql" {
                 // This represents the current user defined function is `language sql`
-
-                // Note that the map here is just simulate the mapping index of parameter definitions
-                // e.g., sub(1, 2, 3) <=> sub(a, b, c)
-                let map = hashmap! {
-                    "a".to_string() => 0,
-                    "b".to_string() => 1,
-                    "c".to_string() => 2,
-                };
-                return sql_udf_expr_evaluate(*query, &map, &args);
-            }
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                let ast = risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str()).unwrap();
+                // The actual inline logic
+                create_udf_context(self, &args, &Arc::clone(func));
+                return self.bind_expr(extract_udf_expression(ast));
+            } else {
+                debug_assert!(func.language == "python" || func.language == "java", "only `python` and `java` are currently supported for general udf");
+                match &func.kind {
+                    Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                    }
+                    Aggregate => todo!("support UDAF"),
                 }
-                Aggregate => todo!("support UDAF"),
             }
         }
 

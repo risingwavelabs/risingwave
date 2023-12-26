@@ -37,6 +37,11 @@ impl Binder {
             }
         };
 
+        // Special check for sql udf
+        if self.udf_context.contains_key(&column_name) {
+            return self.bind_expr(self.udf_context.get(&column_name).unwrap().clone());
+        }
+
         match self
             .context
             .get_column_binding_indices(&table_name, &column_name)

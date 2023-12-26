@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
 
 mod bind_context;
 mod bind_param;
@@ -116,6 +116,8 @@ pub struct Binder {
     included_relations: HashSet<TableId>,
 
     param_types: ParameterTypes,
+
+    udf_context: HashMap<String, AstExpr>,
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works
@@ -217,6 +219,7 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
+            udf_context: HashMap::new(),
         }
     }
 
