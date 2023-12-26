@@ -303,9 +303,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
             let squared_input_expr = ExprImpl::from(
                 FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()]).unwrap(),
             );
-            self.builder.add_expr(&squared_input_expr).map_err(|err| {
-                not_implemented!("{err} inside args")
-            })?;
+            self.builder
+                .add_expr(&squared_input_expr)
+                .map_err(|err| not_implemented!("{err} inside args"))?;
         }
         for arg in &window_function.args {
             self.builder
