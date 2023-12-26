@@ -883,6 +883,9 @@ impl ClusterControllerInner {
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;
+        if worker.is_none() {
+            return Ok(None);
+        }
         let extra_info = self.get_extra_info_checked(worker_id)?;
         Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
     }
