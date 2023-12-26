@@ -83,7 +83,9 @@ impl PlainParser {
             UpsertChangeEvent::default();
         let change_event_op = ChangeEventOperation::Upsert;
 
-        if let Some(data) = key && let Some(key_builder) = self.key_builder.as_mut() {
+        if let Some(data) = key
+            && let Some(key_builder) = self.key_builder.as_mut()
+        {
             // key is optional in format plain
             row_op = row_op.with_key(key_builder.generate_accessor(data).await?);
         }

@@ -176,9 +176,7 @@ impl ManagedBarrierState {
                 } => {
                     if remaining_actors.contains(&actor_id)
                         && let Some(collect_notifier) = collect_notifier.take()
-                        && collect_notifier
-                            .send(Err(err.clone()))
-                            .is_err()
+                        && collect_notifier.send(Err(err.clone())).is_err()
                     {
                         warn!(error = %err.as_report(), actor_id, "failed to notify actor exiting");
                     }
