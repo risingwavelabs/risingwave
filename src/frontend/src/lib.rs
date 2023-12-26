@@ -26,7 +26,6 @@
 #![feature(box_patterns)]
 #![feature(lazy_cell)]
 #![feature(macro_metavar_expr)]
-#![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
