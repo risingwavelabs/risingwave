@@ -30,7 +30,6 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(type_name_of_val)]
 
 pub mod backup_restore;
 pub mod barrier;
