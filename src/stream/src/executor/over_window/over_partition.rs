@@ -25,13 +25,12 @@ use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::Sentinelled;
+use risingwave_common::util::delta_btree_map::{Change, DeltaBTreeMap};
 use risingwave_expr::window_function::{FrameBounds, StateKey, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::delta_btree_map::Change;
 use super::general::RowConverter;
-use crate::executor::over_window::delta_btree_map::DeltaBTreeMap;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
 

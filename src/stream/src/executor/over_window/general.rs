@@ -25,6 +25,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
+use risingwave_common::util::delta_btree_map::{Change, PositionType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
@@ -33,7 +34,6 @@ use risingwave_expr::window_function::{
 };
 use risingwave_storage::StateStore;
 
-use super::delta_btree_map::Change;
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
@@ -42,7 +42,6 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
