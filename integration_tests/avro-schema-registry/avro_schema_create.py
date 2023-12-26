@@ -107,7 +107,7 @@ class KeyValueSchema:
             f"{DB_NAME}.{PG_SCHEMA}.{PG_TABLE}.Key",
             pk_columns)
         self.value = AvroSchema(
-            f"{PG_SCHEMA}.{PG_TABLE}",
+            f"{PG_SCHEMA}.{PG_TABLE}-value",
             f"{DB_NAME}.{PG_SCHEMA}.{PG_TABLE}.Value",
             columns)
 
