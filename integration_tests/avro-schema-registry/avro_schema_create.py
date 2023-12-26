@@ -39,10 +39,13 @@ AVRO_DATA_TYPES = {
     "double precision": "double",
     "character varying": "string",
     "bytea": "bytes",
-    "timestamp with time zone": {"type": "long", "logicalType": "timestamp-micros"},
+    "timestamp with time zone": {
+        "type": "long",
+        "logicalType": "timestamp-micros"
+    },
     "timestamp without time zone": {
-            "type": "long",
-            "logicalType": "local-timestamp-micros",
+        "type": "long",
+        "logicalType": "local-timestamp-micros",
     },
     "date": {"type": "int", "logicalType": "date"},
     "time without time zone": {"type": "long", "logicalType": "time-micros"},
@@ -84,6 +87,7 @@ class AvroSchema:
         """Register the schema to Schema Registry"""
         print(f"Registering schema {self.subject_name}")
         print(self.schema_json)
+
         schema_id = client.register_schema(
             self.subject_name, Schema(self.schema_json, "AVRO"))
         print("Schema registered successfully with ID:", schema_id)
