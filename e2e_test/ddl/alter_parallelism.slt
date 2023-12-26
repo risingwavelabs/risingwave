@@ -1,109 +1,118 @@
 statement ok
-SET RW_IMPLICIT_FLUSH TO true;
+set rw_implicit_flush to true;
 
 statement ok
-SET STREAMING_PARALLELISM TO DEFAULT;
+set streaming_parallelism to default;
 
 statement ok
-CREATE TABLE t (v INT);
+create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;
 
-query T
-SELECT parallelism FROM rw_tables WHERE name = 't';
+statement ok
+create view mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;
+
+statement ok
+create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, rw_table_fragments tf where s.id = tf.table_id;
+
+statement ok
+create table t (v int);
+
+query t
+select parallelism from table_parallelism where name = 't';
 ----
 AUTO
 
 statement ok
-ALTER TABLE t SET PARALLELISM = 2;
+alter table t set parallelism = 2;
 
-query T
-SELECT parallelism FROM rw_tables WHERE name = 't';
+query t
+select parallelism from table_parallelism where name = 't';
 ----
 FIXED(2)
 
-query I
-SELECT parallelism FROM rw_fragments;
+query i
+select parallelism from rw_fragments;
 ----
 2
 2
 
 statement ok
-ALTER TABLE t SET PARALLELISM = AUTO;
+alter table t set parallelism = auto;
 
-query T
-SELECT parallelism FROM rw_tables WHERE name = 't';
+query t
+select parallelism from table_parallelism where name = 't';
 ----
 AUTO
 
 statement ok
-CREATE MATERIALIZED VIEW m_simple AS SELECT * FROM t;
+create materialized view m_simple as select * from t;
 
-query T
-SELECT parallelism FROM rw_materialized_views WHERE name = 'm_simple';
+query t
+select parallelism from mview_parallelism where name = 'm_simple';
 ----
 AUTO
 
 statement ok
-ALTER MATERIALIZED VIEW m_simple SET PARALLELISM = 3;
+alter materialized view m_simple set parallelism = 3;
 
-query T
-SELECT parallelism FROM rw_materialized_views WHERE name = 'm_simple';
+query t
+select parallelism from mview_parallelism where name = 'm_simple';
 ----
 AUTO
 
 statement ok
-CREATE MATERIALIZED VIEW m_join AS SELECT t1.v AS t1v, t2.v AS t2v FROM t t1, t t2 WHERE t1.v = t2.v;
+create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;
 
-query T
-SELECT parallelism FROM rw_materialized_views WHERE name = 'm_join';
+query t
+select parallelism from mview_parallelism where name = 'm_join';
 ----
 AUTO
 
 statement ok
-ALTER MATERIALIZED VIEW m_join SET PARALLELISM = 3;
+alter materialized view m_join set parallelism = 3;
 
-query T
-SELECT parallelism FROM rw_materialized_views WHERE name = 'm_join';
+query t
+select parallelism from mview_parallelism where name = 'm_join';
 ----
 FIXED(3)
 
 statement ok
-CREATE SINK s AS SELECT t1.v AS t1v, t2.v AS t2v FROM t t1, t t2 WHERE t1.v = t2.v WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
+create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v with ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
 
-query T
-SELECT parallelism FROM rw_sinks WHERE name = 's';
+query t
+select parallelism from sink_parallelism where name = 's';
 ----
 AUTO
 
 statement ok
-ALTER SINK s SET PARALLELISM = 4;
+alter sink s set parallelism = 4;
 
-query T
-SELECT parallelism FROM rw_sinks WHERE name = 's';
+query t
+select parallelism from sink_parallelism where name = 's';
 ----
 FIXED(4)
 
 statement ok
-DROP SINK s;
+drop sink s;
 
 statement ok
-DROP MATERIALIZED VIEW m_join;
+drop materialized view m_join;
 
 statement ok
-DROP MATERIALIZED VIEW m_simple;
+drop materialized view m_simple;
 
 statement ok
-DROP TABLE t;
+drop table t;
 
 statement ok
-SET STREAMING_PARALLELISM TO 2;
+set streaming_parallelism to 2;
 
 statement ok
-CREATE TABLE t (v1 INT);
+create table t (v1 int);
 
-query T
-SELECT parallelism FROM rw_tables WHERE name = 't';
+query t
+select parallelism from table_parallelism where name = 't';
 ----
 FIXED(2)
 
 statement ok
-DROP TABLE t;
+drop table t;
