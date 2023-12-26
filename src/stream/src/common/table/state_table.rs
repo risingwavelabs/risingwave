@@ -213,6 +213,9 @@ where
 
 fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
     OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+        if first == second {
+            return true;
+        }
         let first = match row_serde.deserialize(first) {
             Ok(rows) => rows,
             Err(e) => {
