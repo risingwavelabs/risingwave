@@ -23,6 +23,7 @@ use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
+use risingwave_common::types::Sentinelled;
 use risingwave_expr::window_function::{FrameBounds, StateKey, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -30,12 +31,11 @@ use risingwave_storage::StateStore;
 use super::delta_btree_map::Change;
 use super::estimated_btree_map::EstimatedBTreeMap;
 use super::general::RowConverter;
-use super::sentinel::KeyWithSentinel;
 use crate::executor::over_window::delta_btree_map::DeltaBTreeMap;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
 
-pub(super) type CacheKey = KeyWithSentinel<StateKey>;
+pub(super) type CacheKey = Sentinelled<StateKey>;
 
 /// Range cache for one over window partition.
 /// The cache entries can be:
@@ -1198,7 +1198,7 @@ mod find_affected_ranges_tests {
 
     #[test]
     fn test_empty_with_sentinels() {
-        let cache: BTreeMap<KeyWithSentinel<StateKey>, OwnedRow> = create_cache!(..., , ...);
+        let cache: BTreeMap<Sentinelled<StateKey>, OwnedRow> = create_cache!(..., , ...);
         let delta = create_delta!((1, Insert), (2, Insert));
 
         {

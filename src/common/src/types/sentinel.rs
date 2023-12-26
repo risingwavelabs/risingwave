@@ -14,16 +14,15 @@
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_expr::window_function::StateKey;
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
-pub(super) enum KeyWithSentinel<T> {
+pub enum Sentinelled<T> {
     Smallest,
     Normal(T),
     Largest,
 }
 
-impl<T> KeyWithSentinel<T> {
+impl<T> Sentinelled<T> {
     pub fn as_normal_expect(&self) -> &T {
         self.as_normal().expect("expect normal key")
     }
@@ -33,7 +32,7 @@ impl<T> KeyWithSentinel<T> {
     }
 }
 
-impl<T> PartialOrd for KeyWithSentinel<T>
+impl<T> PartialOrd for Sentinelled<T>
 where
     T: Ord,
 {
@@ -42,12 +41,12 @@ where
     }
 }
 
-impl<T> Ord for KeyWithSentinel<T>
+impl<T> Ord for Sentinelled<T>
 where
     T: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use KeyWithSentinel::*;
+        use Sentinelled::*;
         match (self, other) {
             (Smallest, Smallest) => std::cmp::Ordering::Equal,
             (Smallest, _) => std::cmp::Ordering::Less,
@@ -60,18 +59,12 @@ where
     }
 }
 
-impl<T: EstimateSize> EstimateSize for KeyWithSentinel<T> {
+impl<T: EstimateSize> EstimateSize for Sentinelled<T> {
     fn estimated_heap_size(&self) -> usize {
         match self {
             Self::Smallest => 0,
             Self::Normal(inner) => inner.estimated_heap_size(),
             Self::Largest => 0,
         }
-    }
-}
-
-impl From<StateKey> for KeyWithSentinel<StateKey> {
-    fn from(key: StateKey) -> Self {
-        Self::Normal(key)
     }
 }
