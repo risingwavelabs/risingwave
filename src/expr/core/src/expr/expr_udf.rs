@@ -238,7 +238,7 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
     }
 }
 
-type WasmRuntime = tokio::sync::Mutex<arrow_udf_wasm_runtime::Runtime>;
+type WasmRuntime = tokio::sync::Mutex<arrow_udf_wasm::Runtime>;
 
 #[cfg(not(madsim))]
 /// Get or create a wasm runtime.
@@ -275,7 +275,7 @@ pub(crate) fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>>
                 .context("failed to load wasm binary from object storage")
         })
     })?;
-    let runtime = arrow_udf_wasm_runtime::Runtime::new(&binary)?;
+    let runtime = arrow_udf_wasm::Runtime::new(&binary)?;
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
     runtimes.insert(link.into(), Arc::downgrade(&runtime));
     Ok(runtime)
