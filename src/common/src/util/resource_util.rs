@@ -132,7 +132,7 @@ mod runtime {
 }
 
 pub mod memory {
-    use sysinfo::{System, SystemExt};
+    use sysinfo::System;
 
     use super::runtime::get_resource;
 
