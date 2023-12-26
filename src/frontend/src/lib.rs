@@ -25,7 +25,6 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(lazy_cell)]
-#![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]

@@ -22,7 +22,6 @@
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
-#![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(test)]
