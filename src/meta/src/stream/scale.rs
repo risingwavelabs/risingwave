@@ -1674,8 +1674,6 @@ impl ScaleController {
             })
             .collect::<BTreeMap<_, _>>();
 
-        // todo, dump code
-
         let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
         // FIXME: only need actor id and dispatcher info, avoid clone it.
