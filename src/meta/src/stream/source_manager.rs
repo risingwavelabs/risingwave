@@ -709,7 +709,7 @@ impl SourceManager {
         Ok(())
     }
 
-    /// unregister connector worker for source.
+    /// Unregister connector worker for source.
     pub async fn unregister_sources(&self, source_ids: Vec<SourceId>) {
         let mut core = self.core.lock().await;
         for source_id in source_ids {
