@@ -32,15 +32,17 @@ use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
-use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParserConfig};
+use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
     StreamChunkWithState,
 };
+
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
@@ -209,11 +211,6 @@ impl S3FileReader {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
             let source_ctx = self.source_ctx.clone();
-            let use_nd_streaming = {
-                let _encoding_config = &self.parser_config.specific.encoding_config;
-                matches!(&EncodingProperties::Json, _encoding_config)
-                    || matches!(&EncodingProperties::Csv, _encoding_config)
-            };
 
             let split_id = split.id();
 
@@ -226,7 +223,7 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if use_nd_streaming {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)
