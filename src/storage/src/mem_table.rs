@@ -26,6 +26,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use thiserror::Error;
+use tracing::warn;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
@@ -600,7 +601,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64, _opts: SealCurrentEpochOptions) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -612,6 +613,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+        if opts.table_watermarks.is_some() {
+            warn!("table watermark only supported in hummock state store");
+        }
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {

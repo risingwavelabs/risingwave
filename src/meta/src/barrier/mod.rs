@@ -28,7 +28,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_hummock_sdk::table_watermark::merge_multiple_new_table_watermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    merge_multiple_new_table_watermarks, TableWatermarks,
+};
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::table::TableType;
@@ -1348,7 +1350,22 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
     }
     CommitEpochInfo::new(
         synced_ssts,
-        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
+        merge_multiple_new_table_watermarks(
+            resps
+                .iter()
+                .map(|resp| {
+                    resp.table_watermarks
+                        .iter()
+                        .map(|(table_id, watermarks)| {
+                            (
+                                TableId::new(*table_id),
+                                TableWatermarks::from_protobuf(watermarks),
+                            )
+                        })
+                        .collect()
+                })
+                .collect_vec(),
+        ),
         sst_to_worker,
     )
 }

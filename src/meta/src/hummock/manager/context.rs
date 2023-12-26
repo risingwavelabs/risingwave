@@ -18,10 +18,11 @@ use std::ops::DerefMut;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
 };
-use risingwave_pb::hummock::{HummockVersion, ValidationTask};
+use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{

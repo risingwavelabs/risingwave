@@ -18,11 +18,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -84,7 +84,7 @@ impl HummockManagerService for HummockServiceImpl {
         let current_version = self.hummock_manager.get_current_version().await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version),
+            current_version: Some(current_version.to_protobuf()),
         }))
     }
 
@@ -95,10 +95,12 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let (version, compaction_groups) = self
             .hummock_manager
-            .replay_version_delta(req.version_delta.unwrap())
+            .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
+                &req.version_delta.unwrap(),
+            ))
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
-            version: Some(version),
+            version: Some(version.to_protobuf()),
             modified_compaction_groups: compaction_groups,
         }))
     }
@@ -120,7 +122,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<DisableCommitEpochResponse>, Status> {
         let version = self.hummock_manager.disable_commit_epoch().await;
         Ok(Response::new(DisableCommitEpochResponse {
-            current_version: Some(version),
+            current_version: Some(version.to_protobuf()),
         }))
     }
 
@@ -134,7 +136,12 @@ impl HummockManagerService for HummockServiceImpl {
             .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
-            version_deltas: Some(version_deltas),
+            version_deltas: Some(PbHummockVersionDeltas {
+                version_deltas: version_deltas
+                    .iter()
+                    .map(HummockVersionDelta::to_protobuf)
+                    .collect(),
+            }),
         };
         Ok(Response::new(resp))
     }
@@ -416,15 +423,10 @@ impl HummockManagerService for HummockServiceImpl {
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let payload = self.hummock_manager.pin_version(req.context_id).await?;
-        match payload {
-            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
-                pinned_version: Some(version),
-            })),
-            Payload::VersionDeltas(_) => {
-                unreachable!("pin_version should not return version delta")
-            }
-        }
+        let version = self.hummock_manager.pin_version(req.context_id).await?;
+        Ok(Response::new(PinVersionResponse {
+            pinned_version: Some(version.to_protobuf()),
+        }))
     }
 
     async fn split_compaction_group(
@@ -461,7 +463,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
         let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
         Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
-            checkpoint_version: Some(checkpoint_version),
+            checkpoint_version: Some(checkpoint_version.to_protobuf()),
         }))
     }
 

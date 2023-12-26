@@ -28,7 +28,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
@@ -75,7 +74,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         let hummock = context
             .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
             .await?;
-        let version = hummock.inner().get_pinned_version().version();
+        let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {

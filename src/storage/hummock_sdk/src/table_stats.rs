@@ -15,9 +15,9 @@
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
-use risingwave_pb::hummock::{HummockVersion, PbTableStats};
+use risingwave_pb::hummock::PbTableStats;
 
-use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+use crate::version::HummockVersion;
 
 pub type TableStatsMap = HashMap<u32, TableStats>;
 
