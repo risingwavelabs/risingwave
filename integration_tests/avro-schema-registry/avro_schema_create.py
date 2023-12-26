@@ -58,7 +58,6 @@ def generate_avro_schema(postgres_schema):
         },
         "date": {"type": "int", "logicalType": "date"},
         "time without time zone": {"type": "long", "logicalType": "time-micros"},
-        "interval": {"type": "fixed", "size": 12, "logicalType": "duration"},
     }
 
     avro_schema = {
