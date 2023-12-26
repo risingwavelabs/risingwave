@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Index;
 
-
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};

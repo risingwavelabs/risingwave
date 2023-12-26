@@ -24,8 +24,6 @@ use std::num::NonZeroUsize;
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-
-
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::{ActorInfo, ParallelUnit};
