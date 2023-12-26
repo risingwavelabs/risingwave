@@ -759,7 +759,6 @@ impl HummockUploader {
             .push_front(imm);
     }
 
-    #[expect(dead_code)]
     pub(crate) fn add_table_watermarks(
         &mut self,
         epoch: u64,

@@ -27,7 +27,9 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, is_empty_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, TableWatermarksIndex};
+use risingwave_hummock_sdk::table_watermark::{
+    ReadTableWatermark, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
@@ -124,6 +126,11 @@ pub enum VersionUpdate {
     Staging(StagingData),
     CommittedDelta(HummockVersionDelta),
     CommittedSnapshot(CommittedVersion),
+    NewTableWatermark {
+        direction: WatermarkDirection,
+        epoch: HummockEpoch,
+        vnode_watermarks: Vec<VnodeWatermark>,
+    },
 }
 
 #[derive(Clone)]
@@ -407,6 +414,16 @@ impl HummockReadVersion {
                     }
                 }
             }
+            VersionUpdate::NewTableWatermark {
+                direction,
+                epoch,
+                vnode_watermarks,
+            } => self
+                .table_watermarks
+                .get_or_insert_with(|| {
+                    TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
+                })
+                .add_epoch_watermark(epoch, &vnode_watermarks, direction),
         }
     }
 
@@ -416,6 +433,16 @@ impl HummockReadVersion {
 
     pub fn committed(&self) -> &CommittedVersion {
         &self.committed
+    }
+
+    /// We have assumption that the watermark is increasing monotonically. Therefore,
+    /// here if the upper layer usage has passed an regressed watermark, we should
+    /// filter out the regressed watermark. Currently the kv log store may write
+    /// regressed watermark
+    pub fn filter_regress_watermarks(&self, watermarks: &mut Vec<VnodeWatermark>) {
+        if let Some(watermark_index) = &self.table_watermarks {
+            watermark_index.filter_regress_watermarks(watermarks)
+        }
     }
 
     pub fn clear_uncommitted(&mut self) {

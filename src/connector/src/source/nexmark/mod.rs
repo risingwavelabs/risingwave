@@ -43,11 +43,9 @@ const fn none<T>() -> Option<T> {
     None
 }
 
-pub type NexmarkProperties = Box<NexmarkPropertiesInner>;
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct NexmarkPropertiesInner {
+pub struct NexmarkProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]
     pub split_num: i32,
@@ -233,15 +231,15 @@ fn default_event_num() -> u64 {
     u64::MAX
 }
 
-impl Default for NexmarkPropertiesInner {
+impl Default for NexmarkProperties {
     fn default() -> Self {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
-        NexmarkPropertiesInner::deserialize(v).unwrap()
+        NexmarkProperties::deserialize(v).unwrap()
     }
 }
 
-impl From<&NexmarkPropertiesInner> for NexmarkConfig {
-    fn from(value: &NexmarkPropertiesInner) -> Self {
+impl From<&NexmarkProperties> for NexmarkConfig {
+    fn from(value: &NexmarkProperties) -> Self {
         // 2015-07-15 00:00:00
         pub const BASE_TIME: u64 = 1_436_918_400_000;
 

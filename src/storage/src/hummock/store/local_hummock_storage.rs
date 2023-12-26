@@ -394,7 +394,7 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -407,6 +407,17 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+        if let Some((direction, watermarks)) = &mut opts.table_watermarks {
+            let mut read_version = self.read_version.write();
+            read_version.filter_regress_watermarks(watermarks);
+            if !watermarks.is_empty() {
+                read_version.update(VersionUpdate::NewTableWatermark {
+                    direction: *direction,
+                    epoch: prev_epoch,
+                    vnode_watermarks: watermarks.clone(),
+                });
+            }
+        }
         self.event_sender
             .send(HummockEvent::LocalSealEpoch {
                 instance_id: self.instance_id(),

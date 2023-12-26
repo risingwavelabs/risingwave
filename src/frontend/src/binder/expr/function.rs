@@ -532,12 +532,7 @@ impl Binder {
                     );
                 }
             };
-            if !bounds.is_valid() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame bounds `{bounds}` is not valid",
-                ))
-                .into());
-            }
+            bounds.validate()?;
             Some(Frame { bounds, exclusion })
         } else {
             None
@@ -999,6 +994,7 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
