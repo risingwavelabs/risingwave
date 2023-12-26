@@ -40,10 +40,14 @@ impl Default for HummockVersion {
 }
 
 impl HummockVersion {
+    /// Convert the `PbHummockVersion` received from rpc to `HummockVersion`. No need to
+    /// maintain backward compatibility.
     pub fn from_rpc_protobuf(pb_version: &PbHummockVersion) -> Self {
         Self::from_protobuf_inner(pb_version)
     }
 
+    /// Convert the `PbHummockVersion` deserialized from persisted state to `HummockVersion`.
+    /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(pb_version: &PbHummockVersion) -> Self {
         Self::from_protobuf_inner(pb_version)
     }
@@ -125,10 +129,14 @@ impl Default for HummockVersionDelta {
 }
 
 impl HummockVersionDelta {
+    /// Convert the `PbHummockVersionDelta` deserialized from persisted state to `HummockVersionDelta`.
+    /// We should maintain backward compatibility.
     pub fn from_persisted_protobuf(delta: &PbHummockVersionDelta) -> Self {
         Self::from_protobuf_inner(delta)
     }
 
+    /// Convert the `PbHummockVersionDelta` received from rpc to `HummockVersionDelta`. No need to
+    /// maintain backward compatibility.
     pub fn from_rpc_protobuf(delta: &PbHummockVersionDelta) -> Self {
         Self::from_protobuf_inner(delta)
     }
