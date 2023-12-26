@@ -1381,7 +1381,7 @@ async fn test_replicated_local_hummock_storage() {
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
             TEST_TABLE_ID,
-            false,
+            OpConsistencyLevel::Inconsistent,
             TableOption {
                 retention_seconds: None,
             },
