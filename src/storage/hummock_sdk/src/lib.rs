@@ -44,6 +44,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 pub mod table_watermark;
+pub mod version;
 
 pub use compact::*;
 
