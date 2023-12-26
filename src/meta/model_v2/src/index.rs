@@ -27,7 +27,7 @@ pub struct Model {
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
     pub index_items: ExprNodeArray,
-    pub index_columns_len: u32,
+    pub index_columns_len: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
