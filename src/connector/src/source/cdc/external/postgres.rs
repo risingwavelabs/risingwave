@@ -173,27 +173,25 @@ impl PostgresExternalTableReader {
         primary_keys: Vec<String>,
     ) {
         let order_key = primary_keys.iter().join(",");
-        let client = self.client.lock().await;
-        let stmt = if start_pk_row.is_none() {
-            let sql = format!(
+        let sql = if start_pk_row.is_none() {
+            format!(
                 "SELECT {} FROM {} ORDER BY {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 order_key
-            );
-            client.prepare(&sql).await?
+            )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
-            let sql = format!(
+            format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key
-            );
-            client.prepare(&sql).await?
+            )
         };
 
+        let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
         let params: Vec<DatumRef<'_>> = match start_pk_row {
@@ -201,7 +199,7 @@ impl PostgresExternalTableReader {
             None => Vec::new(),
         };
 
-        let stream = client.query_raw(&stmt, &params).await?;
+        let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
             Ok::<_, anyhow::Error>(postgres_row_to_owned_row(row, &self.rw_schema))
