@@ -320,7 +320,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // panic!("row count should be non-negative") // TODO: need strict mode sys param / session var
 
             // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
-            // corresponding group exists before (or has been deleted). In this case, `prev_row_count()` will
+            // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will
             // report `0`. To ignore the inconsistent, we set `curr_row_count` to `0` here, so that `OnlyOutputIfHasInput`
             // will return no change, so that the inconsistent will be hidden from downstream. This won't prevent from
             // incorrect results of existing groups, but at lease can prevent from downstream panicking due to non-existing
