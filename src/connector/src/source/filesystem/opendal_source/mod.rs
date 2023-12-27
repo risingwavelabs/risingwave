@@ -17,6 +17,7 @@ pub mod gcs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
+use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
@@ -30,7 +31,7 @@ pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
@@ -78,7 +79,7 @@ impl OpendalSource for OpendalGcs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,

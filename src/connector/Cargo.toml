@@ -136,7 +136,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
-with_options = { path = "../utils/with_options" }
+with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]

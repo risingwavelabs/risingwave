@@ -67,7 +67,7 @@ const fn _default_max_in_flight_requests_per_connection() -> usize {
 
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
-enum CompressionCodec {
+pub enum CompressionCodec {
     None,
     Gzip,
     Snappy,

@@ -11,6 +11,7 @@ members = [
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
+  "src/connector/with_options",
   "src/ctl",
   "src/error",
   "src/expr/core",
@@ -55,7 +56,6 @@ members = [
   "src/utils/runtime",
   "src/utils/sync-point",
   "src/utils/variables",
-  "src/utils/with_options",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]

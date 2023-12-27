@@ -55,6 +55,8 @@ pub mod common;
 
 pub use paste::paste;
 
+mod with_options;
+
 #[cfg(test)]
 mod with_options_test;
 
