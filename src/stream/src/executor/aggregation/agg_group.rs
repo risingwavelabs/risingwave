@@ -317,7 +317,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .as_int64();
         if row_count < 0 {
             tracing::error!(group = ?self.group_key_row(), "bad row count");
-            // panic!("row count should be non-negative") // TODO: need strict mode sys param / session var
+            if cfg!(debug_assertions) {
+                // TODO: need strict mode sys param / session var
+                panic!("row count should be non-negative");
+            }
 
             // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
             // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will
