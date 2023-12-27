@@ -874,7 +874,7 @@ impl ScalarImpl {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(str.to_string().into()),
             DataType::Boolean => {
-                Self::Bool(bool::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+                Self::Bool(str_to_bool(str).map_err(|_| FromSqlError::from_text(str))?)
             }
             DataType::Int16 => {
                 Self::Int16(i16::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
@@ -931,7 +931,13 @@ impl ScalarImpl {
                 }
                 let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    if s.is_empty() {
+                        continue;
+                    } else if s.eq_ignore_ascii_case("null") {
+                        builder.append_null();
+                    } else {
+                        builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    }
                 }
                 Self::List(ListValue::new(builder.finish()))
             }
