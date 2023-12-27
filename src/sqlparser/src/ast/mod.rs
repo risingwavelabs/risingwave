@@ -327,6 +327,13 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    SimilarTo {
+        expr: Box<Expr>,
+        negated: bool,
+        pat: Box<Expr>,
+        esc_text: Option<Box<Expr>>,
+    },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
         left: Box<Expr>,
@@ -526,6 +533,24 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => {
+                write!(
+                    f,
+                    "{} {}SIMILAR TO {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pat,
+                )?;
+                if let Some(et) = esc_text {
+                    write!(f, "ESCAPE {}", et)?;
+                }
+                Ok(())
+            }
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
@@ -1023,9 +1048,13 @@ pub struct CdcTableInfo {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Statement {
     /// Analyze (Hive)
-    Analyze { table_name: ObjectName },
+    Analyze {
+        table_name: ObjectName,
+    },
     /// Truncate (Hive)
-    Truncate { table_name: ObjectName },
+    Truncate {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1100,6 +1129,8 @@ pub enum Statement {
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
+        /// `INCLUDE a AS b INCLUDE c`
+        include_column_options: Vec<(Ident, Option<Ident>)>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1113,11 +1144,17 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource { stmt: CreateSourceStatement },
+    CreateSource {
+        stmt: CreateSourceStatement,
+    },
     /// CREATE SINK
-    CreateSink { stmt: CreateSinkStatement },
+    CreateSink {
+        stmt: CreateSinkStatement,
+    },
     /// CREATE CONNECTION
-    CreateConnection { stmt: CreateConnectionStatement },
+    CreateConnection {
+        stmt: CreateConnectionStatement,
+    },
     /// CREATE FUNCTION
     ///
     /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
@@ -1213,6 +1250,7 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    ShowTransactionIsolationLevel,
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
     /// KILL COMMAND
@@ -1241,11 +1279,17 @@ pub enum Statement {
     /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    ShowVariable { variable: Vec<Ident> },
+    ShowVariable {
+        variable: Vec<Ident>,
+    },
     /// `START TRANSACTION ...`
-    StartTransaction { modes: Vec<TransactionMode> },
+    StartTransaction {
+        modes: Vec<TransactionMode>,
+    },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    Begin { modes: Vec<TransactionMode> },
+    Begin {
+        modes: Vec<TransactionMode>,
+    },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1268,9 +1312,13 @@ pub enum Statement {
         comment: Option<String>,
     },
     /// `COMMIT [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Commit { chain: bool },
+    Commit {
+        chain: bool,
+    },
     /// `ROLLBACK [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]`
-    Rollback { chain: bool },
+    Rollback {
+        chain: bool,
+    },
     /// CREATE SCHEMA
     CreateSchema {
         schema_name: ObjectName,
@@ -1301,11 +1349,17 @@ pub enum Statement {
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Deallocate { name: Ident, prepare: bool },
+    Deallocate {
+        name: Ident,
+        prepare: bool,
+    },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
     ///
     /// Note: this is a PostgreSQL-specific statement.
-    Execute { name: Ident, parameters: Vec<Expr> },
+    Execute {
+        name: Ident,
+        parameters: Vec<Expr>,
+    },
     /// `PREPARE name [ ( data_type [, ...] ) ] AS statement`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -1383,6 +1437,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
                 write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
+            Statement::ShowTransactionIsolationLevel => {
+                write!(f, "SHOW TRANSACTION ISOLATION LEVEL")?;
                 Ok(())
             }
             Statement::Insert {
@@ -1558,6 +1616,7 @@ impl fmt::Display for Statement {
                 append_only,
                 query,
                 cdc_table_info,
+                include_column_options,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1582,6 +1641,17 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+                if !include_column_options.is_empty() { // (Ident, Option<Ident>)
+                    write!(f, " INCLUDE {}", display_comma_separated(
+                        include_column_options.iter().map(|(a, b)| {
+                            if let Some(b) = b {
+                                format!("{} AS {}", a, b)
+                            } else {
+                                a.to_string()
+                            }
+                        }).collect_vec().as_slice()
+                    ))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;

@@ -469,7 +469,7 @@ where
                         &mut backfill_state,
                         #[cfg(debug_assertions)]
                         state_len,
-                        vnodes.iter_vnodes()
+                        vnodes.iter_vnodes(),
                     )
                     .await?;
 

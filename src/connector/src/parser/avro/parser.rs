@@ -60,12 +60,9 @@ impl AvroAccessBuilder {
         } = config;
         Ok(Self {
             schema: match encoding_type {
-                EncodingType::Key => key_schema.map_or(
-                    Err(RwError::from(ProtocolError(
-                        "Avro with empty key schema".to_string(),
-                    ))),
-                    Ok,
-                )?,
+                EncodingType::Key => key_schema.ok_or(RwError::from(ProtocolError(
+                    "Avro with empty key schema".to_string(),
+                )))?,
                 EncodingType::Value => schema,
             },
             schema_resolver,
@@ -305,6 +302,7 @@ mod test {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
+            key_builder: None,
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,
@@ -332,7 +330,10 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(input_data, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(input_data), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

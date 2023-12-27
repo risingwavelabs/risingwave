@@ -891,7 +891,8 @@ impl BatchPlanFragmenter {
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
-                    source_catalog.properties.clone().into_iter().collect(),
+                    source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
                 )?;
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {

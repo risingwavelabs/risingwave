@@ -16,12 +16,12 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
-#![feature(result_option_inspect)]
 #![feature(try_blocks)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
 mod macros;
+mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
@@ -57,6 +57,7 @@ use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing_slf4j::*;
 
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;

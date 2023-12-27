@@ -56,6 +56,9 @@ INTEGRATION_TEST_MAP = {
     "redis-sink-json": ["xinhao"],
     "big-query-sink-json": ["xinhao"],
     "vector-json": ["tao"],
+    "doris-sink": ["xinhao"],
+    "starrocks-sink": ["xinhao"],
+    "deltalake-sink": ["xinhao"],
 }
 
 def get_failed_tests(get_test_status, test_map):

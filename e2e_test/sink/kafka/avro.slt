@@ -1,5 +1,7 @@
 statement ok
-create table from_kafka with (
+create table from_kafka ( primary key (some_key) )
+include key as some_key
+with (
   connector = 'kafka',
   topic = 'test-rw-sink-upsert-avro',
   properties.bootstrap.server = 'message_queue:29092')

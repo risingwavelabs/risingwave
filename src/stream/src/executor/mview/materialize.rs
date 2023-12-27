@@ -85,16 +85,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) -> Self {
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
 
-        let state_table = if table_catalog.version.is_some() {
-            // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
-            // with the new version of serializer is the same as the old one, even if they can be
-            // decoded into the same value. The table is now performing consistency check on the raw
-            // bytes, so we need to turn off the check here. We may turn it on if we can compare the
-            // decoded row.
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
-        } else {
-            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
-        };
+        let state_table = StateTableInner::from_table_catalog(table_catalog, store, vnodes).await;
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");

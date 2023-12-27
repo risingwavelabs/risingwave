@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(result_option_inspect)]
-
 use std::ffi::c_void;
 
 use jni::sys::{jint, JNI_VERSION_1_2};

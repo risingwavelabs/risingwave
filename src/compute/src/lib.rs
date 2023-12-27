@@ -16,7 +16,6 @@
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(result_option_inspect)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(lazy_cell)]

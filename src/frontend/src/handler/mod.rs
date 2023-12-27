@@ -249,6 +249,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             cdc_table_info,
+            include_column_options,
         } => {
             if or_replace {
                 bail_not_implemented!("CREATE OR REPLACE TABLE");
@@ -278,6 +279,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
             )
             .await
         }
@@ -304,6 +306,9 @@ pub async fn handle(
         } => show::handle_show_object(handler_args, show_object, filter).await,
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
+        }
+        Statement::ShowTransactionIsolationLevel => {
+            transaction::handle_show_isolation_level(handler_args)
         }
         Statement::Drop(DropStatement {
             object_type,

@@ -233,6 +233,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         self.truncate_offset = offset;
         Ok(())
     }
+
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        Ok((false, None))
+    }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {

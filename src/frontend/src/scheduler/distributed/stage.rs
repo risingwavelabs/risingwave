@@ -24,7 +24,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::stream::Fuse;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
@@ -370,7 +370,12 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    Some(worker),
+                    expr_context.clone(),
+                ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -383,7 +388,12 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -394,16 +404,18 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         }
 
         // Await each future and convert them into a set of streams.
-        let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
-        let mut buffered_streams = vec![];
-        while let Some(result) = buffered.next().await {
-            buffered_streams.push(result?);
-        }
+        let buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        let buffered_streams = buffered.try_collect::<Vec<_>>().await?;
 
         // Merge different task streams into a single stream.
         let cancelled = pin!(shutdown_rx.cancelled());

@@ -18,27 +18,21 @@ use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use strum::EnumDiscriminants;
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(name(DdlType))]
+#[strum_discriminants(vis(pub))]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DdlType {
-    MaterializedView,
-    Sink,
-    Table,
-    Index,
-    Source,
 }
 
 #[cfg(test)]
@@ -48,18 +42,6 @@ impl Default for DdlType {
         // This should not be used by mock services,
         // so we can just pick an arbitrary default variant.
         DdlType::Table
-    }
-}
-
-impl From<&StreamingJob> for DdlType {
-    fn from(job: &StreamingJob) -> Self {
-        match job {
-            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
-            StreamingJob::Sink(_, _) => DdlType::Sink,
-            StreamingJob::Table(_, _, _) => DdlType::Table,
-            StreamingJob::Index(_, _) => DdlType::Index,
-            StreamingJob::Source(_) => DdlType::Source,
-        }
     }
 }
 
@@ -233,7 +215,7 @@ impl StreamingJob {
             Self::Sink(sink, _) => sink.properties.clone(),
             Self::Table(_, table, ..) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
-            Self::Source(source) => source.properties.clone(),
+            Self::Source(source) => source.with_properties.clone(),
         }
     }
 

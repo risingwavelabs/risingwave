@@ -65,6 +65,8 @@ message StreamSourceInfo {
   // Whether the stream source is a cdc source streaming job.
   // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
   bool cdc_source_job = 13;
+  // Options specified by user in the FORMAT ENCODE clause.
+  map<string, string> format_encode_options = 14;
 }
 
 message Source {
@@ -81,7 +83,7 @@ message Source {
   // specify a primary key, the vector will be empty.
   repeated int32 pk_column_ids = 7;
   // Properties specified by the user in WITH clause.
-  map<string, string> properties = 8;
+  map<string, string> with_properties = 8;
 
   uint32 owner = 9;
 
@@ -184,11 +186,14 @@ message Index {
   // Only `InputRef` type index is supported Now.
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
-  repeated int32 original_columns = 9;
+  reserved 9; // Deprecated repeated int32 original_columns = 9;
 
   optional uint64 initialized_at_epoch = 10;
   optional uint64 created_at_epoch = 11;
   StreamJobStatus stream_job_status = 12;
+
+  // Use to record the prefix len of the index_item to reconstruct index columns provided by users.
+  uint32 index_columns_len = 13;
 }
 
 message Function {
