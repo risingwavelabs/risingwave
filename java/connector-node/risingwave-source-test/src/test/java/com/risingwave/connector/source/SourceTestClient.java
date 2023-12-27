@@ -130,7 +130,7 @@ public class SourceTestClient {
         String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
         ConnectorServiceProto.GetEventStreamRequest req =
                 ConnectorServiceProto.GetEventStreamRequest.newBuilder()
-                        .setSourceId(0)
+                        .setSourceId(1005)
                         .setSourceType(sourceType)
                         .setStartOffset("")
                         .putProperties("hostname", container.getHost())

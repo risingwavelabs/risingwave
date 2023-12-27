@@ -16,8 +16,8 @@ use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
-use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_frontend::expr::cast_sigs;
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
 use crate::sql_gen::types::data_type_to_ast_data_type;

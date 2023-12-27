@@ -482,6 +482,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }
         self.rx.rewind();
 
-        Ok((true, Some(self.serde.vnodes().clone())))
+        Ok((true, Some((**self.serde.vnodes()).clone())))
     }
 }

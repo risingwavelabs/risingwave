@@ -41,7 +41,7 @@ public class DbzSourceUtils {
     }
 
     private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
-        int maxPollCount = 10;
+        int maxPollCount = 11; // max poll 10 seconds
         while (!isStreamingRunning(connector, dbServerName, "streaming")) {
             maxPollCount--;
             if (maxPollCount == 0) {
