@@ -49,6 +49,8 @@ impl SomeAllExpression {
         }
     }
 
+    // Notice that this function may not exhaust the iterator,
+    // so never pass an iterator created `by_ref`.
     fn resolve_bools(&self, bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
         match self.expr_type {
             Type::Some => {
