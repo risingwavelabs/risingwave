@@ -4,6 +4,7 @@ package ddl_service;
 
 import "catalog.proto";
 import "common.proto";
+import "meta.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -216,6 +217,13 @@ message AlterSetSchemaResponse {
   uint64 version = 2;
 }
 
+message AlterParallelismRequest {
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
+}
+
+message AlterParallelismResponse {}
+
 message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
@@ -401,6 +409,7 @@ service DdlService {
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
+  rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
