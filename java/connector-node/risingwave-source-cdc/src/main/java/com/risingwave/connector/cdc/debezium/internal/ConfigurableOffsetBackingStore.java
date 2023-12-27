@@ -18,18 +18,22 @@
 
 package com.risingwave.connector.cdc.debezium.internal;
 
+import io.debezium.config.Instantiator;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.json.JsonConverter;
+import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.OffsetBackingStore;
@@ -81,12 +85,13 @@ public class ConfigurableOffsetBackingStore implements OffsetBackingStore {
         }
 
         String engineName = (String) conf.get(EmbeddedEngine.ENGINE_NAME.name());
-        Converter keyConverter = new JsonConverter();
+        Map<String, String> converterConfig =
+                Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false");
+
+        Converter keyConverter = Instantiator.getInstance(JsonConverter.class.getName());
+        keyConverter.configure(converterConfig, true);
         Converter valueConverter = new JsonConverter();
-        keyConverter.configure(config.originals(), true);
-        Map<String, Object> valueConfigs = new HashMap<>(conf);
-        valueConfigs.put("schemas.enable", false);
-        valueConverter.configure(valueConfigs, true);
+        valueConverter.configure(converterConfig, true);
         OffsetStorageWriter offsetWriter =
                 new OffsetStorageWriter(
                         this,
@@ -194,5 +199,10 @@ public class ConfigurableOffsetBackingStore implements OffsetBackingStore {
                     }
                     return null;
                 });
+    }
+
+    @Override
+    public Set<Map<String, Object>> connectorPartitions(String connectorName) {
+        return null;
     }
 }
