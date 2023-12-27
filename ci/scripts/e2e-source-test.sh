@@ -84,16 +84,18 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
+echo "> inserted new rows into mysql"
+
 psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
-echo "inserted new rows into mysql and postgres"
+echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="info,events::stream::message::chunk=trace,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
 cargo make dev ci-1cn-1fe-with-recovery
-echo "wait for cluster recovery finish"
-sleep 20
-echo "check mviews after cluster recovery"
+echo "> wait for cluster recovery finish"
+sleep 25
+echo "> check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
