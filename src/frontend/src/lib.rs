@@ -145,7 +145,7 @@ impl risingwave_common::opts::Opts for FrontendOpts {
     }
 
     fn meta_addr(&self) -> &str {
-        &self.meta_addr.trim_start_matches("http://")
+        self.meta_addr.trim_start_matches("http://")
     }
 }
 
