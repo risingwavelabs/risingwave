@@ -323,7 +323,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will
             // report `0`. To ignore the inconsistent, we set `curr_row_count` to `0` here, so that `OnlyOutputIfHasInput`
             // will return no change, so that the inconsistent will be hidden from downstream. This won't prevent from
-            // incorrect results of existing groups, but at lease can prevent from downstream panicking due to non-existing
+            // incorrect results of existing groups, but at least can prevent from downstream panicking due to non-existing
             // keys.
             row_count = 0;
         }
