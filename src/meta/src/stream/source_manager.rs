@@ -81,12 +81,13 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_source(
-    source: &Source,
-    deny_unknown_fields: bool,
-) -> MetaResult<ConnectorProperties> {
-    let mut properties =
-        ConnectorProperties::extract(source.with_properties.clone(), deny_unknown_fields)?;
+fn extract_prop_from_existing_source(source: &Source) -> MetaResult<ConnectorProperties> {
+    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+    properties.init_from_pb_source(source);
+    Ok(properties)
+}
+fn extract_prop_from_new_source(source: &Source) -> MetaResult<ConnectorProperties> {
+    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
@@ -719,7 +720,7 @@ impl SourceManager {
         let current_splits_ref = splits.clone();
         let source_id = source.id;
 
-        let connector_properties = extract_prop_from_source(&source, false)?;
+        let connector_properties = extract_prop_from_existing_source(&source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
@@ -779,7 +780,7 @@ impl SourceManager {
         let current_splits_ref = splits.clone();
         let source_id = source.id;
 
-        let connector_properties = extract_prop_from_source(source, true)?;
+        let connector_properties = extract_prop_from_new_source(source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {

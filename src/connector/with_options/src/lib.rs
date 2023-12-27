@@ -17,7 +17,8 @@ use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
 /// Annotates that the struct represents the `WITH` properties for a connector.
-/// This is a dummy marker that has no effect on the generated code. It's used to generate the `with_option_*.yaml` files.
+/// This implements a marker trait `WithOptions`.
+/// It's also used to generate the `with_option_*.yaml` files.
 ///
 /// ## Notes about how to define property structs
 ///
@@ -28,11 +29,6 @@ use syn::{parse_macro_input, DeriveInput};
 ///
 /// The only exception now is CDC, which needs to pass a lot of options as-is to Debezium.
 ///
-/// ### `serde` attributes
-///
-/// Always add `#[serde(deny_unknown_fields)]` to the top-level struct.
-/// However, do not add it if there's a `HashMap` field with `#[serde(flatten)]`.
-///
 /// ### Common struct
 ///
 /// When there are some fields can be grouped together, and/or can be shared by source and sink,
@@ -42,7 +38,7 @@ use syn::{parse_macro_input, DeriveInput};
 /// Add `#[derive(WithOptions)]` to both the outer and the inner struct.
 ///
 /// Avoid using nested `#[serde(flatten)]` field in the common struct,
-/// because this doesn't work with `#[serde(deny_unknown_fields)]`.
+/// because this will lead to unexpected serde behaviors.
 /// Put all flatten fields in the top-level struct instead.
 #[proc_macro_derive(WithOptions, attributes(with_option))]
 pub fn derive_helper_attr(input: TokenStream) -> TokenStream {
