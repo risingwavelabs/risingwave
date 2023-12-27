@@ -26,3 +26,7 @@ export function IconArrowRightCircle() {
 export function IconArrowRightCircleFill() {
   return <i className="bi bi-arrow-right-circle-fill"></i>
 }
+
+export function IconBoxArrowUpRight() {
+  return <i className="bi bi-box-arrow-up-right"></i>
+}
