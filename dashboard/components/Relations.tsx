@@ -105,7 +105,7 @@ export const primaryKeyColumn: Column<RwTable> = {
 export const connectorColumnSource: Column<RwSource> = {
   name: "Connector",
   width: 3,
-  content: (r) => r.properties.connector ?? "unknown",
+  content: (r) => r.withProperties.connector ?? "unknown",
 }
 
 export const connectorColumnSink: Column<RwSink> = {
