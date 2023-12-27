@@ -603,7 +603,7 @@ mod tests {
     use futures::stream::StreamExt;
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
     use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
@@ -1458,6 +1458,14 @@ mod tests {
             StreamChunkBuilder::new(chunk_size, vec![DataType::Int32, DataType::Int32]);
         let mut rng = SmallRng::seed_from_u64(SEED);
 
+        let random_vis = |c: StreamChunk, rng: &mut SmallRng| -> StreamChunk {
+            let len = c.data_chunk().capacity();
+            let mut c = StreamChunkMut::from(c);
+            for i in 0..len {
+                c.set_vis(i, rng.gen_bool(0.5));
+            }
+            c.into()
+        };
         for _ in 0..row_number {
             let k = (rng.next_u32() % KN) as i32;
             let v = rng.next_u32() as i32;
@@ -1469,11 +1477,11 @@ mod tests {
             if let Some(c) =
                 builder.append_row(op, OwnedRow::new(vec![Some(k.into()), Some(v.into())]))
             {
-                ret.push(c);
+                ret.push(random_vis(c, &mut rng));
             }
         }
         if let Some(c) = builder.take() {
-            ret.push(c);
+            ret.push(random_vis(c, &mut rng));
         }
         ret
     }
