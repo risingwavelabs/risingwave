@@ -1181,10 +1181,6 @@ impl FragmentManager {
 
             let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
-            if let Some(parallelism) = table_parallelism_assignment.get(&table_id) {
-                table_fragment.assigned_parallelism = *parallelism;
-            }
-
             for (fragment_id, reschedule) in reschedules {
                 let Reschedule {
                     added_actors,
@@ -1330,6 +1326,12 @@ impl FragmentManager {
                         }
                     }
                 }
+            }
+        }
+
+        for (table_id, parallelism) in table_parallelism_assignment {
+            if let Some(mut table) = table_fragments.get_mut(table_id) {
+                table.assigned_parallelism = parallelism;
             }
         }
 

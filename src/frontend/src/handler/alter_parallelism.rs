@@ -16,7 +16,7 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
-use risingwave_pb::meta::PbTableParallelism;
+use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
 
@@ -61,11 +61,22 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.
+    let target_parallelism = extract_table_parallelism(parallelism)?;
+
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .alter_parallelism(table_id, target_parallelism)
+        .await?;
+
+    Ok(RwPgResponse::empty_result(stmt_type))
+}
+
+fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
     let auto_parallelism = PbTableParallelism {
         parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
     };
 
+    // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.
     let target_parallelism = match parallelism {
         SetVariableValue::Single(SetVariableValueSingle::Ident(ident))
             if ident
@@ -103,10 +114,5 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_parallelism(table_id, target_parallelism)
-        .await?;
-
-    Ok(RwPgResponse::empty_result(stmt_type))
+    Ok(target_parallelism)
 }

@@ -737,10 +737,6 @@ impl GlobalStreamManager {
             })
             .await?;
 
-        if reschedules.is_empty() {
-            return Ok(());
-        }
-
         self.reschedule_actors(
             reschedules,
             RescheduleOptions {

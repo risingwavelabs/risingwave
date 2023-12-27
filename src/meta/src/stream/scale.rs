@@ -1755,7 +1755,7 @@ impl ScaleController {
                             continue;
                         }
 
-                        let units = rebalance_units(&worker_parallel_units, 1, table_id)?;
+                        let units = schedule_units_for_slots(&worker_parallel_units, 1, table_id)?;
 
                         let chosen_target_parallel_unit_id = units
                             .values()
@@ -1799,7 +1799,7 @@ impl ScaleController {
                             }
 
                             let rebalance_result =
-                                rebalance_units(&worker_parallel_units, n, table_id)?;
+                                schedule_units_for_slots(&worker_parallel_units, n, table_id)?;
 
                             let target_parallel_unit_ids =
                                 rebalance_result.into_values().flatten().collect();
@@ -2584,7 +2584,7 @@ impl GlobalStreamManager {
 // We redistribute parallel units (which will be ensembles in the future) through a simple consistent hashing ring.
 // Note that we have added some simple logic here to ensure the consistency of the ratio between each slot,
 // especially when equal division is needed.
-pub fn rebalance_units(
+pub fn schedule_units_for_slots(
     slots: &BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,
     salt: u32,
