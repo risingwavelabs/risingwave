@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use prost::Message;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::HummockVersionDelta;
+use risingwave_pb::hummock::PbHummockVersionDelta;
 
 use crate::hummock::model::HUMMOCK_VERSION_DELTA_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
@@ -22,22 +23,22 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `HummockVersionDelta` tracks delta of `Sstables` in given version based on previous version.
 impl MetadataModel for HummockVersionDelta {
     type KeyType = HummockVersionId;
-    type PbType = HummockVersionDelta;
+    type PbType = PbHummockVersionDelta;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_VERSION_DELTA_CF_NAME)
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        self.clone()
+        self.to_protobuf()
     }
 
     fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.encode_to_vec()
+        self.to_protobuf().encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        prost
+        Self::from_persisted_protobuf(&prost)
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {
