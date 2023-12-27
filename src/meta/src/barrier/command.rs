@@ -938,7 +938,6 @@ impl CommandContext {
                     MetadataManager::V2(mgr) => {
                         mgr.catalog_controller
                             .post_collect_table_fragments(
-                                &table_fragments.table_id(),
                                 table_fragments.actor_ids(),
                                 dispatchers.clone(),
                                 init_split_assignment,

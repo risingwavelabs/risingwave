@@ -18,9 +18,12 @@ use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use thiserror_ext::AsReport;
 
-use crate::controller::catalog::CatalogController;
-use crate::manager::{MetadataManager, NotificationVersion, StreamingJob};
+use crate::manager::{
+    MetadataManager, MetadataManagerV2, NotificationVersion, StreamingJob,
+    IGNORED_NOTIFICATION_VERSION,
+};
 use crate::model::{MetadataModel, StreamContext};
 use crate::rpc::ddl_controller::{fill_table_stream_graph_info, DdlController};
 use crate::stream::{validate_sink, StreamFragmentGraph};
@@ -29,22 +32,20 @@ use crate::MetaResult;
 impl DdlController {
     pub async fn create_streaming_job_v2(
         &self,
-        mut stream_job: StreamingJob,
+        mut streaming_job: StreamingJob,
         mut fragment_graph: StreamFragmentGraphProto,
-        create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V2(mgr) = &self.metadata_manager else {
             unreachable!("MetadataManager should be V2")
         };
+        let job_id = streaming_job.id();
 
-        // TODO: add revert function to clean metadata from db if failed.
-        // create catalogs for streaming jobs.
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut stream_job, create_type, &ctx)
+            .create_job_catalog(&mut streaming_job, &ctx)
             .await?;
 
-        match &mut stream_job {
+        match &mut streaming_job {
             StreamingJob::Table(Some(src), table, job_type) => {
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
@@ -63,9 +64,9 @@ impl DdlController {
         }
 
         tracing::debug!(
-            id = stream_job.id(),
-            definition = stream_job.definition(),
-            "starting stream job",
+            id = job_id,
+            definition = streaming_job.definition(),
+            "starting streaming job",
         );
         let _permit = self
             .creating_streaming_job_permits
@@ -75,27 +76,59 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
-        // build streaming graph.
+        // create streaming job.
+        match self
+            .create_streaming_job_inner_v2(mgr, ctx, &mut streaming_job, fragment_graph)
+            .await
+        {
+            Ok(version) => Ok(version),
+            Err(err) => {
+                tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
+                let aborted = mgr
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(job_id as _)
+                    .await?;
+                if aborted {
+                    tracing::warn!(id = job_id, "aborted streaming job");
+                    match &streaming_job {
+                        StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => {
+                            self.source_manager.unregister_sources(vec![src.id]).await;
+                        }
+                        _ => {}
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn create_streaming_job_inner_v2(
+        &self,
+        mgr: &MetadataManagerV2,
+        ctx: StreamContext,
+        streaming_job: &mut StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+    ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, &stream_job).await?;
-        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+            StreamFragmentGraph::new(&self.env, fragment_graph, streaming_job).await?;
+        streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
         // create internal table catalogs and refill table id.
         let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
         let table_id_map = mgr
             .catalog_controller
-            .create_internal_table_catalog(stream_job.id() as _, internal_tables)
+            .create_internal_table_catalog(streaming_job.id() as _, internal_tables)
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
         // create fragment and actor catalogs.
-        tracing::debug!(id = stream_job.id(), "building stream job");
+        tracing::debug!(id = streaming_job.id(), "building streaming job");
         let (ctx, table_fragments) = self
-            .build_stream_job(ctx, &stream_job, fragment_graph, None)
+            .build_stream_job(ctx, &streaming_job, fragment_graph, None)
             .await?;
 
-        match &stream_job {
+        match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 Self::validate_cdc_table(table, &table_fragments).await?;
             }
@@ -117,31 +150,47 @@ impl DdlController {
             _ => {}
         }
 
-        let fragment_actors = CatalogController::extract_fragment_and_actors_from_table_fragments(
-            table_fragments.to_protobuf(),
-        )?;
         mgr.catalog_controller
-            .create_fragment_actors(fragment_actors)
+            .prepare_streaming_job(table_fragments.to_protobuf(), streaming_job)
             .await?;
 
-        // update fragment id and dml fragment id.
-        mgr.catalog_controller
-            .update_fragment_id_in_table(&stream_job)
-            .await?;
-
-        // TODO: check if the job is in background mode.
         // create streaming jobs.
-        self.stream_manager
-            .create_streaming_job(table_fragments, ctx)
-            .await?;
-
-        // finish the job.
-        let version = mgr
-            .catalog_controller
-            .finish_streaming_job(stream_job.id() as _)
-            .await?;
-        tracing::debug!(id = stream_job.id(), "finished stream job");
-
-        Ok(version)
+        let stream_job_id = streaming_job.id();
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
+                self.stream_manager
+                    .create_streaming_job(table_fragments, ctx)
+                    .await?;
+                // TODO: should retry until success.
+                let version = mgr
+                    .catalog_controller
+                    .finish_streaming_job(stream_job_id as _)
+                    .await?;
+                Ok(version)
+            }
+            CreateType::Background => {
+                let ctrl = self.clone();
+                let mgr = mgr.clone();
+                let fut = async move {
+                    let result = ctrl
+                        .stream_manager
+                        .create_streaming_job(table_fragments, ctx)
+                        .await.inspect_err(|err| {
+                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
+                        });
+                    if result.is_ok() {
+                        // TODO: should retry until success.
+                        let _ = mgr
+                            .catalog_controller
+                            .finish_streaming_job(stream_job_id as _)
+                            .await.inspect_err(|err| {
+                                tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
+                            });
+                    }
+                };
+                tokio::spawn(fut);
+                Ok(IGNORED_NOTIFICATION_VERSION)
+            }
+        }
     }
 }

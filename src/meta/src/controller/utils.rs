@@ -657,12 +657,14 @@ where
         .all(db)
         .await?;
 
-    Ok(actor_dispatchers
-        .into_iter()
-        .group_by(|actor_dispatcher| actor_dispatcher.actor_id)
-        .into_iter()
-        .map(|(actor_id, actor_dispatcher)| (actor_id, actor_dispatcher.collect()))
-        .collect())
+    let mut actor_dispatchers_map = HashMap::new();
+    for actor_dispatcher in actor_dispatchers {
+        actor_dispatchers_map
+            .entry(actor_dispatcher.actor_id)
+            .or_insert_with(Vec::new)
+            .push(actor_dispatcher);
+    }
+    Ok(actor_dispatchers_map)
 }
 
 /// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.

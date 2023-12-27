@@ -449,23 +449,12 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        // get all fragment mappings.
-        let mut fragment_mappings = vec![];
-        for job_id in &creating_job_ids {
-            let mappings = get_fragment_mappings(&txn, *job_id).await?;
-            fragment_mappings.extend(mappings);
-        }
-
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(creating_job_ids.clone()))
             .exec(&txn)
             .await?;
         assert!(res.rows_affected > 0);
         txn.commit().await?;
-
-        // notify delete of fragment mappings.
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
 
         Ok(ReleaseContext {
             streaming_jobs: creating_job_ids,
@@ -587,8 +576,11 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
+        let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
         txn.commit().await?;
 
+        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+            .await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Add,

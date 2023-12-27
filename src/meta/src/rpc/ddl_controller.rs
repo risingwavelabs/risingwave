@@ -637,7 +637,7 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             return self
-                .create_streaming_job_v2(stream_job, fragment_graph, create_type)
+                .create_streaming_job_v2(stream_job, fragment_graph)
                 .await;
         };
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;

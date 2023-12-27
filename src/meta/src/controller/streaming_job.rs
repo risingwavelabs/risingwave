@@ -15,18 +15,17 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, ObjectDependency, Table};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Object, ObjectDependency, Table};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, index, object_dependency, sink, source, streaming_job,
-    table, ActorId, DatabaseId, JobStatus, ObjectId, SchemaId, UserId,
+    actor, actor_dispatcher, index, object_dependency, sink, source, streaming_job, table, ActorId,
+    CreateType, DatabaseId, JobStatus, ObjectId, SchemaId, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
-use risingwave_pb::meta::subscribe_response::Operation as NotificationOperation;
+use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
 use sea_orm::sea_query::SimpleExpr;
@@ -37,9 +36,7 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::controller::utils::{
-    check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_mappings,
-};
+use crate::controller::utils::{check_relation_name_duplicate, ensure_object_id, ensure_user_id};
 use crate::manager::StreamingJob;
 use crate::model::StreamContext;
 use crate::stream::SplitAssignment;
@@ -58,7 +55,7 @@ impl CatalogController {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
             job_id: Set(obj.oid),
-            job_status: Set(JobStatus::Creating),
+            job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone.clone()),
         };
@@ -70,11 +67,12 @@ impl CatalogController {
     pub async fn create_job_catalog(
         &self,
         streaming_job: &mut StreamingJob,
-        create_type: PbCreateType,
         ctx: &StreamContext,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let create_type = streaming_job.create_type();
+
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
         ensure_object_id(ObjectType::Schema, streaming_job.schema_id() as _, &txn).await?;
@@ -245,19 +243,18 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub async fn create_fragment_actors(
+    pub async fn prepare_streaming_job(
         &self,
-        fragment_actors: Vec<(
-            fragment::Model,
-            Vec<actor::Model>,
-            HashMap<ActorId, Vec<actor_dispatcher::Model>>,
-        )>,
+        table_fragment: PbTableFragments,
+        streaming_job: &StreamingJob,
     ) -> MetaResult<()> {
+        let fragment_actors =
+            Self::extract_fragment_and_actors_from_table_fragments(table_fragment)?;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Add fragments, actors and actor dispatchers.
         for (fragment, actors, actor_dispatchers) in fragment_actors {
-            // TODO: check if into_active_models works or not.
             let fragment = fragment.into_active_model();
             fragment.insert(&txn).await?;
             for actor in actors {
@@ -272,17 +269,8 @@ impl CatalogController {
                 }
             }
         }
-        txn.commit().await?;
 
-        Ok(())
-    }
-
-    pub async fn update_fragment_id_in_table(
-        &self,
-        streaming_job: &StreamingJob,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        // Update fragment id and dml fragment id.
         match streaming_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
@@ -306,14 +294,56 @@ impl CatalogController {
             .exec(&txn)
             .await?;
         }
+
+        // Mark job as CREATING.
+        streaming_job::ActiveModel {
+            job_id: Set(streaming_job.id() as _),
+            job_status: Set(JobStatus::Creating),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
         txn.commit().await?;
 
         Ok(())
     }
 
+    /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
+    /// It returns true if the job is not found or aborted.
+    pub async fn try_abort_creating_streaming_job(&self, job_id: ObjectId) -> MetaResult<bool> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
+        let Some(streaming_job) = streaming_job else {
+            tracing::warn!(
+                id = job_id,
+                "streaming job not found when aborting creating"
+            );
+            return Ok(true);
+        };
+
+        assert_ne!(streaming_job.job_status, JobStatus::Created);
+        if streaming_job.create_type == CreateType::Background
+            && streaming_job.job_status == JobStatus::Creating
+        {
+            // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
+            tracing::warn!(
+                id = job_id,
+                "streaming job is created in background and still in creating status"
+            );
+            return Ok(false);
+        }
+
+        Object::delete_by_id(job_id).exec(&txn).await?;
+        txn.commit().await?;
+
+        Ok(true)
+    }
+
     pub async fn post_collect_table_fragments(
         &self,
-        table_id: &TableId,
         actor_ids: Vec<crate::model::ActorId>,
         new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<Dispatcher>>,
         split_assignment: &SplitAssignment,
@@ -362,12 +392,7 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
         }
-
-        let fragment_mapping = get_fragment_mappings(&txn, table_id.table_id as _).await?;
         txn.commit().await?;
-
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
 
         Ok(())
     }
