@@ -2964,6 +2964,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "delta_btree_map"
+version = "1.5.0-alpha"
+dependencies = [
+ "enum-as-inner",
+]
+
+[[package]]
 name = "deltalake"
 version = "0.17.0"
 source = "git+https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4640490202ffe98adbd13b09cef8e007b"
@@ -9384,6 +9391,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
+ "delta_btree_map",
  "educe 0.5.7",
  "either",
  "enum-as-inner",
