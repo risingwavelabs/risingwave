@@ -8275,6 +8275,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_common_delta_btree_map"
+version = "1.5.0-alpha"
+dependencies = [
+ "enum-as-inner",
+]
+
+[[package]]
 name = "risingwave_common_heap_profiling"
 version = "1.5.0-alpha"
 dependencies = [
@@ -9407,6 +9414,7 @@ dependencies = [
  "prost 0.12.1",
  "rand",
  "risingwave_common",
+ "risingwave_common_delta_btree_map",
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_expr_impl",

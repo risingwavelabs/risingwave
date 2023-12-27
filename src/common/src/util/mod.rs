@@ -18,7 +18,6 @@ pub mod addr;
 pub mod chunk_coalesce;
 pub mod column_index_mapping;
 pub mod compress;
-pub mod delta_btree_map;
 pub mod deployment;
 pub mod env_var;
 pub mod epoch;

@@ -9,6 +9,7 @@ members = [
   "src/common/common_service",
   "src/common/fields-derive",
   "src/common/heap_profiling",
+  "src/common/delta_btree_map",
   "src/compute",
   "src/connector",
   "src/ctl",
@@ -151,6 +152,7 @@ risingwave_cmd = { path = "./src/cmd" }
 risingwave_common = { path = "./src/common" }
 risingwave_common_service = { path = "./src/common/common_service" }
 risingwave_common_heap_profiling = { path = "./src/common/heap_profiling" }
+risingwave_common_delta_btree_map = { path = "./src/common/delta_btree_map" }
 risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }

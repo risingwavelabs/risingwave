@@ -25,10 +25,10 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
-use risingwave_common::util::delta_btree_map::{Change, PositionType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_delta_btree_map::{Change, PositionType};
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
