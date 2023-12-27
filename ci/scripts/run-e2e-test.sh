@@ -146,7 +146,7 @@ fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" TTT="1" \
     cargo make ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'

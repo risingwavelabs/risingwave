@@ -1298,9 +1298,17 @@ echo RiseDev installed to $(tput setaf 4)${INSTALL_PATH}$(tput sgr0)
 echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(tput sgr0) to something like $(tput setaf 4)r+$(tput sgr0).
 """
 
-[tasks.ci-start]
+[tasks.ci-check]
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
+script = """
+echo $RUST_LOG
+echo $TTT
+"""
+
+[tasks.ci-start]
+category = "RiseDev - CI"
+dependencies = ["ci-check", "clean-data", "pre-start-dev"]
 command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
