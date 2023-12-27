@@ -166,6 +166,15 @@ impl CatalogController {
                 index.id = job_id as _;
                 index.index_table_id = job_id as _;
                 table.id = job_id as _;
+
+                object_dependency::ActiveModel {
+                    oid: Set(index.primary_table_id as _),
+                    used_by: Set(table.id as _),
+                    ..Default::default()
+                }
+                .insert(&txn)
+                .await?;
+
                 let table: table::ActiveModel = table.clone().into();
                 table.insert(&txn).await?;
                 let index: index::ActiveModel = index.clone().into();

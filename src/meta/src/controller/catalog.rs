@@ -27,7 +27,7 @@ use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source,
     streaming_job, table, user_privilege, view, ColumnCatalogArray, ConnectionId, CreateType,
     DatabaseId, FunctionId, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SourceId, TableId, UserId,
+    SourceId, StreamSourceInfo, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -39,7 +39,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments, Relation, RelationGroup};
+use risingwave_pb::meta::{PbRelation, PbRelationGroup};
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -597,15 +597,6 @@ impl CatalogController {
             .await;
 
         Ok(version)
-    }
-
-    pub fn create_stream_job(
-        &self,
-        _stream_job: &StreamingJob,
-        _table_fragments: &PbTableFragments,
-        _internal_tables: Vec<PbTable>,
-    ) -> MetaResult<()> {
-        todo!()
     }
 
     pub async fn create_source(
@@ -1320,10 +1311,10 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 Operation::Update,
-                Info::RelationGroup(RelationGroup {
+                Info::RelationGroup(PbRelationGroup {
                     relations: relations
                         .into_iter()
-                        .map(|relation_info| Relation {
+                        .map(|relation_info| PbRelation {
                             relation_info: Some(relation_info),
                         })
                         .collect_vec(),
@@ -1431,8 +1422,24 @@ impl CatalogController {
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
             .map(|obj| obj.oid)
             .collect_vec();
+
+        // cdc source streaming job.
+        if object_type == ObjectType::Source {
+            let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
+                .select_only()
+                .column(source::Column::SourceInfo)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
+            if let Some(source_info) = source_info
+                && source_info.into_inner().cdc_source_job
+            {
+                to_drop_streaming_jobs.push(object_id);
+            }
+        }
+
         let mut to_drop_state_table_ids = to_drop_table_ids.clone().collect_vec();
-        // todo: record index dependency info in the object dependency table.
         let to_drop_index_ids = to_drop_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Index)
