@@ -90,7 +90,8 @@ psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 echo "> inserted new rows into postgres"
 
 # start cluster w/o clean-data
-RUST_LOG="info,events::stream::message::chunk=trace,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+unset RISINGWAVE_CI
+export RUST_LOG="events::stream::message::chunk=trace,risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info" \
 
 cargo make dev ci-1cn-1fe-with-recovery
 echo "> wait for cluster recovery finish"
@@ -106,6 +107,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
+export RISINGWAVE_CI=true
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
