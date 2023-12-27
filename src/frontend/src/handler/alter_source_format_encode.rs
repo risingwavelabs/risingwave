@@ -59,13 +59,17 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
     })
 }
 
+/// Returns the columns in `columns_a` but not in `columns_b`,
+/// where the comparison is done by name and data type,
+/// and hidden columns are ignored.
 fn columns_diff(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
     columns_a
         .iter()
         .filter(|col_a| {
-            !columns_b
-                .iter()
-                .any(|col_b| col_a.column_desc.name == col_b.column_desc.name)
+            !col_a.is_hidden()
+                && !columns_b.iter().any(|col_b| {
+                    col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
+                })
         })
         .cloned()
         .collect()
@@ -156,18 +160,12 @@ pub async fn handle_alter_source_format_encode(
     let added_columns = columns_diff(&columns_from_resolve_source, &source.columns);
     let dropped_columns = columns_diff(&source.columns, &columns_from_resolve_source);
 
-    if dropped_columns
-        .iter()
-        .filter(|col| !col.column_desc.name.starts_with('_'))
-        .peekable()
-        .peek()
-        .is_some()
-    {
+    if !dropped_columns.is_empty() {
         bail_not_implemented!(
-            "this altering will drop columns, which is not supported yet: {}",
+            "this altering statement will drop columns, which is not supported yet: {}",
             dropped_columns
                 .iter()
-                .map(|col| col.column_desc.name.clone())
+                .map(|col| format!("({}: {})", col.name(), col.data_type()))
                 .join(", ")
         );
     }
@@ -266,7 +264,18 @@ pub mod tests {
             )"#,
             proto_file.path().to_str().unwrap()
         );
-        assert!(frontend.run_sql(sql).await.is_err());
+        assert!(frontend.run_sql(sql).await.unwrap_err().to_string().contains("the original definition is FORMAT Plain ENCODE Protobuf"));
+
+        let sql = format!(
+            r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
+                message = '.test.TestRecordAlterType',
+                schema.location = 'file://{}'
+            )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let res_str = frontend.run_sql(sql).await.unwrap_err().to_string();
+        assert!(res_str.contains("id: integer"));
+        assert!(res_str.contains("zipcode: bigint"));
 
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (

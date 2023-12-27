@@ -975,6 +975,12 @@ pub static PROTO_FILE_DATA: &str = r#"
       int64 zipcode = 4;
       float rate = 5;
     }
+    message TestRecordAlterType {
+        string id = 1;
+        Country country = 3;
+        int32 zipcode = 4;
+        float rate = 5;
+      }
     message TestRecordExt {
       int32 id = 1;
       Country country = 3;
