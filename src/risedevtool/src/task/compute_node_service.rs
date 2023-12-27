@@ -86,6 +86,10 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
+        if let Ok(rust_log) = std::env::var("RUST_LOG") && !rust_log.is_empty() {
+            cmd.env("RUST_LOG", rust_log);
+        }
+
         cmd.env("RUST_BACKTRACE", "1").env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),

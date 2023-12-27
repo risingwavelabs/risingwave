@@ -93,6 +93,10 @@ impl Task for FrontendService {
 
         let mut cmd = self.frontend()?;
 
+        if let Ok(rust_log) = std::env::var("RUST_LOG") && !rust_log.is_empty() {
+            cmd.env("RUST_LOG", rust_log);
+        }
+
         cmd.env("RUST_BACKTRACE", "1");
 
         let prefix_config = env::var("PREFIX_CONFIG")?;

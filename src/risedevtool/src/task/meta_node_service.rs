@@ -172,6 +172,10 @@ impl Task for MetaNodeService {
 
         let mut cmd = self.meta_node()?;
 
+        if let Ok(rust_log) = std::env::var("RUST_LOG") && !rust_log.is_empty() {
+            cmd.env("RUST_LOG", rust_log);
+        }
+
         cmd.env("RUST_BACKTRACE", "1");
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
