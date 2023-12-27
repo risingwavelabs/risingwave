@@ -40,7 +40,6 @@ use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,

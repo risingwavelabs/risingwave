@@ -749,7 +749,7 @@ mod tests {
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         RelationIdEnum, StreamingClusterInfo,
     };
-    use crate::model::{ActorId, FragmentId};
+    use crate::model::{ActorId, FragmentId, TableParallelism};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::stream::SourceManager;
@@ -1029,6 +1029,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
+                TableParallelism::Auto,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,
