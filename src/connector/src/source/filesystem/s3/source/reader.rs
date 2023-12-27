@@ -36,11 +36,13 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
     StreamChunkWithState,
 };
+
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
@@ -221,10 +223,7 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)

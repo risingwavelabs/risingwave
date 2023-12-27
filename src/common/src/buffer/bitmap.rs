@@ -293,7 +293,6 @@ impl Bitmap {
     /// Creates a new bitmap from a slice of `bool`.
     pub fn from_bool_slice(bools: &[bool]) -> Self {
         // use SIMD to speed up
-        use std::simd::ToBitMask;
         let mut iter = bools.array_chunks::<BITS>();
         let mut bits = Vec::with_capacity(Self::vec_len(bools.len()));
         for chunk in iter.by_ref() {

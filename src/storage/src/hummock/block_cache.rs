@@ -200,16 +200,17 @@ impl BlockCache {
     {
         let h = Self::hash(object_id, block_idx);
         let key = (object_id, block_idx);
-        match self
-            .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
-                let f = fetch_block();
-                async move {
-                    let block = f.await?;
-                    let len = block.capacity();
-                    Ok((block, len))
-                }
-            }) {
+        let lookup_response =
+            self.inner
+                .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
+                    let f = fetch_block();
+                    async move {
+                        let block = f.await?;
+                        let len = block.capacity();
+                        Ok((block, len))
+                    }
+                });
+        match lookup_response {
             LookupResponse::Invalid => unreachable!(),
             LookupResponse::Cached(entry) => {
                 BlockResponse::Block(BlockHolder::from_cached_block(entry))

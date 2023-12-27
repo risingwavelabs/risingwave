@@ -137,12 +137,8 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties: HashMap<String, String> = table_desc
-            .connect_properties
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v))
-            .collect();
+        let properties: HashMap<String, String> =
+            table_desc.connect_properties.clone().into_iter().collect();
 
         let table_schema = TableSchema {
             columns: table_desc.columns.clone(),

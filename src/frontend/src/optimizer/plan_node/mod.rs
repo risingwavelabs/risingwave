@@ -754,7 +754,7 @@ pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
 mod expr_visitable;
-pub use expr_rewritable::*;
+
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;

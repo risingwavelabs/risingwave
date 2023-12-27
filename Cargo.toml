@@ -204,8 +204,14 @@ explicit_iter_loop = "warn"
 inconsistent_struct_constructor = "warn"
 unused_async = "warn"
 map_flatten = "warn"
-no_effect_underscore_binding = "warn"
 await_holding_lock = "warn"
+# For private code, this is a little pedantic and not worth fixing.
+# &Vec or &String is acceptable
+ptr_arg = "allow"
+# a little pedantic
+get_first = "allow"
+# https://github.com/rust-lang/rust-clippy/issues/12016
+blocks_in_conditions = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
