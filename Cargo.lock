@@ -2964,6 +2964,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "delta_btree_map"
+version = "1.5.0-alpha"
+dependencies = [
+ "enum-as-inner",
+]
+
+[[package]]
 name = "deltalake"
 version = "0.17.0"
 source = "git+https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4640490202ffe98adbd13b09cef8e007b"
@@ -8275,13 +8282,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_common_delta_btree_map"
-version = "1.5.0-alpha"
-dependencies = [
- "enum-as-inner",
-]
-
-[[package]]
 name = "risingwave_common_heap_profiling"
 version = "1.5.0-alpha"
 dependencies = [
@@ -9391,6 +9391,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
+ "delta_btree_map",
  "educe 0.5.7",
  "either",
  "enum-as-inner",
@@ -9414,7 +9415,6 @@ dependencies = [
  "prost 0.12.1",
  "rand",
  "risingwave_common",
- "risingwave_common_delta_btree_map",
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_expr_impl",

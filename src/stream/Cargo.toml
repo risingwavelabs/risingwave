@@ -22,6 +22,7 @@ async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
 bytes = "1"
+delta_btree_map = { path = "../utils/delta_btree_map" }
 educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
@@ -46,7 +47,6 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 rand = "0.8"
 risingwave_common = { workspace = true }
-risingwave_common_delta_btree_map = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }

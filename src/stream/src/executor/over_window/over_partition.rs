@@ -19,13 +19,13 @@ use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
+use delta_btree_map::{Change, DeltaBTreeMap};
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::Sentinelled;
-use risingwave_common_delta_btree_map::{Change, DeltaBTreeMap};
 use risingwave_expr::window_function::{FrameBounds, StateKey, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;

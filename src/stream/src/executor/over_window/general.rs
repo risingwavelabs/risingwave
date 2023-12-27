@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
+use delta_btree_map::{Change, PositionType};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -28,7 +29,6 @@ use risingwave_common::types::{DataType, DefaultOrdered};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common_delta_btree_map::{Change, PositionType};
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };

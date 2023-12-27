@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_common_delta_btree_map"
+name = "delta_btree_map"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
