@@ -24,8 +24,9 @@ use crate::source::SourceProperties;
 
 pub const S3_CONNECTOR: &str = "s3";
 
+/// These are supported by both `s3` and `s3_v2` (opendal) sources.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub struct S3Properties {
+pub struct S3PropertiesCommon {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
     #[serde(rename = "s3.bucket_name")]
@@ -40,6 +41,18 @@ pub struct S3Properties {
     pub endpoint_url: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct S3Properties {
+    #[serde(flatten)]
+    pub common: S3PropertiesCommon,
+}
+
+impl From<S3PropertiesCommon> for S3Properties {
+    fn from(common: S3PropertiesCommon) -> Self {
+        Self { common }
+    }
+}
+
 impl SourceProperties for S3Properties {
     type Split = FsSplit;
     type SplitEnumerator = S3SplitEnumerator;
@@ -50,6 +63,7 @@ impl SourceProperties for S3Properties {
 
 impl From<&S3Properties> for AwsAuthProps {
     fn from(props: &S3Properties) -> Self {
+        let props = &props.common;
         Self {
             region: Some(props.region_name.clone()),
             endpoint: props.endpoint_url.clone(),
