@@ -217,13 +217,15 @@ impl Scheduler {
 
         let parallelism = default_parallelism.get();
         let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
-        let scheduled_parallel_units = scheduled.values().flatten().cloned().collect_vec();
+
+        let scheduled_parallel_units = scheduled.values().flatten().cloned().sorted().collect_vec();
         assert_eq!(scheduled_parallel_units.len(), parallelism);
 
         // Build the default hash mapping uniformly.
         let default_hash_mapping = ParallelUnitMapping::build_from_ids(&scheduled_parallel_units);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
+
         let default_singleton_parallel_unit = single_scheduled
             .values()
             .flatten()

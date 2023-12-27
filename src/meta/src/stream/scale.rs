@@ -2588,7 +2588,7 @@ pub fn schedule_units_for_slots(
     slots: &BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>,
     total_unit_size: usize,
     salt: u32,
-) -> MetaResult<HashMap<WorkerId, BTreeSet<ParallelUnitId>>> {
+) -> MetaResult<BTreeMap<WorkerId, BTreeSet<ParallelUnitId>>> {
     let mut ch = ConsistentHashRing::new(salt);
 
     for (worker_id, parallel_unit_ids) in slots {
