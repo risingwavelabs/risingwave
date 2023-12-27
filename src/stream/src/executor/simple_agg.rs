@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::try_join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -229,11 +228,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            try_join_all(
-                this.all_state_tables_mut()
-                    .map(|table| table.commit_no_data_expected(epoch)),
-            )
-            .await?;
+            this.all_state_tables_mut().for_each(|table| {
+                table.commit_no_data_expected(epoch);
+            });
             None
         };
 

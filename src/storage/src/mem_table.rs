@@ -29,6 +29,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
@@ -573,16 +574,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 }
             }
         }
-        self.inner
-            .ingest_batch(
-                kv_pairs,
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            )
-            .await
+        self.inner.ingest_batch(
+            kv_pairs,
+            delete_ranges,
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
     }
 
     fn epoch(&self) -> u64 {
@@ -603,11 +602,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(())
     }
 
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        opts: SealCurrentEpochOptions,
-    ) -> StorageResult<()> {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -641,18 +636,17 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                         })
                 })
                 .collect_vec();
-            self.inner
-                .ingest_batch(
-                    Vec::new(),
-                    delete_ranges,
-                    WriteOptions {
-                        epoch: self.epoch(),
-                        table_id: self.table_id,
-                    },
-                )
-                .await?;
+            if let Err(e) = self.inner.ingest_batch(
+                Vec::new(),
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            ) {
+                error!(err = ?e, "failed to write delete ranges of table watermark");
+            }
         }
-        Ok(())
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {

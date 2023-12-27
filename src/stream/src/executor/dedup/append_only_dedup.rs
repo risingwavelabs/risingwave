@@ -140,9 +140,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         self.state_table.commit(barrier.epoch).await?;
                         commit_data = false;
                     } else {
-                        self.state_table
-                            .commit_no_data_expected(barrier.epoch)
-                            .await?;
+                        self.state_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {

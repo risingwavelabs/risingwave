@@ -317,24 +317,19 @@ pub mod verify {
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        async fn ingest_batch(
+        fn ingest_batch(
             &self,
             kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
-            let actual = self
-                .actual
-                .ingest_batch(
-                    kv_pairs.clone(),
-                    delete_ranges.clone(),
-                    write_options.clone(),
-                )
-                .await;
+            let actual = self.actual.ingest_batch(
+                kv_pairs.clone(),
+                delete_ranges.clone(),
+                write_options.clone(),
+            );
             if let Some(expected) = &self.expected {
-                let expected = expected
-                    .ingest_batch(kv_pairs, delete_ranges, write_options)
-                    .await;
+                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
                 assert_eq!(actual.is_err(), expected.is_err());
             }
             actual
@@ -445,17 +440,11 @@ pub mod verify {
             Ok(())
         }
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            opts: SealCurrentEpochOptions,
-        ) -> StorageResult<()> {
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             if let Some(expected) = &mut self.expected {
-                expected
-                    .seal_current_epoch(next_epoch, opts.clone())
-                    .await?;
+                expected.seal_current_epoch(next_epoch, opts.clone());
             }
-            self.actual.seal_current_epoch(next_epoch, opts).await
+            self.actual.seal_current_epoch(next_epoch, opts);
         }
 
         fn epoch(&self) -> u64 {
@@ -795,11 +784,7 @@ pub mod boxed_state_store {
 
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            opts: SealCurrentEpochOptions,
-        ) -> StorageResult<()>;
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
     }
 
     #[async_trait::async_trait]
@@ -864,12 +849,8 @@ pub mod boxed_state_store {
             self.init(options).await
         }
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            opts: SealCurrentEpochOptions,
-        ) -> StorageResult<()> {
-            self.seal_current_epoch(next_epoch, opts).await
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.seal_current_epoch(next_epoch, opts)
         }
     }
 
@@ -941,12 +922,8 @@ pub mod boxed_state_store {
             self.deref_mut().init(options)
         }
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            opts: SealCurrentEpochOptions,
-        ) -> StorageResult<()> {
-            self.deref_mut().seal_current_epoch(next_epoch, opts).await
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.deref_mut().seal_current_epoch(next_epoch, opts)
         }
     }
 

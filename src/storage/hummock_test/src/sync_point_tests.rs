@@ -297,13 +297,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
-    local
-        .seal_current_epoch(
-            101,
-            risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-        )
-        .await
-        .unwrap();
+    local.seal_current_epoch(
+        101,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -334,13 +331,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )])
         .await
         .unwrap();
-    local
-        .seal_current_epoch(
-            102,
-            risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-        )
-        .await
-        .unwrap();
+    local.seal_current_epoch(
+        102,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(
         hummock_manager_ref.clone(),
@@ -371,13 +365,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )])
         .await
         .unwrap();
-    local
-        .seal_current_epoch(
-            103,
-            risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-        )
-        .await
-        .unwrap();
+    local.seal_current_epoch(
+        103,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
     compact_once(
@@ -403,13 +394,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
-    local
-        .seal_current_epoch(
-            u64::MAX,
-            risingwave_storage::store::SealCurrentEpochOptions::for_test(),
-        )
-        .await
-        .unwrap();
+    local.seal_current_epoch(
+        u64::MAX,
+        risingwave_storage::store::SealCurrentEpochOptions::for_test(),
+    );
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
     compact_once(

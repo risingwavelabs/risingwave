@@ -205,18 +205,11 @@ impl LocalReplay for LocalReplayImpl {
             .map_err(|_| TraceError::Other("init failed"))
     }
 
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        opts: TracedSealCurrentEpochOptions,
-    ) -> Result<()> {
-        self.0
-            .seal_current_epoch(
-                next_epoch,
-                opts.try_into().expect("should not fail to convert"),
-            )
-            .await
-            .map_err(|_| TraceError::Other("seal current epoch failed"))
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions) {
+        self.0.seal_current_epoch(
+            next_epoch,
+            opts.try_into().expect("should not fail to convert"),
+        );
     }
 
     fn epoch(&self) -> u64 {

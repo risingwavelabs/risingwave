@@ -160,12 +160,10 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         self.state_store.flush(vec![]).await?;
         let watermark = watermark.into_iter().collect_vec();
-        self.state_store
-            .seal_current_epoch(
-                next_epoch,
-                SealCurrentEpochOptions::new(watermark, WatermarkDirection::Ascending),
-            )
-            .await?;
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions::new(watermark, WatermarkDirection::Ascending),
+        );
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())

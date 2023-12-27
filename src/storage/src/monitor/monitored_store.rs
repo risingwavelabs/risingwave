@@ -280,13 +280,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.init(options).await
     }
 
-    async fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        opts: SealCurrentEpochOptions,
-    ) -> StorageResult<()> {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         // TODO: may collect metrics
-        self.inner.seal_current_epoch(next_epoch, opts).await
+        self.inner.seal_current_epoch(next_epoch, opts)
     }
 
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {

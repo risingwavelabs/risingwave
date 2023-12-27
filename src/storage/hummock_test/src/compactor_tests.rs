@@ -165,15 +165,9 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
-                local
-                    .seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test())
-                    .await
-                    .unwrap();
+                local.seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test());
             } else {
-                local
-                    .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
-                    .await
-                    .unwrap();
+                local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -555,10 +549,7 @@ pub(crate) mod tests {
                     .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
-            local
-                .seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test())
-                .await
-                .unwrap();
+            local.seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
@@ -743,14 +734,8 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             storage.flush(Vec::new()).await.unwrap();
-            storage
-                .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test())
-                .await
-                .unwrap();
-            other
-                .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test())
-                .await
-                .unwrap();
+            storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+            other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = global_storage
                 .seal_and_sync_epoch(epoch)
@@ -940,10 +925,7 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local
-                .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test())
-                .await
-                .unwrap();
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -1141,10 +1123,7 @@ pub(crate) mod tests {
                 .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local
-                .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test())
-                .await
-                .unwrap();
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -1315,10 +1294,7 @@ pub(crate) mod tests {
             .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
             .await
             .unwrap();
-        local
-            .seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test())
-            .await
-            .unwrap();
+        local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
 

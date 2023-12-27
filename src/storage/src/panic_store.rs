@@ -55,8 +55,7 @@ impl StateStoreRead for PanicStateStore {
 }
 
 impl StateStoreWrite for PanicStateStore {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -130,11 +129,7 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    async fn seal_current_epoch(
-        &mut self,
-        _next_epoch: u64,
-        _opts: SealCurrentEpochOptions,
-    ) -> StorageResult<()> {
+    fn seal_current_epoch(&mut self, _next_epoch: u64, _opts: SealCurrentEpochOptions) {
         panic!("should not operate on the panic state store!")
     }
 

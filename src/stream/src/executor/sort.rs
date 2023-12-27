@@ -148,9 +148,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if vars.buffer_changed {
                         this.buffer_table.commit(barrier.epoch).await?;
                     } else {
-                        this.buffer_table
-                            .commit_no_data_expected(barrier.epoch)
-                            .await?;
+                        this.buffer_table.commit_no_data_expected(barrier.epoch);
                     }
                     vars.buffer_changed = false;
 

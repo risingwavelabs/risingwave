@@ -1041,8 +1041,7 @@ where
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store
-                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark())
-                .await?;
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -1104,19 +1103,14 @@ where
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
-    pub async fn commit_no_data_expected(
-        &mut self,
-        new_epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
         self.local_store
-            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark())
-            .await?;
-        Ok(())
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::no_watermark());
     }
 
     /// Write to state store.
@@ -1215,9 +1209,7 @@ where
             }
             None => SealCurrentEpochOptions::no_watermark(),
         };
-        self.local_store
-            .seal_current_epoch(next_epoch, seal_opt)
-            .await?;
+        self.local_store.seal_current_epoch(next_epoch, seal_opt);
         Ok(())
     }
 

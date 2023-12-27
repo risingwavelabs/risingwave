@@ -425,9 +425,7 @@ impl NormalState {
             .await
             .map_err(|e| format!("{:?}", e))?;
         self.storage
-            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test())
-            .await
-            .map_err(|e| format!("{:?}", e))?;
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
         Ok(())
     }
 

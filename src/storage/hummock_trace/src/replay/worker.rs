@@ -347,7 +347,7 @@ impl ReplayWorker {
             Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                local_storage.seal_current_epoch(epoch, opts).await.unwrap();
+                local_storage.seal_current_epoch(epoch, opts);
             }
             Operation::ValidateReadEpoch(epoch) => {
                 assert_eq!(storage_type, StorageType::Global);
