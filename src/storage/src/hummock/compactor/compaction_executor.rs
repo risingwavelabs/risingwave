@@ -30,7 +30,7 @@ impl CompactionExecutor {
         let mut worker_num = resource_util::cpu::total_cpu_available() as usize;
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            builder.thread_name("risingwave-compaction");
+            builder.thread_name("rw-compaction");
             if let Some(worker_threads_num) = worker_threads_num {
                 builder.worker_threads(worker_threads_num);
                 worker_num = worker_threads_num;

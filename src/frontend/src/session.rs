@@ -436,7 +436,7 @@ impl FrontendEnv {
         Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
                 .worker_threads(4)
-                .thread_name("frontend-compute-threads")
+                .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
                 .unwrap(),
@@ -1163,6 +1163,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                 DataType::Varchar.type_len(),
             ),
         ]),
+        Statement::ShowTransactionIsolationLevel => {
+            let name = "transaction_isolation";
+            Ok(infer_show_variable(name))
+        }
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))

@@ -442,6 +442,8 @@ macro_rules! for_all_plain_native_methods {
     ($macro:path $(,$args:tt)*) => {
         $macro! {
             {
+                public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
+
                 public static native int vnodeCount();
 
                 // hummock iterator method
@@ -880,6 +882,7 @@ mod tests {
         // This test shows the signature of all native methods
         let expected = expect_test::expect![[r#"
             [
+                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,

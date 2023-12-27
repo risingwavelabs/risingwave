@@ -15,3 +15,4 @@
 mod cast_regclass;
 mod col_description;
 pub mod context;
+mod pg_get_indexdef;

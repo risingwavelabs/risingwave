@@ -29,8 +29,6 @@ use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
 
-pub mod cast;
-
 /// The global registry of all function signatures.
 pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsafe {
     // SAFETY: this function is called after all `#[ctor]` functions are called.
