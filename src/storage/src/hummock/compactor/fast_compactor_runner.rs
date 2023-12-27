@@ -643,12 +643,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                     self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
                     self.last_table_stats.total_value_size -= value.encoded_len() as i64;
                 }
-                if value.is_delete() && !self.last_key_is_delete {
-                    println!(
-                        "drop a deleted key error!!!!: {}",
-                        u64::from_be_bytes(iter.key().user_key.table_key.0.try_into().unwrap()),
-                    );
-                }
                 iter.next();
                 continue;
             }
