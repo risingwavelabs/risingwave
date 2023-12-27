@@ -44,7 +44,7 @@ pub struct MetaNodeOpts {
     security_group_id: Option<String>,
 
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
@@ -162,6 +162,16 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+}
+
+impl risingwave_common::opts::Opts for MetaNodeOpts {
+    fn name() -> &'static str {
+        "meta"
+    }
+
+    fn meta_addr(&self) -> &str {
+        &self.listen_addr
+    }
 }
 
 use std::future::Future;

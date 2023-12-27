@@ -66,7 +66,27 @@ pub struct ParsedStandaloneOpts {
     pub compactor_opts: Option<CompactorOpts>,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
+    fn name() -> &'static str {
+        "standalone"
+    }
+
+    fn meta_addr(&self) -> &str {
+        if let Some(opts) = self.meta_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compute_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.frontend_opts.as_ref() {
+            opts.meta_addr()
+        } else if let Some(opts) = self.compactor_opts.as_ref() {
+            opts.meta_addr()
+        } else {
+            ""
+        }
+    }
+}
+
+pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     let meta_opts = opts.meta_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "meta-node".into());
@@ -131,15 +151,15 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     }
 }
 
-pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
-
-    let ParsedStandaloneOpts {
+pub async fn standalone(
+    ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    } = parse_opt_args(&opts);
+    }: ParsedStandaloneOpts,
+) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
 
     if let Some(opts) = meta_opts {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
@@ -215,7 +235,7 @@ mod test {
         assert_eq!(actual, opts);
 
         // Test parsing into node-level opts.
-        let actual = parse_opt_args(&opts);
+        let actual = parse_standalone_opt_args(&opts);
         check(
             actual,
             expect![[r#"

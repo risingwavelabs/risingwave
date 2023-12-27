@@ -44,6 +44,8 @@ pub struct LoggerSettings {
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
     /// Override the default level.
     default_level: Option<tracing::metadata::LevelFilter>,
+    /// The endpoint of the tracing collector in OTLP gRPC protocol.
+    tracing_endpoint: Option<String>,
 }
 
 impl Default for LoggerSettings {
@@ -53,6 +55,14 @@ impl Default for LoggerSettings {
 }
 
 impl LoggerSettings {
+    pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
+        let mut settings = Self::new(O::name());
+        if settings.tracing_endpoint.is_none() && !opts.meta_addr().is_empty() {
+            settings.tracing_endpoint = Some(format!("http://{}", opts.meta_addr()));
+        }
+        settings
+    }
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -62,6 +72,7 @@ impl LoggerSettings {
             with_thread_name: false,
             targets: vec![],
             default_level: None,
+            tracing_endpoint: std::env::var("RW_TRACING_ENDPOINT").ok(),
         }
     }
 
@@ -353,7 +364,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Tracing layer
     #[cfg(not(madsim))]
-    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
+    if let Some(endpoint) = settings.tracing_endpoint {
         println!("tracing enabled, exported to `{endpoint}`");
 
         use opentelemetry::{sdk, KeyValue};

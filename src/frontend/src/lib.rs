@@ -139,6 +139,16 @@ pub struct FrontendOpts {
     pub enable_barrier_read: Option<bool>,
 }
 
+impl risingwave_common::opts::Opts for FrontendOpts {
+    fn name() -> &'static str {
+        "frontend"
+    }
+
+    fn meta_addr(&self) -> &str {
+        &self.meta_addr.trim_start_matches("http://")
+    }
+}
+
 impl Default for FrontendOpts {
     fn default() -> Self {
         FrontendOpts::parse_from(iter::empty::<OsString>())

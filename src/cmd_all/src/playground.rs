@@ -143,6 +143,16 @@ pub struct PlaygroundOpts {
     profile: String,
 }
 
+impl risingwave_common::opts::Opts for PlaygroundOpts {
+    fn name() -> &'static str {
+        "playground"
+    }
+
+    fn meta_addr(&self) -> &str {
+        "0.0.0.0:5690" // hard-coded
+    }
+}
+
 pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
     let profile = opts.profile;
 

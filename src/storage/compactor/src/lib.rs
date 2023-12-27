@@ -90,6 +90,16 @@ pub struct CompactorOpts {
     pub proxy_rpc_endpoint: String,
 }
 
+impl risingwave_common::opts::Opts for CompactorOpts {
+    fn name() -> &'static str {
+        "compactor"
+    }
+
+    fn meta_addr(&self) -> &str {
+        &self.meta_address.trim_start_matches("http://")
+    }
+}
+
 use std::future::Future;
 use std::pin::Pin;
 
