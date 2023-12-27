@@ -101,9 +101,10 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 #[derive(
     Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
-#[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
+#[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
+#[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
 pub enum DataType {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]

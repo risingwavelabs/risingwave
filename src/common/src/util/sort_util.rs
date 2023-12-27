@@ -448,6 +448,10 @@ fn compare_rows_in_chunk(
         let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
 
         let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
+            #[expect(
+                clippy::unnecessary_fallible_conversions,
+                reason = "FIXME: Array's `into` is not safe. We should revise it."
+            )]
             let rhs_inner = (&**rhs_array).try_into().unwrap_or_else(|_| {
                 panic!(
                     "Unmatched array types, lhs array is: {}, rhs array is: {}",

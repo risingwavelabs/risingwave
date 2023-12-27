@@ -183,7 +183,7 @@ impl NotificationServiceImpl {
 
         MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version),
+            hummock_version: Some(hummock_version.to_protobuf()),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()

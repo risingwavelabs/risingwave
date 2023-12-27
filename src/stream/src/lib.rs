@@ -27,7 +27,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
-#![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
 #![feature(lazy_cell)]
