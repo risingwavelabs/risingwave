@@ -26,8 +26,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 
