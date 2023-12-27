@@ -1,0 +1,18 @@
+sources:
+  prom:
+    type: "prometheus_scrape"
+    endpoints:
+      - http://prometheus-0:9500/metrics
+
+sinks:
+  risingwave:
+    type: "risingwave"
+    host: "risingwave-standalone"
+    port: 4566
+    database: "dev"
+    user: "root"
+    table: "event"
+    encoding:
+      codec: "json"
+    inputs:
+      - "prom"
