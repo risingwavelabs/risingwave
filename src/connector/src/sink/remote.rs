@@ -25,10 +25,13 @@ use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use jni::JavaVM;
 use prost::Message;
-use risingwave_common::array::{ArrayImpl, JsonbArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
+};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
-use risingwave_common::types::{DataType, JsonbVal, Scalar};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, JsonbVal, Scalar, ToText};
 use risingwave_common::util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
@@ -153,6 +156,8 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
             writer_param,
             Self::SINK_NAME,
             self.param.schema(),
+            self.param.downstream_pk.clone(),
+            self.param.properties.clone(),
         )
         .await
     }
@@ -243,9 +248,18 @@ enum StreamChunkConverter {
     Other,
 }
 impl StreamChunkConverter {
-    fn new(sink_name: &str, schema: Schema) -> Self {
+    fn new(
+        sink_name: &str,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        properties: HashMap<String, String>,
+    ) -> Self {
         if sink_name.eq("elasticsearch") {
-            StreamChunkConverter::Es(EsStreamChunkConverter::new(schema))
+            StreamChunkConverter::Es(EsStreamChunkConverter::new(
+                schema,
+                pk_indices,
+                properties.get("delimiter").cloned(),
+            ))
         } else {
             StreamChunkConverter::Other
         }
@@ -260,30 +274,69 @@ impl StreamChunkConverter {
 }
 struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
+    pk_indices: Vec<usize>,
+    delimiter: Option<String>,
 }
 impl EsStreamChunkConverter {
-    fn new(schema: Schema) -> Self {
+    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>) -> Self {
         let json_encoder = JsonEncoder::new_with_es(schema, None);
-        Self { json_encoder }
+        Self {
+            json_encoder,
+            pk_indices,
+            delimiter,
+        }
     }
 
     fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         let mut ops = vec![];
+        let mut id_string_builder =
+            <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut json_builder =
             <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         for (op, row) in chunk.rows() {
             ops.push(op);
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
             risingwave_common::array::ArrayBuilder::append(
+                &mut id_string_builder,
+                Some(&self.build_id(row)?),
+            );
+            risingwave_common::array::ArrayBuilder::append(
                 &mut json_builder,
                 Some(json.as_scalar_ref()),
             );
         }
-        let a = risingwave_common::array::ArrayBuilder::finish(json_builder);
+        let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
+        let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
         Ok(StreamChunk::new(
             ops,
-            vec![std::sync::Arc::new(ArrayImpl::Jsonb(a))],
+            vec![
+                std::sync::Arc::new(ArrayImpl::Utf8(id_string_array)),
+                std::sync::Arc::new(ArrayImpl::Jsonb(json_array)),
+            ],
         ))
+    }
+
+    fn build_id(&self, row: RowRef<'_>) -> Result<String> {
+        if self.pk_indices.is_empty() {
+            Ok(row
+                .datum_at(0)
+                .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                .to_text())
+        } else {
+            let mut keys = vec![];
+            for index in &self.pk_indices {
+                keys.push(
+                    row.datum_at(*index)
+                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                        .to_text(),
+                );
+            }
+            Ok(keys.join(
+                self.delimiter
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Please set delimiter in with option"))?,
+            ))
+        }
     }
 }
 pub struct RemoteLogSinker {
@@ -299,6 +352,8 @@ impl RemoteLogSinker {
         writer_param: SinkWriterParam,
         sink_name: &str,
         schema: Schema,
+        pk_indices: Vec<usize>,
+        properties: HashMap<String, String>,
     ) -> Result<Self> {
         let SinkWriterStreamHandle {
             request_sender,
@@ -312,7 +367,9 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
             sink_metrics,
-            stream_chunk_converter: StreamChunkConverter::new(sink_name, schema),
+            stream_chunk_converter: StreamChunkConverter::new(
+                sink_name, schema, pk_indices, properties,
+            ),
         })
     }
 }

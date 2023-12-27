@@ -213,8 +213,12 @@ public class SinkWriterStreamObserver
         if (connectorName.equals("elasticsearch")) {
             tableSchema =
                     new TableSchema(
-                            List.of("test"),
-                            List.of(Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build()),
+                            List.of("id", "json_result"),
+                            List.of(
+                                    Data.DataType.newBuilder()
+                                            .setTypeName(TypeName.VARCHAR)
+                                            .build(),
+                                    Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build()),
                             List.of());
         }
         switch (format) {
