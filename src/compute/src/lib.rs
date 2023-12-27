@@ -141,7 +141,7 @@ impl risingwave_common::opts::Opts for ComputeNodeOpts {
     }
 
     fn meta_addr(&self) -> &str {
-        &self.meta_address.trim_start_matches("http://")
+        self.meta_address.trim_start_matches("http://")
     }
 }
 
