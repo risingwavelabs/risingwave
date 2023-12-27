@@ -13,6 +13,8 @@
 // limitations under the License.
 pub mod enumerator;
 
+use std::collections::HashMap;
+
 pub use enumerator::S3SplitEnumerator;
 mod source;
 use serde::Deserialize;
@@ -20,7 +22,7 @@ pub use source::S3FileReader;
 
 use crate::common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
-use crate::source::SourceProperties;
+use crate::source::{SourceProperties, UnknownFields};
 
 pub const S3_CONNECTOR: &str = "s3";
 
@@ -45,11 +47,17 @@ pub struct S3PropertiesCommon {
 pub struct S3Properties {
     #[serde(flatten)]
     pub common: S3PropertiesCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl From<S3PropertiesCommon> for S3Properties {
     fn from(common: S3PropertiesCommon) -> Self {
-        Self { common }
+        Self {
+            common,
+            unknown_fields: HashMap::new(),
+        }
     }
 }
 
@@ -59,6 +67,12 @@ impl SourceProperties for S3Properties {
     type SplitReader = S3FileReader;
 
     const SOURCE_NAME: &'static str = S3_CONNECTOR;
+}
+
+impl UnknownFields for S3Properties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl From<&S3Properties> for AwsAuthProps {

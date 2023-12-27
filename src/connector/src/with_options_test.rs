@@ -95,6 +95,10 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
         for field in struct_item.fields {
             // Process each field
             if let Some(field_name) = &field.ident {
+                if field_name == "unknown_fields" {
+                    continue;
+                }
+
                 let SerdeProperties {
                     default_func,
                     rename,

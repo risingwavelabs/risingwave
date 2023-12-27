@@ -83,7 +83,10 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
 }
 
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(properties: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(
+        properties: HashMap<String, String>,
+        _deny_unknown_fields: bool,
+    ) -> anyhow::Result<Self> {
         let is_multi_table_shared = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
@@ -149,6 +152,13 @@ where
         self.table_schema = table_schema;
         // properties are not shared, so mark it as false
         self.is_multi_table_shared = false;
+    }
+}
+
+impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        // FIXME: CDC does not handle unknown fields yet
+        HashMap::new()
     }
 }
 

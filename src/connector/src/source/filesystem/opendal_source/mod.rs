@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod gcs_source;
+use std::collections::HashMap;
 
+pub mod gcs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
@@ -25,7 +26,7 @@ use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
 use super::s3::S3PropertiesCommon;
 use super::OpendalFsSplit;
-use crate::source::SourceProperties;
+use crate::source::{SourceProperties, UnknownFields};
 
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
@@ -41,6 +42,15 @@ pub struct GcsProperties {
     pub service_account: Option<String>,
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for GcsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for GcsProperties {
@@ -87,6 +97,15 @@ pub struct OpendalS3Properties {
     // The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for OpendalS3Properties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for OpendalS3Properties {
