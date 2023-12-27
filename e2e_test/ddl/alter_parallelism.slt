@@ -57,7 +57,7 @@ alter materialized view m_simple set parallelism = 3;
 query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
-AUTO
+FIXED(3)
 
 statement ok
 create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2.v;
