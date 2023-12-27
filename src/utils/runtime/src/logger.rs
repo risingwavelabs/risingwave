@@ -55,6 +55,11 @@ impl Default for LoggerSettings {
 }
 
 impl LoggerSettings {
+    /// Create a new logger settings from the given command-line options.
+    ///
+    /// If env var`RW_TRACING_ENDPOINT` is not set, the meta address will be used
+    /// as the default tracing endpoint, which means that the embedded tracing
+    /// collector will be used.
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
         let mut settings = Self::new(O::name());
         if settings.tracing_endpoint.is_none() && !opts.meta_addr().is_empty() {
@@ -63,6 +68,7 @@ impl LoggerSettings {
         settings
     }
 
+    /// Create a new logger settings with the given service name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -107,6 +113,12 @@ impl LoggerSettings {
     /// Overrides the default level.
     pub fn with_default(mut self, level: impl Into<tracing::metadata::LevelFilter>) -> Self {
         self.default_level = Some(level.into());
+        self
+    }
+
+    /// Overrides the tracing endpoint.
+    pub fn with_tracing_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.tracing_endpoint = Some(endpoint.into());
         self
     }
 }
