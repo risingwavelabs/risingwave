@@ -1711,11 +1711,6 @@ impl ScaleController {
             &mut no_shuffle_target_fragment_ids,
         );
 
-        let table_parallelisms: HashMap<u32, TableParallelism> = table_parallelisms
-            .into_iter()
-            .map(|(id, parallelism)| (id, parallelism))
-            .collect();
-
         let mut target_plan = HashMap::new();
 
         for (table_id, parallelism) in table_parallelisms {
