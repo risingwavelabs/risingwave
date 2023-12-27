@@ -57,12 +57,17 @@ impl Default for LoggerSettings {
 impl LoggerSettings {
     /// Create a new logger settings from the given command-line options.
     ///
-    /// If env var`RW_TRACING_ENDPOINT` is not set, the meta address will be used
+    /// If env var `RW_TRACING_ENDPOINT` is not set, the meta address will be used
     /// as the default tracing endpoint, which means that the embedded tracing
     /// collector will be used.
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
         let mut settings = Self::new(O::name());
-        if settings.tracing_endpoint.is_none() && !opts.meta_addr().is_empty() {
+        if settings.tracing_endpoint.is_none() // no explicit env var is set
+            && !opts.meta_addr().is_empty() // meta address is valid
+            && !Deployment::current().is_ci()
+        // not in CI
+        {
+            // Use embedded collector in the meta service.
             settings.tracing_endpoint = Some(format!("http://{}", opts.meta_addr()));
         }
         settings
