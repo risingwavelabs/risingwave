@@ -36,7 +36,7 @@ use prometheus::{
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::metrics::LabelGuardedIntCounterVec;
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
@@ -433,7 +433,7 @@ impl Future for MonitoredGaiFuture {
         Pin::new(&mut self.inner).poll(cx).map(|res| match res {
             Ok(addrs) => {
                 let addrs: MonitoredGaiAddrs = addrs.into();
-                info!("resolve {} => {:?}", self.name, addrs.inner);
+                debug!("resolve {} => {:?}", self.name, addrs.inner);
                 Ok(addrs)
             }
             Err(err) => Err(err),
