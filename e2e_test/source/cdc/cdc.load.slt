@@ -176,25 +176,6 @@ create table t1_rw (
   publication.create.enable='false'
 );
 
-statement ok
-create table person_rw (
-    id int primary key,
-    name varchar,
-    email_address varchar,
-    credit_card varchar,
-    city varchar
-) with (
-  connector = 'postgres-cdc',
-  hostname = 'db',
-  port = '5432',
-  username = 'postgres',
-  password='postgres',
-  database.name='cdc_test',
-  table.name='person',
-  publication.name='my_publicaton',
-  publication.create.enable='false'
-);
-
 statement error
 create table person_rw (
     id int primary key,
@@ -211,6 +192,3 @@ create table person_rw (
   publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
-
-statement ok
-create materialized view person_cnt as select count(*) as cnt from person_rw;

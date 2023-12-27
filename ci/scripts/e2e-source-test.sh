@@ -72,8 +72,9 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster
 cargo make kill
-echo "cluster killed "
+echo "> cluster killed "
 
+echo "--- mysql & postgres recovery check"
 # insert into mytest database (cdc.share_stream.slt)
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products
        VALUES (default,'RisingWave','Next generation Streaming Database'),
@@ -95,7 +96,7 @@ export RUST_LOG="events::stream::message::chunk=trace,risingwave_stream=debug,ri
 
 cargo make dev ci-1cn-1fe-with-recovery
 echo "> wait for cluster recovery finish"
-sleep 25
+sleep 20
 echo "> check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
