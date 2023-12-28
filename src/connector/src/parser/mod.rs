@@ -50,7 +50,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::unified::AccessError;
-use crate::parser::util::extreact_timestamp_from_meta;
+use crate::parser::util::{extract_headers_from_meta, extreact_timestamp_from_meta};
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -365,11 +365,18 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
                     ));
                 }
+                (_, &AdditionalColumnType::Header) => {
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extract_headers_from_meta(ele.meta))
+                            .unwrap(),
+                    ))
+                }
                 (
                     _,
-                    &AdditionalColumnType::Filename | &AdditionalColumnType::Header,
-                    // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
-                    // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
+                    &AdditionalColumnType::Filename, /* AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
+                                                      * AdditionalColumnType::Key is processed in normal process, together with Unspecified ones */
                 ) => Err(AccessError::Other(anyhow!(
                     "Column type {:?} not implemented yet",
                     &desc.additional_column_type

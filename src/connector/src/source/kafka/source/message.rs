@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rdkafka::message::BorrowedMessage;
+use rdkafka::message::{BorrowedMessage, OwnedHeaders};
 use rdkafka::Message;
 
 use crate::source::base::SourceMessage;
@@ -22,10 +22,11 @@ use crate::source::SourceMeta;
 pub struct KafkaMeta {
     // timestamp(milliseconds) of message append in mq
     pub timestamp: Option<i64>,
+    pub headers: Option<OwnedHeaders>,
 }
 
 impl SourceMessage {
-    pub fn from_kafka_message(message: &BorrowedMessage<'_>) -> Self {
+    pub fn from_kafka_message(message: &BorrowedMessage<'_>, require_header: bool) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             key: message.key().map(|p| p.to_vec()),
@@ -34,6 +35,11 @@ impl SourceMessage {
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
                 timestamp: message.timestamp().to_millis(),
+                headers: if require_header {
+                    message.headers().map(|headers| headers.detach())
+                } else {
+                    None
+                },
             }),
         }
     }

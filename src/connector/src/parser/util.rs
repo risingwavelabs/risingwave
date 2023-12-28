@@ -15,15 +15,18 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use bytes::Bytes;
+use itertools::Itertools;
+use rdkafka::message::Headers;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, Scalar};
+use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
+use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::SourceMeta;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
@@ -156,6 +159,27 @@ pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {
                     .to_scalar_value()
             })
             .into(),
+        _ => None,
+    }
+}
+
+pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.headers.as_ref().map(|header| {
+            let header_item: Vec<Datum> = header
+                .iter()
+                .map(|header| {
+                    Some(ScalarImpl::Struct(StructValue::new(vec![
+                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
+                        header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
+                    ])))
+                })
+                .collect_vec();
+            Some(ScalarImpl::List(ListValue::from_datum_iter(
+                &get_kafka_header_item_datatype(),
+                header_item,
+            )))
+        }),
         _ => None,
     }
 }

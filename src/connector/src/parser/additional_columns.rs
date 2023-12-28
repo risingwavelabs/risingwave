@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::plan_common::AdditionalColumnType;
 
 use crate::source::{
@@ -94,19 +94,25 @@ fn kafka_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColum
                 }
             }),
         ),
-        // Todo(tabVersion): add header column desc
-        // (
-        //     "header",
-        //     Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
-        //         ColumnCatalog {
-        //             column_desc: ColumnDesc::named(name, id, DataType::List(
-        //
-        //             )),
-        //             is_hidden: false,
-        //         }
-        //     }),
-        // ),
+        (
+            "header", // type: struct<key varchar, value bytea>[]
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named(
+                        name,
+                        id,
+                        DataType::List(get_kafka_header_item_datatype().into()),
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
     ]
+}
+
+pub fn get_kafka_header_item_datatype() -> DataType {
+    let struct_inner = vec![("key", DataType::Varchar), ("value", DataType::Bytea)];
+    DataType::Struct(StructType::new(struct_inner))
 }
 
 fn pulsar_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalColumnsFn)> {
