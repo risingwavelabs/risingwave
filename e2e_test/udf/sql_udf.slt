@@ -3,15 +3,15 @@ SET RW_IMPLICIT_FLUSH TO true;
 
 # Create an anonymous function with double dollar as clause
 statement ok
-create function add(INT, INT) returns int as $$select $1 + $2$$ language sql;
+create function add(INT, INT) returns int language sql as $$select $1 + $2$$;
 
 # Create an anonymous function with single quote as clause
 statement ok
-create function sub(INT, INT) returns int as 'select $1 - $2' language sql;
+create function sub(INT, INT) returns int language sql as'select $1 - $2';
 
 # Currently we can only support constant calling convention
 statement ok
-create function add_sub_binding() returns int as 'select add(1, 1) + sub(2, 2)' language sql;
+create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
 
 # Create an anonymous function with return expression
 statement ok
@@ -79,14 +79,14 @@ select c1, c2, add_return(c1, c2) from t1 order by c1 asc;
 
 # Invalid function body syntax
 statement error
-create function add_error(INT, INT) returns int as $$select $1 + $2 +$$ language sql;
+create function add_error(INT, INT) returns int language sql as $$select $1 + $2 +$$;
 
 # Multiple type interleaving sql udf
 statement ok
-create function add_sub(INT, FLOAT, INT) returns FLOAT as $$select -$1 + $2 - $3$$ language sql;
+create function add_sub(INT, FLOAT, INT) returns FLOAT language sql as $$select -$1 + $2 - $3$$;
 
 statement ok
-create function add_sub_return(INT, FLOAT, INT) returns FLOAT return -$1 + $2 - $3 language sql;
+create function add_sub_return(INT, FLOAT, INT) returns FLOAT language sql return -$1 + $2 - $3;
 
 # Note: need EXPLICIT type cast in order to call the multiple types interleaving sql udf
 query I
