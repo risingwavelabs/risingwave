@@ -76,10 +76,15 @@ impl RowIdGenExecutor {
 
         for ((datum, op), vis) in column.iter().zip_eq_fast(ops).zip_eq_fast(vis.iter()) {
             // Only refill row_id for insert operation.
-            match (vis, op) {
-                (false, _) => builder.append(None),
-                (true, Op::Insert) => builder.append(Some(self.row_id_generator.next().into())),
-                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
+            match op {
+                Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
+                _ => {
+                    if vis {
+                        builder.append(Some(Serial::try_from(datum.unwrap()).unwrap()))
+                    } else {
+                        builder.append(None)
+                    }
+                }
             }
         }
 
@@ -100,7 +105,6 @@ impl RowIdGenExecutor {
 
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
