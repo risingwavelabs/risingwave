@@ -101,6 +101,7 @@ pub use versioning::HummockVersionSafePoint;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod compaction;
+mod sequence;
 mod worker;
 
 use compaction::*;

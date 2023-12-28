@@ -173,6 +173,24 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table(HummockSequence::Table)
+                    .col(
+                        ColumnDef::new(HummockSequence::Name)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockSequence::Seq)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
 
         Ok(())
     }
@@ -201,7 +219,8 @@ impl MigrationTrait for Migration {
             HummockPinnedVersion,
             HummockPinnedSnapshot,
             HummockVersionDelta,
-            HummockVersionStats
+            HummockVersionStats,
+            HummockSequence
         );
         Ok(())
     }
@@ -259,4 +278,11 @@ enum HummockVersionStats {
     Table,
     Id,
     Stats,
+}
+
+#[derive(DeriveIden)]
+enum HummockSequence {
+    Table,
+    Name,
+    Seq,
 }

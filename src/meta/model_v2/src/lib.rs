@@ -33,6 +33,7 @@ pub mod fragment;
 pub mod function;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
+pub mod hummock_sequence;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod index;
