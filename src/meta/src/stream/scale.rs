@@ -1115,7 +1115,7 @@ impl ScaleController {
 
                 let actor_splits = self
                     .source_manager
-                    .reallocate_splits(*fragment_id, &prev_actor_ids, &curr_actor_ids)
+                    .migrate_splits(*fragment_id, &prev_actor_ids, &curr_actor_ids)
                     .await?;
 
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);

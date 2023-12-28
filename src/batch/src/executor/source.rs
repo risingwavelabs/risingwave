@@ -63,7 +63,8 @@ impl BoxedExecutorBuilder for SourceExecutor {
         // prepare connector source
         let source_props: HashMap<String, String> =
             HashMap::from_iter(source_node.with_properties.clone());
-        let config = ConnectorProperties::extract(source_props).map_err(BatchError::connector)?;
+        let config =
+            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
         let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;

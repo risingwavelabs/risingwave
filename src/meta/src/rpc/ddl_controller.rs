@@ -618,7 +618,7 @@ impl DdlController {
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                let mut props = ConnectorProperties::extract(properties)?;
+                let mut props = ConnectorProperties::extract(properties, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
                 dispatch_source_prop!(props, props, {

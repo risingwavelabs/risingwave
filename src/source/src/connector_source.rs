@@ -64,8 +64,8 @@ impl ConnectorSource {
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
-        let config =
-            ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
+        let config = ConnectorProperties::extract(properties, false)
+            .map_err(|e| ConnectorError(e.into()))?;
 
         Ok(Self {
             config,

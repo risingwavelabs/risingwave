@@ -95,7 +95,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let actor_splits = self
             .source_manager
-            .get_actor_splits()
+            .list_assignments()
             .await
             .into_iter()
             .map(|(actor_id, splits)| {

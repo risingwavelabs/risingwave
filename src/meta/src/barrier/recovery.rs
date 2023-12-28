@@ -103,7 +103,7 @@ impl GlobalBarrierManager {
 
         // clean up source connector dirty changes.
         self.source_manager
-            .drop_source_change(&to_drop_table_fragments)
+            .drop_source_fragments(&to_drop_table_fragments)
             .await;
 
         Ok(())
