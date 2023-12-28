@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
-use super::{CompactionStatistics, TaskConfig};
+use super::{check_compaction_result, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -43,7 +43,7 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
+    Forward, ForwardMergeRangeIterator, HummockIterator,
     UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
@@ -140,7 +140,6 @@ impl CompactorRunner {
             .await?;
         Ok((self.split_index, ssts, compaction_stat))
     }
-
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(
         &self,
@@ -229,10 +228,7 @@ impl CompactorRunner {
         // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
-            SkipWatermarkIterator::from_safe_epoch_watermarks(
-                UnorderedMergeIteratorInner::for_compactor(table_iters),
-                &self.compact_task.table_watermarks,
-            ),
+            UnorderedMergeIteratorInner::for_compactor(table_iters),
             CompactionDeleteRangeIterator::new(del_iter),
         ))
     }
@@ -507,6 +503,7 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
+        check_compaction_result(&compact_task, context.clone()).await.unwrap();
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
