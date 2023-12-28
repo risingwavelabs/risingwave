@@ -211,14 +211,20 @@ impl Binder {
             use crate::catalog::function_catalog::FunctionKind::*;
             if func.language == "sql" {
                 // This represents the current user defined function is `language sql`
-                let ast = risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str()).unwrap();
+                let ast = risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str())
+                    .unwrap();
                 // The actual inline logic
                 create_udf_context(self, &args, &Arc::clone(func));
                 return self.bind_expr(extract_udf_expression(ast));
             } else {
-                debug_assert!(func.language == "python" || func.language == "java", "only `python` and `java` are currently supported for general udf");
+                debug_assert!(
+                    func.language == "python" || func.language == "java",
+                    "only `python` and `java` are currently supported for general udf"
+                );
                 match &func.kind {
-                    Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                    Scalar { .. } => {
+                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
+                    }
                     Table { .. } => {
                         self.ensure_table_function_allowed()?;
                         return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
