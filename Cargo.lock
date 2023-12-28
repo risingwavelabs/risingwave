@@ -8507,6 +8507,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "time",
+ "tokio-postgres",
  "tokio-retry",
  "tokio-stream",
  "tokio-util",
