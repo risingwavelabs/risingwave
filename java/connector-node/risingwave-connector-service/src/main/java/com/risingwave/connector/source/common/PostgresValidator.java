@@ -306,9 +306,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     /* Check required privilege to create/alter a publication */
     private void validatePublicationConfig(boolean isSuperUser) throws SQLException {
-        boolean publicationCoversTable = false;
-        boolean publicationExists = false;
-        boolean partialPublication = false;
+        boolean isPublicationCoversTable = false;
+        boolean isPublicationExists = false;
+        boolean isPartialPublicationEnabled = false;
 
         // Check whether publication exists
         try (var stmt =
@@ -317,13 +317,21 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(1, pubName);
             var res = stmt.executeQuery();
             while (res.next()) {
-                publicationExists = res.getBoolean(1);
+                isPublicationExists = res.getBoolean(1);
             }
         }
 
-        if (!pubAutoCreate && !publicationExists) {
-            throw ValidatorUtils.invalidArgument(
-                    "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+        if (!isPublicationExists) {
+            // We require a publication on upstream to publish table cdc events
+            if (!pubAutoCreate) {
+                throw ValidatorUtils.invalidArgument(
+                        "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+            } else {
+                // createPublicationIfNeeded(Optional.empty());
+                LOG.info(
+                        "Publication '{}' doesn't exist, will be created in the process of streaming job.",
+                        this.pubName);
+            }
         }
 
         // If the source properties is shared by multiple tables, skip the following
@@ -336,12 +344,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.publication_att_exists"));
             while (res.next()) {
-                partialPublication = res.getBoolean(1);
+                isPartialPublicationEnabled = res.getBoolean(1);
             }
         }
         // PG 15 and up supports partial publication of table
         // check whether publication covers all columns of the table schema
-        if (partialPublication) {
+        if (isPartialPublicationEnabled) {
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.publication_attnames"))) {
@@ -361,10 +369,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                                             pubName, schemaName + "." + tableName));
                         }
                         if (i == tableSchema.getNumColumns() - 1) {
-                            publicationCoversTable = true;
+                            isPublicationCoversTable = true;
                         }
                     }
-                    if (publicationCoversTable) {
+                    if (isPublicationCoversTable) {
                         LOG.info(
                                 "The publication covers the table '{}'.",
                                 schemaName + "." + tableName);
@@ -383,9 +391,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
                 if (res.next()) {
-                    publicationCoversTable = res.getBoolean(1);
-                    if (publicationCoversTable) {
-                        LOG.info("The publication covers the table.");
+                    isPublicationCoversTable = res.getBoolean(1);
+                    if (isPublicationCoversTable) {
+                        LOG.info(
+                                "The publication covers the table '{}'.",
+                                schemaName + "." + tableName);
                     }
                 }
             }
@@ -393,12 +403,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         // If auto create is enabled and the publication doesn't exist or doesn't cover the table,
         // we need to create or alter the publication. And we need to check the required privileges.
-        if (!publicationCoversTable) {
+        if (!isPublicationCoversTable) {
             // check whether the user has the CREATE privilege on database
             if (!isSuperUser) {
                 validatePublicationPrivileges();
             }
-            if (publicationExists) {
+            if (isPublicationExists) {
                 alterPublicationIfNeeded();
             } else {
                 LOG.info(
@@ -490,7 +500,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 String.format(
                         "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
         try (var stmt = jdbcConnection.createStatement()) {
-            LOG.info("Altered publication with statement: {}", stmt);
+            LOG.info("Altered publication with statement: {}", alterPublicationSql);
             stmt.execute(alterPublicationSql);
         }
     }
