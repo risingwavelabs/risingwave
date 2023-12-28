@@ -300,6 +300,11 @@ impl ParallelUnitMapping {
         Self::new_uniform(parallel_units.iter().map(|pu| pu.id))
     }
 
+    /// Create a uniform parallel unit mapping from the given parallel units ids
+    pub fn build_from_ids(parallel_unit_ids: &[ParallelUnitId]) -> Self {
+        Self::new_uniform(parallel_unit_ids.iter().cloned())
+    }
+
     /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.
     pub fn to_actor(&self, to_map: &HashMap<ParallelUnitId, ActorId>) -> ActorMapping {
         self.transform(to_map)

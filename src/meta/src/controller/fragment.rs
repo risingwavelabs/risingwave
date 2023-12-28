@@ -331,6 +331,8 @@ impl CatalogController {
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
             ctx: Some(ctx.unwrap_or_default()),
+            // TODO(peng): fix this for model v2
+            parallelism: None,
         };
 
         Ok(table_fragments)

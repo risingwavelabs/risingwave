@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
@@ -32,11 +32,11 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{Locations, ScaleController, ScaleControllerRef};
+use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob, WorkerId};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -713,6 +713,49 @@ impl GlobalStreamManager {
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
     }
+
+    pub(crate) async fn alter_table_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: TableParallelism,
+    ) -> MetaResult<()> {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("support alter table parallelism in v2");
+        };
+        let _reschedule_job_lock = self.reschedule_lock.write().await;
+
+        let worker_nodes = mgr
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let worker_ids = worker_nodes
+            .iter()
+            .filter(|w| w.property.as_ref().map_or(true, |p| !p.is_unschedulable))
+            .map(|node| node.id)
+            .collect::<BTreeSet<_>>();
+
+        let reschedules = self
+            .scale_controller
+            .as_ref()
+            .unwrap()
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids,
+                table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
+            })
+            .await?;
+
+        self.reschedule_actors(
+            reschedules,
+            RescheduleOptions {
+                resolve_no_shuffle_upstream: false,
+            },
+            Some(HashMap::from([(TableId::new(table_id), parallelism)])),
+        )
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1031,6 +1074,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
+                TableParallelism::Auto,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

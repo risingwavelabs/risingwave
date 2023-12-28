@@ -274,6 +274,7 @@ impl StreamManagerService for StreamServiceImpl {
                         |tf| list_table_fragment_states_response::TableFragmentState {
                             table_id: tf.table_id().table_id,
                             state: tf.state() as i32,
+                            parallelism: Some(tf.assigned_parallelism.into()),
                         },
                     )
                     .collect_vec()
@@ -286,6 +287,7 @@ impl StreamManagerService for StreamServiceImpl {
                         list_table_fragment_states_response::TableFragmentState {
                             table_id: table_id as _,
                             state: PbState::from(state) as _,
+                            parallelism: None, // TODO: support parallelism.
                         }
                     })
                     .collect_vec()

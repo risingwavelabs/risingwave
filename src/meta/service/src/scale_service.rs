@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -139,6 +141,10 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<RescheduleResponse>, Status> {
         self.barrier_manager.check_status_running().await?;
 
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("only avaliable in v1");
+        };
+
         let RescheduleRequest {
             reschedules,
             revision,
@@ -155,6 +161,22 @@ impl ScaleService for ScaleServiceImpl {
                 revision: current_revision.inner(),
             }));
         }
+
+        let table_parallelisms = {
+            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
+
+            let mut table_parallelisms = HashMap::new();
+            for (table_id, table) in guard.table_fragments() {
+                if table
+                    .fragment_ids()
+                    .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                {
+                    table_parallelisms.insert(*table_id, TableParallelism::Custom);
+                }
+            }
+
+            table_parallelisms
+        };
 
         self.stream_manager
             .reschedule_actors(
@@ -181,6 +203,7 @@ impl ScaleService for ScaleServiceImpl {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
                 },
+                Some(table_parallelisms),
             )
             .await?;
 

@@ -42,7 +42,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    ValTransaction,
+    TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
@@ -1111,6 +1111,7 @@ impl FragmentManager {
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
     ) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_version = guard.table_revision;
@@ -1178,6 +1179,8 @@ impl FragmentManager {
                 })
                 .collect_vec();
 
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+
             for (fragment_id, reschedule) in reschedules {
                 let Reschedule {
                     added_actors,
@@ -1188,8 +1191,6 @@ impl FragmentManager {
                     downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
-
-                let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
                 // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
@@ -1325,6 +1326,12 @@ impl FragmentManager {
                         }
                     }
                 }
+            }
+        }
+
+        for (table_id, parallelism) in table_parallelism_assignment {
+            if let Some(mut table) = table_fragments.get_mut(table_id) {
+                table.assigned_parallelism = parallelism;
             }
         }
 

@@ -41,7 +41,7 @@ use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetadataManager, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
     ThrottleConfig,
@@ -154,6 +154,7 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism: HashMap<TableId, TableParallelism>,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -951,12 +952,15 @@ impl CommandContext {
                     .await;
             }
 
-            Command::RescheduleFragment { reschedules } => {
+            Command::RescheduleFragment {
+                reschedules,
+                table_parallelism,
+            } => {
                 let node_dropped_actors = self
                     .scale_controller
                     .as_ref()
                     .unwrap()
-                    .post_apply_reschedule(reschedules)
+                    .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
                 self.clean_up(node_dropped_actors).await?;
             }
