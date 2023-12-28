@@ -566,10 +566,23 @@ impl<'a> Tokenizer<'a> {
                     let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
-                    if s == "0" && chars.peek() == Some(&'x') {
+                    if s == "0"
+                        && let Some(&radix) = chars.peek()
+                        && "xob".contains(radix.to_ascii_lowercase())
+                    {
                         chars.next();
-                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_hexdigit());
-                        return Ok(Some(Token::HexStringLiteral(s2)));
+                        let radix = radix.to_ascii_lowercase();
+                        let base = match radix {
+                            'x' => 16,
+                            'o' => 8,
+                            'b' => 2,
+                            _ => unreachable!(),
+                        };
+                        let s2 = peeking_take_while(chars, |ch| ch.is_digit(base));
+                        if s2.is_empty() {
+                            return self.tokenizer_error("incomplete integer literal");
+                        }
+                        return Ok(Some(Token::Number(format!("0{radix}{s2}"))));
                     }
 
                     // match one period

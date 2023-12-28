@@ -78,6 +78,15 @@ impl Decimal {
         let decimal = RustDecimal::from_scientific(value).ok()?;
         Some(Normalized(decimal))
     }
+
+    pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
+            s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
+        }
+    }
 }
 
 impl ToBinary for Decimal {
