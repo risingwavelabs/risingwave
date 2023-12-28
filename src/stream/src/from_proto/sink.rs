@@ -47,8 +47,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
-        // when target table is not present, it should be an external sink
-        let is_external_sink = sink_desc.get_target_table().is_err();
         let properties = sink_desc.get_properties().clone();
         let downstream_pk = sink_desc
             .downstream_pk
@@ -62,7 +60,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(ColumnCatalog::from)
             .collect_vec();
 
-        let connector = if is_external_sink {
+        let connector = {
             let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
                 SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
             })?;
@@ -77,10 +75,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         other
                     )))
                 }
-            )?
-        } else {
-            "table"
-        };
+            )
+        }?;
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
             Some(f) => Some(f.clone().try_into()?),
@@ -142,7 +138,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         sink_param,
                         columns,
                         factory,
-                        is_external_sink,
                     )
                     .await?,
                 ))
@@ -174,7 +169,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                             sink_param,
                             columns,
                             factory,
-                            is_external_sink,
                         )
                         .await?,
                     ))

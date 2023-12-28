@@ -6,6 +6,9 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create table t_simple (v1 int, v2 int);
 
+statement error unsupported sink type table
+create sink table_sink from t_simple with (connector = 'table');
+
 statement ok
 create table m_simple (v1 int primary key, v2 int);
 

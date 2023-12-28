@@ -28,7 +28,9 @@ use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
-use risingwave_connector::sink::{build_sink, LogSinker, Sink, SinkParam, SinkWriterParam};
+use risingwave_connector::sink::{
+    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
+};
 use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -42,11 +44,11 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
     input: BoxedExecutor,
+    sink: SinkImpl,
     input_columns: Vec<ColumnCatalog>,
     sink_param: SinkParam,
     log_store_factory: F,
     sink_writer_param: SinkWriterParam,
-    is_external_sink: bool,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -86,8 +88,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
-        is_external_sink: bool,
     ) -> StreamExecutorResult<Self> {
+        let sink = build_sink(sink_param.clone())?;
         let input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -98,11 +100,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             actor_context,
             info,
             input,
+            sink,
             input_columns: columns,
             sink_param,
             log_store_factory,
             sink_writer_param,
-            is_external_sink,
         })
     }
 
@@ -144,13 +146,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             stream_key_sink_pk_mismatch,
         );
 
-        if !self.is_external_sink {
+        if !self.sink.is_sink_into_table() {
             #[for_await]
             for msg in processed_input {
                 yield msg?;
             }
         } else {
-            let sink = build_sink(self.sink_param)?;
             let (log_reader, log_writer) = self.log_store_factory.build().await;
 
             let write_log_stream = Self::execute_write_log(
@@ -159,7 +160,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 actor_id,
             );
 
-            let output = dispatch_sink!(sink, sink, {
+            let output = dispatch_sink!(self.sink, sink, {
                 let consume_log_stream = Self::execute_consume_log(
                     sink,
                     log_reader,
@@ -519,7 +520,6 @@ mod test {
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
-            true,
         )
         .await
         .unwrap();
@@ -647,7 +647,6 @@ mod test {
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
-            true,
         )
         .await
         .unwrap();
@@ -772,7 +771,6 @@ mod test {
             sink_param,
             columns,
             BoundedInMemLogStoreFactory::new(1),
-            true,
         )
         .await
         .unwrap();

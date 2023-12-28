@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod big_query;
-pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
@@ -33,6 +32,7 @@ pub mod redis;
 pub mod remote;
 pub mod starrocks;
 pub mod test_sink;
+pub mod trivial;
 pub mod utils;
 pub mod writer;
 
@@ -72,7 +72,7 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink },
                 { Kafka, $crate::sink::kafka::KafkaSink },
                 { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink },
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
@@ -87,7 +87,8 @@ macro_rules! for_all_sinks {
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { DeltaLakeRust, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { Test, $crate::sink::test_sink::TestSink }
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::trivial::TableSink }
             }
             $(,$arg)*
         }
@@ -202,16 +203,15 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
+}
 
-    pub fn from_catalog(sink_catalog: SinkCatalog) -> Option<Self> {
-        if sink_catalog.target_table.is_some() {
-            return None;
-        }
+impl From<SinkCatalog> for SinkParam {
+    fn from(sink_catalog: SinkCatalog) -> Self {
         let columns = sink_catalog
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        Some(Self {
+        Self {
             sink_id: sink_catalog.id,
             properties: sink_catalog.properties,
             columns,
@@ -220,7 +220,7 @@ impl SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-        })
+        }
     }
 }
 
@@ -383,6 +383,10 @@ impl SinkImpl {
                 )))
             }
         )
+    }
+
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, SinkImpl::Table(_))
     }
 }
 
