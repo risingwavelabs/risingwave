@@ -137,7 +137,7 @@ tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19", features = ["serde"] }
 tonic-274715c4dabd11b0 = { package = "tonic", version = "0.9", features = ["gzip", "tls-webpki-roots"] }
-tonic-93f6ce9d446188ac = { package = "tonic", version = "0.10" }
+tonic-93f6ce9d446188ac = { package = "tonic", version = "0.10", features = ["gzip", "tls"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
