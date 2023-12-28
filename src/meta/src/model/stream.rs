@@ -253,6 +253,11 @@ impl TableFragments {
         self.state == State::Created
     }
 
+    /// Returns whether the table fragments is in `Initial` state.
+    pub fn is_initial(&self) -> bool {
+        self.state == State::Initial
+    }
+
     /// Set the table ID.
     // TODO: remove this workaround for replacing table.
     pub fn set_table_id(&mut self, table_id: TableId) {

@@ -120,7 +120,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -876,8 +875,8 @@ impl CatalogManager {
                     let fragment: TableFragments = fragment;
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
-                    if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                    if fragment.is_initial() {
+                        tracing::debug!("cleaning table_id with initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
