@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::estimate_size::collections::VecDeque;
+use risingwave_common::estimate_size::collections::EstimatedVecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
@@ -111,7 +111,7 @@ pub struct RankState<RF: RankFuncCount> {
     /// First state key of the partition.
     first_key: Option<StateKey>,
     /// State keys that are waiting to be outputted.
-    buffer: VecDeque<StateKey>,
+    buffer: EstimatedVecDeque<StateKey>,
     /// Function-specific state.
     func_state: RF,
     _phantom: PhantomData<RF>,

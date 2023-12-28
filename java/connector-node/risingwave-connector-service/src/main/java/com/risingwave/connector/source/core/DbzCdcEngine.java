@@ -14,11 +14,12 @@
 
 package com.risingwave.connector.source.core;
 
+import static io.debezium.schema.AbstractTopicNamingStrategy.TOPIC_HEARTBEAT_PREFIX;
+
 import com.risingwave.connector.api.source.CdcEngine;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
-import io.debezium.heartbeat.Heartbeat;
 import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -35,7 +36,7 @@ public class DbzCdcEngine implements CdcEngine {
             long sourceId,
             Properties config,
             DebeziumEngine.CompletionCallback completionCallback) {
-        var dbzHeartbeatPrefix = config.getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
+        var dbzHeartbeatPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
         var consumer =
                 new DbzCdcEventConsumer(
                         sourceId,

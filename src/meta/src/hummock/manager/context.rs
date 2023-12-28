@@ -116,7 +116,7 @@ impl HummockManager {
     pub async fn commit_epoch_sanity_check(
         &self,
         epoch: HummockEpoch,
-        sstables: &Vec<ExtendedSstableInfo>,
+        sstables: &[ExtendedSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {

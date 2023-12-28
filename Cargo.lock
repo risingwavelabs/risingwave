@@ -2964,6 +2964,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "delta_btree_map"
+version = "1.5.0-alpha"
+dependencies = [
+ "enum-as-inner",
+]
+
+[[package]]
 name = "deltalake"
 version = "0.17.0"
 source = "git+https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4640490202ffe98adbd13b09cef8e007b"
@@ -4189,7 +4196,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows",
+ "windows 0.48.0",
 ]
 
 [[package]]
@@ -4678,7 +4685,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows",
+ "windows 0.48.0",
 ]
 
 [[package]]
@@ -8500,6 +8507,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "time",
+ "tokio-postgres",
  "tokio-retry",
  "tokio-stream",
  "tokio-util",
@@ -8884,6 +8892,7 @@ dependencies = [
  "easy-ext",
  "either",
  "enum-as-inner",
+ "expect-test",
  "fail",
  "function_name",
  "futures",
@@ -9384,6 +9393,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
+ "delta_btree_map",
  "educe 0.5.7",
  "either",
  "enum-as-inner",
@@ -11023,16 +11033,16 @@ checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
 
 [[package]]
 name = "sysinfo"
-version = "0.29.10"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a18d114d420ada3a891e6bc8e96a2023402203296a47cdd65083377dad18ba5"
+checksum = "c68492e7268037de59ae153d7efb79546cf94a18a9548235420d3d8d2436b4b1"
 dependencies = [
  "cfg-if",
  "core-foundation-sys",
  "libc",
  "ntapi",
  "once_cell",
- "winapi",
+ "windows 0.51.1",
 ]
 
 [[package]]
@@ -12163,6 +12173,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.51.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca229916c5ee38c2f2bc1e9d8f04df975b4bd93f9955dc69fabb5d91270045c9"
+dependencies = [
+ "windows-core",
+ "windows-targets 0.48.5",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.51.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1f8cf84f35d2db49a46868f947758c7a1138116f7fac3bc844f43ade1292e64"
+dependencies = [
+ "windows-targets 0.48.5",
+]
+
+[[package]]
 name = "windows-sys"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12316,6 +12345,11 @@ dependencies = [
 [[package]]
 name = "with_options"
 version = "1.5.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
 
 [[package]]
 name = "workspace-config"

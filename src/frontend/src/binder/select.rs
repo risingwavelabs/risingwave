@@ -827,9 +827,7 @@ impl Binder {
                                     ))
                                     .into())
                                 }
-                                _ => {
-                                    select_items[*index].clone()
-                                }
+                                _ => select_items[*index].clone(),
                             }
                         }
                         Expr::Value(Value::Number(number)) => match number.parse::<usize>() {

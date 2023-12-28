@@ -41,7 +41,7 @@ use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, DdlType, FragmentManagerRef, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
     ThrottleConfig,
@@ -84,8 +84,8 @@ pub struct ReplaceTablePlan {
     pub init_split_assignment: SplitAssignment,
 }
 
-/// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
-/// we'll build different barriers to send, and may do different stuffs after the barrier is
+/// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
+/// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
@@ -146,6 +146,7 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism: HashMap<TableId, TableParallelism>,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -156,8 +157,8 @@ pub enum Command {
     /// of the Merge executors are changed additionally.
     ReplaceTable(ReplaceTablePlan),
 
-    /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
-    /// newly added splits.
+    /// `SourceSplitAssignment` generates a `Splits` barrier for pushing initialized splits or
+    /// changed splits.
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
@@ -891,10 +892,13 @@ impl CommandContext {
                     .await;
             }
 
-            Command::RescheduleFragment { reschedules } => {
+            Command::RescheduleFragment {
+                reschedules,
+                table_parallelism,
+            } => {
                 let node_dropped_actors = self
                     .scale_controller
-                    .post_apply_reschedule(reschedules)
+                    .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
                 self.clean_up(node_dropped_actors).await?;
             }

@@ -89,12 +89,12 @@ public class SourceValidateHandler {
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
-                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
-                try (var validator = new PostgresValidator(props, tableSchema)) {
+                try (var validator =
+                        new PostgresValidator(props, tableSchema, isMultiTableShared)) {
                     validator.validateAll(isMultiTableShared);
                 }
                 break;

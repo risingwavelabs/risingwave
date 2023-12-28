@@ -168,7 +168,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
             let result = future.await;
-            self.read_flushed_chunk_future
+            let _fut = self
+                .read_flushed_chunk_future
                 .take()
                 .expect("future not None");
             Ok(Some(result?))

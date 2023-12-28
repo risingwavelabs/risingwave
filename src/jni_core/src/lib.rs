@@ -16,7 +16,6 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
-#![feature(result_option_inspect)]
 #![feature(try_blocks)]
 
 pub mod hummock_iterator;

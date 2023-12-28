@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{ScaleController, ScaleControllerRef};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -93,7 +95,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let actor_splits = self
             .source_manager
-            .get_actor_splits()
+            .list_assignments()
             .await
             .into_iter()
             .map(|(actor_id, splits)| {
@@ -145,6 +147,22 @@ impl ScaleService for ScaleServiceImpl {
             }));
         }
 
+        let table_parallelisms = {
+            let guard = self.fragment_manager.get_fragment_read_guard().await;
+
+            let mut table_parallelisms = HashMap::new();
+            for (table_id, table) in guard.table_fragments() {
+                if table
+                    .fragment_ids()
+                    .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                {
+                    table_parallelisms.insert(*table_id, TableParallelism::Custom);
+                }
+            }
+
+            table_parallelisms
+        };
+
         self.stream_manager
             .reschedule_actors(
                 reschedules
@@ -170,6 +188,7 @@ impl ScaleService for ScaleServiceImpl {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
                 },
+                Some(table_parallelisms),
             )
             .await?;
 

@@ -16,7 +16,6 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
