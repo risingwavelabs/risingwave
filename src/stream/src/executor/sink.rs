@@ -146,7 +146,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             stream_key_sink_pk_mismatch,
         );
 
-        if !self.sink.is_sink_into_table() {
+        if self.sink.is_sink_into_table() {
             #[for_await]
             for msg in processed_input {
                 yield msg?;
