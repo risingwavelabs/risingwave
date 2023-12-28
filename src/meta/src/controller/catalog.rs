@@ -407,16 +407,19 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub async fn clean_foreground_creating_jobs(&self) -> MetaResult<ReleaseContext> {
+    /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
+    pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let creating_job_ids: Vec<ObjectId> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
-                streaming_job::Column::CreateType
-                    .eq(CreateType::Foreground)
-                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+                streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
+                    streaming_job::Column::JobStatus
+                        .eq(JobStatus::Creating)
+                        .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
+                ),
             )
             .into_tuple()
             .all(&txn)

@@ -295,15 +295,6 @@ impl CatalogController {
             .await?;
         }
 
-        // Mark job as CREATING.
-        streaming_job::ActiveModel {
-            job_id: Set(streaming_job.id() as _),
-            job_status: Set(JobStatus::Creating),
-            ..Default::default()
-        }
-        .update(&txn)
-        .await?;
-
         txn.commit().await?;
 
         Ok(())
@@ -319,7 +310,7 @@ impl CatalogController {
         let Some(streaming_job) = streaming_job else {
             tracing::warn!(
                 id = job_id,
-                "streaming job not found when aborting creating"
+                "streaming job not found when aborting creating, might be cleaned by recovery"
             );
             return Ok(true);
         };
@@ -344,6 +335,7 @@ impl CatalogController {
 
     pub async fn post_collect_table_fragments(
         &self,
+        job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
         new_actor_dispatchers: HashMap<crate::model::ActorId, Vec<Dispatcher>>,
         split_assignment: &SplitAssignment,
@@ -392,6 +384,16 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
         }
+
+        // Mark job as CREATING.
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
         txn.commit().await?;
 
         Ok(())

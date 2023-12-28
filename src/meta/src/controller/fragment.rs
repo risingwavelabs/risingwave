@@ -22,9 +22,9 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ConnectorSplits, ExprContext,
-    FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamNode,
-    TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
+    ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
+    StreamNode, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -60,13 +60,16 @@ use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 impl CatalogControllerInner {
-    /// List all fragment vnode mapping info
+    /// List all fragment vnode mapping info for all CREATED streaming jobs.
     pub async fn all_running_fragment_mappings(
         &self,
     ) -> MetaResult<impl Iterator<Item = FragmentParallelUnitMapping> + '_> {
         let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .into_tuple()
             .all(&self.db)
             .await?;
