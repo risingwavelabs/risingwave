@@ -17,7 +17,7 @@ use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;

@@ -36,6 +36,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
+mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
@@ -520,6 +521,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
+            operation: AlterTableOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_TABLE,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
             operation: AlterTableOperation::SetSchema { new_schema_name },
         } => {
             alter_set_schema::handle_alter_set_schema(
@@ -551,6 +564,19 @@ pub async fn handle(
             } else {
                 alter_rename::handle_rename_view(handler_args, name, view_name).await
             }
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetParallelism { parallelism },
+        } if materialized => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_MATERIALIZED_VIEW,
+            )
+            .await
         }
         Statement::AlterView {
             materialized,
@@ -604,6 +630,7 @@ pub async fn handle(
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
+
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::ChangeOwner { new_owner_name },
@@ -626,6 +653,18 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SINK,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SINK,
             )
             .await
         }

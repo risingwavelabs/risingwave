@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub mod external;
 pub mod source;
 pub mod split;
 use std::collections::HashMap;

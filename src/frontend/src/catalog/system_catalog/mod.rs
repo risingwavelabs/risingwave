@@ -29,6 +29,8 @@ use risingwave_common::catalog::{
 use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -207,6 +209,22 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
             .map(|(ty, name)| format!("NULL::{} AS {}", ty, name))
             .join(", ")
     )
+}
+
+fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
+    let parallelism = match state
+        .parallelism
+        .as_ref()
+        .and_then(|parallelism| parallelism.parallelism.as_ref())
+    {
+        None => "unknown".to_string(),
+        Some(PbParallelism::Auto(_)) => "auto".to_string(),
+        Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
+            format!("fixed({parallelism})")
+        }
+        Some(PbParallelism::Custom(_)) => "custom".to_string(),
+    };
+    parallelism
 }
 
 /// get acl items of `object` in string, ignore public.
