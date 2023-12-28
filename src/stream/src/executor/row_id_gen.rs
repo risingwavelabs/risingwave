@@ -100,6 +100,7 @@ impl RowIdGenExecutor {
 
             match msg {
                 Message::Chunk(chunk) => {
+                    let chunk = chunk.compact();
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
