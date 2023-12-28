@@ -109,7 +109,6 @@ regex-syntax = { version = "0.8" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls", "rustls-tls-native-roots", "stream"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-rustls = { version = "0.21" }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -136,8 +135,8 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19", features = ["serde"] }
-tonic-274715c4dabd11b0 = { package = "tonic", version = "0.9", features = ["gzip", "tls-webpki-roots"] }
-tonic-93f6ce9d446188ac = { package = "tonic", version = "0.10" }
+tonic-274715c4dabd11b0 = { package = "tonic", version = "0.9", features = ["gzip", "tls"] }
+tonic-93f6ce9d446188ac = { package = "tonic", version = "0.10", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
