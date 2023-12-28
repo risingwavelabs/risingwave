@@ -582,6 +582,7 @@ impl<'a> Tokenizer<'a> {
                         if s2.is_empty() {
                             return self.tokenizer_error("incomplete integer literal");
                         }
+                        self.reject_number_junk(chars)?;
                         return Ok(Some(Token::Number(format!("0{radix}{s2}"))));
                     }
 
@@ -608,11 +609,13 @@ impl<'a> Tokenizer<'a> {
                                 chars.next();
                             }
                             s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
+                            self.reject_number_junk(chars)?;
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
                         _ => {}
                     };
+                    self.reject_number_junk(chars)?;
                     Ok(Some(Token::Number(s)))
                 }
                 // punctuation
@@ -904,6 +907,15 @@ impl<'a> Tokenizer<'a> {
             col: self.col,
             line: self.line,
         })
+    }
+
+    fn reject_number_junk(&self, chars: &mut Peekable<Chars<'_>>) -> Result<(), TokenizerError> {
+        if let Some(ch) = chars.peek()
+            && is_identifier_start(*ch)
+        {
+            return self.tokenizer_error("trailing junk after numeric literal");
+        }
+        Ok(())
     }
 
     // Consume characters until newline
