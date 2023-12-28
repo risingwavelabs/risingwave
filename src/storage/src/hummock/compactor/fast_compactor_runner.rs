@@ -466,8 +466,16 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                let is_new_user_key = !self.executor.last_key.user_key.eq(&smallest_key.user_key);
-                if !self.executor.builder.need_flush() && is_new_user_key {
+                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
+                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
+                    && self.executor.last_key_is_delete;
+                if self.executor.builder.need_flush() || need_deleted {
+                    let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
+                    let target_key = FullKey::decode(&largest_key);
+                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
+                    let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.run(&mut iter, target_key).await?;
+                } else {
                     let largest_key = sstable_iter.current_block_largest();
                     let block_len = block.len() as u64;
                     let block_key_count = block_meta.total_key_count;
@@ -482,12 +490,6 @@ impl CompactorRunner {
                     }
                     self.executor.may_report_process_key(block_key_count);
                     self.executor.clear();
-                } else {
-                    let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
-                    let target_key = FullKey::decode(&largest_key);
-                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
-                    let mut iter = sstable_iter.iter.take().unwrap();
-                    self.executor.run(&mut iter, target_key).await?;
                 }
             }
             rest_data.next_sstable().await?;
