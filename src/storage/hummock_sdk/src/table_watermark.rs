@@ -331,6 +331,10 @@ impl VnodeWatermark {
     pub fn vnode_bitmap(&self) -> &Bitmap {
         &self.vnode_bitmap
     }
+
+    pub fn watermark(&self) -> &Bytes {
+        &self.watermark
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

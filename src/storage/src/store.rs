@@ -155,7 +155,7 @@ pub trait StateStoreWrite: StaticSendSync {
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    ) -> StorageResult<usize>;
 }
 
 #[derive(Default, Debug)]
