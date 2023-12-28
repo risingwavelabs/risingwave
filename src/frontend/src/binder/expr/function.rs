@@ -351,7 +351,9 @@ impl Binder {
                     );
                 };
 
-                if let Some(ref fraction_value) = fraction_datum && !(0.0..=1.0).contains(&fraction_value.as_float64().0) {
+                if let Some(ref fraction_value) = fraction_datum
+                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+                {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must between 0.0 and 1.0",
                         kind
@@ -994,6 +996,7 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];

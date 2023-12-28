@@ -14,5 +14,6 @@
 
 pub(crate) mod checked;
 pub(crate) mod non_strict;
+pub(crate) mod strict;
 
 pub use non_strict::{EvalErrorReport, LogReport};

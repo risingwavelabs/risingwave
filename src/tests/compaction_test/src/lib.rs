@@ -20,7 +20,6 @@
 #![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(bound_map)]

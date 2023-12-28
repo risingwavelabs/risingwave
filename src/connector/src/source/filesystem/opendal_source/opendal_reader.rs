@@ -24,6 +24,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
@@ -81,10 +82,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)

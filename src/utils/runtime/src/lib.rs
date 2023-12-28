@@ -74,7 +74,7 @@ where
     }
 
     tokio::runtime::Builder::new_multi_thread()
-        .thread_name("risingwave-main")
+        .thread_name("rw-main")
         .enable_all()
         .build()
         .unwrap()

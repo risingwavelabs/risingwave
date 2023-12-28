@@ -54,6 +54,7 @@ enum Commands {
     Default,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]

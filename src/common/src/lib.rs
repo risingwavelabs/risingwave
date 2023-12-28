@@ -39,11 +39,11 @@
 #![feature(exclusive_range_pattern)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_option_inspect)]
 #![feature(map_entry_replace)]
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
+#![feature(btree_cursors)]
 
 #[cfg_attr(not(test), expect(unused_extern_crates))]
 extern crate self as risingwave_common;
