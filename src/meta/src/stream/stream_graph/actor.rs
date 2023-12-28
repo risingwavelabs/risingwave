@@ -650,6 +650,7 @@ impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
     pub fn new(
+        streaming_job_id: u32,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
@@ -657,11 +658,12 @@ impl ActorGraphBuilder {
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
-        let distributions = schedule::Scheduler::new(
+        let scheduler = schedule::Scheduler::new(
+            streaming_job_id,
             cluster_info.parallel_units.values().cloned(),
             default_parallelism,
-        )
-        .schedule(&fragment_graph)?;
+        )?;
+        let distributions = scheduler.schedule(&fragment_graph)?;
 
         Ok(Self {
             distributions,
