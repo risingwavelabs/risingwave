@@ -21,9 +21,10 @@ use crate::MetaResult;
 
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let param = SinkParam::from(sink_catalog);
-
-    let sink = build_sink(param)?;
-
-    dispatch_sink!(sink, sink, Ok(sink.validate().await?))
+    if let Some(param) = SinkParam::from_catalog(sink_catalog) {
+        let sink = build_sink(param)?;
+        dispatch_sink!(sink, sink, Ok(sink.validate().await?))
+    } else {
+        Ok(())
+    }
 }

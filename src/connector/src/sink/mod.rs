@@ -202,15 +202,16 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
-}
 
-impl From<SinkCatalog> for SinkParam {
-    fn from(sink_catalog: SinkCatalog) -> Self {
+    pub fn from_catalog(sink_catalog: SinkCatalog) -> Option<Self> {
+        if sink_catalog.target_table.is_some() {
+            return None;
+        }
         let columns = sink_catalog
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        Self {
+        Some(Self {
             sink_id: sink_catalog.id,
             properties: sink_catalog.properties,
             columns,
@@ -219,7 +220,7 @@ impl From<SinkCatalog> for SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-        }
+        })
     }
 }
 
