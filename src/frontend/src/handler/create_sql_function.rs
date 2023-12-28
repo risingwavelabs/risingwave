@@ -83,7 +83,16 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         None => {
-            return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into())
+            if params.return_.is_none() {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "AS or RETURN must be specified".to_string(),
+                )
+                .into());
+            }
+            // Otherwise this is a return expression
+            // Note: this is a current work around, and we are assuming return sql udf
+            // will NOT involve complex syntax, so just reuse the logic for select definition
+            format!("select {}", &params.return_.unwrap().to_string())
         }
     };
 
