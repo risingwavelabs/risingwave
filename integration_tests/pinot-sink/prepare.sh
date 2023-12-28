@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-sleep 30
-
 # setup kafka
 docker compose exec kafka \
 kafka-topics --create --topic orders.upsert.log --bootstrap-server localhost:9092
