@@ -47,7 +47,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: in function "divide"
+  3: division by zero
 
 
 query error
@@ -57,7 +58,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: in function "divide"
+  3: division by zero
 
 
 statement error

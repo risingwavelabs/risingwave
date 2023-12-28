@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use risingwave_common::array::{ArrayError, ListRef};
 use risingwave_common::types::{CheckedAdd, Decimal, ScalarRefImpl};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[function("array_sum(int2[]) -> int8")]
 fn array_sum_int2(list: ListRef<'_>) -> Result<Option<i64>> {
@@ -54,9 +55,7 @@ where
     let mut sum = T::default();
     for e in list.iter().flatten() {
         let v: S = e.try_into()?;
-        sum = sum
-            .checked_add(v.into())
-            .ok_or_else(|| ExprError::NumericOutOfRange)?;
+        sum = sum.checked_add(v.into()).context("numeric out of range")?;
     }
     Ok(Some(sum))
 }

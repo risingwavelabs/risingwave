@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{bail, Result};
 use jsonbb::Builder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{JsonbVal, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 use super::{ToJsonb, ToTextDisplay};
 
@@ -58,10 +59,7 @@ fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
 #[function("jsonb_build_object(...) -> jsonb")]
 fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     if args.len() % 2 == 1 {
-        return Err(ExprError::InvalidParam {
-            name: "args",
-            reason: "argument list must have even number of elements".into(),
-        });
+        bail!("argument list must have even number of elements");
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
@@ -73,20 +71,12 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     {
         match key {
             Some(ScalarRefImpl::List(_) | ScalarRefImpl::Struct(_) | ScalarRefImpl::Jsonb(_)) => {
-                return Err(ExprError::InvalidParam {
-                    name: "args",
-                    reason: "key value must be scalar, not array, composite, or json".into(),
-                })
+                bail!("key value must be scalar, not array, composite, or json")
             }
             // special treatment for bool, `false` & `true` rather than `f` & `t`.
             Some(ScalarRefImpl::Bool(b)) => builder.display(b),
             Some(s) => builder.display(ToTextDisplay(s)),
-            None => {
-                return Err(ExprError::InvalidParam {
-                    name: "args",
-                    reason: format!("argument {}: key must not be null", i * 2 + 1).into(),
-                })
-            }
+            None => bail!("argument {}: key must not be null", i * 2 + 1),
         }
         value.add_to(value_type, &mut builder)?;
     }

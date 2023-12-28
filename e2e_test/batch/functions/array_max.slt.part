@@ -28,10 +28,10 @@ select array_max(array['2c😅🤔😅️c2', '114🥵514', '30🤣🥳03', '5�
 ----
 5🥵💩💩🥵5
 
-query error invalid digit found in string
+query error invalid input syntax for type integer: "a"
 select array_max(array['a', 'b', 'c', 114514]);
 
-query error invalid digit found in string
+query error invalid input syntax for type integer: "a"
 select array_max(array[114514, 'a', 'b', 'c']);
 
 # i32::MIN & i32::MIN - 1 & i32::MAX

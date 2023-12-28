@@ -113,7 +113,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
+  2: in function "to_char"
+  3: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
 
 
 query error
@@ -123,7 +124,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
+  2: in function "to_char"
+  3: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
 
 
 query error
@@ -133,7 +135,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
+  2: in function "to_char"
+  3: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
 
 
 query error
@@ -143,7 +146,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
+  2: in function "to_char"
+  3: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
 
 
 query error
@@ -153,4 +157,5 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
+  2: in function "to_char"
+  3: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.

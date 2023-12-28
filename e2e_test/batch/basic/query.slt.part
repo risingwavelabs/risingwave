@@ -30,7 +30,7 @@ select count(*) from t3;
 ----
 1
 
-statement error Division by zero
+statement error division by zero
 select v1/0 from t3;
 
 

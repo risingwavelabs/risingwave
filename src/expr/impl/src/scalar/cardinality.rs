@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{anyhow, Result};
 use risingwave_common::array::ListRef;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Returns the total number of elements in the array.
 ///
@@ -64,5 +65,5 @@ fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T> {
         .flatten()
         .len()
         .try_into()
-        .map_err(|_| ExprError::NumericOverflow)
+        .map_err(|_| anyhow!("array length overflow"))
 }

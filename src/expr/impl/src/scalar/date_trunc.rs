@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{anyhow, bail, Result};
 use risingwave_common::types::{Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 use super::timestamptz::timestamp_at_time_zone;
 
@@ -94,10 +95,9 @@ pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> 
         MINUTE => interval.truncate_minute(),
         HOUR => interval.truncate_hour(),
         DAY => interval.truncate_day(),
-        WEEK => return Err(ExprError::UnsupportedFunction(
+        WEEK => bail!(
             "interval units \"week\" not supported because months usually have fractional weeks"
-                .into(),
-        )),
+        ),
         MONTH => interval.truncate_month(),
         QUARTER => interval.truncate_quarter(),
         YEAR => interval.truncate_year(),
@@ -109,9 +109,7 @@ pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> 
 }
 
 #[inline]
-fn invalid_field_error(field: &str) -> ExprError {
-    ExprError::InvalidParam {
-        name: "field",
-        reason: format!("invalid field {field:?}. must be one of: microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century, millennium").into(),
-    }
+#[track_caller]
+fn invalid_field_error(field: &str) -> anyhow::Error {
+    anyhow!("invalid field {field:?}. must be one of: microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century, millennium")
 }

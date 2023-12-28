@@ -14,8 +14,9 @@
 
 use std::fmt::Write;
 
+use anyhow::{anyhow, Result};
 use risingwave_common::types::JsonbRef;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[function("jsonb_typeof(jsonb) -> varchar")]
 pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl Write) {
@@ -24,12 +25,7 @@ pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl Write) {
 
 #[function("jsonb_array_length(jsonb) -> int4")]
 pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
-    v.array_len()
-        .map(|n| n as i32)
-        .map_err(|e| ExprError::InvalidParam {
-            name: "",
-            reason: e.into(),
-        })
+    Ok(v.array_len().map_err(|e| anyhow!("{e}"))? as i32)
 }
 
 #[function("is_json(varchar) -> boolean")]

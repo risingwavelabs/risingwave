@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{ensure, Context as _, Result};
 use risingwave_common::array::{I32Array, ListRef, ListValue};
 use risingwave_common::types::ScalarRefImpl;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
 /// it's not present.
@@ -102,15 +103,7 @@ fn array_position_start(
     element: Option<ScalarRefImpl<'_>>,
     start: Option<i32>,
 ) -> Result<Option<i32>> {
-    let start = match start {
-        None => {
-            return Err(ExprError::InvalidParam {
-                name: "start",
-                reason: "initial position must not be null".into(),
-            })
-        }
-        Some(start) => (start.max(1) - 1) as usize,
-    };
+    let start = (start.context("initial position must not be null")?.max(1) - 1) as usize;
     array_position_common(array, element, start)
 }
 
@@ -120,9 +113,7 @@ fn array_position_common(
     skip: usize,
 ) -> Result<Option<i32>> {
     let Some(left) = array else { return Ok(None) };
-    if i32::try_from(left.len()).is_err() {
-        return Err(ExprError::CastOutOfRange("invalid array length"));
-    }
+    ensure!(left.len() <= i32::MAX as usize, "invalid array length");
 
     Ok(left
         .iter()
@@ -190,9 +181,10 @@ fn array_positions(
         return Ok(None);
     };
     let values = array.iter();
-    if values.len() - 1 > i32::MAX as usize {
-        return Err(ExprError::CastOutOfRange("invalid array length"));
-    }
+    ensure!(
+        values.len() - 1 <= i32::MAX as usize,
+        "invalid array length"
+    );
     Ok(Some(ListValue::new(
         values
             .enumerate()

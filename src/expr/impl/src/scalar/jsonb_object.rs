@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{bail, Result};
 use jsonbb::Builder;
 use risingwave_common::types::{JsonbVal, ListRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Builds a JSON object out of a text array.
 ///
@@ -46,22 +47,14 @@ use risingwave_expr::{function, ExprError, Result};
 #[function("jsonb_object(varchar[]) -> jsonb")]
 fn jsonb_object_1d(array: ListRef<'_>) -> Result<JsonbVal> {
     if array.len() % 2 == 1 {
-        return Err(ExprError::InvalidParam {
-            name: "array",
-            reason: "array must have even number of elements".into(),
-        });
+        bail!("array must have even number of elements")
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
     for [key, value] in array.iter().array_chunks() {
         match key {
             Some(s) => builder.add_string(s.into_utf8()),
-            None => {
-                return Err(ExprError::InvalidParam {
-                    name: "array",
-                    reason: "null value not allowed for object key".into(),
-                })
-            }
+            None => bail!("null value not allowed for object key"),
         }
         match value {
             Some(s) => builder.add_string(s.into_utf8()),
@@ -100,26 +93,15 @@ fn jsonb_object_2d(array: ListRef<'_>) -> Result<JsonbVal> {
     builder.begin_object();
     for kv in array.iter() {
         let Some(kv) = kv else {
-            return Err(ExprError::InvalidParam {
-                name: "array",
-                reason: "Unexpected array element.".into(),
-            });
+            bail!("Unexpected array element.");
         };
         let kv = kv.into_list();
         if kv.len() != 2 {
-            return Err(ExprError::InvalidParam {
-                name: "array",
-                reason: "array must have two columns".into(),
-            });
+            bail!("array must have two columns");
         }
         match kv.get(0).unwrap() {
             Some(s) => builder.add_string(s.into_utf8()),
-            None => {
-                return Err(ExprError::InvalidParam {
-                    name: "array",
-                    reason: "null value not allowed for object key".into(),
-                })
-            }
+            None => bail!("null value not allowed for object key"),
         }
         match kv.get(1).unwrap() {
             Some(s) => builder.add_string(s.into_utf8()),
@@ -151,22 +133,14 @@ fn jsonb_object_2d(array: ListRef<'_>) -> Result<JsonbVal> {
 #[function("jsonb_object(varchar[], varchar[]) -> jsonb")]
 fn jsonb_object_kv(keys: ListRef<'_>, values: ListRef<'_>) -> Result<JsonbVal> {
     if keys.len() != values.len() {
-        return Err(ExprError::InvalidParam {
-            name: "values",
-            reason: "mismatched array dimensions".into(),
-        });
+        bail!("mismatched array dimensions");
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
     for (key, value) in keys.iter().zip_eq_fast(values.iter()) {
         match key {
             Some(s) => builder.add_string(s.into_utf8()),
-            None => {
-                return Err(ExprError::InvalidParam {
-                    name: "keys",
-                    reason: "null value not allowed for object key".into(),
-                })
-            }
+            None => bail!("null value not allowed for object key"),
         }
         match value {
             Some(s) => builder.add_string(s.into_utf8()),

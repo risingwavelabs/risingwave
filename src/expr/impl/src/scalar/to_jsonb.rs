@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 
+use anyhow::{Context as _, Result};
 use jsonbb::Builder;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, ScalarRefImpl,
@@ -21,7 +22,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[function("to_jsonb(*) -> jsonb")]
 fn to_jsonb(input: Option<impl ToJsonb>, ctx: &Context) -> Result<JsonbVal> {
@@ -138,7 +139,7 @@ impl ToJsonb for Decimal {
     fn add_to(self, t: &DataType, builder: &mut Builder) -> Result<()> {
         let res: F64 = self
             .try_into()
-            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
+            .context("numeric our of range. must be IEEE 754 double")?;
         res.add_to(t, builder)?;
         Ok(())
     }

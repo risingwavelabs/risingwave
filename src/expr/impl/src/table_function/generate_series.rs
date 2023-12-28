@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{bail, Context as _, Result};
 use num_traits::One;
 use risingwave_common::types::{CheckedAdd, Decimal, IsNegative};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]
@@ -106,10 +107,7 @@ where
     S: IsNegative + Copy,
 {
     if step.is_zero() {
-        return Err(ExprError::InvalidParam {
-            name: "step",
-            reason: "step size cannot equal zero".into(),
-        });
+        bail!("step size cannot equal zero");
     }
     let mut cur = start;
     let neg = step.is_negative();
@@ -122,7 +120,7 @@ where
             _ => {}
         };
         let ret = cur;
-        cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
+        cur = cur.checked_add(step).context("numeric out of range")?;
         Ok(Some(ret))
     };
     Ok(std::iter::from_fn(move || next().transpose()))
@@ -140,14 +138,8 @@ fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Re
 fn validate_decimal(decimal: Decimal, name: &'static str) -> Result<()> {
     match decimal {
         Decimal::Normalized(_) => Ok(()),
-        Decimal::PositiveInf | Decimal::NegativeInf => Err(ExprError::InvalidParam {
-            name,
-            reason: format!("{} value cannot be infinity", name).into(),
-        }),
-        Decimal::NaN => Err(ExprError::InvalidParam {
-            name,
-            reason: format!("{} value cannot be NaN", name).into(),
-        }),
+        Decimal::PositiveInf | Decimal::NegativeInf => bail!("{name} value cannot be infinity"),
+        Decimal::NaN => bail!("{name} value cannot be NaN"),
     }
 }
 
@@ -161,7 +153,6 @@ mod tests {
     use risingwave_common::types::{DataType, Decimal, Interval, ScalarImpl, Timestamp};
     use risingwave_expr::expr::{BoxedExpression, ExpressionBoxExt, LiteralExpression};
     use risingwave_expr::table_function::build;
-    use risingwave_expr::ExprError;
     use risingwave_pb::expr::table_function::PbType;
 
     const CHUNK_SIZE: usize = 1024;
@@ -351,15 +342,8 @@ mod tests {
         let mut output = function.eval(&dummy_chunk).await;
         while let Some(res) = output.next().await {
             match res {
-                Ok(_) => {
-                    assert!(expect_ok);
-                }
-                Err(ExprError::InvalidParam { .. }) => {
-                    assert!(!expect_ok);
-                }
-                Err(_) => {
-                    unreachable!();
-                }
+                Ok(_) => assert!(expect_ok),
+                Err(_) => assert!(!expect_ok),
             }
         }
     }

@@ -14,9 +14,9 @@
 
 use std::fmt::Write;
 
+use anyhow::{anyhow, bail, Result};
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
-use risingwave_expr::{function, ExprError, Result};
-use thiserror_ext::AsReport;
+use risingwave_expr::function;
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";
 const PARSE_BASE64_INVALID_PADDING: &str = "unexpected \"=\" while decoding base64 sequence";
@@ -48,10 +48,7 @@ pub fn encode(data: &[u8], format: &str, writer: &mut impl Write) -> Result<()> 
             encode_bytes_escape(data, writer).unwrap();
         }
         _ => {
-            return Err(ExprError::InvalidParam {
-                name: "format",
-                reason: format!("unrecognized encoding: \"{}\"", format).into(),
-            });
+            return Err(anyhow!("unrecognized encoding: \"{}\"", format));
         }
     }
     Ok(())
@@ -61,16 +58,11 @@ pub fn encode(data: &[u8], format: &str, writer: &mut impl Write) -> Result<()> 
 pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
     match format {
         "base64" => Ok(parse_bytes_base64(data)?.into()),
-        "hex" => Ok(parse_bytes_hex(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into()),
+        "hex" => Ok(parse_bytes_hex(data).map_err(|e| anyhow!("{e}"))?.into()),
         "escape" => Ok(parse_bytes_traditional(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
+            .map_err(|e| anyhow!("{e}"))?
             .into()),
-        _ => Err(ExprError::InvalidParam {
-            name: "format",
-            reason: format!("unrecognized encoding: \"{}\"", format).into(),
-        }),
+        _ => Err(anyhow!("unrecognized encoding: \"{}\"", format)),
     }
 }
 
@@ -82,10 +74,7 @@ impl CharacterSet {
     fn recognize(encoding: &str) -> Result<Self> {
         match encoding.to_uppercase().as_str() {
             "UTF8" | "UTF-8" => Ok(Self::Utf8),
-            _ => Err(ExprError::InvalidParam {
-                name: "encoding",
-                reason: format!("unrecognized encoding: \"{}\"", encoding).into(),
-            }),
+            _ => Err(anyhow!("unrecognized encoding: \"{}\"", encoding)),
         }
     }
 }
@@ -94,10 +83,7 @@ impl CharacterSet {
 pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
     match CharacterSet::recognize(src_encoding)? {
         CharacterSet::Utf8 => {
-            let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
-                name: "data",
-                reason: e.to_report_string().into(),
-            })?;
+            let text = String::from_utf8(data.to_vec())?;
             writer.write_str(&text).unwrap();
             Ok(())
         }
@@ -200,16 +186,16 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
                 out.push(s2 << 4 | s3 >> 2);
             }
             (Some(b'='), _, _, _) => {
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                bail!("{}", PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(b'='), _, _) => {
                 alphabet_decode(d1)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                bail!("{}", PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(d2), Some(b'='), _) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
+                bail!("{}", PARSE_BASE64_INVALID_PADDING);
             }
             (Some(d1), Some(d2), Some(d3), Some(d4)) => {
                 let s1 = alphabet_decode(d1)?;
@@ -222,21 +208,21 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
             }
             (Some(d1), None, None, None) => {
                 alphabet_decode(d1)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                bail!("{}", PARSE_BASE64_INVALID_END);
             }
             (Some(d1), Some(d2), None, None) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                bail!("{}", PARSE_BASE64_INVALID_END);
             }
             (Some(d1), Some(d2), Some(d3), None) => {
                 alphabet_decode(d1)?;
                 alphabet_decode(d2)?;
                 alphabet_decode(d3)?;
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                bail!("{}", PARSE_BASE64_INVALID_END);
             }
             _ => {
-                return Err(ExprError::Parse(PARSE_BASE64_INVALID_END.into()));
+                bail!("{}", PARSE_BASE64_INVALID_END);
             }
         }
     }
@@ -246,23 +232,17 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
 #[inline]
 fn alphabet_decode(d: u8) -> Result<u8> {
     if d > 0x7A {
-        Err(ExprError::Parse(
-            format!(
-                "invalid symbol \"{}\" while decoding base64 sequence",
-                std::char::from_u32(d as u32).unwrap()
-            )
-            .into(),
-        ))
+        bail!(
+            "invalid symbol \"{}\" while decoding base64 sequence",
+            std::char::from_u32(d as u32).unwrap()
+        );
     } else {
         let p = PARSE_BASE64_ALPHABET_DECODE_TABLE[d as usize];
         if p == 0x7f {
-            Err(ExprError::Parse(
-                format!(
-                    "invalid symbol \"{}\" while decoding base64 sequence",
-                    std::char::from_u32(d as u32).unwrap()
-                )
-                .into(),
-            ))
+            bail!(
+                "invalid symbol \"{}\" while decoding base64 sequence",
+                std::char::from_u32(d as u32).unwrap()
+            );
         } else {
             Ok(p)
         }

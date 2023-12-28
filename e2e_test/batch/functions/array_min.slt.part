@@ -28,10 +28,10 @@ select array_min(array['901😅🤔😅️109', '114🥵514', '3🤣🥳3', '5�
 ----
 114🥵514
 
-query error invalid digit found in string
+query error invalid input syntax for type integer: "a"
 select array_min(array['a', 'b', 'c', 114514]);
 
-query error invalid digit found in string
+query error invalid input syntax for type integer: "a"
 select array_min(array[114514, 'a', 'b', 'c']);
 
 # i32::MIN & i32::MIN - 1 & i32::MAX

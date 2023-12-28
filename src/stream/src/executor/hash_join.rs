@@ -29,7 +29,6 @@ use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
-use risingwave_expr::ExprError;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
@@ -925,9 +924,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 match eval_result {
                     Ok(value) => input_watermark.val = value.unwrap(),
                     Err(err) => {
-                        if !matches!(err, ExprError::NumericOutOfRange) {
-                            self.ctx.on_compute_error(err, &self.info.identity);
-                        }
+                        self.ctx.on_compute_error(err, &self.info.identity);
                         continue;
                     }
                 }

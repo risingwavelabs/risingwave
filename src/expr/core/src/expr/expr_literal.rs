@@ -78,7 +78,7 @@ impl Build for LiteralExpression {
             prost_value,
             &DataType::from(prost.get_return_type().unwrap()),
         )
-        .map_err(|e| ExprError::Internal(e.into()))?;
+        .map_err(|e| ExprError::Anyhow(e.into()))?;
         Ok(Self {
             return_type: ret_type,
             literal: value,

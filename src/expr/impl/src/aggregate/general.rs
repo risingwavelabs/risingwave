@@ -14,8 +14,9 @@
 
 use std::convert::From;
 
+use anyhow::{Context, Result};
 use num_traits::{CheckedAdd, CheckedSub};
-use risingwave_expr::{aggregate, ExprError, Result};
+use risingwave_expr::aggregate;
 
 #[aggregate("sum(int2) -> int8")]
 #[aggregate("sum(int4) -> int8")]
@@ -32,14 +33,11 @@ where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
     if retract {
-        state
-            .checked_sub(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)
+        state.checked_sub(&S::from(input))
     } else {
-        state
-            .checked_add(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)
+        state.checked_add(&S::from(input))
     }
+    .context("numeric out of range")
 }
 
 #[aggregate("avg(int2) -> decimal", rewritten)]

@@ -14,6 +14,7 @@
 
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
@@ -196,13 +197,10 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         let units = window_size
             .exact_div(window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-            .ok_or_else(|| ExprError::InvalidParam {
-                name: "window",
-                reason: format!(
-                    "window_size {} cannot be divided by window_slide {}",
-                    window_size, window_slide
-                )
-                .into(),
+            .ok_or_else(|| {
+                ExprError::from(anyhow!(
+                    "window_size {window_size} cannot be divided by window_slide {window_slide}",
+                ))
             })?
             .get();
         let window_size_expr: ExprImpl =
@@ -237,17 +235,11 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         let mut window_end_exprs = Vec::with_capacity(units);
         for i in 0..units {
             {
-                let window_start_offset =
-                    window_slide
-                        .checked_mul_int(i)
-                        .ok_or_else(|| ExprError::InvalidParam {
-                            name: "window",
-                            reason: format!(
-                                "window_slide {} cannot be multiplied by {}",
-                                window_slide, i
-                            )
-                            .into(),
-                        })?;
+                let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
+                    ExprError::from(anyhow!(
+                        "window_slide {window_slide} cannot be multiplied by {i}",
+                    ))
+                })?;
                 let window_start_offset_expr =
                     Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
                 let window_start_expr = FunctionCall::new(
@@ -260,15 +252,11 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             {
                 let window_end_offset =
                     window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                        ExprError::InvalidParam {
-                            name: "window",
-                            reason: format!(
-                                "window_slide {} cannot be multiplied by {}",
-                                window_slide,
-                                i + units
-                            )
-                            .into(),
-                        }
+                        ExprError::from(anyhow!(
+                            "window_slide {} cannot be multiplied by {}",
+                            window_slide,
+                            i + units
+                        ))
                     })?;
                 let window_end_offset_expr =
                     Literal::new(Some(window_end_offset.into()), DataType::Interval).into();

@@ -14,9 +14,10 @@
 
 use std::collections::HashSet;
 
+use anyhow::{anyhow, bail, Result};
 use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{JsonbRef, JsonbVal, ListRef};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 /// Removes a key (and its value) from a JSON object, or matching string value(s) from a JSON array.
 ///
@@ -47,10 +48,7 @@ fn jsonb_remove(v: JsonbRef<'_>, key: &str) -> Result<JsonbVal> {
         ValueRef::Array(arr) => Ok(JsonbVal::from(Value::array(
             arr.iter().filter(|value| value.as_str() != Some(key)),
         ))),
-        _ => Err(ExprError::InvalidParam {
-            name: "jsonb",
-            reason: "cannot delete from scalar".into(),
-        }),
+        _ => bail!("cannot delete from scalar"),
     }
 }
 
@@ -83,10 +81,7 @@ fn jsonb_remove_keys(v: JsonbRef<'_>, keys: ListRef<'_>) -> Result<JsonbVal> {
                 },
             ))))
         }
-        _ => Err(ExprError::InvalidParam {
-            name: "jsonb",
-            reason: "cannot delete from scalar".into(),
-        }),
+        _ => bail!("cannot delete from scalar"),
     }
 }
 
@@ -126,18 +121,8 @@ fn jsonb_remove_keys(v: JsonbRef<'_>, keys: ListRef<'_>) -> Result<JsonbVal> {
 fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
     let array = match v.into() {
         ValueRef::Array(array) => array,
-        ValueRef::Object(_) => {
-            return Err(ExprError::InvalidParam {
-                name: "jsonb",
-                reason: "cannot delete from object using integer index".into(),
-            })
-        }
-        _ => {
-            return Err(ExprError::InvalidParam {
-                name: "jsonb",
-                reason: "cannot delete from scalar".into(),
-            })
-        }
+        ValueRef::Object(_) => bail!("cannot delete from object using integer index"),
+        _ => bail!("cannot delete from scalar"),
     };
     let Some(idx) = normalize_array_index(array.len(), index) else {
         // out of bounds index returns original value
@@ -250,10 +235,7 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
 #[function("jsonb_delete_path(jsonb, varchar[]) -> jsonb")]
 fn jsonb_delete_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
     if v.is_scalar() {
-        return Err(ExprError::InvalidParam {
-            name: "jsonb",
-            reason: "cannot delete path in scalar".into(),
-        });
+        bail!("cannot delete path in scalar");
     }
     if path.is_empty() {
         return Ok(JsonbVal::from(v));
@@ -281,10 +263,7 @@ fn jsonbb_remove_path(
             let key = path
                 .get(i)
                 .unwrap()
-                .ok_or_else(|| ExprError::InvalidParam {
-                    name: "path",
-                    reason: format!("path element at position {} is null", i + 1).into(),
-                })?
+                .ok_or_else(|| anyhow!("path element at position {} is null", i + 1))?
                 .into_utf8();
             if !obj.contains_key(key) {
                 builder.add_value(jsonb);
@@ -314,19 +293,14 @@ fn jsonbb_remove_path(
             let key = path
                 .get(i)
                 .unwrap()
-                .ok_or_else(|| ExprError::InvalidParam {
-                    name: "path",
-                    reason: format!("path element at position {} is null", i + 1).into(),
-                })?
+                .ok_or_else(|| anyhow!("path element at position {} is null", i + 1))?
                 .into_utf8();
-            let idx = key.parse::<i32>().map_err(|_| ExprError::InvalidParam {
-                name: "path",
-                reason: format!(
+            let idx = key.parse::<i32>().map_err(|_| {
+                anyhow!(
                     "path element at position {} is not an integer: \"{}\"",
                     i + 1,
                     key
                 )
-                .into(),
             })?;
             let Some(idx) = normalize_array_index(array.len(), idx) else {
                 // out of bounds index returns original value

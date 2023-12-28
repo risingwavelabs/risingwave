@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{Context as _, Result};
 use num_traits::Zero;
 use risingwave_common::types::{Date, Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 #[inline(always)]
 fn interval_to_micro_second(t: Interval) -> Result<i64> {
@@ -28,7 +29,7 @@ fn interval_to_micro_second(t: Interval) -> Result<i64> {
             )
     };
 
-    checked_interval_to_micro_second().ok_or(ExprError::NumericOutOfRange)
+    checked_interval_to_micro_second().context("numeric out of range")
 }
 
 #[function("tumble_start(date, interval) -> timestamp")]
@@ -94,17 +95,17 @@ fn get_window_start_with_offset(
     // Inspired by https://issues.apache.org/jira/browse/FLINK-26334
     let remainder = timestamp_micro_second
         .checked_sub(offset_micro_second)
-        .ok_or(ExprError::NumericOutOfRange)?
+        .context("numeric out of range")?
         .checked_rem(window_size_micro_second)
-        .ok_or(ExprError::DivisionByZero)?;
+        .context("division by zero")?;
     if remainder < 0 {
         timestamp_micro_second
             .checked_sub(remainder + window_size_micro_second)
-            .ok_or(ExprError::NumericOutOfRange)
+            .context("numeric out of range")
     } else {
         timestamp_micro_second
             .checked_sub(remainder)
-            .ok_or(ExprError::NumericOutOfRange)
+            .context("numeric out of range")
     }
 }
 

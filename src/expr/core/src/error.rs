@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
-use thiserror_ext::AsReport;
 
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
@@ -44,50 +43,11 @@ pub enum ExprError {
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
-    #[error("Unsupported cast: {0} to {1}")]
-    UnsupportedCast(DataType, DataType),
-
-    #[error("Casting to {0} out of range")]
-    CastOutOfRange(&'static str),
-
-    #[error("Numeric out of range")]
-    NumericOutOfRange,
-
-    #[error("Numeric out of range: underflow")]
-    NumericUnderflow,
-
-    #[error("Numeric out of range: overflow")]
-    NumericOverflow,
-
-    #[error("Division by zero")]
-    DivisionByZero,
-
-    #[error("Parse error: {0}")]
-    // TODO(error-handling): should prefer use error types than strings.
-    Parse(Box<str>),
-
-    #[error("Invalid parameter {name}: {reason}")]
-    // TODO(error-handling): should prefer use error types than strings.
-    InvalidParam {
-        name: &'static str,
-        reason: Box<str>,
-    },
-
     #[error("Array error: {0}")]
     Array(
         #[from]
         #[backtrace]
         ArrayError,
-    ),
-
-    #[error("More than one row returned by {0} used as an expression")]
-    MaxOneRow(&'static str),
-
-    #[error(transparent)]
-    Internal(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
     ),
 
     #[error("UDF error: {0}")]
@@ -103,17 +63,19 @@ pub enum ExprError {
     #[error("Context {0} not found")]
     Context(&'static str),
 
-    #[error("field name must not be null")]
-    FieldNameNull,
-
-    #[error("too few arguments for format()")]
-    TooFewArguments,
-
     #[error("invalid state: {0}")]
     InvalidState(String),
+
+    /// Errors returned by functions.
+    #[error(transparent)]
+    Anyhow(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
+static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 32);
 
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {
@@ -123,15 +85,12 @@ impl From<ExprError> for RwError {
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
-        Self::Parse(e.to_report_string().into())
+        anyhow!(e).context("failed to parse date/time").into()
     }
 }
 
 impl From<PbFieldNotFound> for ExprError {
     fn from(err: PbFieldNotFound) -> Self {
-        Self::Internal(anyhow::anyhow!(
-            "Failed to decode prost: field not found `{}`",
-            err.0
-        ))
+        anyhow!(err).into()
     }
 }

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Result;
 use chrono::format::Parsed;
 use risingwave_common::types::{Date, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;

@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::any::type_name;
+
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
+use anyhow::{Context as _, Result};
 use num_traits::{CheckedShl, CheckedShr};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::function;
 
 // Conscious decision for shl and shr is made here to diverge from PostgreSQL.
 // If overflow happens, instead of truncated to zero, we return overflow error as this is
@@ -36,7 +37,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shl(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_shl(b).context("numeric out of range")
     })
 }
 
@@ -52,7 +53,7 @@ where
     T2: TryInto<u32> + Debug,
 {
     general_shift(l, r, |a, b| {
-        a.checked_shr(b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_shr(b).context("numeric out of range")
     })
 }
 
@@ -64,9 +65,7 @@ where
     F: FnOnce(T1, u32) -> Result<T1>,
 {
     // TODO: We need to improve the error message
-    let r: u32 = r
-        .try_into()
-        .map_err(|_| ExprError::CastOutOfRange(type_name::<u32>()))?;
+    let r: u32 = r.try_into().ok().context("cast to int out of range")?;
     atm(l, r)
 }
 
@@ -107,8 +106,6 @@ pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
     use super::*;
 
     #[test]
@@ -116,10 +113,10 @@ mod tests {
         // check the boundary
         assert_eq!(general_shl::<i32, i32>(1i32, 0i32).unwrap(), 1i32);
         assert_eq!(general_shl::<i64, i32>(1i64, 31i32).unwrap(), 2147483648i64);
-        assert_matches!(
-            general_shl::<i32, i32>(1i32, 32i32).unwrap_err(),
-            ExprError::NumericOutOfRange,
-        );
+        assert!(general_shl::<i32, i32>(1i32, 32i32)
+            .unwrap_err()
+            .to_string()
+            .contains("numeric out of range"));
         assert_eq!(
             general_shr::<i64, i32>(-2147483648i64, 31i32).unwrap(),
             -1i64
