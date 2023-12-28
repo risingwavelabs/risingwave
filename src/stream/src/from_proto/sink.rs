@@ -62,7 +62,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(ColumnCatalog::from)
             .collect_vec();
 
-        let connector = {
+        let connector = if is_external_sink {
             let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
                 SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
             })?;
@@ -77,8 +77,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         other
                     )))
                 }
-            )
-        }?;
+            )?
+        } else {
+            "table"
+        };
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
             Some(f) => Some(f.clone().try_into()?),

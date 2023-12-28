@@ -106,21 +106,24 @@ impl StreamSink {
             format_desc,
         )?;
 
-        // check and ensure that the sink connector is specified and supported
-        match sink.properties.get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => match_sink_name_str!(
-                connector.to_lowercase().as_str(),
-                SinkType,
-                Ok(()),
-                |other| Err(SinkError::Config(anyhow!(
-                    "unsupported sink type {}",
-                    other
-                )))
-            )?,
-            None => {
-                return Err(
-                    SinkError::Config(anyhow!("connector not specified when create sink")).into(),
-                );
+        if sink.target_table.is_none() {
+            // check and ensure that the sink connector is specified and supported
+            match sink.properties.get(CONNECTOR_TYPE_KEY) {
+                Some(connector) => match_sink_name_str!(
+                    connector.to_lowercase().as_str(),
+                    SinkType,
+                    Ok(()),
+                    |other| Err(SinkError::Config(anyhow!(
+                        "unsupported sink type {}",
+                        other
+                    )))
+                )?,
+                None => {
+                    return Err(SinkError::Config(anyhow!(
+                        "connector not specified when create sink"
+                    ))
+                    .into());
+                }
             }
         }
 
@@ -435,10 +438,10 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
-                SinkDecouple::Default => {
-                    let enable_sink_decouple =
-                        match_sink_name_str!(
+            log_store_type: if self.sink_desc.target_table.is_none() {
+                match self.base.ctx().session_ctx().config().sink_decouple() {
+                    SinkDecouple::Default => {
+                        let enable_sink_decouple = match_sink_name_str!(
                         self.sink_desc.properties.get(CONNECTOR_TYPE_KEY).expect(
                             "have checked connector is contained when create the `StreamSink`"
                         ).to_lowercase().as_str(),
@@ -448,14 +451,17 @@ impl StreamNode for StreamSink {
                             "have checked connector is supported when create the `StreamSink`"
                         )
                     );
-                    if enable_sink_decouple {
-                        SinkLogStoreType::KvLogStore as i32
-                    } else {
-                        SinkLogStoreType::InMemoryLogStore as i32
+                        if enable_sink_decouple {
+                            SinkLogStoreType::KvLogStore as i32
+                        } else {
+                            SinkLogStoreType::InMemoryLogStore as i32
+                        }
                     }
+                    SinkDecouple::Enable => SinkLogStoreType::KvLogStore as i32,
+                    SinkDecouple::Disable => SinkLogStoreType::InMemoryLogStore as i32,
                 }
-                SinkDecouple::Enable => SinkLogStoreType::KvLogStore as i32,
-                SinkDecouple::Disable => SinkLogStoreType::InMemoryLogStore as i32,
+            } else {
+                SinkLogStoreType::InMemoryLogStore as i32
             },
         })
     }
