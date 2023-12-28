@@ -513,10 +513,8 @@ impl GlobalStreamManager {
 
             let dummy_table_id = table_fragments.table_id();
 
-            let init_split_assignment = self
-                .source_manager
-                .pre_allocate_splits(&dummy_table_id)
-                .await?;
+            let init_split_assignment =
+                self.source_manager.allocate_splits(&dummy_table_id).await?;
 
             replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
@@ -536,7 +534,7 @@ impl GlobalStreamManager {
 
         let table_id = table_fragments.table_id();
 
-        let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
+        let init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
 
         let command = Command::CreateStreamingJob {
             table_fragments,
@@ -587,10 +585,7 @@ impl GlobalStreamManager {
 
         let dummy_table_id = table_fragments.table_id();
 
-        let init_split_assignment = self
-            .source_manager
-            .pre_allocate_splits(&dummy_table_id)
-            .await?;
+        let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
@@ -633,7 +628,7 @@ impl GlobalStreamManager {
             .await?;
 
         self.source_manager
-            .drop_source_change(&table_fragments_vec)
+            .drop_source_fragments(&table_fragments_vec)
             .await;
 
         self.barrier_scheduler
@@ -749,7 +744,7 @@ mod tests {
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         RelationIdEnum, StreamingClusterInfo,
     };
-    use crate::model::{ActorId, FragmentId};
+    use crate::model::{ActorId, FragmentId, TableParallelism};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
     use crate::stream::SourceManager;
@@ -1029,6 +1024,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
+                TableParallelism::Auto,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

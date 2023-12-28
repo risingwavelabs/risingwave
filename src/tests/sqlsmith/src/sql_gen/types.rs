@@ -20,9 +20,8 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::aggregate::AggKind;
-use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
-use risingwave_frontend::expr::ExprType;
+use risingwave_frontend::expr::{cast_sigs, CastContext, CastSig as RwCastSig, ExprType};
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {

@@ -37,8 +37,9 @@ use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
+    BranchedSstInfo, HummockLevelsExt,
 };
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
     HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
@@ -54,10 +55,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableWatermarks,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -99,7 +99,7 @@ mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
 use versioning::*;
-mod checkpoint;
+pub(crate) mod checkpoint;
 mod compaction;
 mod worker;
 
@@ -211,8 +211,6 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -269,14 +267,14 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<u32, TableWatermarks>,
+    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<u32, TableWatermarks>,
+        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {
@@ -503,7 +501,7 @@ impl HummockManager {
                 .insert(self.env.meta_store())
                 .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: Some(checkpoint_version.clone()),
+                version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
@@ -512,12 +510,7 @@ impl HummockManager {
         } else {
             // Read checkpoint from object store.
             versioning_guard.checkpoint = self.read_checkpoint().await?;
-            versioning_guard
-                .checkpoint
-                .version
-                .as_ref()
-                .cloned()
-                .unwrap()
+            versioning_guard.checkpoint.version.clone()
         };
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
@@ -586,10 +579,7 @@ impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     #[named]
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<version_update_payload::Payload> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -602,7 +592,7 @@ impl HummockManager {
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(versioning.current_version.clone());
+        let ret = versioning.current_version.clone();
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -1787,7 +1777,7 @@ impl HummockManager {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = read_lock!(self, versioning).await;
         let version_deltas = versioning
             .hummock_version_deltas
@@ -1797,7 +1787,7 @@ impl HummockManager {
             .take(num_limit as _)
             .cloned()
             .collect();
-        Ok(HummockVersionDeltas { version_deltas })
+        Ok(version_deltas)
     }
 
     pub async fn init_metadata_for_version_replay(
@@ -2048,7 +2038,7 @@ impl HummockManager {
                         .last_key_value()
                         .unwrap()
                         .1
-                        .clone()],
+                        .to_protobuf()],
                 }),
             );
     }
@@ -2991,7 +2981,7 @@ impl HummockManager {
                 rewrite_cg_ids.push(*cg_id);
             }
 
-            if let Some(levels) = current_version.get_levels().get(cg_id) {
+            if let Some(levels) = current_version.levels.get(cg_id) {
                 if levels.member_table_ids.len() == 1 {
                     restore_cg_to_partition_vnode.insert(
                         *cg_id,
@@ -3226,10 +3216,13 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {

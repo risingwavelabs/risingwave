@@ -269,7 +269,7 @@ async fn compaction_test(
     )
     .await
     .unwrap();
-    let version = store.get_pinned_version().version();
+    let version = store.get_pinned_version().version().clone();
     let remote_version = meta_client.get_current_version().await.unwrap();
     println!(
         "version-{}, remote version-{}",

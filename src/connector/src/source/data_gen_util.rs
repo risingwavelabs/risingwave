@@ -31,7 +31,7 @@ pub fn spawn_data_generation_stream<T: Send + 'static>(
 ) -> impl Stream<Item = T> + Send + 'static {
     static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-data-generation")
+            .thread_name("rw-datagen")
             .enable_all()
             .build()
             .expect("failed to build data-generation runtime")

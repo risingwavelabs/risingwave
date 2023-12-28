@@ -151,7 +151,12 @@ pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFu
             ))
         })?;
 
-    if let FuncBuilder::Aggregate{ append_only: Some(f), .. } = sig.build && prefer_append_only {
+    if let FuncBuilder::Aggregate {
+        append_only: Some(f),
+        ..
+    } = sig.build
+        && prefer_append_only
+    {
         return f(agg);
     }
     sig.build_aggregate(agg)
