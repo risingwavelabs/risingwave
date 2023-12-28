@@ -15,10 +15,10 @@ create function add_sub_binding() returns int as 'select add(1, 1) + sub(2, 2)' 
 
 # Create an anonymous function with return expression
 statement ok
-create function add_return(INT, INT) returns int return $1 + $2 language sql;
+create function add_return(INT, INT) returns int language sql return $1 + $2;
 
 statement ok
-create function add_return_binding() returns int return add_return(1, 1) + add_return(1, 1) language sql;
+create function add_return_binding() returns int language sql return add_return(1, 1) + add_return(1, 1);
 
 # Call the defined sql udf
 query I
