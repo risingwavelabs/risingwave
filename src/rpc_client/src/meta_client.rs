@@ -499,6 +499,20 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+
+        self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -1864,7 +1878,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
-             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
+            ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1874,6 +1888,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
+            ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

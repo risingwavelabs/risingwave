@@ -208,6 +208,7 @@ message ListTableFragmentStatesResponse {
   message TableFragmentState {
     uint32 table_id = 1;
     TableFragments.State state = 2;
+    TableParallelism parallelism = 3;
   }
   repeated TableFragmentState states = 1;
 }
