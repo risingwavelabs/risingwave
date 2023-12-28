@@ -1128,7 +1128,7 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            true
+            false
         }
 
         pub fn max_preload_io_retry_times() -> usize {
