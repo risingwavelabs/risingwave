@@ -29,7 +29,7 @@ use serde_json::{json, Map, Value};
 
 use super::{
     CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, Result,
-    RowEncoder, SerTo, TimestampHandlingMode, TimestamptzHandlingMode,
+    RowEncoder, SerTo, TimestampHandlingMode, TimestamptzHandlingMode, TimeHandlingMode,
 };
 use crate::sink::SinkError;
 
@@ -162,6 +162,7 @@ fn datum_to_json_object(
     date_handling_mode: DateHandlingMode,
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
+    time_mode: TimeHandlingMode,
     custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {

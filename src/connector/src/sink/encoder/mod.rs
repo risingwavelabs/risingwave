@@ -97,6 +97,12 @@ pub enum TimestampHandlingMode {
     String,
 }
 
+#[derive(Clone, Copy)]
+pub enum TimeHandlingMode {
+    Milli,
+    String,
+}
+
 #[derive(Clone, Copy, Default)]
 pub enum TimestamptzHandlingMode {
     #[default]
