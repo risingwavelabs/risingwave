@@ -148,7 +148,7 @@ pub struct MultiExprError(Box<[ExprError]>);
 
 impl MultiExprError {
     /// Returns the first error.
-    pub fn first(self) -> ExprError {
+    pub fn into_first(self) -> ExprError {
         self.0.into_vec().into_iter().next().expect("first error")
     }
 }

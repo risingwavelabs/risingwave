@@ -57,14 +57,14 @@ where
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         match self.inner.eval(input).await {
-            Err(ExprError::Multiple(_, errors)) => Err(errors.first()),
+            Err(ExprError::Multiple(_, errors)) => Err(errors.into_first()),
             res => res,
         }
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         match self.inner.eval_v2(input).await {
-            Err(ExprError::Multiple(_, errors)) => Err(errors.first()),
+            Err(ExprError::Multiple(_, errors)) => Err(errors.into_first()),
             res => res,
         }
     }
