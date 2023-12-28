@@ -47,9 +47,9 @@ pub static PG_INDEX: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     columns: &PG_INDEX_COLUMNS,
     sql: "SELECT id AS indexrelid, \
                 primary_table_id AS indrelid, \
-                ARRAY_LENGTH(original_column_ids)::smallint AS indnatts, \
+                ARRAY_LENGTH(indkey)::smallint AS indnatts, \
                 false AS indisunique, \
-                original_column_ids AS indkey, \
+                indkey, \
                 ARRAY[]::smallint[] as indoption, \
                 NULL AS indexprs, \
                 NULL AS indpred, \

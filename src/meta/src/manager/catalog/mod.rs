@@ -190,14 +190,16 @@ impl CatalogManager {
             .tree_ref()
             .iter()
             .filter(|(_, source)| {
-                if let Some(source_info) = &source.info && source_info.format_encode_options.is_empty() {
+                if let Some(source_info) = &source.info
+                    && source_info.format_encode_options.is_empty()
+                {
                     true
                 } else {
                     false
                 }
-        })
-        .map(|t| t.1.clone())
-        .collect_vec();
+            })
+            .map(|t| t.1.clone())
+            .collect_vec();
         for mut source in legacy_sources {
             let connector = source
                 .with_properties

@@ -18,7 +18,6 @@
 #![feature(iterator_try_collect)]
 #![feature(lazy_cell)]
 #![feature(coroutines)]
-#![feature(arc_unwrap_or_clone)]
 #![feature(never_type)]
 #![feature(error_generic_member_access)]
 

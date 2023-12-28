@@ -92,8 +92,12 @@ impl ScheduledQueue {
         // command and execute it when the cluster is ready to clean up it.
         // TODO: this is just a workaround to allow dropping streaming jobs when the cluster is under recovery,
         // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
-        if let QueueStatus::Blocked(reason) = &self.status &&
-            !matches!(scheduled.command, Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)) {
+        if let QueueStatus::Blocked(reason) = &self.status
+            && !matches!(
+                scheduled.command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            )
+        {
             return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);

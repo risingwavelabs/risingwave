@@ -217,6 +217,9 @@ pub struct NexmarkProperties {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.threads", default = "none")]
     pub threads: Option<usize>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for NexmarkProperties {
@@ -225,6 +228,12 @@ impl SourceProperties for NexmarkProperties {
     type SplitReader = NexmarkSplitReader;
 
     const SOURCE_NAME: &'static str = NEXMARK_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for NexmarkProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 fn default_event_num() -> u64 {

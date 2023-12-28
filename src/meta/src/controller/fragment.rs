@@ -1002,7 +1002,7 @@ impl CatalogController {
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
-    pub async fn get_running_actors_by_fragment(
+    pub async fn get_running_actors_of_fragment(
         &self,
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {

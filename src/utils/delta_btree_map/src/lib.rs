@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(btree_cursors)]
+
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -21,13 +23,13 @@ use enum_as_inner::EnumAsInner;
 /// [`DeltaBTreeMap`] wraps two [`BTreeMap`] references respectively as snapshot and delta,
 /// providing cursor that can iterate over the updated version of the snapshot.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct DeltaBTreeMap<'a, K: Ord, V> {
+pub struct DeltaBTreeMap<'a, K: Ord, V> {
     snapshot: &'a BTreeMap<K, V>,
     delta: &'a BTreeMap<K, Change<V>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
-pub(super) enum Change<V> {
+pub enum Change<V> {
     Insert(V),
     Delete,
 }
@@ -144,7 +146,7 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
 
 /// Cursor that can iterate back and forth over the updated version of the snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CursorWithDelta<'a, K: Ord, V> {
+pub struct CursorWithDelta<'a, K: Ord, V> {
     snapshot: &'a BTreeMap<K, V>,
     delta: &'a BTreeMap<K, Change<V>>,
     curr_key_value: Option<(&'a K, &'a V)>,
@@ -153,7 +155,7 @@ pub(super) struct CursorWithDelta<'a, K: Ord, V> {
 /// Type of cursor position. [`PositionType::Ghost`] is a special position between the first and
 /// the last item, where the key and value are `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
-pub(super) enum PositionType {
+pub enum PositionType {
     Ghost,
     Snapshot,
     DeltaUpdate,
@@ -191,7 +193,6 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     }
 
     /// Get the value pointed by the cursor.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn value(&self) -> Option<&'a V> {
         self.curr_key_value.map(|(_, v)| v)
     }

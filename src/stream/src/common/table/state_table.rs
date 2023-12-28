@@ -54,8 +54,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    SealCurrentEpochOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -212,6 +212,34 @@ where
     }
 }
 
+fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
+        if first == second {
+            return true;
+        }
+        let first = match row_serde.deserialize(first) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(err = %e, value = ?first, "fail to deserialize serialized value");
+                return false;
+            }
+        };
+        let second = match row_serde.deserialize(second) {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!(err = %e, value = ?second, "fail to deserialize serialized value");
+                return false;
+            }
+        };
+        if first != second {
+            error!(first = ?first, second = ?second, "sanity check fail");
+            false
+        } else {
+            true
+        }
+    }))
+}
+
 // initialize
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
@@ -294,14 +322,6 @@ where
                 .collect()
         };
 
-        let table_option = TableOption::build_table_option(table_catalog.get_properties());
-        let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
-        } else {
-            NewLocalOptions::new(table_id, is_consistent_op, table_option)
-        };
-        let local_state_store = store.new_local(new_local_options).await;
-
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
@@ -334,10 +354,29 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let row_serde = SD::new(
-            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-            Arc::from(table_columns.into_boxed_slice()),
-        );
+        let make_row_serde = || {
+            SD::new(
+                Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+                Arc::from(table_columns.clone().into_boxed_slice()),
+            )
+        };
+
+        let op_consistency_level = if is_consistent_op {
+            let row_serde = make_row_serde();
+            consistent_old_value_op(row_serde)
+        } else {
+            OpConsistencyLevel::Inconsistent
+        };
+
+        let table_option = TableOption::build_table_option(table_catalog.get_properties());
+        let new_local_options = if IS_REPLICATED {
+            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
+        } else {
+            NewLocalOptions::new(table_id, op_consistency_level, table_option)
+        };
+        let local_state_store = store.new_local(new_local_options).await;
+
+        let row_serde = make_row_serde();
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
@@ -527,13 +566,31 @@ where
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
     ) -> Self {
+        let make_row_serde = || {
+            SD::new(
+                Arc::from(
+                    value_indices
+                        .clone()
+                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
+                        .into_boxed_slice(),
+                ),
+                Arc::from(table_columns.clone().into_boxed_slice()),
+            )
+        };
+        let op_consistency_level = if is_consistent_op {
+            let row_serde = make_row_serde();
+            consistent_old_value_op(row_serde)
+        } else {
+            OpConsistencyLevel::Inconsistent
+        };
         let local_state_store = store
             .new_local(NewLocalOptions::new(
                 table_id,
-                is_consistent_op,
+                op_consistency_level,
                 TableOption::default(),
             ))
             .await;
+        let row_serde = make_row_serde();
         let data_types: Vec<DataType> = table_columns
             .iter()
             .map(|col| col.data_type.clone())
@@ -553,15 +610,7 @@ where
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(
-                Arc::from(
-                    value_indices
-                        .clone()
-                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
-                        .into_boxed_slice(),
-                ),
-                Arc::from(table_columns.into_boxed_slice()),
-            ),
+            row_serde,
             pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
@@ -909,7 +958,7 @@ where
 
     /// Update a row without giving old value.
     ///
-    /// `is_consistent_op` should be set to false.
+    /// `op_consistency_level` should be set to `Inconsistent`.
     pub fn update_without_old_value(&mut self, new_value: impl Row) {
         let new_pk = (&new_value).project(self.pk_indices());
         let new_key_bytes =
@@ -1158,9 +1207,7 @@ where
         let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
 
         // Compute Delete Ranges
-        if should_clean_watermark
-            && let Some(watermark_suffix) = watermark_suffix
-        {
+        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
@@ -1176,16 +1223,16 @@ where
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes.clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref())
-                    )
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
                 ));
             } else {
                 seal_watermark = Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
                         self.vnodes.clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref())
-                    )
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
                 ));
             }
         }

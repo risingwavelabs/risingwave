@@ -286,7 +286,7 @@ impl MetadataManager {
         }
     }
 
-    pub async fn get_running_actors_by_fragment(
+    pub async fn get_running_actors_of_fragment(
         &self,
         id: FragmentId,
     ) -> MetaResult<HashSet<ActorId>> {
@@ -299,7 +299,7 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let actor_ids = mgr
                     .catalog_controller
-                    .get_running_actors_by_fragment(id as _)
+                    .get_running_actors_of_fragment(id as _)
                     .await?;
                 Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
             }

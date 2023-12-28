@@ -797,9 +797,16 @@ impl DdlController {
         }
 
         for actor in &stream_scan_fragment.actors {
-            if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = actor.nodes.as_ref().unwrap().node_body && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc {
-                let properties: HashMap<String, String> = cdc_table_desc.connect_properties.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let mut props = ConnectorProperties::extract(properties)?;
+            if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
+                actor.nodes.as_ref().unwrap().node_body
+                && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
+            {
+                let properties: HashMap<String, String> = cdc_table_desc
+                    .connect_properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                let mut props = ConnectorProperties::extract(properties, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
                 dispatch_source_prop!(props, props, {
@@ -889,8 +896,10 @@ impl DdlController {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             for sink_id in &table_catalog.incoming_sinks {
-                if let Some(dropping_sink_id) = dropping_sink_id && *sink_id == dropping_sink_id{
-                    continue
+                if let Some(dropping_sink_id) = dropping_sink_id
+                    && *sink_id == dropping_sink_id
+                {
+                    continue;
                 };
 
                 let sink_table_fragments = guard
@@ -999,9 +1008,12 @@ impl DdlController {
                 visit_stream_node_cont(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input in &mut node.input {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && merge_node.upstream_actor_id.is_empty() {
+                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                                && merge_node.upstream_actor_id.is_empty()
+                            {
                                 if let Some(sink_id) = sink_id {
-                                    input.identity = format!("MergeExecutor(from sink {})", sink_id);
+                                    input.identity =
+                                        format!("MergeExecutor(from sink {})", sink_id);
                                 }
 
                                 *merge_node = MergeNode {
@@ -1052,8 +1064,12 @@ impl DdlController {
             match stream_job.create_type() {
                 CreateType::Background => {
                     tracing::error!(id = job_id, error = ?e, "finish stream job failed");
-                    if let Err(err) = mgr.fragment_manager.select_table_fragments_by_table_id(&job_id.into()).await
-                        && err.is_fragment_not_found() {
+                    if let Err(err) = mgr
+                        .fragment_manager
+                        .select_table_fragments_by_table_id(&job_id.into())
+                        .await
+                        && err.is_fragment_not_found()
+                    {
                         // If the table fragments are not found, it means that the stream job has not been created.
                         // We need to cancel the stream job.
                         self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
@@ -1926,20 +1942,20 @@ pub fn fill_table_stream_graph_info(
                 // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
                 // group (that is, different from any other server id being used by any master or slave)
                 if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY)
-                        && matches!(
-                            CdcSourceType::from(connector.as_str()),
-                            CdcSourceType::Mysql
-                        )
-                    {
-                        let props = &mut source_node.source_inner.as_mut().unwrap().with_properties;
-                        let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
-                        props
-                            .entry("server.id".to_string())
-                            .or_insert(rand_server_id.to_string());
+                    && matches!(
+                        CdcSourceType::from(connector.as_str()),
+                        CdcSourceType::Mysql
+                    )
+                {
+                    let props = &mut source_node.source_inner.as_mut().unwrap().with_properties;
+                    let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
+                    props
+                        .entry("server.id".to_string())
+                        .or_insert(rand_server_id.to_string());
 
-                        // make these two `Source` consistent
-                        props.clone_into(&mut source.with_properties);
-                    }
+                    // make these two `Source` consistent
+                    props.clone_into(&mut source.with_properties);
+                }
             }
 
             // fill table id for cdc backfill
