@@ -29,13 +29,14 @@ use serde_json::{json, Map, Value};
 
 use super::{
     CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, Result,
-    RowEncoder, SerTo, TimestampHandlingMode, TimestamptzHandlingMode, TimeHandlingMode,
+    RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
+    time_handling_mode: TimeHandlingMode,
     date_handling_mode: DateHandlingMode,
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
@@ -50,10 +51,12 @@ impl JsonEncoder {
         date_handling_mode: DateHandlingMode,
         timestamp_handling_mode: TimestampHandlingMode,
         timestamptz_handling_mode: TimestamptzHandlingMode,
+        time_handling_mode: TimeHandlingMode,
     ) -> Self {
         Self {
             schema,
             col_indices,
+            time_handling_mode,
             date_handling_mode,
             timestamp_handling_mode,
             timestamptz_handling_mode,
@@ -66,6 +69,7 @@ impl JsonEncoder {
         Self {
             schema,
             col_indices,
+            time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
@@ -83,6 +87,7 @@ impl JsonEncoder {
         Self {
             schema,
             col_indices,
+            time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
@@ -126,6 +131,7 @@ impl RowEncoder for JsonEncoder {
                 self.date_handling_mode,
                 self.timestamp_handling_mode,
                 self.timestamptz_handling_mode,
+                self.time_handling_mode,
                 &self.custom_json_type,
             )
             .map_err(|e| SinkError::Encode(e.to_string()))?;
@@ -162,7 +168,7 @@ fn datum_to_json_object(
     date_handling_mode: DateHandlingMode,
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
-    time_mode: TimeHandlingMode,
+    time_handling_mode: TimeHandlingMode,
     custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
@@ -231,10 +237,16 @@ fn datum_to_json_object(
             TimestamptzHandlingMode::Micro => json!(v.timestamp_micros()),
             TimestamptzHandlingMode::Milli => json!(v.timestamp_millis()),
         },
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
+        (DataType::Time, ScalarRefImpl::Time(v)) => match time_handling_mode {
+            TimeHandlingMode::Milli => {
+                // todo: just ignore the nanos part to avoid leap second complex
+                json!(v.0.num_seconds_from_midnight() as i64 * 1000)
+            }
+            TimeHandlingMode::String => {
+                let a = v.0.format("%H:%M:%S%.6f").to_string();
+                json!(a)
+            }
+        },
         (DataType::Date, ScalarRefImpl::Date(v)) => match date_handling_mode {
             DateHandlingMode::FromCe => json!(v.0.num_days_from_ce()),
             DateHandlingMode::FromEpoch => {
@@ -272,6 +284,7 @@ fn datum_to_json_object(
                     date_handling_mode,
                     timestamp_handling_mode,
                     timestamptz_handling_mode,
+                    time_handling_mode,
                     custom_json_type,
                 )?;
                 vec.push(value);
@@ -293,6 +306,7 @@ fn datum_to_json_object(
                             date_handling_mode,
                             timestamp_handling_mode,
                             timestamptz_handling_mode,
+                            time_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -313,6 +327,7 @@ fn datum_to_json_object(
                             date_handling_mode,
                             timestamp_handling_mode,
                             timestamptz_handling_mode,
+                            time_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -431,6 +446,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -445,6 +461,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -459,6 +476,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -478,6 +496,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -493,6 +512,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcWithoutSuffix,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -510,6 +530,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -527,6 +548,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -545,6 +567,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -562,6 +585,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -579,6 +603,7 @@ mod tests {
             DateHandlingMode::String,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(map),
         )
         .unwrap();
@@ -593,6 +618,7 @@ mod tests {
             DateHandlingMode::FromCe,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -607,6 +633,7 @@ mod tests {
             DateHandlingMode::FromEpoch,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -621,6 +648,7 @@ mod tests {
             DateHandlingMode::String,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();
@@ -645,6 +673,7 @@ mod tests {
             DateHandlingMode::String,
             TimestampHandlingMode::String,
             TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::Milli,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();

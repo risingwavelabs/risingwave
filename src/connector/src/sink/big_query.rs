@@ -34,7 +34,8 @@ use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{
-    DateHandlingMode, JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
@@ -314,6 +315,7 @@ impl BigQuerySinkWriter {
                 DateHandlingMode::String,
                 TimestampHandlingMode::String,
                 TimestamptzHandlingMode::UtcString,
+                TimeHandlingMode::Milli,
             ),
         })
     }

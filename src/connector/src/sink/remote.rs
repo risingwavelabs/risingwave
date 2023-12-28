@@ -322,6 +322,12 @@ impl EsStreamChunkConverter {
                 .datum_at(0)
                 .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
                 .to_text())
+        } else if self.pk_indices.len() == 1 {
+            let index = self.pk_indices.get(0).unwrap();
+            Ok(row
+                .datum_at(*index)
+                .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                .to_text())
         } else {
             let mut keys = vec![];
             for index in &self.pk_indices {
