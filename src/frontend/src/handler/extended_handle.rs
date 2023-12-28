@@ -47,6 +47,7 @@ pub struct PreparedResult {
     pub bound_result: BoundResult,
 }
 
+#[expect(clippy::enum_variant_names)]
 #[derive(Clone)]
 pub enum Portal {
     Empty,

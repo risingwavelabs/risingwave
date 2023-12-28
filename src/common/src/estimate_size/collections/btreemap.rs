@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeInclusive};
 
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use crate::estimate_size::{EstimateSize, KvSize};
 
 pub struct EstimatedBTreeMap<K, V> {
     inner: BTreeMap<K, V>,
@@ -77,7 +77,6 @@ where
         }
     }
 
-    #[expect(dead_code)]
     pub fn clear(&mut self) {
         self.inner.clear();
         self.heap_size.set(0);

@@ -31,13 +31,10 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
-pub mod external;
 mod manager;
-mod mock_external_table;
 pub mod test_source;
 
 pub use manager::{SourceColumnDesc, SourceColumnType};
-pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::parser::additional_columns::{
     get_connector_compatible_additional_columns, CompatibleAdditionalColumnsFn,

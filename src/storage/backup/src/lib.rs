@@ -21,7 +21,6 @@
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(result_option_inspect)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]

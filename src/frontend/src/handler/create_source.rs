@@ -34,12 +34,12 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
@@ -76,7 +76,6 @@ use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
-pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -861,32 +860,35 @@ pub(crate) async fn bind_source_pk(
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
         (Format::Upsert, encode @ Encode::Json | encode @ Encode::Avro) => {
-            if let Some(ref key_column_name) = key_column_name && sql_defined_pk {
+            if let Some(ref key_column_name) = key_column_name
+                && sql_defined_pk
+            {
                 if sql_defined_pk_names.len() != 1 {
-                    return Err(RwError::from(ProtocolError(
-                        format!("upsert {:?} supports only one primary key column ({}).", encode, key_column_name)
-                    )));
+                    return Err(RwError::from(ProtocolError(format!(
+                        "upsert {:?} supports only one primary key column ({}).",
+                        encode, key_column_name
+                    ))));
                 }
                 // the column name have been converted to real value in `handle_addition_columns`
                 // so we don't ignore ascii case here
                 if !key_column_name.eq(sql_defined_pk_names[0].as_str()) {
                     return Err(RwError::from(ProtocolError(format!(
-                        "upsert {}'s key column {} not match with sql defined primary key {}", encode,
-                        key_column_name, sql_defined_pk_names[0]
+                        "upsert {}'s key column {} not match with sql defined primary key {}",
+                        encode, key_column_name, sql_defined_pk_names[0]
                     ))));
                 }
                 sql_defined_pk_names
             } else {
                 return if key_column_name.is_none() {
-                    Err(
-                        RwError::from(ProtocolError(format!("INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE {:?}", encode)
-                        ))
-                    )
+                    Err(RwError::from(ProtocolError(format!(
+                        "INCLUDE KEY clause must be set for FORMAT UPSERT ENCODE {:?}",
+                        encode
+                    ))))
                 } else {
                     Err(RwError::from(ProtocolError(format!(
                         "Primary key must be specified to {} when creating source with FORMAT UPSERT ENCODE {:?}",
                         key_column_name.unwrap(), encode))))
-                }
+                };
             }
         }
 
@@ -1090,17 +1092,16 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
                 POSTGRES_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
                 ),
                 CITUS_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(

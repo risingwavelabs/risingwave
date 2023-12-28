@@ -538,8 +538,8 @@ macro_rules! for_all_plain_native_methods {
 /// }
 /// assert_eq!([
 ///     ("f", "int", "(int param1, boolean param2)"),
-///     ("f2", "boolean []", "()"),
-///     ("f3", "java.lang.String", "(byte [] param)")
+///     ("f2", "boolean[]", "()"),
+///     ("f3", "java.lang.String", "(byte[] param)")
 /// ], call_split_extract_plain_native_methods!(
 ///     int f(int param1, boolean param2);
 ///     boolean[] f2();

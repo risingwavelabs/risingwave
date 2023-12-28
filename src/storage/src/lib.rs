@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(arc_unwrap_or_clone)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
@@ -22,7 +21,6 @@
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
-#![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(test)]

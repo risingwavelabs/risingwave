@@ -621,7 +621,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        if let Err(e) = &res && e.is_object_not_found_error() && !path.ends_with(".data") {
+        if let Err(e) = &res
+            && e.is_object_not_found_error()
+            && !path.ends_with(".data")
+        {
             // Some not_found_error is expected, e.g. metadata backup's manifest.json.
             // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
         } else {

@@ -14,7 +14,6 @@
 
 #![feature(lint_reasons)]
 #![feature(trait_alias)]
-#![feature(result_option_inspect)]
 #![feature(iterator_try_collect)]
 #![feature(trusted_len)]
 #![feature(lazy_cell)]

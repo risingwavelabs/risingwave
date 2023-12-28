@@ -43,6 +43,9 @@ pub enum ConnectorError {
     #[error("MySQL error: {0}")]
     MySql(#[from] mysql_async::Error),
 
+    #[error("Postgres error: {0}")]
+    Postgres(#[from] tokio_postgres::Error),
+
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

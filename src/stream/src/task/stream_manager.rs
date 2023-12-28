@@ -485,9 +485,6 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
-    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
-    // TODO: remove `allow` here after the issued is closed.
-    #[expect(clippy::needless_pass_by_ref_mut)]
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
@@ -661,12 +658,7 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 self.config.unique_user_stream_errors,
             );
-            let vnode_bitmap = actor
-                .vnode_bitmap
-                .as_ref()
-                .map(|b| b.try_into())
-                .transpose()
-                .context("failed to decode vnode bitmap")?;
+            let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
 
             let (executor, subtasks) = self
