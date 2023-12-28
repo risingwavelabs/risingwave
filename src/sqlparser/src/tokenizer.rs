@@ -539,14 +539,6 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the first char
                     let s = self.tokenize_word(ch, chars);
 
-                    if s.chars().all(|x| x.is_ascii_digit() || x == '.') {
-                        let mut s = peeking_take_while(&mut s.chars().peekable(), |ch| {
-                            ch.is_ascii_digit() || ch == '.'
-                        });
-                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_digit() || ch == '.');
-                        s += s2.as_str();
-                        return Ok(Some(Token::Number(s)));
-                    }
                     Ok(Some(Token::make_word(&s, None)))
                 }
                 // string
