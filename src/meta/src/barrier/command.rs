@@ -84,8 +84,8 @@ pub struct ReplaceTablePlan {
     pub init_split_assignment: SplitAssignment,
 }
 
-/// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
-/// we'll build different barriers to send, and may do different stuffs after the barrier is
+/// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
+/// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
@@ -156,8 +156,8 @@ pub enum Command {
     /// of the Merge executors are changed additionally.
     ReplaceTable(ReplaceTablePlan),
 
-    /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
-    /// newly added splits.
+    /// `SourceSplitAssignment` generates a `Splits` barrier for pushing initialized splits or
+    /// changed splits.
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change

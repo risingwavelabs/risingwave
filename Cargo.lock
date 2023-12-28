@@ -8891,6 +8891,7 @@ dependencies = [
  "easy-ext",
  "either",
  "enum-as-inner",
+ "expect-test",
  "fail",
  "function_name",
  "futures",
