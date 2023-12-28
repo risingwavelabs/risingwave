@@ -43,6 +43,7 @@
 #![feature(negative_impls)]
 #![feature(bound_map)]
 #![feature(array_methods)]
+#![feature(btree_cursors)]
 
 #[cfg_attr(not(test), expect(unused_extern_crates))]
 extern crate self as risingwave_common;

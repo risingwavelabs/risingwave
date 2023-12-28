@@ -874,6 +874,22 @@ impl DdlService for DdlServiceImpl {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
     }
+
+    async fn alter_parallelism(
+        &self,
+        request: Request<AlterParallelismRequest>,
+    ) -> Result<Response<AlterParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let parallelism = req.get_parallelism()?.clone();
+
+        self.ddl_controller
+            .alter_parallelism(table_id, parallelism)
+            .await?;
+
+        Ok(Response::new(AlterParallelismResponse {}))
+    }
 }
 
 impl DdlServiceImpl {

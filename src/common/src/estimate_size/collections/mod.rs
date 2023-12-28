@@ -20,9 +20,11 @@ mod heap;
 pub mod lru;
 pub use heap::*;
 pub mod vecdeque;
-pub use vecdeque::EstimatedVecDeque as VecDeque;
+pub use vecdeque::EstimatedVecDeque;
 pub mod hashmap;
-pub use hashmap::EstimatedHashMap as HashMap;
+pub use hashmap::EstimatedHashMap;
+pub mod btreemap;
+pub use btreemap::EstimatedBTreeMap;
 
 mod private {
     use super::*;

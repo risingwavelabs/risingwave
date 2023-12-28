@@ -76,7 +76,6 @@ use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
-pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(

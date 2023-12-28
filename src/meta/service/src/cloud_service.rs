@@ -133,7 +133,7 @@ impl CloudService for CloudServiceImpl {
         }
         // try fetch kafka metadata, return error message on failure
         let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
-        let props = ConnectorProperties::extract(source_cfg);
+        let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

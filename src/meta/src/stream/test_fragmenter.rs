@@ -463,6 +463,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
