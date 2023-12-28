@@ -46,7 +46,10 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         properties: PulsarProperties,
         _context: SourceEnumeratorContextRef,
     ) -> Result<PulsarSplitEnumerator> {
-        let pulsar = properties.common.build_client().await?;
+        let pulsar = properties
+            .common
+            .build_client(&properties.oauth, &properties.aws_auth_props)
+            .await?;
         let topic = properties.common.topic;
         let parsed_topic = parse_topic(&topic)?;
 

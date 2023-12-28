@@ -16,6 +16,8 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
@@ -41,6 +43,9 @@ pub struct KinesisProperties {
 
     #[serde(flatten)]
     pub common: KinesisCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for KinesisProperties {
@@ -49,6 +54,12 @@ impl SourceProperties for KinesisProperties {
     type SplitReader = KinesisSplitReader;
 
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for KinesisProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 #[cfg(test)]

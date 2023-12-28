@@ -40,6 +40,7 @@ use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
@@ -57,7 +58,7 @@ use crate::manager::{
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentId, StreamContext, TableFragments};
+use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -326,6 +327,16 @@ impl DdlController {
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.barrier_manager.get_ddl_progress().await
+    }
+
+    pub async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> MetaResult<()> {
+        self.stream_manager
+            .alter_table_parallelism(table_id, parallelism.into())
+            .await
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
@@ -618,7 +629,7 @@ impl DdlController {
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                let mut props = ConnectorProperties::extract(properties)?;
+                let mut props = ConnectorProperties::extract(properties, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
                 dispatch_source_prop!(props, props, {
@@ -1085,11 +1096,11 @@ impl DdlController {
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-        let default_parallelism =
-            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+
+        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
 
         let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1105,11 +1116,18 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
+
+        let table_parallelism = match default_parallelism {
+            None => TableParallelism::Auto,
+            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
+        };
+
         let table_fragments = TableFragments::new(
             id.into(),
             graph,
             &building_locations.actor_locations,
             stream_ctx.clone(),
+            table_parallelism,
         );
 
         let replace_table_job_info = match affected_table_replace_info {
@@ -1464,10 +1482,10 @@ impl DdlController {
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-        let default_parallelism =
-            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+
+        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
         let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1491,6 +1509,11 @@ impl DdlController {
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
+        let table_parallelism = match default_parallelism {
+            None => TableParallelism::Auto,
+            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
+        };
+
         // 4. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
@@ -1499,6 +1522,8 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
+            // todo: shall we use the old table fragments' parallelism
+            table_parallelism,
         );
 
         let ctx = ReplaceTableContext {

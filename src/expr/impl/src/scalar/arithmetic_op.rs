@@ -154,8 +154,8 @@ where
 }
 
 #[function("abs(decimal) -> decimal")]
-pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
-    Ok(Decimal::abs(&decimal))
+pub fn decimal_abs(decimal: Decimal) -> Decimal {
+    Decimal::abs(&decimal)
 }
 
 fn err_pow_zero_negative() -> ExprError {

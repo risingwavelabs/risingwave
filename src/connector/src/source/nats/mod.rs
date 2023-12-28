@@ -16,6 +16,8 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use with_options::WithOptions;
 
@@ -42,6 +44,9 @@ pub struct NatsProperties {
 
     #[serde(rename = "stream")]
     pub stream: String,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for NatsProperties {
@@ -50,4 +55,10 @@ impl SourceProperties for NatsProperties {
     type SplitReader = NatsSplitReader;
 
     const SOURCE_NAME: &'static str = NATS_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for NatsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
