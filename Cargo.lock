@@ -4270,16 +4270,16 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-gax"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7324ffbab9043aecca2d0e9b9be04944d31565e15c06297fb8ff151b01a7705d"
+checksum = "8cb60314136e37de9e2a05ddb427b9c5a39c3d188de2e2f026c6af74425eef44"
 dependencies = [
  "google-cloud-token",
  "http 0.2.9",
  "thiserror",
  "tokio",
  "tokio-retry",
- "tonic 0.9.2",
+ "tonic 0.10.2",
  "tower",
  "tracing",
 ]
@@ -4296,6 +4296,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-cloud-googleapis"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db8a478015d079296167e3f08e096dc99cffc2cb50fa203dd38aaa9dd37f8354"
+dependencies = [
+ "prost 0.12.1",
+ "prost-types 0.12.1",
+ "tonic 0.10.2",
+]
+
+[[package]]
 name = "google-cloud-metadata"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4308,17 +4319,17 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a501b632b606f8fdb36661d461cdd798db214117d1d433baa11f51dda4983870"
+checksum = "72c96d7e0fd07ecbce85bc8420bb7a049bb70ea74036e59fbee1a51deaa79216"
 dependencies = [
  "async-channel",
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.12.0",
  "google-cloud-token",
- "prost-types 0.11.9",
+ "prost-types 0.12.1",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -7139,7 +7150,7 @@ name = "prepare_ci_pubsub"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.11.0",
  "google-cloud-pubsub",
  "madsim-tokio",
 ]
@@ -11516,6 +11527,7 @@ dependencies = [
  "axum",
  "base64 0.21.4",
  "bytes",
+ "flate2",
  "h2",
  "http 0.2.9",
  "http-body",
@@ -11524,12 +11536,16 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls",
+ "rustls-pemfile",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 0.25.2",
 ]
 
 [[package]]
