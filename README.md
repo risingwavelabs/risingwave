@@ -77,8 +77,8 @@ risingwave playground
 ```
 **Ubuntu**
 ```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.5.3/risingwave-v1.5.3-x86_64-unknown-linux-all-in-one.tar.gz
-tar xvf risingwave-v1.5.3-x86_64-unknown-linux-all-in-one.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v1.5.4/risingwave-v1.5.4-x86_64-unknown-linux-all-in-one.tar.gz
+tar xvf risingwave-v1.5.4-x86_64-unknown-linux-all-in-one.tar.gz
 ./risingwave playground
 ```
 Now connect to RisingWave using `psql`:
