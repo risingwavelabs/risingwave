@@ -46,7 +46,7 @@ use super::{
 };
 use crate::sink::writer::SinkWriterExt;
 
-pub const DELTALAKE_SINK: &str = "deltalake_rust";
+pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
@@ -534,7 +534,7 @@ mod test {
             .unwrap();
 
         let properties = hashmap! {
-            "connector".to_string() => "deltalake_rust".to_string(),
+            "connector".to_string() => "deltalake".to_string(),
             "force_append_only".to_string() => "true".to_string(),
             "type".to_string() => "append-only".to_string(),
             "location".to_string() => format!("file://{}", path),

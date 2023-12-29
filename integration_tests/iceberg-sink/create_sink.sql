@@ -1,7 +1,7 @@
 CREATE SINK bhv_iceberg_sink
 FROM
     bhv_mv WITH (
-    connector = 'iceberg_java',
+    connector = 'iceberg',
     type = 'upsert',
     primary_key = 'user_id, target_id, event_timestamp',
     warehouse.path = 's3://hummock001/iceberg-data',
