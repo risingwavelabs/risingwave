@@ -30,8 +30,9 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
-    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec, Query, Select,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, Query, Select,
+    SelectItem, SetExpr, Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits,
+    WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
@@ -165,7 +166,9 @@ impl Binder {
             for (i, current_arg) in args.iter().enumerate() {
                 if let FunctionArg::Unnamed(arg) = current_arg {
                     let FunctionArgExpr::Expr(e) = arg else {
-                        return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into())
+                        return Err(
+                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                        );
                     };
                     // if catalog.arg_names.is_some() {
                     //      todo!()
@@ -173,7 +176,7 @@ impl Binder {
                     ret.insert(format!("${}", i + 1), e.clone());
                     continue;
                 }
-                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into())
+                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
             }
             Ok(ret)
         }
@@ -181,7 +184,7 @@ impl Binder {
         fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
             if ast.len() != 1 {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "the query for sql udf should contain only one statement".to_string()
+                    "the query for sql udf should contain only one statement".to_string(),
                 )
                 .into());
             }
@@ -192,24 +195,25 @@ impl Binder {
                 query = q;
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "invalid function definition, please recheck the syntax".to_string()
+                    "invalid function definition, please recheck the syntax".to_string(),
                 )
                 .into());
             }
-            
+
             let select: Box<Select>;
             if let SetExpr::Select(s) = query.body {
                 select = s;
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "missing `select` body for sql udf expression, please recheck the syntax".to_string()
+                    "missing `select` body for sql udf expression, please recheck the syntax"
+                        .to_string(),
                 )
                 .into());
             };
 
             if select.projection.len() != 1 {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "`projection` should contain only one `SelectItem`".to_string()
+                    "`projection` should contain only one `SelectItem`".to_string(),
                 )
                 .into());
             }
@@ -219,7 +223,7 @@ impl Binder {
                 expr = e;
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "expect `UnnamedExpr` for `projection`".to_string()
+                    "expect `UnnamedExpr` for `projection`".to_string(),
                 )
                 .into());
             }
@@ -238,13 +242,13 @@ impl Binder {
             use crate::catalog::function_catalog::FunctionKind::*;
             if func.language == "sql" {
                 // This represents the current user defined function is `language sql`
-                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str());
-                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) = parse_result {
+                let parse_result =
+                    risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str());
+                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+                    parse_result
+                {
                     // Here we just return the original parse error message
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        err
-                    )
-                    .into());
+                    return Err(ErrorCode::InvalidInputSyntax(err).into());
                 }
                 debug_assert!(parse_result.is_ok());
                 let ast = parse_result.unwrap();
@@ -256,7 +260,7 @@ impl Binder {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
-                    .into())
+                    .into());
                 }
 
                 if let Ok(expr) = extract_udf_expression(ast) {
@@ -268,7 +272,8 @@ impl Binder {
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to parse the input query and extract the udf expression,
-                        please recheck the syntax".to_string()
+                        please recheck the syntax"
+                            .to_string(),
                     )
                     .into());
                 }

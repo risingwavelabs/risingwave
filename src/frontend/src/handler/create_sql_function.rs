@@ -77,9 +77,9 @@ pub async fn handle_create_sql_function(
         debug_assert!(lang == "sql", "`language` for sql udf must be sql");
         if lang != "sql" {
             return Err(ErrorCode::InvalidParameterValue(
-                "`language` for sql udf must be sql".to_string()
+                "`language` for sql udf must be sql".to_string(),
             )
-            .into())
+            .into());
         }
     }
 
@@ -171,12 +171,10 @@ pub async fn handle_create_sql_function(
     // Note that the parsing here is just basic syntax / semantic check, the result will NOT be stored
     // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
     let parse_result = Parser::parse_sql(body.as_str());
-    if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) = parse_result {
+    if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) = parse_result
+    {
         // Here we just return the original parse error message
-        return Err(ErrorCode::InvalidInputSyntax(
-            err
-        )
-        .into());
+        return Err(ErrorCode::InvalidInputSyntax(err).into());
     } else {
         debug_assert!(parse_result.is_ok());
     }
