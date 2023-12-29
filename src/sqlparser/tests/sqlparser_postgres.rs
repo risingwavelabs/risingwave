@@ -768,8 +768,6 @@ fn parse_create_function() {
         }
     );
 
-    // Note that there should NOT exist blank space between
-    // function definition and double dollar signs
     let sql = "CREATE FUNCTION sub(INT, INT) RETURNS INT LANGUAGE SQL AS $$select $1 - $2;$$";
     assert_eq!(
         verified_stmt(sql),

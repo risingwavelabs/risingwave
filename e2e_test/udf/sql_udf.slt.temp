@@ -1,0 +1,80 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Create an anonymous function with double dollar as clause
+statement ok
+create function add(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+# Create an anonymous function with single quote as clause
+statement ok
+create function sub(INT, INT) returns int language sql as'select $1 - $2';
+
+# Currently we can only support constant calling convention
+statement ok
+create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
+
+# Create an anonymous function with return expression
+statement ok
+create function add_return(INT, INT) returns int language sql return $1 + $2;
+
+statement ok
+create function add_return_binding() returns int language sql return add_return(1, 1) + add_return(1, 1);
+
+# Call the defined sql udf
+query ?
+select add(1, -1);
+----
+0
+
+query ?
+select sub(1, 1);
+----
+0
+
+query ?
+select add_sub_binding();
+----
+2
+
+query ???
+select add(1, -1), sub(1, 1), add_sub_binding();
+----
+0 0 2
+
+query ?
+select add_return(1, 1);
+----
+2
+
+query ?
+select add_return_binding();
+----
+4
+
+# Create a mock table
+statement ok
+create table t1 (c1 INT, c2 INT);
+
+# Insert some data into the mock table
+statement ok
+insert into t1 values (1, 1), (2, 2), (3, 3), (4, 4), (5, 5);
+
+query ????
+select sub(c1, c2), c1, c2, add(c1, c2) from t1 order by c1 asc;
+----
+0 1 1 2
+0 2 2 4
+0 3 3 6
+0 4 4 8
+0 5 5 10
+
+query ???
+select c1, c2, add_return(c1, c2) from t1 order by c1 asc;
+----
+1 1 2
+2 2 4
+3 3 6
+4 4 8
+5 5 10
+
+# Invalid function body syntax
