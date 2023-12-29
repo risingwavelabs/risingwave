@@ -1,0 +1,1870 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "RisingWave Dashboard",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": 2,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "risedev-prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 53,
+      "options": {
+        "displayLabels": [],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [],
+          "width": 200
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "/^value$/",
+          "limit": 50,
+          "values": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "risedev-prometheus"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH evt AS (\n  SELECT\n    convert_from(value, 'UTF8') :: jsonb AS jsb\n  FROM\n    event\n)\nSELECT\n  NOW() as time_sec,\n  count(*) AS value,\n  jsb ->> 'name' AS metric\nFROM\n  evt\nGROUP BY\n  metric\nLIMIT\n  50",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "table": "event"
+        }
+      ],
+      "title": "Pie of metrics",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "risedev-prometheus"
+      },
+      "editable": true,
+      "error": false,
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "hideTimeOverride": false,
+      "id": 1,
+      "links": [],
+      "maxDataPoints": 100,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "risedev-prometheus"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Actor/Table Id Info",
+      "transformations": [],
+      "type": "row"
+    },
+    {
+      "color": {
+        "mode": "thresholds"
+      },
+      "columns": [],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "risedev-prometheus"
+      },
+      "description": "Mapping from actor id to fragment id",
+      "editable": true,
+      "error": false,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          }
+        },
+        "overrides": []
+      },
+      "fontSize": "100%",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "hideTimeOverride": false,
+      "id": 2,
+      "links": [],
+      "mappings": [],
+      "maxDataPoints": 100,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.2.3",
+      "span": 6,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "actor_info{job=~\"$job\",instance=~\"$node\"}",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "metric": "",
+          "query": "actor_info{job=~\"$job\",instance=~\"$node\"}",
+          "rawQuery": true,
+          "rawSql": "SELECT actor_id, fragment_id\nFROM rw_actors\nLIMIT 10",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "step": 10,
+          "target": ""
+        }
+      ],
+      "title": "Actor Id Info",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "color": {
+        "mode": "thresholds"
+      },
+      "columns": [],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "risedev-prometheus"
+      },
+      "description": "Mapping from materialized view table id to it's internal table ids",
+      "editable": true,
+      "error": false,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          }
+        },
+        "overrides": []
+      },
+      "fontSize": "100%",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "hideTimeOverride": false,
+      "id": 3,
+      "links": [],
+      "mappings": [],
+      "maxDataPoints": 100,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.2.3",
+      "span": 6,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "group(table_info{job=~\"$job\",instance=~\"$node\"}) by (materialized_view_id, table_id, table_name, table_type)",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "metric": "",
+          "query": "group(table_info{job=~\"$job\",instance=~\"$node\"}) by (materialized_view_id, table_id, table_name, table_type)",
+          "rawQuery": true,
+          "rawSql": "SELECT id, name FROM rw_materialized_views;",
+          "refId": "A",
+          "sql": {
+            "columns": [
+              {
+                "parameters": [],
+                "type": "function"
+              }
+            ],
+            "groupBy": [
+              {
+                "property": {
+                  "type": "string"
+                },
+                "type": "groupBy"
+              }
+            ],
+            "limit": 50
+          },
+          "step": 10,
+          "target": ""
+        }
+      ],
+      "title": "Materialized View Info",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "risedev-prometheus"
+      },
+      "editable": true,
+      "error": false,
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": []
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "hideTimeOverride": false,
+      "id": 4,
+      "links": [],
+      "maxDataPoints": 100,
+      "panels": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The figure shows the number of rows read by each source per second.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 18
+          },
+          "hideTimeOverride": false,
+          "id": 5,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "10.2.3",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(stream_source_output_rows_counts{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (source_name)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{source_name}}",
+              "metric": "",
+              "query": "sum(rate(stream_source_output_rows_counts{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (source_name)",
+              "rawQuery": true,
+              "rawSql": "WITH evt AS (\n  SELECT\n    convert_from(value, 'UTF8') :: jsonb AS jsb\n  FROM\n    event\n)\nSELECT\n  count(*) AS number,\n  date_trunc('second', (jsb ->> 'timestamp') :: timestamptz) AS time\nFROM\n  evt\nGROUP BY\n  time\nORDER BY\n  time desc\nLIMIT\n  100",
+              "refId": "A",
+              "sql": {
+                "columns": [
+                  {
+                    "parameters": [],
+                    "type": "function"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "property": {
+                      "type": "string"
+                    },
+                    "type": "groupBy"
+                  }
+                ],
+                "limit": 50
+              },
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Aggregated Source Throughput(rows/s)",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The figure shows the number of bytes read by each source per second.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": "MB/s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 18
+          },
+          "hideTimeOverride": false,
+          "id": 6,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "(sum by (source_id)(rate(partition_input_bytes{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])))/(1000*1000)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "source_id {{source_id}}",
+              "metric": "",
+              "query": "(sum by (source_id)(rate(partition_input_bytes{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])))/(1000*1000)",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Aggregated Source Throughput(MB/s)",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The number of rows streamed into each sink per second.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": "rows/s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 26
+          },
+          "hideTimeOverride": false,
+          "id": 7,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(rate(stream_sink_input_row_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group(sink_info{job=~\"$job\",instance=~\"$node\"}) by (sink_id, sink_name)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "sink {{sink_id}} {{sink_name}}",
+              "metric": "",
+              "query": "sum(rate(stream_sink_input_row_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group(sink_info{job=~\"$job\",instance=~\"$node\"}) by (sink_id, sink_name)",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Sink Throughput(rows/s)",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The figure shows the number of rows written into each materialized view per second.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": "rows/s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 26
+          },
+          "hideTimeOverride": false,
+          "id": 8,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(rate(stream_mview_input_row_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group(table_info{job=~\"$job\",instance=~\"$node\"}) by (table_id, table_name)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "mview {{table_id}} {{table_name}}",
+              "metric": "",
+              "query": "sum(rate(stream_mview_input_row_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group(table_info{job=~\"$job\",instance=~\"$node\"}) by (table_id, table_name)",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Materialized View Throughput(rows/s)",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The time that the data between two consecutive barriers gets fully processed, i.e. the computation results are made durable into materialized views or sink to external systems. This metric shows to users the freshness of materialized views.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 34
+          },
+          "hideTimeOverride": false,
+          "id": 9,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "histogram_quantile(0.5, sum(rate(meta_barrier_duration_seconds_bucket{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (le))",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "barrier_latency_p50",
+              "metric": "",
+              "query": "histogram_quantile(0.5, sum(rate(meta_barrier_duration_seconds_bucket{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (le))",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "histogram_quantile(0.99, sum(rate(meta_barrier_duration_seconds_bucket{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (le))",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "barrier_latency_p99",
+              "metric": "",
+              "query": "histogram_quantile(0.99, sum(rate(meta_barrier_duration_seconds_bucket{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (le))",
+              "refId": "B",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "rate(meta_barrier_duration_seconds_sum{job=~\"$job\",instance=~\"$node\"}[$__rate_interval]) / rate(meta_barrier_duration_seconds_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "barrier_latency_avg",
+              "metric": "",
+              "query": "rate(meta_barrier_duration_seconds_sum{job=~\"$job\",instance=~\"$node\"}[$__rate_interval]) / rate(meta_barrier_duration_seconds_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "refId": "C",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Barrier Latency",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "Alerts in the system group by type:\n            - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.\n            - Recovery Triggered: cluster recovery is triggered. Check 'Errors by Type' / 'Node Count' panels.\n            - Lagging Version: the checkpointed or pinned version id is lagging behind the current version id. Check 'Hummock Manager' section in dev dashboard.\n            - Lagging Epoch: the pinned or safe epoch is lagging behind the current max committed epoch. Check 'Hummock Manager' section in dev dashboard.\n            - Lagging Compaction: there are too many files in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.\n            - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.\n            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.\n            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.\n            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.\n            - Write Stall: Compaction cannot keep up. Stall foreground write.\n            ",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": ""
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 34
+          },
+          "hideTimeOverride": false,
+          "id": 10,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "last"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "all_barrier_nums{job=~\"$job\",instance=~\"$node\"} >= bool 200",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Too Many Barriers",
+              "metric": "",
+              "query": "all_barrier_nums{job=~\"$job\",instance=~\"$node\"} >= bool 200",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(rate(recovery_latency_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) > bool 0 + sum(recovery_failure_cnt{job=~\"$job\",instance=~\"$node\"}) > bool 0",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Recovery Triggered",
+              "metric": "",
+              "query": "sum(rate(recovery_latency_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) > bool 0 + sum(recovery_failure_cnt{job=~\"$job\",instance=~\"$node\"}) > bool 0",
+              "refId": "B",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "((storage_current_version_id{job=~\"$job\",instance=~\"$node\"} - storage_checkpoint_version_id{job=~\"$job\",instance=~\"$node\"}) >= bool 100) + ((storage_current_version_id{job=~\"$job\",instance=~\"$node\"} - storage_min_pinned_version_id{job=~\"$job\",instance=~\"$node\"}) >= bool 100)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Lagging Version",
+              "metric": "",
+              "query": "((storage_current_version_id{job=~\"$job\",instance=~\"$node\"} - storage_checkpoint_version_id{job=~\"$job\",instance=~\"$node\"}) >= bool 100) + ((storage_current_version_id{job=~\"$job\",instance=~\"$node\"} - storage_min_pinned_version_id{job=~\"$job\",instance=~\"$node\"}) >= bool 100)",
+              "refId": "C",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "((storage_max_committed_epoch{job=~\"$job\",instance=~\"$node\"} - storage_min_pinned_epoch{job=~\"$job\",instance=~\"$node\"}) >= bool 6553600000 unless + storage_min_pinned_epoch{job=~\"$job\",instance=~\"$node\"} == 0)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Lagging Epoch",
+              "metric": "",
+              "query": "((storage_max_committed_epoch{job=~\"$job\",instance=~\"$node\"} - storage_min_pinned_epoch{job=~\"$job\",instance=~\"$node\"}) >= bool 6553600000 unless + storage_min_pinned_epoch{job=~\"$job\",instance=~\"$node\"} == 0)",
+              "refId": "D",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(label_replace(storage_level_sst_num{job=~\"$job\",instance=~\"$node\"}, 'L0', 'L0', 'level_index', '.*_L0') unless storage_level_sst_num{job=~\"$job\",instance=~\"$node\"}) by (L0) >= bool 200",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Lagging Compaction",
+              "metric": "",
+              "query": "sum(label_replace(storage_level_sst_num{job=~\"$job\",instance=~\"$node\"}, 'L0', 'L0', 'level_index', '.*_L0') unless storage_level_sst_num{job=~\"$job\",instance=~\"$node\"}) by (L0) >= bool 200",
+              "refId": "E",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "storage_stale_object_count{job=~\"$job\",instance=~\"$node\"} >= bool 200",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Lagging Vacuum",
+              "metric": "",
+              "query": "storage_stale_object_count{job=~\"$job\",instance=~\"$node\"} >= bool 200",
+              "refId": "F",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "state_store_meta_cache_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 1.1",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Abnormal Meta Cache Memory",
+              "metric": "",
+              "query": "state_store_meta_cache_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 1.1",
+              "refId": "G",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "state_store_block_cache_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 1.1",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Abnormal Block Cache Memory",
+              "metric": "",
+              "query": "state_store_block_cache_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 1.1",
+              "refId": "H",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "state_store_uploading_memory_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 0.7",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Abnormal Uploading Memory Usage",
+              "metric": "",
+              "query": "state_store_uploading_memory_usage_ratio{job=~\"$job\",instance=~\"$node\"} >= bool 0.7",
+              "refId": "I",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "storage_write_stop_compaction_groups{job=~\"$job\",instance=~\"$node\"} > bool 0",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Write Stall",
+              "metric": "",
+              "query": "storage_write_stop_compaction_groups{job=~\"$job\",instance=~\"$node\"} > bool 0",
+              "refId": "J",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Alerts",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "Errors in the system group by type",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": ""
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "hideTimeOverride": false,
+          "id": 11,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(user_compute_error_count{job=~\"$job\",instance=~\"$node\"}) by (error_type, error_msg, fragment_id, executor_name)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "compute error {{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+              "metric": "",
+              "query": "sum(user_compute_error_count{job=~\"$job\",instance=~\"$node\"}) by (error_type, error_msg, fragment_id, executor_name)",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(user_source_error_count{job=~\"$job\",instance=~\"$node\"}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "parse error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+              "metric": "",
+              "query": "sum(user_source_error_count{job=~\"$job\",instance=~\"$node\"}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+              "refId": "B",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "source_status_is_up{job=~\"$job\",instance=~\"$node\"} == 0",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "source error: source_id={{source_id}}, source_name={{source_name}} @ {{instance}}",
+              "metric": "",
+              "query": "source_status_is_up{job=~\"$job\",instance=~\"$node\"} == 0",
+              "refId": "C",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(rate(object_store_failure_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (instance, job, type)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "remote storage error {{type}}: {{job}} @ {{instance}}",
+              "metric": "",
+              "query": "sum(rate(object_store_failure_count{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])) by (instance, job, type)",
+              "refId": "D",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Errors",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": "Qps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "hideTimeOverride": false,
+          "id": 12,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "rate(frontend_query_counter_local_execution{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Local mode",
+              "metric": "",
+              "query": "rate(frontend_query_counter_local_execution{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "rate(distributed_completed_query_counter{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "Distributed mode",
+              "metric": "",
+              "query": "rate(distributed_completed_query_counter{job=~\"$job\",instance=~\"$node\"}[$__rate_interval])",
+              "refId": "B",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Batch Query QPS",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "The number of each type of RisingWave components alive.",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": ""
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 50
+          },
+          "hideTimeOverride": false,
+          "id": 13,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "last"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "sum(worker_num{job=~\"$job\",instance=~\"$node\"}) by (worker_type)",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{worker_type}}",
+              "metric": "",
+              "query": "sum(worker_num{job=~\"$job\",instance=~\"$node\"}) by (worker_type)",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Node Count",
+          "transformations": [],
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "risedev-prometheus"
+          },
+          "description": "Number of active sessions in frontend nodes",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "log": 2,
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": []
+              },
+              "unit": ""
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 50
+          },
+          "hideTimeOverride": false,
+          "id": 14,
+          "interval": "1s",
+          "links": [],
+          "maxDataPoints": 1000,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "risedev-prometheus"
+              },
+              "expr": "frontend_active_sessions{job=~\"$job\",instance=~\"$node\"}",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "",
+              "metric": "",
+              "query": "frontend_active_sessions{job=~\"$job\",instance=~\"$node\"}",
+              "refId": "A",
+              "step": 10,
+              "target": ""
+            }
+          ],
+          "title": "Active Sessions",
+          "transformations": [],
+          "type": "timeseries"
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "risedev-prometheus"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Overview",
+      "transformations": [],
+      "type": "row"
+    }
+  ],
+  "refresh": false,
+  "schemaVersion": 39,
+  "tags": [
+    "risingwave"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "__all"
+          ]
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "risedev-prometheus"
+        },
+        "definition": "label_values(process_cpu_seconds_total, instance)",
+        "description": "Reporting instance of the metric",
+        "error": {},
+        "hide": 0,
+        "includeAll": true,
+        "label": "Node",
+        "multi": true,
+        "name": "node",
+        "options": [],
+        "query": {
+          "query": "label_values(process_cpu_seconds_total, instance)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 6,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "__all"
+          ]
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "risedev-prometheus"
+        },
+        "definition": "label_values(process_cpu_seconds_total, job)",
+        "description": "Reporting job of the metric",
+        "error": {},
+        "hide": 0,
+        "includeAll": true,
+        "label": "Job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": {
+          "query": "label_values(process_cpu_seconds_total, job)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 6,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": false,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "risingwave_dashboard",
+  "uid": "Fcy3uV1nz",
+  "version": 2
+}

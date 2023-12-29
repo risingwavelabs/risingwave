@@ -36,6 +36,7 @@ CASES_MAP = {
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
     'deltalake-sink': ['json'],
+    'prometheus-new': ['json'],
 }
 
 def gen_pipeline_steps():
