@@ -92,6 +92,7 @@ mod tests {
     use crate::controller::SqlMetaStore;
     use crate::hummock::manager::sequence::{SequenceGenerator, COMPACTION_TASK_ID};
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_seq_gen() {
         let store = SqlMetaStore::for_test().await;
