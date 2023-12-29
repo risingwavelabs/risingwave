@@ -27,32 +27,6 @@ use super::*;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
-/// Simple type check for sql udf
-/// e.g., return type mismatch check, parameter type check, ..., etc.
-/// TODO: any existing module / function that can achieve the same functionality?
-fn _sql_udf_type_checker(ast: Vec<Statement>) -> Result<()> {
-    // Extract the expression out
-    let Statement::Query(query) = ast
-        .into_iter()
-        .exactly_one()
-        .expect("sql udf should contain only one statement")
-    else {
-        unreachable!("sql udf should contain a query statement");
-    };
-    let SetExpr::Select(select) = query.body else {
-        panic!("Invalid syntax");
-    };
-    let projection = select.projection;
-    let SelectItem::UnnamedExpr(_expr) = projection
-        .into_iter()
-        .exactly_one()
-        .expect("`projection` should contain only one `SelectItem`")
-    else {
-        unreachable!("`projection` should contain only one `SelectItem`");
-    };
-    todo!()
-}
-
 pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,
