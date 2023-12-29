@@ -190,20 +190,14 @@ impl Binder {
             }
 
             // Extract the expression out
-            let query: Box<Query>;
-            if let Statement::Query(q) = ast[0].clone() {
-                query = q;
-            } else {
+            let Statement::Query(query) = ast[0].clone() else {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "invalid function definition, please recheck the syntax".to_string(),
                 )
                 .into());
-            }
+            };
 
-            let select: Box<Select>;
-            if let SetExpr::Select(s) = query.body {
-                select = s;
-            } else {
+            let SetExpr::Select(select) = query.body else {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "missing `select` body for sql udf expression, please recheck the syntax"
                         .to_string(),
@@ -218,15 +212,12 @@ impl Binder {
                 .into());
             }
 
-            let expr: AstExpr;
-            if let SelectItem::UnnamedExpr(e) = select.projection[0].clone() {
-                expr = e;
-            } else {
+            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "expect `UnnamedExpr` for `projection`".to_string(),
                 )
                 .into());
-            }
+            };
 
             Ok(expr)
         }
