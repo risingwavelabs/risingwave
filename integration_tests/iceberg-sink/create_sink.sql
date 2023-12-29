@@ -8,6 +8,7 @@ FROM
     s3.endpoint = 'http://minio-0:9301',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
+    s3.region = 'us-east-1',
     database.name='demo_db',
     table.name='demo_table'
 );
