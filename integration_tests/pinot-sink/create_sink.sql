@@ -4,4 +4,4 @@ create SINK orders_sink FROM orders WITH (
     topic = 'orders.upsert.log',
     type = 'upsert',
     primary_key = 'id'
-);
+) FORMAT UPSERT ENCODE JSON;
