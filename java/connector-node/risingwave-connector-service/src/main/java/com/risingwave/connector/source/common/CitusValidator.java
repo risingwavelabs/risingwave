@@ -21,7 +21,7 @@ import java.util.Map;
 public class CitusValidator extends PostgresValidator {
     public CitusValidator(Map<String, String> userProps, TableSchema tableSchema)
             throws SQLException {
-        super(userProps, tableSchema);
+        super(userProps, tableSchema, false);
     }
 
     @Override
