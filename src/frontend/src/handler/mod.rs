@@ -206,22 +206,15 @@ pub async fn handle(
             returns,
             params,
         } => {
-            debug_assert!(
-                params.language.is_some(),
-                "`language` must be specified for all kinds of udf"
-            );
-            if params.language.is_none() {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "`language` must be specified for all kinds of udf".to_string(),
-                )
-                .into());
-            }
-            if !params
-                .language
-                .as_ref()
-                .unwrap()
-                .real_value()
-                .eq_ignore_ascii_case("sql")
+            // For general udf, `language` clause could be ignored
+            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+            if params.language.is_none()
+                || !params
+                    .language
+                    .as_ref()
+                    .unwrap()
+                    .real_value()
+                    .eq_ignore_ascii_case("sql")
             {
                 // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
@@ -237,9 +230,15 @@ pub async fn handle(
             } else {
                 // SQL user defined function, the logic is mostly inlined
                 debug_assert!(
-                    params.using.is_none(),
-                    "`params.using` must be none for sql udf function"
+                    params.using.is_none() && params.language.is_some(),
+                    "`params.using` must be none && `params.language` must be specified for sql udf function"
                 );
+                if params.language.is_none() {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "`language` must be specified for sql udf".to_string(),
+                    )
+                    .into());
+                }
                 create_sql_function::handle_create_sql_function(
                     handler_args,
                     or_replace,
