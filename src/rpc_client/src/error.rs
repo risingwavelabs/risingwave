@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::{error::{ErrorCode, RwError}, util::meta_addr::MetaAddressParseError};
+use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::meta_addr::MetaAddressStrategyParseError;
 use thiserror::Error;
 
 pub type Result<T, E = RpcError> = std::result::Result<T, E>;
@@ -29,7 +30,7 @@ pub enum RpcError {
     GrpcStatus(Box<TonicStatusWrapper>),
 
     #[error(transparent)]
-    MetaAddressParse(#[from] MetaAddressParseError),
+    MetaAddressParse(#[from] MetaAddressStrategyParseError),
 
     #[error(transparent)]
     Internal(
