@@ -16,13 +16,14 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
-use std::time::Instant;
+use std::time::Duration;
 
 use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
 use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
+use moka::future::Cache;
 use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::row::OwnedRow;
@@ -253,19 +254,13 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
 /// Later calls with the same link will reuse the same runtime.
 #[cfg_or_panic(not(madsim))]
 pub async fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> {
-    // link -> (runtime, last_used_time)
-    type Map = HashMap<String, (Arc<WasmRuntime>, Instant)>;
-    static RUNTIMES: LazyLock<tokio::sync::Mutex<Map>> = LazyLock::new(Default::default);
-
-    let mut runtimes = RUNTIMES.lock().await;
-    let now = Instant::now();
-    // evict unused runtimes for the past 60 seconds
-    runtimes.retain(|l, (rt, last_used_time)| {
-        l == link || Arc::strong_count(rt) > 1 || now.duration_since(*last_used_time).as_secs() < 60
+    static RUNTIMES: LazyLock<Cache<String, Arc<WasmRuntime>>> = LazyLock::new(|| {
+        Cache::builder()
+            .time_to_idle(Duration::from_secs(60))
+            .build()
     });
-    if let Some((runtime, last_used_time)) = runtimes.get_mut(link) {
-        // reuse existing runtime
-        *last_used_time = now;
+
+    if let Some(runtime) = RUNTIMES.get(link).await {
         return Ok(runtime.clone());
     }
 
@@ -287,8 +282,7 @@ pub async fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> 
         .await
         .context("failed to load wasm binary from object storage")?;
 
-    let runtime = arrow_udf_wasm::Runtime::new(&binary)?;
-    let runtime = Arc::new(runtime);
-    runtimes.insert(link.into(), (runtime.clone(), Instant::now()));
+    let runtime = Arc::new(arrow_udf_wasm::Runtime::new(&binary)?);
+    RUNTIMES.insert(link.into(), runtime.clone()).await;
     Ok(runtime)
 }

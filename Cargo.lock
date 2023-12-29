@@ -9036,6 +9036,7 @@ dependencies = [
  "futures-util",
  "itertools 0.12.0",
  "madsim-tokio",
+ "moka",
  "num-traits",
  "parse-display",
  "paste",
