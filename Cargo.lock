@@ -6461,7 +6461,7 @@ dependencies = [
 [[package]]
 name = "otlp-embedded"
 version = "0.1.0"
-source = "git+https://github.com/BugenZhao/otlp-embedded?rev=1402d9e#1402d9ef8413179a2bb13c59631323a69a836f9c"
+source = "git+https://github.com/BugenZhao/otlp-embedded?rev=c224f787a2de8528c83bbf242349355afd79e60e#c224f787a2de8528c83bbf242349355afd79e60e"
 dependencies = [
  "axum",
  "hex",

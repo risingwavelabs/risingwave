@@ -472,7 +472,7 @@ pub async fn start_service_as_election_leader(
         prometheus_selector.clone(),
     ));
 
-    let trace_state = otlp_embedded::State::new();
+    let trace_state = otlp_embedded::State::new(opts.cached_traces_num);
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
     #[cfg(not(madsim))]
