@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::row::{OwnedRow, Project, Row, RowExt};
@@ -66,6 +65,8 @@ impl ColumnMapping {
         origin_row.project(&self.output_indices)
     }
 
+    /// Project column values to a new row. Compare to `project`, this method could avoid calling `into_owned_row`,
+    /// which would clone all datum once.
     pub fn project_to_row(&self, mut values: Vec<Datum>) -> OwnedRow {
         if self.is_duplicate {
             return self.project(OwnedRow::new(values)).into_owned_row();

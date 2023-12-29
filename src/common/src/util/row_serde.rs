@@ -88,6 +88,7 @@ impl OrderedRowSerde {
         Ok(OwnedRow::new(values))
     }
 
+    /// The elements in parameter `output_indices` must be unique, because we take the content of `Datum` for every indices. Taking a `Datum` again would get `None`.
     pub fn deserialize_by_indices(
         &self,
         data: &[u8],

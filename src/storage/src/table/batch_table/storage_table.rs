@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::collections::HashSet;
 use std::default::Default;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
@@ -654,11 +653,13 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
+    /// If all values of `output_indices` is unique, set `exist_index_duplicate` false.
     exist_index_duplicate: bool,
 
     /// the key part of output_indices.
     key_output_indices: Option<Vec<usize>>,
 
+    /// If all values of `key_output_indices` is unique, set `exist_key_index_duplicate` false.
     exist_key_index_duplicate: bool,
 
     /// the value part of output_indices.
@@ -694,10 +695,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         store.validate_read_epoch(epoch)?;
         let exist_key_index_duplicate = key_output_indices
             .as_ref()
-            .map(|indices| HashSet::<usize>::from_iter(indices.clone()).len() != indices.len())
+            .map(|indices| !indices.iter().all_unique())
             .unwrap_or(false);
-        let exist_index_duplicate =
-            HashSet::<usize>::from_iter(output_indices.clone()).len() != output_indices.len();
+        let exist_index_duplicate = !output_indices.iter().all_unique();
         let iter = Self {
             iter,
             mapping,
@@ -735,6 +735,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                             if self.exist_key_index_duplicate {
                                 let pk =
                                     pk_serializer.deserialize(table_key.key_part().as_ref())?;
+                                // `into_owned_row` will clone every datum once.
                                 pk.project(&self.output_row_in_key_indices).into_owned_row()
                             } else {
                                 pk_serializer.deserialize_by_indices(
