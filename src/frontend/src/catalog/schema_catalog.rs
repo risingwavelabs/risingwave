@@ -542,7 +542,6 @@ impl SchemaCatalog {
         name: &str,
         args: &[DataType],
     ) -> Option<&Arc<FunctionCatalog>> {
-        println!("Current args: {:#?}", args);
         self.function_by_name.get(name)?.get(args)
     }
 

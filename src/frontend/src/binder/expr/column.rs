@@ -38,8 +38,15 @@ impl Binder {
         };
 
         // Special check for sql udf
-        if self.udf_context.contains_key(&column_name) {
-            return self.bind_expr(self.udf_context.get(&column_name).unwrap().clone());
+        // Note: The check in `bind_column` is to inline the identifiers,
+        // which, in the context of sql udf, will NOT be perceived as normal
+        // columns, but the actual named input parameters.
+        // Thus, we need to figure out if the current "column name" corresponds
+        // to the name of the defined sql udf parameters stored in `udf_context`.
+        // If so, we will treat this bind as an special bind, the actual expression 
+        // stored in `udf_context` will then be bound instead of binding the non-existing column.
+        if let Some(expr) = self.udf_context.get(&column_name) {
+            return self.bind_expr(expr.clone());
         }
 
         match self

@@ -1012,7 +1012,6 @@ impl Session for SessionImpl {
         stmt: Statement,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        println!("The current stmt: {:#?}", stmt);
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);

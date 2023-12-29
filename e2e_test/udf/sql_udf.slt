@@ -83,10 +83,10 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 
 # Multiple type interleaving sql udf
 statement ok
-create function add_sub(INT, FLOAT, INT) returns FLOAT language sql as $$select -$1 + $2 - $3$$;
+create function add_sub(INT, FLOAT, INT) returns float language sql as $$select -$1 + $2 - $3$$;
 
 statement ok
-create function add_sub_return(INT, FLOAT, INT) returns FLOAT language sql return -$1 + $2 - $3;
+create function add_sub_return(INT, FLOAT, INT) returns float language sql return -$1 + $2 - $3;
 
 # Note: need EXPLICIT type cast in order to call the multiple types interleaving sql udf
 query I
@@ -138,6 +138,9 @@ drop function add_sub_binding;
 
 statement ok
 drop function add_sub;
+
+statement ok
+drop function add_sub_return;
 
 statement ok
 drop function add_return;

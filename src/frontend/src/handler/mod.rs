@@ -206,7 +206,14 @@ pub async fn handle(
             returns,
             params,
         } => {
-            if params.using.is_some() {
+            debug_assert!(params.language.is_some(), "`language` must be specified for all kinds of udf");
+            if params.language.is_none() {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "`language` must be specified for all kinds of udf".to_string(),
+                )
+                .into());
+            }
+            if !params.language.as_ref().unwrap().real_value().eq_ignore_ascii_case("sql") {
                 // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
                     handler_args,

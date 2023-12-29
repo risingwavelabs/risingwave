@@ -379,9 +379,11 @@ impl Binder {
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
         // Special check for sql udf
-        let name = "$".to_string() + &index.to_string();
-        if self.udf_context.contains_key(&name) {
-            return self.bind_expr(self.udf_context.get(&name).unwrap().clone());
+        // Note: This is specific to anonymous sql udf, since the
+        // parameters will be parsed and treated as `Parameter`.
+        // For detailed explanation, consider checking `bind_column`.
+        if let Some(expr) = self.udf_context.get(&format!("${index}")) {
+            return self.bind_expr(expr.clone());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
