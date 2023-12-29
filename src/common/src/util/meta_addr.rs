@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &'static str = "load-balance+";
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MetaAddressStrategy {
     LoadBalance(http::Uri),
     List(Vec<http::Uri>),
@@ -59,10 +59,10 @@ impl fmt::Display for MetaAddressStrategy {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             MetaAddressStrategy::LoadBalance(addr) => {
-                write!(f, "LoadBalance({})", addr)?;
+                write!(f, "{}{}", META_ADDRESS_LOAD_BALANCE_MODE_PREFIX, addr)?;
             }
             MetaAddressStrategy::List(addrs) => {
-                write!(f, "List({})", addrs.iter().format(", "))?;
+                write!(f, "{}", addrs.iter().format(","))?;
             }
         }
         Ok(())
@@ -78,7 +78,9 @@ mod tests {
         let results = vec![
             (
                 "load-balance+http://abc",
-                Some(MetaAddressStrategy::LoadBalance("http://abc".parse().unwrap())),
+                Some(MetaAddressStrategy::LoadBalance(
+                    "http://abc".parse().unwrap(),
+                )),
             ),
             ("load-balance+http://abc,http://def", None),
             ("load-balance+http://abc:xxx", None),
@@ -99,7 +101,8 @@ mod tests {
                     assert!(parsed_result.is_err());
                 }
                 Some(strategy) => {
-                    assert_eq!(strategy, parsed_result.unwrap())
+                    assert_eq!(strategy, parsed_result.unwrap());
+                    assert_eq!(addr, strategy.to_string());
                 }
             }
         }

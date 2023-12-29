@@ -115,8 +115,6 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
-    const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &'static str = "load-balance+";
-
     pub fn worker_id(&self) -> u32 {
         self.worker_id
     }
@@ -185,13 +183,12 @@ impl MetaClient {
 
     /// Register the current node to the cluster and set the corresponding worker id.
     pub async fn register_new(
-        meta_addr: &str,
+        addr_strategy: MetaAddressStrategy,
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
         meta_config: &MetaConfig,
     ) -> Result<(Self, SystemParamsReader)> {
-        let addr_strategy = meta_addr.parse()?;
         tracing::info!("register meta client using strategy: {}", addr_strategy);
 
         // Retry until reaching `max_heartbeat_interval_secs`
@@ -1524,7 +1521,7 @@ struct MetaMemberManagement {
 impl MetaMemberManagement {
     const META_MEMBER_REFRESH_PERIOD: Duration = Duration::from_secs(5);
 
-    fn host_address_to_url(addr: HostAddress) -> http::Uri {
+    fn host_address_to_uri(addr: HostAddress) -> http::Uri {
         format!("http://{}:{}", addr.host, addr.port)
             .parse()
             .unwrap()
@@ -1586,7 +1583,7 @@ impl MetaMemberManagement {
                         leader = Some(member.clone());
                     }
 
-                    let addr = Self::host_address_to_url(member.address.unwrap());
+                    let addr = Self::host_address_to_uri(member.address.unwrap());
                     // We don't clean any expired addrs here to deal with some extreme situations.
                     if !member_group.members.contains(&addr) {
                         tracing::info!("new meta member joined: {}", addr);
@@ -1599,7 +1596,7 @@ impl MetaMemberManagement {
         };
 
         if let Some(leader) = leader_addr {
-            let discovered_leader = Self::host_address_to_url(leader.address.unwrap());
+            let discovered_leader = Self::host_address_to_uri(leader.address.unwrap());
 
             if discovered_leader != self.current_leader {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
