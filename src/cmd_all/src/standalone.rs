@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
@@ -71,7 +72,7 @@ impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
         "standalone"
     }
 
-    fn meta_addr(&self) -> &str {
+    fn meta_addr(&self) -> MetaAddressStrategy {
         if let Some(opts) = self.meta_opts.as_ref() {
             opts.meta_addr()
         } else if let Some(opts) = self.compute_opts.as_ref() {
@@ -81,7 +82,7 @@ impl risingwave_common::opts::Opts for ParsedStandaloneOpts {
         } else if let Some(opts) = self.compactor_opts.as_ref() {
             opts.meta_addr()
         } else {
-            ""
+            unreachable!("at least one service should be specified as checked during parsing")
         }
     }
 }
@@ -143,6 +144,15 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
             meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
         }
     }
+
+    if meta_opts.is_none()
+        && compute_opts.is_none()
+        && frontend_opts.is_none()
+        && compactor_opts.is_none()
+    {
+        panic!("No service is specified to start.");
+    }
+
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,

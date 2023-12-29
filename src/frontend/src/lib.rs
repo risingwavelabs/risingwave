@@ -144,8 +144,8 @@ impl risingwave_common::opts::Opts for FrontendOpts {
         "frontend"
     }
 
-    fn meta_addr(&self) -> &str {
-        self.meta_addr.trim_start_matches("http://")
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_addr.clone()
     }
 }
 

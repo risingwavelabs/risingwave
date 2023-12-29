@@ -20,6 +20,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use tempfile::TempPath;
 use tokio::signal;
 
@@ -148,8 +149,8 @@ impl risingwave_common::opts::Opts for PlaygroundOpts {
         "playground"
     }
 
-    fn meta_addr(&self) -> &str {
-        "0.0.0.0:5690" // hard-coded
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        "http://0.0.0.0:5690".parse().unwrap() // hard-coded
     }
 }
 

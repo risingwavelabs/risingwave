@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::util::meta_addr::MetaAddressStrategy;
+
 /// Accessor trait for a component's command-line options.
 pub trait Opts {
     /// The name of the component.
     fn name() -> &'static str;
 
     /// The address to the meta node.
-    ///
-    /// Should include the port and not start with the protocol like `http://`.
-    fn meta_addr(&self) -> &str;
+    fn meta_addr(&self) -> MetaAddressStrategy;
 }

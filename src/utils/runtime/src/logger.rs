@@ -30,7 +30,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
 
 pub struct LoggerSettings {
-    /// The name of the service.
+    /// The name of the service. Used to identify the service in distributed tracing.
     name: String,
     /// Enable tokio console output.
     enable_tokio_console: bool,
@@ -63,12 +63,14 @@ impl LoggerSettings {
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
         let mut settings = Self::new(O::name());
         if settings.tracing_endpoint.is_none() // no explicit env var is set
-            && !opts.meta_addr().is_empty() // meta address is valid
+            && let Some(addr) = opts.meta_addr().exactly_one() // meta address is valid
             && !Deployment::current().is_ci()
         // not in CI
         {
             // Use embedded collector in the meta service.
-            settings.tracing_endpoint = Some(format!("http://{}", opts.meta_addr()));
+            // TODO: when there's multiple meta nodes for high availability, we may send
+            // to a wrong node here.
+            settings.tracing_endpoint = Some(addr.to_string());
         }
         settings
     }

@@ -140,8 +140,8 @@ impl risingwave_common::opts::Opts for ComputeNodeOpts {
         "compute"
     }
 
-    fn meta_addr(&self) -> &str {
-        self.meta_address.trim_start_matches("http://")
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
     }
 }
 

@@ -24,6 +24,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
@@ -43,6 +44,7 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
+    // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     pub listen_addr: String,
 
@@ -169,8 +171,10 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
         "meta"
     }
 
-    fn meta_addr(&self) -> &str {
-        &self.listen_addr
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        format!("http://{}", self.listen_addr)
+            .parse()
+            .expect("invalid listen address")
     }
 }
 
