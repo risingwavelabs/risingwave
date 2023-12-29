@@ -30,9 +30,8 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, Query, Select,
-    SelectItem, SetExpr, Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits,
-    WindowSpec,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
+    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;

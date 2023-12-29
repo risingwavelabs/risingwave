@@ -78,11 +78,14 @@ pub async fn handle_create_sql_function(
 
     // We do NOT allow recursive calling inside sql udf
     // Since there does not exist the base case for this definition
-    if body.find(format!("{}(", name.real_value()).as_str()).is_some() {
+    if body
+        .find(format!("{}(", name.real_value()).as_str())
+        .is_some()
+    {
         return Err(ErrorCode::InvalidInputSyntax(
-            "recursive definition is forbidden, please recheck your function syntax".to_string()
+            "recursive definition is forbidden, please recheck your function syntax".to_string(),
         )
-        .into())
+        .into());
     }
 
     // Sanity check for link, this must be none with sql udf function
