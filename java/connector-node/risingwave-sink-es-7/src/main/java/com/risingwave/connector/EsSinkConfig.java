@@ -37,6 +37,9 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "password")
     private String password;
 
+    @JsonProperty(value = "es.type")
+    private String esType;
+
     @JsonCreator
     public EsSinkConfig(
             @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
@@ -46,6 +49,10 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public String getUrl() {
         return url;
+    }
+
+    public String getEsType() {
+        return esType;
     }
 
     public String getIndex() {
@@ -76,6 +83,11 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public EsSinkConfig withPassword(String password) {
         this.password = password;
+        return this;
+    }
+
+    public EsSinkConfig withEsType(String esType) {
+        this.esType = esType;
         return this;
     }
 }
