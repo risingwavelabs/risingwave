@@ -87,11 +87,7 @@ impl CompactorContext {
         let mut running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
         let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
 
-        if parallelism + running_u32 > max_u32 {
-            return false;
-        }
-
-        while parallelism + running_u32 < max_u32 {
+        while parallelism + running_u32 <= max_u32 {
             match self.running_task_parallelism.compare_exchange(
                 running_u32,
                 running_u32 + parallelism,
