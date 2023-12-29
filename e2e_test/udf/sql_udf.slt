@@ -28,6 +28,10 @@ create function add_return(INT, INT) returns int language sql return $1 + $2;
 statement ok
 create function add_return_binding() returns int language sql return add_return(1, 1) + add_return(1, 1);
 
+# Recursive definition is forbidden
+statement error recursive definition is forbidden, please recheck your function syntax
+create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+
 # Call the defined sql udf
 query I
 select add(1, -1);
