@@ -9,7 +9,7 @@ create function add(INT, INT) returns int language sql as $$select $1 + $2$$;
 statement ok
 create function sub(INT, INT) returns int language sql as 'select $1 - $2';
 
-# Currently we can only support constant calling convention
+# Create an anonymous function that calls other pre-defined sql udfs
 statement ok
 create function add_sub_binding() returns int language sql as 'select add(1, 1) + sub(2, 2)';
 
@@ -31,6 +31,10 @@ create function add_return_binding() returns int language sql return add_return(
 # Recursive definition is forbidden
 statement error recursive definition is forbidden, please recheck your function syntax
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+
+# Create a wrapper function for `add` & `sub`
+statement ok
+create function add_sub_wrapper(INT, INT) returns int language sql as 'select add($1, $2) + sub($1, $2) + 114512';
 
 # Call the defined sql udf
 query I
@@ -67,6 +71,11 @@ query T
 select call_regexp_replace();
 ----
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
+
+query I
+select add_sub_wrapper(1, 1);
+----
+114514
 
 # Create a mock table
 statement ok
@@ -171,6 +180,9 @@ drop function add_return_binding;
 
 statement ok
 drop function call_regexp_replace;
+
+statement ok
+drop function add_sub_wrapper;
 
 # Drop the mock table
 statement ok
