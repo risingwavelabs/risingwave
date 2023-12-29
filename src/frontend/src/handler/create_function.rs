@@ -175,8 +175,8 @@ pub async fn handle_create_function(
 
             link = match using {
                 CreateFunctionUsing::Link(link) => {
-                    let wasm_binary = get_or_create_wasm_runtime(&link).await?;
-                    check_wasm_function(&wasm_binary, &identifier).await?;
+                    let runtime = get_or_create_wasm_runtime(&link).await?;
+                    check_wasm_function(&runtime, &identifier)?;
                     link
                 }
                 CreateFunctionUsing::Base64(encoded) => {
@@ -187,7 +187,7 @@ pub async fn handle_create_function(
                         .context("invalid base64 encoding")?;
 
                     let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
-                    check_wasm_function(&runtime, &identifier).await?;
+                    check_wasm_function(&runtime, &identifier)?;
 
                     let system_params = session.env().meta_client().get_system_params().await?;
                     let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
@@ -240,14 +240,14 @@ async fn upload_wasm_binary(
     )
     .await;
     object_store
-        .upload(&object_name, wasm_binary.into())
+        .upload(object_name, wasm_binary)
         .await
         .context("failed to upload wasm binary to object store")?;
     Ok(())
 }
 
 /// Check if the function exists in the wasm binary.
-async fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
+fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
     if !runtime.functions().contains(&identifier) {
         return Err(ErrorCode::InvalidParameterValue(format!(
             "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",

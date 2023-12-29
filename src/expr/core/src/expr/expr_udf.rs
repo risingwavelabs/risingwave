@@ -254,8 +254,8 @@ pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightU
 #[cfg_or_panic(not(madsim))]
 pub async fn get_or_create_wasm_runtime(link: &str) -> Result<Arc<WasmRuntime>> {
     // link -> (runtime, last_used_time)
-    static RUNTIMES: LazyLock<tokio::sync::Mutex<HashMap<String, (Arc<WasmRuntime>, Instant)>>> =
-        LazyLock::new(Default::default);
+    type Map = HashMap<String, (Arc<WasmRuntime>, Instant)>;
+    static RUNTIMES: LazyLock<tokio::sync::Mutex<Map>> = LazyLock::new(Default::default);
 
     let mut runtimes = RUNTIMES.lock().await;
     let now = Instant::now();
