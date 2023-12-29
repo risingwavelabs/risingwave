@@ -35,6 +35,7 @@ use std::pin::Pin;
 
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,7 @@ pub struct ComputeNodeOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     /// Endpoint of the connector node
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]

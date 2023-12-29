@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
+use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
@@ -48,42 +49,60 @@ impl Default for DdlType {
 impl StreamingJob {
     pub fn mark_created(&mut self) {
         let created_at_epoch = Some(Epoch::now().0);
+        let created_at_cluster_version = Some(current_cluster_version());
         match self {
-            StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::MaterializedView(table) => {
+                table.created_at_epoch = created_at_epoch;
+                table.created_at_cluster_version = created_at_cluster_version;
+            }
             StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
             StreamingJob::Table(source, table, ..) => {
                 table.created_at_epoch = created_at_epoch;
+                table.created_at_cluster_version = created_at_cluster_version.clone();
                 if let Some(source) = source {
                     source.created_at_epoch = created_at_epoch;
+                    source.created_at_cluster_version = created_at_cluster_version;
                 }
             }
             StreamingJob::Index(index, _) => {
                 index.created_at_epoch = created_at_epoch;
+                index.created_at_cluster_version = created_at_cluster_version;
             }
             StreamingJob::Source(source) => {
                 source.created_at_epoch = created_at_epoch;
+                source.created_at_cluster_version = created_at_cluster_version;
             }
         }
     }
 
     pub fn mark_initialized(&mut self) {
         let initialized_at_epoch = Some(Epoch::now().0);
+        let initialized_at_cluster_version = Some(current_cluster_version());
         match self {
             StreamingJob::MaterializedView(table) => {
-                table.initialized_at_epoch = initialized_at_epoch
+                table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version;
             }
-            StreamingJob::Sink(table, _) => table.initialized_at_epoch = initialized_at_epoch,
+            StreamingJob::Sink(table, _) => {
+                table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version;
+            }
             StreamingJob::Table(source, table, ..) => {
                 table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version.clone();
+
                 if let Some(source) = source {
                     source.initialized_at_epoch = initialized_at_epoch;
+                    source.initialized_at_cluster_version = initialized_at_cluster_version;
                 }
             }
             StreamingJob::Index(index, _) => {
                 index.initialized_at_epoch = initialized_at_epoch;
+                index.initialized_at_cluster_version = initialized_at_cluster_version;
             }
             StreamingJob::Source(source) => {
                 source.initialized_at_epoch = initialized_at_epoch;
+                source.initialized_at_cluster_version = initialized_at_cluster_version;
             }
         }
     }

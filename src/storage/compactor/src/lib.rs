@@ -21,6 +21,7 @@ use clap::Parser;
 use risingwave_common::config::{
     AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
 };
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -56,7 +57,7 @@ pub struct CompactorOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
