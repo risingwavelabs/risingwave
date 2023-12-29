@@ -239,6 +239,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.add(full_key, value).await
     }
 
+    /// only for test
+    pub fn current_block_size(&self) -> usize {
+        self.block_builder.approximate_len()
+    }
+
     /// Add raw data of block to sstable. return false means fallback
     pub async fn add_raw_block(
         &mut self,
@@ -666,7 +671,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             + self.range_tombstone_size
     }
 
-    async fn build_block(&mut self) -> HummockResult<()> {
+    pub async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());

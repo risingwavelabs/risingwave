@@ -553,6 +553,8 @@ mod tests {
             create_type: PbCreateType::Foreground.into(),
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         }
     }
 

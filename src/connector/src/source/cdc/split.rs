@@ -18,8 +18,8 @@ use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::CdcSourceTypeTrait;
-use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.

@@ -144,6 +144,8 @@ impl CatalogController {
             database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
+            initialized_at_cluster_version: Default::default(),
+            created_at_cluster_version: Default::default(),
         };
         Ok(active_db.insert(txn).await?)
     }
