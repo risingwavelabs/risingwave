@@ -50,7 +50,7 @@ fn gcd(mut x: i32, mut y: i32) -> i32 {
 You can find more usages in the [documentation](https://docs.rs/arrow_udf/0.1.0/arrow_udf/attr.function.html) and more examples in the [tests](https://github.com/risingwavelabs/arrow-udf/blob/main/arrow-udf/tests/tests.rs).
 
 Currently we only support scalar functions with a limited set of data types.
-`decimal`, `timestamptz`, `jsonb` and complex array types are not supported yet.
+`timestamptz` and complex array types are not supported yet.
 
 ## 3. Build the project
 

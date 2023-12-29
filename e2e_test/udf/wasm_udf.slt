@@ -17,6 +17,14 @@ statement ok
 create function extract_tcp_info(bytea) returns struct<src_addr varchar, dst_addr varchar, src_port smallint, dst_port smallint>
 language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
 
+statement ok
+create function decimal_add(decimal, decimal) returns decimal
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+
+statement ok
+create function jsonb_access(jsonb, int) returns jsonb
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+
 query I
 select int_42();
 ----
@@ -37,6 +45,19 @@ select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d97
 ----
 (192.168.0.14,192.168.0.1,861,8374)
 
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
+
+query T
+select jsonb_access(a::jsonb, 1) from
+(values ('["a", "b", "c"]'), (null), ('[0, false]')) t(a);
+----
+"b"
+NULL
+false
+
 statement ok
 drop function int_42;
 
@@ -48,3 +69,9 @@ drop function gcd(int,int,int);
 
 statement ok
 drop function extract_tcp_info;
+
+statement ok
+drop function decimal_add;
+
+statement ok
+drop function jsonb_access;

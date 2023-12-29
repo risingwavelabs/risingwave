@@ -284,7 +284,7 @@ fn datatype_name(ty: &DataType) -> String {
         DataType::Timestamptz => "timestamptz".to_string(),
         DataType::Interval => "interval".to_string(),
         DataType::Decimal => "decimal".to_string(),
-        DataType::Jsonb => "jsonb".to_string(),
+        DataType::Jsonb => "json".to_string(),
         DataType::Serial => "serial".to_string(),
         DataType::Int256 => "int256".to_string(),
         DataType::Bytea => "bytea".to_string(),

@@ -1,4 +1,5 @@
 use arrow_udf::function;
+use rust_decimal::Decimal;
 
 #[function("int_42() -> int")]
 fn int_42() -> i32 {
@@ -61,4 +62,14 @@ fn extract_tcp_info(tcp_packet: &[u8]) -> (String, String, i16, i16) {
         src_port as i16,
         dst_port as i16,
     )
+}
+
+#[function("decimal_add(decimal, decimal) -> decimal")]
+fn decimal_add(a: Decimal, b: Decimal) -> Decimal {
+    a + b
+}
+
+#[function("jsonb_access(json, int) -> json")]
+fn jsonb_access(json: serde_json::Value, index: i32) -> Option<serde_json::Value> {
+    json.get(index as usize).cloned()
 }
