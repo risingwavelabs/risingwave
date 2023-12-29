@@ -142,7 +142,7 @@ impl ScaleService for ScaleServiceImpl {
         self.barrier_manager.check_status_running().await?;
 
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("only avaliable in v1");
+            unimplemented!("only available in v1");
         };
 
         let RescheduleRequest {
