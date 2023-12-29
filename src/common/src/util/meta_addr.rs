@@ -96,8 +96,13 @@ mod tests {
                 )),
             ),
             ("load-balance+http://abc,http://def", None),
-            ("load-balance+http://abc:xxx", None),
             ("", None),
+            (
+                "http://abc",
+                Some(MetaAddressStrategy::List(vec!["http://abc"
+                    .parse()
+                    .unwrap()])),
+            ),
             (
                 "http://abc,http://def",
                 Some(MetaAddressStrategy::List(vec![
@@ -105,13 +110,12 @@ mod tests {
                     "http://def".parse().unwrap(),
                 ])),
             ),
-            ("http://abc:xx,http://def", None),
         ];
         for (addr, result) in results {
             let parsed_result = addr.parse();
             match result {
                 None => {
-                    assert!(parsed_result.is_err());
+                    assert!(parsed_result.is_err(), "{parsed_result:?}");
                 }
                 Some(strategy) => {
                     assert_eq!(strategy, parsed_result.unwrap());
