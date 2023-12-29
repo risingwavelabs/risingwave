@@ -155,6 +155,7 @@ pub trait PlanNode:
     + Downcast
     + ColPrunable
     + ExprRewritable
+    + ExprVisitable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -301,6 +302,19 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
+pub(crate) trait VisitExprsRecursive {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor);
+}
+
+impl VisitExprsRecursive for PlanRef {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor) {
+        self.visit_exprs(r);
+        self.inputs()
+            .iter()
+            .for_each(|plan_ref| plan_ref.visit_exprs_recursive(r));
+    }
+}
+
 impl PlanRef {
     pub fn expect_stream_key(&self) -> &[usize] {
         self.stream_key().unwrap_or_else(|| {
@@ -423,7 +437,15 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| {
+                                // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
+                                let mut finder = ExprCorrelatedIdFinder::default();
+                                finder.visit_expr(e);
+                                e.count_nows() == 0
+                                    && e.is_pure()
+                                    && !finder.has_correlated_input_ref()
+                            })
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))
@@ -731,6 +753,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
+mod expr_visitable;
+
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -759,6 +783,7 @@ mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
+mod batch_max_one_row;
 mod batch_nested_loop_join;
 mod batch_over_window;
 mod batch_project;
@@ -768,6 +793,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
 mod batch_source;
+mod batch_sys_seq_scan;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -775,6 +801,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_cdc_scan;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -785,6 +812,7 @@ mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_limit;
+mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
 mod logical_over_window;
@@ -793,6 +821,7 @@ mod logical_project_set;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
+mod logical_sys_scan;
 mod logical_table_function;
 mod logical_topn;
 mod logical_union;
@@ -845,6 +874,7 @@ pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
+pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
@@ -854,6 +884,7 @@ pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
 pub use batch_source::BatchSource;
+pub use batch_sys_seq_scan::BatchSysSeqScan;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -861,6 +892,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -871,6 +903,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
@@ -879,6 +912,7 @@ pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
+pub use logical_sys_scan::LogicalSysScan;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
@@ -917,9 +951,11 @@ pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
+use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
@@ -944,6 +980,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -964,6 +1002,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -973,6 +1012,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Delete }
             , { Batch, Update }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -989,6 +1029,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1035,6 +1076,8 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -1055,6 +1098,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
         }
     };
 }
@@ -1070,6 +1114,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1089,6 +1134,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
         }
     };
 }

@@ -21,6 +21,7 @@ use super::batch::prelude::*;
 use super::batch::BatchPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
 
@@ -85,3 +86,5 @@ impl ToLocalBatch for BatchSort {
 }
 
 impl ExprRewritable for BatchSort {}
+
+impl ExprVisitable for BatchSort {}

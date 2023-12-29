@@ -43,7 +43,11 @@ import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation, StreamingJob } from "../pages/api/streaming"
-import { Table as RwTable } from "../proto/gen/catalog"
+import {
+  Sink as RwSink,
+  Source as RwSource,
+  Table as RwTable,
+} from "../proto/gen/catalog"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -61,7 +65,7 @@ export const dependentsColumn: Column<Relation> = {
       <Button
         size="sm"
         aria-label="view dependents"
-        colorScheme="teal"
+        colorScheme="blue"
         variant="link"
       >
         D
@@ -78,7 +82,7 @@ export const fragmentsColumn: Column<StreamingJob> = {
       <Button
         size="sm"
         aria-label="view fragments"
-        colorScheme="teal"
+        colorScheme="blue"
         variant="link"
       >
         F
@@ -98,7 +102,13 @@ export const primaryKeyColumn: Column<RwTable> = {
       .join(", "),
 }
 
-export const connectorColumn: Column<Relation> = {
+export const connectorColumnSource: Column<RwSource> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.withProperties.connector ?? "unknown",
+}
+
+export const connectorColumnSink: Column<RwSink> = {
   name: "Connector",
   width: 3,
   content: (r) => r.properties.connector ?? "unknown",
@@ -195,7 +205,7 @@ export function Relations<R extends Relation>(
                   <Button
                     size="sm"
                     aria-label="view catalog"
-                    colorScheme="teal"
+                    colorScheme="blue"
                     variant="link"
                     onClick={() => openRelationCatalog(r)}
                   >
@@ -209,7 +219,7 @@ export function Relations<R extends Relation>(
                 ))}
                 <Td overflowWrap="normal">
                   {r.columns
-                    .filter((col) => !col.isHidden)
+                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
                     .map((col) => extractColumnInfo(col))
                     .join(", ")}
                 </Td>

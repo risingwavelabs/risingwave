@@ -260,11 +260,11 @@
           ├─BatchLimit { limit: 1, offset: 0 }
           │ └─BatchExchange { order: [], dist: Single }
           │   └─BatchLimit { limit: 1, offset: 0 }
-          │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+          │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], limit: 1, distribution: SomeShard }
           └─BatchLimit { limit: 1, offset: 0 }
             └─BatchExchange { order: [], dist: Single }
               └─BatchLimit { limit: 1, offset: 0 }
-                └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+                └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], limit: 1, distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
@@ -286,11 +286,11 @@
             ├─BatchLimit { limit: 1, offset: 0 }
             │ └─BatchExchange { order: [], dist: Single }
             │   └─BatchLimit { limit: 1, offset: 0 }
-            │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+            │     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], limit: 1, distribution: SomeShard }
             └─BatchLimit { limit: 1, offset: 0 }
               └─BatchExchange { order: [], dist: Single }
                 └─BatchLimit { limit: 1, offset: 0 }
-                  └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+                  └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], limit: 1, distribution: SomeShard }
 - sql: |
     select 1 union all select 1
   optimized_logical_plan_for_batch: 'LogicalValues { rows: [[1:Int32], [1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }'
@@ -596,7 +596,7 @@
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, 3:Int32] }
-    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c], pk: [t4.b, t4.a], dist: UpstreamHashShard(t4.a, t4.b) }
+    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c], pk: [t4.b, t4.a], dist: UpstreamHashShard(t4.b, t4.a) }
         ├── state table: 3
         ├── Upstream
         └── BatchPlanNode

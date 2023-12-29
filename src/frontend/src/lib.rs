@@ -25,15 +25,14 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(lazy_cell)]
-#![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
-#![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
+#![feature(round_ties_even)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -157,7 +156,7 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, Some(TlsConfig::new_default()))
+        pg_serve(&listen_addr, session_mgr, TlsConfig::new_default())
             .await
             .unwrap();
     })

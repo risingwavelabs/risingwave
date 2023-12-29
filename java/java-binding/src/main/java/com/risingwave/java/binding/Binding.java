@@ -26,6 +26,9 @@ public class Binding {
         }
     }
 
+    public static native void tracingSlf4jEvent(
+            String threadName, String name, int level, String message);
+
     public static native int vnodeCount();
 
     // hummock iterator method
@@ -83,7 +86,8 @@ public class Binding {
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
-    public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
+    public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
+            recvSinkWriterRequestFromChannel(long channelPtr);
 
     public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
 

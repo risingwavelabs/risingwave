@@ -73,8 +73,7 @@ impl CloudService for CloudServiceImpl {
                 "unexpected source type, only kafka source is supported",
             ));
         }
-        let mut source_cfg: BTreeMap<String, String> =
-            req.source_config.into_iter().map(|(k, v)| (k, v)).collect();
+        let mut source_cfg: BTreeMap<String, String> = req.source_config.into_iter().collect();
         // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {
@@ -133,9 +132,8 @@ impl CloudService for CloudServiceImpl {
             }
         }
         // try fetch kafka metadata, return error message on failure
-        let source_cfg: HashMap<String, String> =
-            source_cfg.into_iter().map(|(k, v)| (k, v)).collect();
-        let props = ConnectorProperties::extract(source_cfg);
+        let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
+        let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

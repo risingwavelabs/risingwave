@@ -25,7 +25,7 @@ use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
     StreamExecutorError,
 };
 use crate::task::CreateMviewProgress;
@@ -36,43 +36,39 @@ const DEFAULT_CHUNK_SIZE: usize = 1024;
 /// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
+
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgress,
 
     rows: vec::IntoIter<Vec<NonStrictExpression>>,
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
 }
 
 impl ValuesExecutor {
     /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         progress: CreateMviewProgress,
         rows: Vec<Vec<NonStrictExpression>>,
-        schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
     ) -> Self {
         Self {
             ctx,
+            info,
             progress,
             barrier_receiver,
             rows: rows.into_iter(),
-            pk_indices: vec![schema.len() - 1], // the last one column is pk
-            identity: format!("ValuesExecutor {:X}", executor_id),
-            schema,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(self) {
         let Self {
+            info,
             mut progress,
             mut barrier_receiver,
-            schema,
             mut rows,
             ..
         } = self;
@@ -100,7 +96,7 @@ impl ValuesExecutor {
                 }
             }
 
-            let cardinality = schema.len();
+            let cardinality = info.schema.len();
             ensure!(cardinality > 0);
             while !rows.is_empty() {
                 // We need a one row chunk rather than an empty chunk because constant
@@ -109,7 +105,7 @@ impl ValuesExecutor {
                 let one_row_chunk = DataChunk::new_dummy(1);
 
                 let chunk_size = DEFAULT_CHUNK_SIZE.min(rows.len());
-                let mut array_builders = schema.create_array_builders(chunk_size);
+                let mut array_builders = info.schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
                         let out = expr.eval_infallible(&one_row_chunk).await;
@@ -145,15 +141,15 @@ impl Executor for ValuesExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -172,7 +168,7 @@ mod tests {
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Executor, ExecutorInfo, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -208,30 +204,36 @@ mod tests {
                 Some(ScalarImpl::Int64(0)),
             )),
         ];
-        let fields = exprs
+        let schema = exprs
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
-            .collect::<Vec<Field>>();
+            .collect::<Schema>();
+        let pk_indices = vec![schema.len() - 1];
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "ValuesExecutor".to_string(),
+        };
         let values_executor_struct = ValuesExecutor::new(
             ActorContext::create(actor_id),
+            info,
             progress,
             vec![exprs
                 .into_iter()
                 .map(NonStrictExpression::for_test)
                 .collect()],
-            Schema { fields },
             barrier_receiver,
-            10005,
         );
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
-        let first_message = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-            adds: Default::default(),
-            added_actors: maplit::hashset! {actor_id},
-            splits: Default::default(),
-            pause: false,
-        });
+        let first_message =
+            Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
+                adds: Default::default(),
+                added_actors: maplit::hashset! {actor_id},
+                splits: Default::default(),
+                pause: false,
+            }));
         tx.send(first_message).unwrap();
 
         assert!(matches!(

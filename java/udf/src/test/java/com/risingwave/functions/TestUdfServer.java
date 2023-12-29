@@ -27,7 +27,9 @@ import java.util.stream.IntStream;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.types.Types.MinorType;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -104,6 +106,16 @@ public class TestUdfServer {
             public String str;
             public byte[] bytes;
             public @DataTypeHint("JSONB") String jsonb;
+            public Struct struct;
+        }
+
+        public static class Struct {
+            public Integer f1;
+            public Integer f2;
+
+            public String toString() {
+                return String.format("(%d, %d)", f1, f2);
+            }
         }
 
         public Row eval(
@@ -120,7 +132,8 @@ public class TestUdfServer {
                 PeriodDuration interval,
                 String str,
                 byte[] bytes,
-                @DataTypeHint("JSONB") String jsonb) {
+                @DataTypeHint("JSONB") String jsonb,
+                Struct struct) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -136,6 +149,7 @@ public class TestUdfServer {
             row.str = str;
             row.bytes = bytes;
             row.jsonb = jsonb;
+            row.struct = struct;
             return row;
         }
     }
@@ -172,9 +186,9 @@ public class TestUdfServer {
         c5.set(0, 1);
         c5.setValueCount(2);
 
-        var c6 = new DecimalVector("", allocator, 38, 0);
+        var c6 = new LargeVarBinaryVector("", allocator);
         c6.allocateNew(2);
-        c6.set(0, BigDecimal.valueOf(10).pow(37));
+        c6.set(0, "1.234".getBytes());
         c6.setValueCount(2);
 
         var c7 = new DateDayVector("", allocator);
@@ -220,13 +234,28 @@ public class TestUdfServer {
         c13.set(0, "{ key: 1 }".getBytes());
         c13.setValueCount(2);
 
-        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+        var c14 =
+                new StructVector(
+                        "", allocator, FieldType.nullable(ArrowType.Struct.INSTANCE), null);
+        c14.allocateNew();
+        var f1 = c14.addOrGet("f1", FieldType.nullable(MinorType.INT.getType()), IntVector.class);
+        var f2 = c14.addOrGet("f2", FieldType.nullable(MinorType.INT.getType()), IntVector.class);
+        f1.allocateNew(2);
+        f2.allocateNew(2);
+        f1.set(0, 1);
+        f2.set(0, 2);
+        c14.setIndexDefined(0);
+        c14.setValueCount(2);
+
+        var input =
+                VectorSchemaRoot.of(
+                        c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14);
 
         try (var stream = client.call("return_all", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(
-                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"decimal\":10000000000000000000000000000000000000,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1000M2000D\",\"duration\":0.000003000},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"decimal\":\"MS4yMzQ=\",\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1000M2000D\",\"duration\":0.000003000},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\",\"struct\":{\"f1\":1,\"f2\":2}}\n{}",
                     output.contentToTSVString().trim());
         }
     }

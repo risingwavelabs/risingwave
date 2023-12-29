@@ -20,7 +20,6 @@ use std::time::Duration;
 use function_name::named;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -72,7 +71,7 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         let deltas_to_delete = versioning
             .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.as_ref().unwrap().id)
+            .range(..=versioning.checkpoint.version.id)
             .map(|(k, _)| *k)
             .collect_vec();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
@@ -116,7 +115,7 @@ impl HummockManager {
             let mut tracked_object_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_object_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_object_ids.extend(delta.get_gc_object_ids());
+                tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
             }
             tracked_object_ids
         };
@@ -209,7 +208,7 @@ pub async fn collect_global_gc_watermark(
     let workers = [
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::Compactor, Some(Running))
+            .list_worker_node(Some(WorkerType::Compactor), Some(Running))
             .await,
     ]
     .concat();
@@ -237,11 +236,11 @@ pub async fn collect_global_gc_watermark(
                 };
                 match init_version_id.as_ref() {
                     None => {
-                        init_version_id = Some(worker_info.info_version_id());
+                        init_version_id = Some(worker_info.info_version_id);
                     }
                     Some(init_version_id) => {
-                        if worker_info.info_version_id() >= *init_version_id + 2 {
-                            return worker_info.hummock_gc_watermark();
+                        if worker_info.info_version_id >= *init_version_id + 2 {
+                            return worker_info.hummock_gc_watermark;
                         }
                     }
                 }

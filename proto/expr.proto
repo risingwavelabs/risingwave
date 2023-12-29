@@ -66,12 +66,14 @@ message ExprNode {
     CAST_WITH_TIME_ZONE = 108;
     ADD_WITH_TIME_ZONE = 109;
     SUBTRACT_WITH_TIME_ZONE = 110;
+    MAKE_TIMESTAMPTZ = 112;
     // other functions
     CAST = 201;
     SUBSTR = 202;
     LENGTH = 203;
     LIKE = 204;
     I_LIKE = 279;
+    SIMILAR_TO_ESCAPE = 284;
     UPPER = 205;
     LOWER = 206;
     TRIM = 207;
@@ -176,6 +178,8 @@ message ExprNode {
     FORMAT = 319;
     PGWIRE_SEND = 320;
     PGWIRE_RECV = 321;
+    CONVERT_FROM = 322;
+    CONVERT_TO = 323;
 
     // Unary operators
     NEG = 401;
@@ -226,7 +230,7 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
-    JSONB_CAT = 605;
+    JSONB_CONCAT = 605;
     JSONB_OBJECT = 606;
     JSONB_PRETTY = 607;
     // jsonb @> jsonb
@@ -250,6 +254,10 @@ message ExprNode {
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
     JSONB_BUILD_OBJECT = 619;
+    JSONB_PATH_EXISTS = 620;
+    JSONB_PATH_MATCH = 621;
+    JSONB_PATH_QUERY_ARRAY = 622;
+    JSONB_PATH_QUERY_FIRST = 623;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -261,9 +269,11 @@ message ExprNode {
     PG_SLEEP_FOR = 2025;
     PG_SLEEP_UNTIL = 2026;
 
-    // Adminitration functions
-    COL_DESCRIPTION = 2100;
-    CAST_REGCLASS = 2101;
+    // System administration functions
+    CAST_REGCLASS = 2100;
+    // System information functions
+    PG_GET_INDEXDEF = 2400;
+    COL_DESCRIPTION = 2401;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
@@ -292,6 +302,7 @@ message TableFunction {
     JSONB_EACH = 12;
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
+    JSONB_PATH_QUERY = 15;
     // User defined table function
     UDTF = 100;
   }

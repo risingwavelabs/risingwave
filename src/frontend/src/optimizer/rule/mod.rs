@@ -90,6 +90,7 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
@@ -130,7 +131,7 @@ pub use apply_project_set_transpose_rule::*;
 mod cross_join_eliminate_rule;
 pub use cross_join_eliminate_rule::*;
 mod table_function_to_project_set_rule;
-pub use cross_join_eliminate_rule::*;
+
 pub use table_function_to_project_set_rule::*;
 mod apply_topn_transpose_rule;
 pub use apply_topn_transpose_rule::*;
@@ -153,6 +154,7 @@ pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
 mod values_extract_project_rule;
+pub use batch::batch_push_limit_to_scan_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -188,6 +190,7 @@ macro_rules! for_all_rules {
             , { AggProjectMergeRule }
             , { UnionMergeRule }
             , { DagToTreeRule }
+            , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
@@ -221,6 +224,7 @@ macro_rules! for_all_rules {
             , { ApplyHopWindowTransposeRule }
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
+            , { BatchPushLimitToScanRule }
         }
     };
 }

@@ -20,6 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::{bail, bail_not_implemented};
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
@@ -28,7 +30,7 @@ use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
@@ -37,6 +39,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
 use crate::utils::{Condition, IndexSet};
+use crate::OptimizerContextRef;
 
 impl Planner {
     pub(super) fn plan_select(
@@ -181,7 +184,7 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0)
+            let group_key = if let Some(field) = fields.first()
                 && field.name == "projected_row_id"
             {
                 // Do not group by projected_row_id hidden column.
@@ -214,6 +217,30 @@ impl Planner {
         )
         .unwrap();
         Ok(LogicalProject::create(count_star.into(), vec![ge.into()]))
+    }
+
+    /// Helper to create an `ARRAY_AGG` operator with the given `input`.
+    /// It is represented by `ARRAY_AGG($0) -> input`
+    fn create_array_agg(&self, input: PlanRef) -> Result<PlanRef> {
+        let fields = input.schema().fields();
+        if fields.len() != 1 {
+            bail!("subquery must return only one column");
+        }
+        let input_column_type = fields[0].data_type();
+        Ok(Agg::new(
+            vec![PlanAggCall {
+                agg_kind: AggKind::ArrayAgg,
+                return_type: DataType::List(input.schema().fields()[0].data_type().into()),
+                inputs: vec![InputRef::new(0, input_column_type)],
+                distinct: false,
+                order_by: vec![],
+                filter: Condition::true_cond(),
+                direct_args: vec![],
+            }],
+            IndexSet::empty(),
+            input,
+        )
+        .into())
     }
 
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
@@ -296,13 +323,7 @@ impl Planner {
                 let right_expr = InputRef::new(input.schema().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
-            kind => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("Not supported subquery kind: {:?}", kind),
-                    1343.into(),
-                )
-                .into())
-            }
+            kind => bail_not_implemented!(issue = 1343, "Not supported subquery kind: {:?}", kind),
         };
         *input = Self::create_apply(
             correlated_id,
@@ -333,39 +354,42 @@ impl Planner {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
             correlated_indices_collection: Vec<Vec<usize>>,
-            correlated_id: CorrelatedId,
+            correlated_ids: Vec<CorrelatedId>,
+            ctx: OptimizerContextRef,
         }
 
         // TODO: consider the multi-subquery case for normal predicate.
         impl ExprRewriter for SubstituteSubQueries {
             fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
+                let correlated_id = self.ctx.next_correlated_id();
+                self.correlated_ids.push(correlated_id);
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery
-                        .collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
+                    subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id),
                 );
                 self.subqueries.push(subquery);
                 input_ref
             }
         }
 
-        let correlated_id = self.ctx.next_correlated_id();
         let mut rewriter = SubstituteSubQueries {
             input_col_num: root.schema().len(),
             subqueries: vec![],
             correlated_indices_collection: vec![],
-            correlated_id,
+            correlated_ids: vec![],
+            ctx: self.ctx.clone(),
         };
         exprs = exprs
             .into_iter()
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        for (subquery, correlated_indices) in rewriter
+        for ((subquery, correlated_indices), correlated_id) in rewriter
             .subqueries
             .into_iter()
             .zip_eq_fast(rewriter.correlated_indices_collection)
+            .zip_eq_fast(rewriter.correlated_ids)
         {
             let mut right = self.plan_query(subquery.query)?.into_subplan();
 
@@ -374,13 +398,10 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
+                SubqueryKind::Array => {
+                    right = self.create_array_agg(right)?;
                 }
+                _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             }
 
             root = Self::create_apply(

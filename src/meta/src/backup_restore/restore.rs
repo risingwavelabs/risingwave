@@ -18,11 +18,12 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::version_checkpoint_path;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
+use risingwave_pb::hummock::PbHummockVersionCheckpoint;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
@@ -74,16 +75,17 @@ async fn restore_hummock_version(
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
     let object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
+            ObjectStoreConfig::default(),
         )
         .await,
     );
     let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
-    let checkpoint = HummockVersionCheckpoint {
-        version: Some(hummock_version.clone()),
+    let checkpoint = PbHummockVersionCheckpoint {
+        version: Some(hummock_version.to_protobuf()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };
@@ -205,7 +207,8 @@ mod tests {
     use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
     use risingwave_backup::storage::MetaSnapshotStorage;
     use risingwave_common::config::{MetaBackend, SystemConfig};
-    use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_pb::hummock::HummockVersionStats;
     use risingwave_pb::meta::SystemParams;
 
     use crate::backup_restore::restore::restore_impl;
@@ -271,7 +274,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        backup_store.create(&snapshot).await.unwrap();
+        backup_store.create(&snapshot, None).await.unwrap();
         restore_impl(opts.clone(), None, Some(backup_store.clone()))
             .await
             .unwrap();
@@ -312,7 +315,7 @@ mod tests {
             },
             ..Default::default()
         };
-        backup_store.create(&snapshot).await.unwrap();
+        backup_store.create(&snapshot, None).await.unwrap();
 
         // `snapshot_2` is a superset of `snapshot`
         let mut snapshot_2 = MetaSnapshot {
@@ -327,7 +330,7 @@ mod tests {
             .metadata
             .default_cf
             .insert(vec![10u8, 20u8], memcomparable::to_vec(&10).unwrap());
-        backup_store.create(&snapshot_2).await.unwrap();
+        backup_store.create(&snapshot_2, None).await.unwrap();
         let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
         restore_impl(
             opts.clone(),
@@ -369,7 +372,7 @@ mod tests {
             },
             ..Default::default()
         };
-        backup_store.create(&snapshot).await.unwrap();
+        backup_store.create(&snapshot, None).await.unwrap();
 
         // violate superset requirement
         let mut snapshot_2 = MetaSnapshot {
@@ -380,7 +383,7 @@ mod tests {
             .metadata
             .default_cf
             .insert(vec![10u8, 20u8], memcomparable::to_vec(&1).unwrap());
-        backup_store.create(&snapshot_2).await.unwrap();
+        backup_store.create(&snapshot_2, None).await.unwrap();
         restore_impl(opts.clone(), None, Some(backup_store.clone()))
             .await
             .unwrap();
@@ -400,7 +403,7 @@ mod tests {
             },
             ..Default::default()
         };
-        backup_store.create(&snapshot).await.unwrap();
+        backup_store.create(&snapshot, None).await.unwrap();
 
         // violate monotonicity requirement
         let mut snapshot_2 = MetaSnapshot {
@@ -411,7 +414,7 @@ mod tests {
             .metadata
             .default_cf
             .insert(vec![1u8, 2u8], memcomparable::to_vec(&9).unwrap());
-        backup_store.create(&snapshot_2).await.unwrap();
+        backup_store.create(&snapshot_2, None).await.unwrap();
         restore_impl(opts.clone(), None, Some(backup_store.clone()))
             .await
             .unwrap();
@@ -447,7 +450,7 @@ mod tests {
             },
             ..Default::default()
         };
-        backup_store.create(&snapshot).await.unwrap();
+        backup_store.create(&snapshot, None).await.unwrap();
         restore_impl(
             opts.clone(),
             Some(empty_meta_store.clone()),

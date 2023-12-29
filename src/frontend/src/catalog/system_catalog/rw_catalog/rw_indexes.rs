@@ -28,10 +28,7 @@ pub static RW_INDEXES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Int32, "id"),
         (DataType::Varchar, "name"),
         (DataType::Int32, "primary_table_id"),
-        (
-            DataType::List(Box::new(DataType::Int16)),
-            "original_column_ids",
-        ),
+        (DataType::List(Box::new(DataType::Int16)), "indkey"),
         (DataType::Int32, "schema_id"),
         (DataType::Int32, "owner"),
         (DataType::Varchar, "definition"),
@@ -60,12 +57,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(index.id.index_id as i32)),
                         Some(ScalarImpl::Utf8(index.name.clone().into())),
                         Some(ScalarImpl::Int32(index.primary_table.id().table_id as i32)),
-                        Some(ScalarImpl::List(ListValue::new(
+                        Some(ScalarImpl::List(ListValue::from_iter(
                             index
-                                .original_columns
+                                .index_item
                                 .iter()
-                                .map(|index| Some(ScalarImpl::Int16(index.get_id() as i16 + 1)))
-                                .collect_vec(),
+                                .take(index.index_columns_len as usize)
+                                .map(|index| {
+                                    let ind = if let Some(input_ref) = index.as_input_ref() {
+                                        input_ref.index() + 1
+                                    } else {
+                                        0
+                                    };
+                                    ind as i16
+                                }),
                         ))),
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(index.index_table.owner as i32)),

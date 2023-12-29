@@ -35,19 +35,21 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
+use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
-    pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
+    pub prometheus_selector: String,
     pub cluster_manager: ClusterManagerRef,
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
     pub meta_store: MetaStoreRef,
+    pub diagnose_command: DiagnoseCommandRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -59,7 +61,7 @@ pub(super) mod handlers {
     use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{Sink, Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
@@ -101,14 +103,12 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
+        let worker_type = WorkerType::try_from(ty)
+            .map_err(|_| anyhow!("invalid worker type"))
+            .map_err(err)?;
         let mut result = srv
             .cluster_manager
-            .list_worker_node(
-                WorkerType::try_from(ty)
-                    .map_err(|_| anyhow!("invalid worker type"))
-                    .map_err(err)?,
-                None,
-            )
+            .list_worker_node(Some(worker_type), None)
             .await;
         result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
@@ -161,6 +161,13 @@ pub(super) mod handlers {
         use crate::model::MetadataModel;
 
         let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
+    }
+
+    pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = View::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
     }
 
@@ -224,7 +231,7 @@ pub(super) mod handlers {
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await;
 
         dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
@@ -325,6 +332,10 @@ pub(super) mod handlers {
 
         response.map_err(err)
     }
+
+    pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
+        Ok(srv.diagnose_command.report().await)
+    }
 }
 
 impl DashboardService {
@@ -341,6 +352,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
+            .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))
@@ -360,6 +372,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

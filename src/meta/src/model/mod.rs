@@ -29,14 +29,12 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use barrier::*;
-pub use catalog::*;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
 pub use notification::*;
 use prost::Message;
 pub use stream::*;
-pub use user::*;
 
 use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
 
@@ -168,7 +166,6 @@ macro_rules! for_all_metadata_models {
         $macro! {
             // These items should be included in a meta snapshot.
             // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersion },
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },
@@ -186,7 +183,7 @@ macro_rules! for_all_metadata_models {
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },
             { crate::hummock::compaction::CompactStatus },
-            { risingwave_pb::hummock::HummockVersionDelta },
+            { risingwave_hummock_sdk::version::HummockVersionDelta },
             { risingwave_pb::hummock::HummockPinnedSnapshot },
             { risingwave_pb::hummock::HummockPinnedVersion },
         }
@@ -472,6 +469,10 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        self.tree_ref
+    }
+
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
         self.tree_ref
     }
 

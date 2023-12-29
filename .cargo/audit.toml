@@ -3,10 +3,7 @@
 # So we ignore known false positives here.
 [advisories]
 ignore = [
-    # We depends on `chrono`, but not `time`, and `chrono` is not affected by `RUSTSEC-2020-0071`
-    # (see https://github.com/time-rs/time/issues/293#issuecomment-946382614).
-    #
-    # `chrono` also suffers from a similar vulnerability ([`RUSTSEC-2020-0159`](https://rustsec.org/advisories/RUSTSEC-2020-0159),
-    # but it's already patched in `0.4.20` by rewriting vulnerable C function in Rust).
-    "RUSTSEC-2020-0071",
+    # https://github.com/risingwavelabs/risingwave/issues/13703
+    # It's impossible to get rid of OpenSSL (or more accurately, the `rsa` crate), and no patch is yet available.
+    "RUSTSEC-2023-0071",
 ]

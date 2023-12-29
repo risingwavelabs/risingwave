@@ -20,7 +20,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::ColumnCatalog;
 
-pub(crate) fn gen_prost_table(
+pub fn gen_prost_table(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -38,7 +38,7 @@ pub(crate) fn gen_prost_table(
     )
 }
 
-pub(crate) fn gen_prost_table_with_dist_key(
+pub fn gen_prost_table_with_dist_key(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -58,7 +58,7 @@ pub(crate) fn gen_prost_table_with_dist_key(
     )
 }
 
-pub(crate) fn gen_prost_table_with_value_indices(
+pub fn gen_prost_table_with_value_indices(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,
@@ -77,7 +77,7 @@ pub(crate) fn gen_prost_table_with_value_indices(
     )
 }
 
-pub(crate) fn gen_prost_table_inner(
+pub fn gen_prost_table_inner(
     table_id: TableId,
     column_descs: Vec<ColumnDesc>,
     order_types: Vec<OrderType>,

@@ -15,6 +15,8 @@
 #[cfg(madsim)]
 mod basic;
 #[cfg(madsim)]
+mod err_isolation;
+#[cfg(madsim)]
 mod recovery;
 #[cfg(madsim)]
 mod scale;

@@ -100,7 +100,9 @@ pub struct MetaStoreSqlBackend {
 }
 
 use risingwave_meta::MetaStoreBackend;
+use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::AddressInfo;
+use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 
 pub async fn rpc_serve(
     address_info: AddressInfo,
@@ -381,7 +383,6 @@ pub async fn start_service_as_election_leader(
             .expect("Failed to upgrade models in meta store");
     }
 
-    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
@@ -402,7 +403,7 @@ pub async fn start_service_as_election_leader(
 
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
-        return Err(MetaError::system_param(format!(
+        return Err(MetaError::system_params(format!(
             "The data directory {:?} is misconfigured.
             Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9].
             The string cannot start or end with '/', and consecutive '/' are not allowed.
@@ -455,20 +456,32 @@ pub async fn start_service_as_election_leader(
         Some(election_client) => Either::Left(election_client),
     });
 
+    let prometheus_client = opts.prometheus_endpoint.as_ref().map(|x| {
+        use std::str::FromStr;
+        prometheus_http_query::Client::from_str(x).unwrap()
+    });
+    let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        cluster_manager.clone(),
+        catalog_manager.clone(),
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+    ));
     #[cfg(not(madsim))]
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            prometheus_endpoint: prometheus_endpoint.clone(),
-            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
-                use std::str::FromStr;
-                prometheus_http_query::Client::from_str(x).unwrap()
-            }),
+            prometheus_client,
+            prometheus_selector,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
+            diagnose_command,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)
@@ -524,6 +537,7 @@ pub async fn start_service_as_election_leader(
             cluster_manager.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
+            catalog_manager.clone(),
         )
         .unwrap(),
     );
@@ -537,7 +551,7 @@ pub async fn start_service_as_election_leader(
                 .map(|t| t.id)
                 .collect_vec(),
         )
-        .await?;
+        .await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -620,6 +634,7 @@ pub async fn start_service_as_election_leader(
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
     let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
+    let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -675,6 +690,10 @@ pub async fn start_service_as_election_leader(
             Duration::from_secs(1),
         ));
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
+
+        if env.opts.enable_automatic_parallelism_control {
+            sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
+        }
     }
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(IdleManager::start_idle_checker(
@@ -705,6 +724,10 @@ pub async fn start_service_as_election_leader(
         sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
+    }
+
+    if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
+        sub_tasks.push(pair);
     }
 
     let shutdown_all = async move {
@@ -744,6 +767,15 @@ pub async fn start_service_as_election_leader(
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
+    let event = risingwave_pb::meta::event_log::EventMetaNodeStart {
+        advertise_addr: address_info.advertise_addr,
+        listen_addr: address_info.listen_addr.to_string(),
+        opts: serde_json::to_string(&env.opts).unwrap(),
+    };
+    env.event_log_manager_ref().add_event_logs(vec![
+        risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
+    ]);
+
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
@@ -765,6 +797,7 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .add_service(EventLogServiceServer::new(event_log_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

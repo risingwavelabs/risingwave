@@ -18,10 +18,10 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -66,7 +66,7 @@ impl ProjectExecutor {
                             .try_collect()?
                     };
                     let (_, vis) = data_chunk.into_parts();
-                    Ok::<_, RwError>(DataChunk::new(arrays, vis))
+                    Ok::<_, BatchError>(DataChunk::new(arrays, vis))
                 }
             })
             .buffered(16)

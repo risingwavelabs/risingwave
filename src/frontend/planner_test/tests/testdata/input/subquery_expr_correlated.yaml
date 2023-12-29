@@ -438,6 +438,37 @@
     create table t2 (v2 int, k2 int);
     select * from t1 where v1 in ( select v2 from t2 where k2 = k1 limit 1);
   expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: test correlated input ref predicate and share operator
+  sql: |
+    create table t (a int, b int, c int);
+    create table dl(c1 int, c2 int);
+    create table di(d1 int, d2 int);
+    select (select 1 from t, di where t.a = dl.c1 and t.b = di.d1 limit 1) name, (select 1 from t, di where t.a = dl.c2 and t.c = di.d2 limit 1) name2 from dl;
+  expected_outputs:
+  - optimized_logical_plan_for_stream
+- name: correlated array subquery
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    select Array(select c from t2 where b = d) arr from t1;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: correlated array subquery \du
+  sql: |
+    SELECT r.rolname, r.rolsuper, r.rolinherit,
+      r.rolcreaterole, r.rolcreatedb, r.rolcanlogin,
+      r.rolconnlimit, r.rolvaliduntil,
+      ARRAY(SELECT b.rolname
+            FROM pg_catalog.pg_auth_members m
+            JOIN pg_catalog.pg_roles b ON (m.roleid = b.oid)
+            WHERE m.member = r.oid) as memberof
+    , r.rolreplication
+    , r.rolbypassrls
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname !~ '^pg_'
+    ORDER BY 1;
+  expected_outputs:
     - batch_plan
-    - stream_plan
-

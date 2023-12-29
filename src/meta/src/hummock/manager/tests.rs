@@ -21,20 +21,20 @@ use prometheus::Registry;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ssts, BranchedSstInfo, HummockVersionExt,
+    get_compaction_group_ssts, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
     HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
-    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    KeyRange, SstableInfo,
+    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    SstableInfo,
 };
 use risingwave_pb::meta::add_worker_node_request::Property;
 
@@ -46,7 +46,7 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
@@ -382,6 +382,7 @@ async fn test_release_context_resource() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
@@ -469,6 +470,7 @@ async fn test_hummock_manager_basic() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
@@ -529,14 +531,9 @@ async fn test_hummock_manager_basic() {
         );
 
         // should pin latest because u64::MAX
-        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_1).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         assert_eq!(
@@ -551,14 +548,9 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
+        let version = hummock_manager.pin_version(context_id_2).await.unwrap();
         assert_eq!(
-            version.get_id(),
+            version.id,
             init_version_id + commit_log_count + register_log_count
         );
         // pinned by context_id_1
@@ -768,7 +760,10 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone(), sst_to_worker)
+        .commit_epoch(
+            epoch,
+            CommitEpochInfo::for_test(ssts.clone(), sst_to_worker),
+        )
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
@@ -778,7 +773,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 }
@@ -1168,7 +1163,7 @@ async fn test_version_stats() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 
@@ -1267,7 +1262,10 @@ async fn test_split_compaction_group_on_commit() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1408,8 +1406,10 @@ async fn test_split_compaction_group_on_demand_basic() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1501,7 +1501,10 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         .await
         .unwrap();
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
 
@@ -1616,13 +1619,15 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2, sst_3, sst_4],
-            HashMap::from([
-                (10, context_id),
-                (11, context_id),
-                (9, context_id),
-                (8, context_id),
-            ]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2, sst_3, sst_4],
+                HashMap::from([
+                    (10, context_id),
+                    (11, context_id),
+                    (9, context_id),
+                    (8, context_id),
+                ]),
+            ),
         )
         .await
         .unwrap();
@@ -1751,7 +1756,10 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1914,8 +1922,10 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1972,7 +1982,10 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1995,7 +2008,10 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap());
     let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
     hummock_manager
-        .commit_epoch(31, vec![sst_2.clone()], HashMap::from([(14, context_id)]))
+        .commit_epoch(
+            31,
+            CommitEpochInfo::for_test(vec![sst_2.clone()], HashMap::from([(14, context_id)])),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;

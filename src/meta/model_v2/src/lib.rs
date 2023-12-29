@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub mod prelude;
 
 pub mod actor;
+pub mod actor_dispatcher;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -122,12 +123,27 @@ impl From<CreateType> for PbCreateType {
     }
 }
 
+impl From<PbCreateType> for CreateType {
+    fn from(create_type: PbCreateType) -> Self {
+        match create_type {
+            PbCreateType::Background => Self::Background,
+            PbCreateType::Foreground => Self::Foreground,
+            PbCreateType::Unspecified => unreachable!("Unspecified create type"),
+        }
+    }
+}
+
 /// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
 macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
         pub struct $struct_name(pub $field_type);
         impl Eq for $struct_name {}
+        impl From<$field_type> for $struct_name {
+            fn from(value: $field_type) -> Self {
+                Self(value)
+            }
+        }
 
         impl $struct_name {
             pub fn into_inner(self) -> $field_type {
@@ -196,10 +212,11 @@ derive_from_json_struct!(
 derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
 derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
-derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
 
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
+derive_from_json_struct!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
+derive_from_json_struct!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
 derive_from_json_struct!(
     FragmentVnodeMapping,

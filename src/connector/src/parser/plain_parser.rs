@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 
-use super::bytes_parser::BytesAccessBuilder;
-use super::unified::util::apply_key_val_accessor_on_stream_chunk_writer;
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::parser::ParserFormat;
+use crate::parser::bytes_parser::BytesAccessBuilder;
+use crate::parser::unified::upsert::UpsertChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
+use crate::parser::unified::{AccessImpl, ChangeEventOperation};
+use crate::parser::upsert_parser::get_key_column_name;
+use crate::parser::{BytesProperties, ParserFormat};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct PlainParser {
-    pub key_builder: AccessBuilderImpl,
+    pub key_builder: Option<AccessBuilderImpl>,
     pub payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     pub source_ctx: SourceContextRef,
@@ -39,13 +41,19 @@ impl PlainParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        let key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
-            EncodingProperties::Bytes(BytesProperties {
-                column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
-            }),
-        )?);
+        let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
+            Some(AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
+                    column_name: Some(key_column_name),
+                }),
+            )?))
+        } else {
+            None
+        };
+
         let payload_builder = match props.encoding_config {
-            EncodingProperties::Protobuf(_)
+            EncodingProperties::Json(_)
+            | EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
             | EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
@@ -70,24 +78,24 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<()> {
-        // if key is empty, set it as vec![]
-        let key_data = key.unwrap_or_default();
-        // if payload is empty, report error
-        let payload_data = payload.ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key".into(),
-            ))
-        })?;
+        // reuse upsert component but always insert
+        let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
+            UpsertChangeEvent::default();
+        let change_event_op = ChangeEventOperation::Upsert;
 
-        let key_accessor = self.key_builder.generate_accessor(key_data).await?;
-        let payload_accessor = self.payload_builder.generate_accessor(payload_data).await?;
-        apply_key_val_accessor_on_stream_chunk_writer(
-            DEFAULT_KEY_COLUMN_NAME,
-            key_accessor,
-            payload_accessor,
-            &mut writer,
-        )
-        .map_err(Into::into)
+        if let Some(data) = key
+            && let Some(key_builder) = self.key_builder.as_mut()
+        {
+            // key is optional in format plain
+            row_op = row_op.with_key(key_builder.generate_accessor(data).await?);
+        }
+        if let Some(data) = payload {
+            // the data part also can be an empty vec
+            row_op = row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+        }
+
+        apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
+            .map_err(Into::into)
     }
 }
 

@@ -67,7 +67,7 @@ export default function DependencyGraph({
         )
         .attr("stroke", (d: any) =>
           isSelected(d.source) || isSelected(d.target)
-            ? theme.colors.teal["500"]
+            ? theme.colors.blue["500"]
             : theme.colors.gray["300"]
         )
     const createEdge = (sel: any) =>
@@ -89,7 +89,7 @@ export default function DependencyGraph({
             `translate(${x + MARGIN_X}, ${y})`
         )
         .attr("fill", (d: any) =>
-          isSelected(d) ? theme.colors.teal["500"] : theme.colors.gray["500"]
+          isSelected(d) ? theme.colors.blue["500"] : theme.colors.gray["500"]
         )
 
     const createNode = (sel: any) =>

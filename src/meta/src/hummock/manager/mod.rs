@@ -29,6 +29,7 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
@@ -36,8 +37,9 @@ use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
+    BranchedSstInfo, HummockLevelsExt,
 };
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
     HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
@@ -53,10 +55,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -74,13 +75,14 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
-    trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
+    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, TableId,
+    META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
@@ -97,7 +99,7 @@ mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
 use versioning::*;
-mod checkpoint;
+pub(crate) mod checkpoint;
 mod compaction;
 mod worker;
 
@@ -144,6 +146,19 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
+
+    // Record the partition corresponding to the table in each group (accepting delays)
+    // The compactor will refer to this structure to determine how to cut the boundaries of sst.
+    // Currently, we update it in a couple of scenarios
+    // 1. throughput and size are checked periodically and calculated according to the rules
+    // 2. A new group is created (split)
+    // 3. split_weight_by_vnode is modified for an existing group. (not supported yet)
+    // Tips:
+    // 1. When table_id does not exist in the current structure, compactor will not cut the boundary
+    // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
+    // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
+    group_to_table_vnode_partition:
+        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -193,11 +208,9 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::{parse_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -249,6 +262,38 @@ pub enum CompactionResumeTrigger {
     CompactorAddition { context_id: HummockContextId },
     /// A compaction task is reported when all compactors are not idle.
     TaskReport { original_task_num: usize },
+}
+
+pub struct CommitEpochInfo {
+    pub sstables: Vec<ExtendedSstableInfo>,
+    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+    pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+}
+
+impl CommitEpochInfo {
+    pub fn new(
+        sstables: Vec<ExtendedSstableInfo>,
+        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self {
+            sstables,
+            new_table_watermarks,
+            sst_to_context,
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub(crate) fn for_test(
+        sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self::new(
+            sstables.into_iter().map(Into::into).collect(),
+            HashMap::new(),
+            sst_to_context,
+        )
+    }
 }
 
 impl HummockManager {
@@ -330,10 +375,11 @@ impl HummockManager {
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
-            parse_remote_object_store(
+            build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
+                ObjectStoreConfig::default(),
             )
             .await,
         );
@@ -352,7 +398,8 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle(state_store_dir).await;
+                let is_bucket_expiration_configured =
+                    s3.inner().configure_bucket_lifecycle(state_store_dir).await;
                 if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
@@ -390,6 +437,7 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
+            group_to_table_vnode_partition: parking_lot::RwLock::new(HashMap::default()),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -452,7 +500,7 @@ impl HummockManager {
                 .insert(self.env.meta_store())
                 .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: Some(checkpoint_version.clone()),
+                version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
@@ -461,12 +509,7 @@ impl HummockManager {
         } else {
             // Read checkpoint from object store.
             versioning_guard.checkpoint = self.read_checkpoint().await?;
-            versioning_guard
-                .checkpoint
-                .version
-                .as_ref()
-                .cloned()
-                .unwrap()
+            versioning_guard.checkpoint.version.clone()
         };
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
@@ -503,60 +546,8 @@ impl HummockManager {
         versioning_guard.objects_to_delete.clear();
         versioning_guard.mark_objects_for_deletion();
 
-        let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
-        let mut configs = self
-            .compaction_group_manager
-            .write()
-            .await
-            .get_or_insert_compaction_group_configs(
-                &all_group_ids.collect_vec(),
-                self.env.meta_store(),
-            )
+        self.initial_compaction_group_config_after_load(versioning_guard)
             .await?;
-
-        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
-        let mut rewrite_cg_ids = vec![];
-        for (cg_id, compaction_group_config) in &mut configs {
-            // update write limit
-            let relaxed_default_write_stop_level_count = 1000;
-            if compaction_group_config
-                .compaction_config
-                .level0_sub_level_compact_level_count
-                == relaxed_default_write_stop_level_count
-            {
-                rewrite_cg_ids.push(*cg_id);
-            }
-        }
-
-        if !rewrite_cg_ids.is_empty() {
-            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
-
-            // update meta store
-            let result = self
-                .compaction_group_manager
-                .write()
-                .await
-                .update_compaction_config(
-                    &rewrite_cg_ids,
-                    &[
-                        mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
-                            compaction_config::level0_stop_write_threshold_sub_level_number(),
-                        ),
-                    ],
-                    self.env.meta_store(),
-                )
-                .await?;
-
-            // update memory
-            for new_config in result {
-                configs.insert(new_config.group_id(), new_config);
-            }
-        }
-
-        versioning_guard.write_limit =
-            calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
-        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
-        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
     }
@@ -587,10 +578,7 @@ impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     #[named]
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<version_update_payload::Payload> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -603,7 +591,7 @@ impl HummockManager {
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(versioning.current_version.clone());
+        let ret = versioning.current_version.clone();
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -819,6 +807,14 @@ impl HummockManager {
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+        let mut table_to_vnode_partition = match self
+            .group_to_table_vnode_partition
+            .read()
+            .get(&compaction_group_id)
+        {
+            Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
+            None => BTreeMap::default(),
+        };
 
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
@@ -903,12 +899,8 @@ impl HummockManager {
         };
 
         compact_task.watermark = watermark;
-        compact_task.existing_table_ids = current_version
-            .levels
-            .get(&compaction_group_id)
-            .unwrap()
-            .member_table_ids
-            .clone();
+        compact_task.existing_table_ids = member_table_ids.clone();
+
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
@@ -948,12 +940,13 @@ impl HummockManager {
             .await?;
 
             tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {} cost time: {:?} input {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
                 compact_task.target_level,
-                start_time.elapsed()
+                start_time.elapsed(),
+                compact_task.input_ssts
             );
         } else {
             compact_task.table_options = table_id_to_option
@@ -969,6 +962,12 @@ impl HummockManager {
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
+            table_to_vnode_partition
+                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+
+            compact_task.table_vnode_partition = table_to_vnode_partition;
+            compact_task.table_watermarks =
+                current_version.safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -1006,10 +1005,9 @@ impl HummockManager {
 
             let compact_task_statistics = statistics_compact_task(&compact_task);
 
-            let level_type_label = format!(
-                "L{}->L{}",
-                compact_task.input_ssts[0].level_idx,
-                compact_task.input_ssts.last().unwrap().level_idx,
+            let level_type_label = build_compact_task_level_type_metrics_label(
+                compact_task.input_ssts[0].level_idx as usize,
+                compact_task.input_ssts.last().unwrap().level_idx as usize,
             );
 
             let level_count = compact_task.input_ssts.len();
@@ -1408,10 +1406,13 @@ impl HummockManager {
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<impl Into<ExtendedSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        commit_info: CommitEpochInfo,
     ) -> Result<Option<HummockSnapshot>> {
-        let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
+        let CommitEpochInfo {
+            mut sstables,
+            new_table_watermarks,
+            sst_to_context,
+        } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -1441,6 +1442,7 @@ impl HummockManager {
             build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.new_table_watermarks = new_table_watermarks;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
         let mut incorrect_ssts = vec![];
@@ -1774,7 +1776,7 @@ impl HummockManager {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = read_lock!(self, versioning).await;
         let version_deltas = versioning
             .hummock_version_deltas
@@ -1784,7 +1786,7 @@ impl HummockManager {
             .take(num_limit as _)
             .cloned()
             .collect();
-        Ok(HummockVersionDeltas { version_deltas })
+        Ok(version_deltas)
     }
 
     pub async fn init_metadata_for_version_replay(
@@ -2035,7 +2037,7 @@ impl HummockManager {
                         .last_key_value()
                         .unwrap()
                         .1
-                        .clone()],
+                        .to_protobuf()],
                 }),
             );
     }
@@ -2170,7 +2172,6 @@ impl HummockManager {
                 ));
                 split_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                split_group_trigger_interval.reset();
 
                 let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
                     .map(|_| HummockTimerEvent::GroupSplit);
@@ -2486,83 +2487,77 @@ impl HummockManager {
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
+        const SPLIT_BY_TABLE: u32 = 1;
+
+        let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.read().clone();
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
+                // no need to handle the separate compaciton group
                 continue;
             }
 
+            let mut table_vnode_partition_mappoing = group_to_table_vnode_partition
+                .entry(group.group_id)
+                .or_default();
+
             for (table_id, table_size) in &group.table_statistic {
-                if !created_tables.contains(table_id) {
-                    continue;
-                }
-                let mut is_high_write_throughput = false;
-                let mut is_low_write_throughput = true;
-                if let Some(history) = table_write_throughput.get(table_id) {
-                    if history.len() >= window_size {
-                        is_high_write_throughput = history.iter().all(|throughput| {
-                            *throughput / checkpoint_secs
-                                > self.env.opts.table_write_throughput_threshold
-                        });
-                        is_low_write_throughput = history.iter().any(|throughput| {
-                            *throughput / checkpoint_secs
-                                < self.env.opts.min_table_split_write_throughput
-                        });
-                    }
-                }
-                let state_table_size = *table_size;
-
-                if is_low_write_throughput {
-                    continue;
-                }
-
-                if state_table_size < self.env.opts.min_table_split_size
-                    && !is_high_write_throughput
-                {
-                    continue;
-                }
-
-                let parent_group_id = group.group_id;
-
-                // do not split a large table and a small table because it would increase IOPS
-                // of small table.
-                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                    let rest_group_size = group.group_size - state_table_size;
-                    if rest_group_size < state_table_size
-                        && rest_group_size < self.env.opts.min_table_split_size
-                    {
-                        continue;
-                    }
-                }
-
-                let ret = self
-                    .move_state_table_to_compaction_group(
-                        parent_group_id,
-                        &[*table_id],
-                        None,
-                        false,
-                        partition_vnode_count,
+                let rule = self
+                    .calculate_table_align_rule(
+                        &table_write_throughput,
+                        table_id,
+                        table_size,
+                        !created_tables.contains(table_id),
+                        checkpoint_secs,
+                        group.group_id,
+                        group.group_size,
                     )
                     .await;
-                match ret {
-                    Ok(new_group_id) => {
-                        tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
-                        return;
+
+                match rule {
+                    TableAlignRule::NoOptimization => {
+                        table_vnode_partition_mappoing.remove(table_id);
+                        continue;
                     }
-                    Err(e) => {
-                        tracing::info!(
-                            "failed to move state table [{}] from group-{} because {:?}",
-                            table_id,
-                            parent_group_id,
-                            e
-                        )
+
+                    TableAlignRule::SplitByTable(table_id) => {
+                        if self.env.opts.hybird_partition_vnode_count > 0 {
+                            table_vnode_partition_mappoing.insert(table_id, SPLIT_BY_TABLE);
+                        } else {
+                            table_vnode_partition_mappoing.remove(&table_id);
+                        }
+                    }
+
+                    TableAlignRule::SplitByVnode((table_id, vnode)) => {
+                        if self.env.opts.hybird_partition_vnode_count > 0 {
+                            table_vnode_partition_mappoing.insert(table_id, vnode);
+                        } else {
+                            table_vnode_partition_mappoing.remove(&table_id);
+                        }
+                    }
+
+                    TableAlignRule::SplitToDedicatedCg((
+                        new_group_id,
+                        table_vnode_partition_count,
+                    )) => {
+                        let _ = table_vnode_partition_mappoing; // drop
+                        group_to_table_vnode_partition
+                            .insert(new_group_id, table_vnode_partition_count);
+
+                        table_vnode_partition_mappoing = group_to_table_vnode_partition
+                            .entry(group.group_id)
+                            .or_default();
                     }
                 }
             }
         }
+
+        tracing::debug!(
+            "group_to_table_vnode_partition {:?}",
+            group_to_table_vnode_partition
+        );
+
+        // batch update group_to_table_vnode_partition
+        *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
     #[named]
@@ -2845,6 +2840,216 @@ impl HummockManager {
 
         None
     }
+
+    async fn calculate_table_align_rule(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        table_id: &u32,
+        table_size: &u64,
+        is_creating_table: bool,
+        checkpoint_secs: u64,
+        parent_group_id: u64,
+        group_size: u64,
+    ) -> TableAlignRule {
+        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let hybrid_vnode_count: u32 = self.env.opts.hybird_partition_vnode_count;
+        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
+
+        let mut is_high_write_throughput = false;
+        let mut is_low_write_throughput = true;
+        if let Some(history) = table_write_throughput.get(table_id) {
+            if !is_creating_table {
+                if history.len() >= window_size {
+                    is_high_write_throughput = history.iter().all(|throughput| {
+                        *throughput / checkpoint_secs
+                            > self.env.opts.table_write_throughput_threshold
+                    });
+                    is_low_write_throughput = history.iter().any(|throughput| {
+                        *throughput / checkpoint_secs
+                            < self.env.opts.min_table_split_write_throughput
+                    });
+                }
+            } else {
+                // For creating table, relax the checking restrictions to make the data alignment behavior more sensitive.
+                let sum = history.iter().sum::<u64>();
+                is_low_write_throughput = sum
+                    < self.env.opts.min_table_split_write_throughput
+                        * history.len() as u64
+                        * checkpoint_secs;
+            }
+        }
+
+        let state_table_size = *table_size;
+        let result = {
+            // When in a hybrid compaction group, data from multiple state tables may exist in a single sst, and in order to make the data in the sub level more aligned, a proactive cut is made for the data.
+            // https://github.com/risingwavelabs/risingwave/issues/13037
+            // 1. In some scenario (like backfill), the creating state_table / mv may have high write throughput (creating table ). Therefore, we relax the limit of `is_low_write_throughput` and partition the table with high write throughput by vnode to improve the parallel efficiency of compaction.
+            // Add: creating table is not allowed to be split
+            // 2. For table with low throughput, partition by table_id to minimize amplification.
+            // 3. When the write mode is changed (the above conditions are not met), the default behavior is restored
+            if !is_low_write_throughput {
+                TableAlignRule::SplitByVnode((*table_id, hybrid_vnode_count))
+            } else if state_table_size > self.env.opts.cut_table_size_limit {
+                TableAlignRule::SplitByTable(*table_id)
+            } else {
+                TableAlignRule::NoOptimization
+            }
+        };
+
+        // 1. Avoid splitting a creating table
+        // 2. Avoid splitting a is_low_write_throughput creating table
+        // 3. Avoid splitting a non-high throughput medium-sized table
+        if is_creating_table
+            || (is_low_write_throughput)
+            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
+        {
+            return result;
+        }
+
+        // do not split a large table and a small table because it would increase IOPS
+        // of small table.
+        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+            let rest_group_size = group_size - state_table_size;
+            if rest_group_size < state_table_size
+                && rest_group_size < self.env.opts.min_table_split_size
+            {
+                return result;
+            }
+        }
+
+        let ret = self
+            .move_state_table_to_compaction_group(
+                parent_group_id,
+                &[*table_id],
+                None,
+                partition_vnode_count,
+            )
+            .await;
+        match ret {
+            Ok((new_group_id, table_vnode_partition_count)) => {
+                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
+                return TableAlignRule::SplitToDedicatedCg((
+                    new_group_id,
+                    table_vnode_partition_count,
+                ));
+            }
+            Err(e) => {
+                tracing::info!(
+                    "failed to move state table [{}] from group-{} because {:?}",
+                    table_id,
+                    parent_group_id,
+                    e
+                )
+            }
+        }
+
+        TableAlignRule::NoOptimization
+    }
+
+    async fn initial_compaction_group_config_after_load(
+        &self,
+        versioning_guard: &mut RwLockWriteGuard<'_, Versioning>,
+    ) -> Result<()> {
+        // 1. Due to version compatibility, we fix some of the configuration of older versions after hummock starts.
+        let current_version = &versioning_guard.current_version;
+        let all_group_ids = get_compaction_group_ids(current_version);
+        let mut configs = self
+            .compaction_group_manager
+            .write()
+            .await
+            .get_or_insert_compaction_group_configs(
+                &all_group_ids.collect_vec(),
+                self.env.meta_store(),
+            )
+            .await?;
+
+        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
+        let mut rewrite_cg_ids = vec![];
+        let mut restore_cg_to_partition_vnode: HashMap<u64, BTreeMap<u32, u32>> =
+            HashMap::default();
+        for (cg_id, compaction_group_config) in &mut configs {
+            // update write limit
+            let relaxed_default_write_stop_level_count = 1000;
+            if compaction_group_config
+                .compaction_config
+                .level0_sub_level_compact_level_count
+                == relaxed_default_write_stop_level_count
+            {
+                rewrite_cg_ids.push(*cg_id);
+            }
+
+            if let Some(levels) = current_version.levels.get(cg_id) {
+                if levels.member_table_ids.len() == 1 {
+                    restore_cg_to_partition_vnode.insert(
+                        *cg_id,
+                        vec![(
+                            levels.member_table_ids[0],
+                            compaction_group_config
+                                .compaction_config
+                                .split_weight_by_vnode,
+                        )]
+                        .into_iter()
+                        .collect(),
+                    );
+                }
+            }
+        }
+
+        if !rewrite_cg_ids.is_empty() {
+            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
+
+            // update meta store
+            let result = self
+                .compaction_group_manager
+                .write()
+                .await
+                .update_compaction_config(
+                    &rewrite_cg_ids,
+                    &[
+                        mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
+                            compaction_config::level0_stop_write_threshold_sub_level_number(),
+                        ),
+                    ],
+                    self.env.meta_store(),
+                )
+                .await?;
+
+            // update memory
+            for new_config in result {
+                configs.insert(new_config.group_id(), new_config);
+            }
+        }
+
+        versioning_guard.write_limit =
+            calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
+        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+
+        {
+            // 2. Restore the memory data structure according to the memory of the compaction group config.
+            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
+            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
+                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// This structure describes how hummock handles sst switching in a compaction group. A better sst cut will result in better data alignment, which in turn will improve the efficiency of the compaction.
+// By adopting certain rules, a better sst cut will lead to better data alignment and thus improve the efficiency of the compaction.
+pub enum TableAlignRule {
+    // The table_id is not optimized for alignment.
+    NoOptimization,
+    // Move the table_id to a separate compaction group. Currently, the system only supports separate compaction with one table.
+    SplitToDedicatedCg((CompactionGroupId, BTreeMap<TableId, u32>)),
+    // In the current group, partition the table's data according to the granularity of the vnode.
+    SplitByVnode((TableId, u32)),
+    // In the current group, partition the table's data at the granularity of the table.
+    SplitByTable(TableId),
 }
 
 fn drop_sst(
@@ -3010,10 +3215,13 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {
@@ -3052,14 +3260,14 @@ impl CompactionState {
 
     pub fn auto_pick_type(&self, group: CompactionGroupId) -> Option<TaskType> {
         let guard = self.scheduled.lock();
-        if guard.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
+        if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
+            Some(compact_task::TaskType::Dynamic)
+        } else if guard.contains(&(group, compact_task::TaskType::SpaceReclaim)) {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
-        } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
-            Some(compact_task::TaskType::Dynamic)
         } else {
             None
         }

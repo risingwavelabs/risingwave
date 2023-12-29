@@ -165,7 +165,10 @@ macro_rules! impl_common_for_num256 {
         }
 
         impl ToBinary for $scalar_ref<'_> {
-            fn to_binary_with_type(&self, _ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+            fn to_binary_with_type(
+                &self,
+                _ty: &DataType,
+            ) -> super::to_binary::Result<Option<Bytes>> {
                 let mut output = bytes::BytesMut::new();
                 let buffer = self.to_be_bytes();
                 output.put_slice(&buffer);
@@ -320,20 +323,6 @@ impl Num for Int256 {
 
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
         i256::from_str_radix(str, radix).map(Into::into)
-    }
-}
-
-impl From<arrow_buffer::i256> for Int256 {
-    fn from(value: arrow_buffer::i256) -> Self {
-        let buffer = value.to_be_bytes();
-        Int256::from_be_bytes(buffer)
-    }
-}
-
-impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
-    fn from(val: Int256Ref<'a>) -> Self {
-        let buffer = val.to_be_bytes();
-        arrow_buffer::i256::from_be_bytes(buffer)
     }
 }
 

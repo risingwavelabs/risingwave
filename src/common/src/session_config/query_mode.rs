@@ -15,10 +15,7 @@
 //! Contains configurations that could be accessed via "set" command.
 
 use std::fmt::Formatter;
-
-use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE};
-use crate::error::ErrorCode::{self, InvalidConfigValue};
-use crate::error::RwError;
+use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum QueryMode {
@@ -30,25 +27,10 @@ pub enum QueryMode {
     Distributed,
 }
 
-impl ConfigEntry for QueryMode {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[QUERY_MODE]
-    }
-}
+impl FromStr for QueryMode {
+    type Err = &'static str;
 
-impl TryFrom<&[&str]> for QueryMode {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
-        }
-
-        let s = value[0];
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("local") {
             Ok(Self::Local)
         } else if s.eq_ignore_ascii_case("distributed") {
@@ -56,10 +38,7 @@ impl TryFrom<&[&str]> for QueryMode {
         } else if s.eq_ignore_ascii_case("auto") {
             Ok(Self::Auto)
         } else {
-            Err(InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            })?
+            Err("expect one of [local, distributed, auto]")
         }
     }
 }
@@ -80,30 +59,18 @@ mod tests {
 
     #[test]
     fn parse_query_mode() {
+        assert_eq!(QueryMode::from_str("auto").unwrap(), QueryMode::Auto);
+        assert_eq!(QueryMode::from_str("Auto").unwrap(), QueryMode::Auto);
+        assert_eq!(QueryMode::from_str("local").unwrap(), QueryMode::Local);
+        assert_eq!(QueryMode::from_str("Local").unwrap(), QueryMode::Local);
         assert_eq!(
-            QueryMode::try_from(["auto"].as_slice()).unwrap(),
-            QueryMode::Auto
-        );
-        assert_eq!(
-            QueryMode::try_from(["Auto"].as_slice()).unwrap(),
-            QueryMode::Auto
-        );
-        assert_eq!(
-            QueryMode::try_from(["local"].as_slice()).unwrap(),
-            QueryMode::Local
-        );
-        assert_eq!(
-            QueryMode::try_from(["Local"].as_slice()).unwrap(),
-            QueryMode::Local
-        );
-        assert_eq!(
-            QueryMode::try_from(["distributed"].as_slice()).unwrap(),
+            QueryMode::from_str("distributed").unwrap(),
             QueryMode::Distributed
         );
         assert_eq!(
-            QueryMode::try_from(["diStributed"].as_slice()).unwrap(),
+            QueryMode::from_str("diStributed").unwrap(),
             QueryMode::Distributed
         );
-        assert!(QueryMode::try_from(["ab"].as_slice()).is_err());
+        assert!(QueryMode::from_str("ab").is_err());
     }
 }
