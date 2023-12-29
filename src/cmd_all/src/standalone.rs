@@ -261,7 +261,11 @@ mod test {
                             listen_addr: "127.0.0.1:8000",
                             advertise_addr: None,
                             prometheus_listener_addr: "127.0.0.1:1234",
-                            meta_address: "http://127.0.0.1:5690",
+                            meta_address: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             connector_rpc_endpoint: None,
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
@@ -281,7 +285,11 @@ mod test {
                             listen_addr: "127.0.0.1:4566",
                             advertise_addr: None,
                             port: None,
-                            meta_addr: "http://127.0.0.1:5690",
+                            meta_addr: List(
+                                [
+                                    http://127.0.0.1:5690/,
+                                ],
+                            ),
                             prometheus_listener_addr: "127.0.0.1:1234",
                             health_check_listener_addr: "127.0.0.1:6786",
                             config_path: "src/config/test.toml",
