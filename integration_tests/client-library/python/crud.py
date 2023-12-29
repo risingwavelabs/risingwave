@@ -12,7 +12,7 @@ class crud:
 
     def create_table(self):
         create_table_query = """
-            CREATE TABLE IF NOT EXISTS sample_table (
+            CREATE TABLE IF NOT EXISTS sample_table_py (
                 name VARCHAR,
                 age INTEGER,
                 salary BIGINT
@@ -29,7 +29,7 @@ class crud:
 
     def insert_data(self, name, age, salary):
         insert_data_query = """
-            INSERT INTO sample_table (name, age, salary)
+            INSERT INTO sample_table_py (name, age, salary)
             VALUES (%s, %s,%s);
         """
         try:
@@ -43,7 +43,7 @@ class crud:
 
     def update_data(self, name, salary):
         update_data_query = """
-            UPDATE sample_table
+            UPDATE sample_table_py
             SET salary=%s
             WHERE name=%s;
         """
@@ -58,7 +58,7 @@ class crud:
 
     def delete_data(self, name):
         insert_data_query = """
-            DELETE FROM sample_table WHERE name='%s';
+            DELETE FROM sample_table_py WHERE name='%s';
         """
         try:
             databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
@@ -71,7 +71,7 @@ class crud:
 
     def table_drop(self):
         reset_query = """
-            DROP TABLE sample_table;
+            DROP TABLE sample_table_py;
         """
         try:
             databaseconnection = client(self.host, self.port,self.database, self.user, self.password)

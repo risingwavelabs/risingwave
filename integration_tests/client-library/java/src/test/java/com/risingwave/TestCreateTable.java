@@ -12,7 +12,7 @@ public class TestCreateTable {
         String createTableQuery;
         Statement statement;
         try (Connection connection = TestUtils.establishConnection()) {
-            createTableQuery = "CREATE TABLE s1 (i1 int [], v1 struct<v2 int, v3 double>, t1 timestamp, c1 varchar) " +
+            createTableQuery = "CREATE TABLE s1_java (i1 int [], v1 struct<v2 int, v3 double>, t1 timestamp, c1 varchar) " +
                     "WITH (" +
                     "    connector = 'datagen'," +
                     "    fields.i1.length = '3'," +
@@ -36,16 +36,16 @@ public class TestCreateTable {
                     ") FORMAT plain ENCODE json ;";
             statement = connection.createStatement();
             statement.executeUpdate(createTableQuery);
-            System.out.println("Source table s1 created successfully.");
+            System.out.println("Source table s1_java created successfully.");
         }
     }
 
     public void dropSourceTable() throws SQLException {
-        String dropSourceQuery = "DROP TABLE s1;";
+        String dropSourceQuery = "DROP TABLE s1_java;";
         try (Connection connection = TestUtils.establishConnection()) {
             Statement statement = connection.createStatement();
             statement.executeUpdate(dropSourceQuery);
-            System.out.println("Source table s1 dropped successfully.");
+            System.out.println("Source table s1_java dropped successfully.");
         }
     }
 

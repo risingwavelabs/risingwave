@@ -34,7 +34,7 @@ func disconnect(conn *pgx.Conn) {
 
 func createTable(t *testing.T, conn *pgx.Conn) {
 	createTableQuery := `
-		CREATE TABLE IF NOT EXISTS sample_table (
+		CREATE TABLE IF NOT EXISTS sample_table_go (
 			name VARCHAR,
 			age INTEGER,
 			salary BIGINT,
@@ -59,7 +59,7 @@ func createTable(t *testing.T, conn *pgx.Conn) {
 }
 func insertData(t *testing.T, conn *pgx.Conn, name string, age int, salary int64, tripIDs []string, birthdate string, deci float64, fareData map[string]float64, starttime string, timest time.Time, timestz time.Time, timegap time.Duration) {
 	insertDataQuery := `
-		INSERT INTO sample_table (name, age, salary, trip_id,  birthdate, deci, fare, starttime, timest, timestz, timegap)
+		INSERT INTO sample_table_go (name, age, salary, trip_id,  birthdate, deci, fare, starttime, timest, timestz, timegap)
 		VALUES ($1, $2, $3, $4, $5, $6, ROW( $7, $8, $9, $10), $11, $12, $13, $14);
 	`
 	_, err := conn.Exec(context.Background(), insertDataQuery,
@@ -78,7 +78,7 @@ func insertData(t *testing.T, conn *pgx.Conn, name string, age int, salary int64
 
 func updateData(conn *pgx.Conn, name string, salary int64) {
 	updateDataQuery := `
-		UPDATE sample_table
+		UPDATE sample_table_go
 		SET salary=$1
 		WHERE name=$2;
 	`
@@ -91,7 +91,7 @@ func updateData(conn *pgx.Conn, name string, salary int64) {
 
 func deleteData(conn *pgx.Conn, name string) {
 	deleteDataQuery := `
-		DELETE FROM sample_table WHERE name=$1;
+		DELETE FROM sample_table_go WHERE name=$1;
 	`
 	_, err := conn.Exec(context.Background(), deleteDataQuery, name)
 	if err != nil {
@@ -102,7 +102,7 @@ func deleteData(conn *pgx.Conn, name string) {
 
 func tableDrop(conn *pgx.Conn) {
 	resetQuery := `
-		DROP TABLE IF EXISTS sample_table;
+		DROP TABLE IF EXISTS sample_table_go;
 	`
 	_, err := conn.Exec(context.Background(), resetQuery)
 	if err != nil {
@@ -167,7 +167,7 @@ func checkInsertedData(t *testing.T, conn *pgx.Conn, name string, age int, salar
 	_, err := conn.Exec(context.Background(), flushQuery)
 	assert.Nil(t, err, "Materialized View flush failed")
 
-	query := "SELECT name, age, salary, trip_id, birthdate, deci, fare, starttime, timest, timestz, timegap FROM sample_table WHERE name=$1"
+	query := "SELECT name, age, salary, trip_id, birthdate, deci, fare, starttime, timest, timestz, timegap FROM sample_table_go WHERE name=$1"
 	row := conn.QueryRow(context.Background(), query, name)
 
 	var retrievedName string

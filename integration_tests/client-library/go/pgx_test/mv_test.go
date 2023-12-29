@@ -56,13 +56,13 @@ func TestMaterializedView(t *testing.T) {
 	insertData(t, conn, name2, age2, salary2, tripIDs2, birthdate2, deci2, fareData2, starttime2, timest2, timest2, 2*time.Hour)
 
 	createMVQuery := `
-		CREATE MATERIALIZED VIEW IF NOT EXISTS customer_earnings_mv AS
+		CREATE MATERIALIZED VIEW IF NOT EXISTS customer_earnings_mv_go AS
 		SELECT
 			name AS customer_name,
 			age AS customer_age,
 			SUM((fare).initial_charge + (fare).subsequent_charge + (fare).surcharge + (fare).tolls) AS total_earnings
 		FROM
-			sample_table
+			sample_table_go
 		GROUP BY
 			name, age;
 	`
@@ -82,7 +82,7 @@ func checkMVData(t *testing.T, conn *pgx.Conn) {
 	assert.Nil(t, err, "Materialized View flush failed")
 	fmt.Println("Materialized View flushed successfully.")
 	checkMVQuery := `
-		SELECT * FROM customer_earnings_mv;
+		SELECT * FROM customer_earnings_mv_go;
 	`
 	rows, err := conn.Query(context.Background(), checkMVQuery)
 	assert.Nil(t, err, "Materialized View data check failed")
@@ -108,7 +108,7 @@ func checkMVData(t *testing.T, conn *pgx.Conn) {
 	}
 }
 func dropMV(t *testing.T, conn *pgx.Conn) {
-	dropMVQuery := "DROP MATERIALIZED VIEW IF EXISTS customer_earnings_mv;"
+	dropMVQuery := "DROP MATERIALIZED VIEW IF EXISTS customer_earnings_mv_go;"
 	_, err := conn.Exec(context.Background(), dropMVQuery)
 	assert.Nil(t, err, "Materialized View drop failed")
 	fmt.Println("Materialized View dropped successfully.")

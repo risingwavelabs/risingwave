@@ -20,9 +20,9 @@ class MaterializeView:
         crud_ins.insert_data("Mantis",28,18000)
         crud_ins.insert_data("Tony",28,19000)
         mv_query="""
-                    CREATE MATERIALIZED VIEW average_salary_view AS
+                    CREATE MATERIALIZED VIEW average_salary_view_py AS
                     SELECT age, AVG(salary) AS average_salary
-                    FROM sample_table
+                    FROM sample_table_py
                     GROUP BY age;
                 """
         try:
@@ -35,7 +35,7 @@ class MaterializeView:
             print("MV creation failed: ", str(e))
 
     def drop_mv(self):
-        mv_drop_query = "DROP materialized view average_salary_view;"
+        mv_drop_query = "DROP materialized view average_salary_view_py;"
         try:
             databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
             cursor=databaseconnection.connect()
