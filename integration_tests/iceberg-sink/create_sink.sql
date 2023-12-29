@@ -10,6 +10,6 @@ FROM
     s3.secret.key = 'hummockadmin',
     s3.region = 'us-east-1',
     catalog.type = 'storage',
-    database.name='demo_db',
-    table.name='demo_table'
+    database.name='demo',
+    table.name='demo_db.demo_table'
 );
