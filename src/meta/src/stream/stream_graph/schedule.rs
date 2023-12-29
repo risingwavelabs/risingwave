@@ -225,7 +225,6 @@ impl Scheduler {
         let default_hash_mapping = ParallelUnitMapping::build_from_ids(&scheduled_parallel_units);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
-
         let default_singleton_parallel_unit = single_scheduled
             .values()
             .flatten()

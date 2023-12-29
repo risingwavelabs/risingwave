@@ -66,6 +66,7 @@ mod struct_type;
 mod successor;
 mod timestamptz;
 mod to_binary;
+mod to_sql;
 mod to_text;
 mod with_data_type;
 

@@ -20,12 +20,12 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -40,6 +40,7 @@ use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
@@ -328,6 +329,16 @@ impl DdlController {
         self.barrier_manager.get_ddl_progress().await
     }
 
+    pub async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> MetaResult<()> {
+        self.stream_manager
+            .alter_table_parallelism(table_id, parallelism.into())
+            .await
+    }
+
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
         self.catalog_manager.create_database(&database).await
     }
@@ -361,6 +372,7 @@ impl DdlController {
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
         // set the initialized_at_epoch to the current epoch.
         source.initialized_at_epoch = Some(Epoch::now().0);
+        source.initialized_at_cluster_version = Some(current_cluster_version());
 
         self.catalog_manager
             .start_create_source_procedure(&source)

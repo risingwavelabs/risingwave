@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Display};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, SystemTime};
-use std::{fmt, thread};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
-use itertools::Itertools;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
@@ -32,6 +31,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
@@ -115,8 +115,6 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
-    const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &'static str = "load-balance+";
-
     pub fn worker_id(&self) -> u32 {
         self.worker_id
     }
@@ -183,53 +181,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
-        if meta_addr.starts_with(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX) {
-            let addr = meta_addr
-                .strip_prefix(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX)
-                .unwrap();
-
-            let addr = addr.split(',').exactly_one().map_err(|_| {
-                RpcError::Internal(anyhow!(
-                    "meta address {} in load-balance mode should be exactly one",
-                    addr
-                ))
-            })?;
-
-            let _url = url::Url::parse(addr).map_err(|e| {
-                RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e))
-            })?;
-
-            Ok(MetaAddressStrategy::LoadBalance(addr.to_string()))
-        } else {
-            let addrs: Vec<_> = meta_addr.split(',').map(str::to_string).collect();
-
-            if addrs.is_empty() {
-                return Err(RpcError::Internal(anyhow!(
-                    "empty meta addresses {:?}",
-                    addrs
-                )));
-            }
-
-            for addr in &addrs {
-                let _url = url::Url::parse(addr).map_err(|e| {
-                    RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e))
-                })?;
-            }
-
-            Ok(MetaAddressStrategy::List(addrs))
-        }
-    }
-
     /// Register the current node to the cluster and set the corresponding worker id.
     pub async fn register_new(
-        meta_addr: &str,
+        addr_strategy: MetaAddressStrategy,
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
         meta_config: &MetaConfig,
     ) -> Result<(Self, SystemParamsReader)> {
-        let addr_strategy = Self::parse_meta_addr(meta_addr)?;
         tracing::info!("register meta client using strategy: {}", addr_strategy);
 
         // Retry until reaching `max_heartbeat_interval_secs`
@@ -497,6 +456,20 @@ impl MetaClient {
         };
         let resp = self.inner.alter_set_schema(request).await?;
         Ok(resp.version)
+    }
+
+    pub async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+
+        self.inner.alter_parallelism(request).await?;
+        Ok(())
     }
 
     pub async fn replace_table(
@@ -1532,44 +1505,26 @@ struct GrpcMetaClient {
     core: Arc<RwLock<GrpcMetaClientCore>>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum MetaAddressStrategy {
-    LoadBalance(String),
-    List(Vec<String>),
-}
-
-impl fmt::Display for MetaAddressStrategy {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            MetaAddressStrategy::LoadBalance(addr) => {
-                write!(f, "LoadBalance({})", addr)?;
-            }
-            MetaAddressStrategy::List(addrs) => {
-                write!(f, "List({:?})", addrs)?;
-            }
-        }
-        Ok(())
-    }
-}
-
 type MetaMemberClient = MetaMemberServiceClient<Channel>;
 
 struct MetaMemberGroup {
-    members: LruCache<String, Option<MetaMemberClient>>,
+    members: LruCache<http::Uri, Option<MetaMemberClient>>,
 }
 
 struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
-    current_leader: String,
+    current_leader: http::Uri,
     meta_config: MetaConfig,
 }
 
 impl MetaMemberManagement {
     const META_MEMBER_REFRESH_PERIOD: Duration = Duration::from_secs(5);
 
-    fn host_address_to_url(addr: HostAddress) -> String {
+    fn host_address_to_uri(addr: HostAddress) -> http::Uri {
         format!("http://{}:{}", addr.host, addr.port)
+            .parse()
+            .unwrap()
     }
 
     async fn recreate_core(&self, channel: Channel) {
@@ -1592,7 +1547,7 @@ impl MetaMemberManagement {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
                             None => {
-                                let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
+                                let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
@@ -1628,7 +1583,7 @@ impl MetaMemberManagement {
                         leader = Some(member.clone());
                     }
 
-                    let addr = Self::host_address_to_url(member.address.unwrap());
+                    let addr = Self::host_address_to_uri(member.address.unwrap());
                     // We don't clean any expired addrs here to deal with some extreme situations.
                     if !member_group.members.contains(&addr) {
                         tracing::info!("new meta member joined: {}", addr);
@@ -1641,7 +1596,7 @@ impl MetaMemberManagement {
         };
 
         if let Some(leader) = leader_addr {
-            let discovered_leader = Self::host_address_to_url(leader.address.unwrap());
+            let discovered_leader = Self::host_address_to_uri(leader.address.unwrap());
 
             if discovered_leader != self.current_leader {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
@@ -1652,7 +1607,7 @@ impl MetaMemberManagement {
                 );
 
                 let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
-                    let endpoint = GrpcMetaClient::addr_to_endpoint(discovered_leader.clone())?;
+                    let endpoint = GrpcMetaClient::addr_to_endpoint(discovered_leader.clone());
                     GrpcMetaClient::connect_to_endpoint(endpoint).await
                 })
                 .await?;
@@ -1678,7 +1633,7 @@ impl GrpcMetaClient {
 
     fn start_meta_member_monitor(
         &self,
-        init_leader_addr: String,
+        init_leader_addr: http::Uri,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
         meta_config: MetaConfig,
@@ -1784,16 +1739,17 @@ impl GrpcMetaClient {
         Ok(client)
     }
 
-    fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
-        let endpoint = Endpoint::from_shared(addr)?;
-        Ok(endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
+    fn addr_to_endpoint(addr: http::Uri) -> Endpoint {
+        Endpoint::from(addr).initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
     }
 
-    pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
+    pub(crate) async fn try_build_rpc_channel(
+        addrs: impl IntoIterator<Item = http::Uri>,
+    ) -> Result<(Channel, http::Uri)> {
         let endpoints: Vec<_> = addrs
             .into_iter()
-            .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
-            .try_collect()?;
+            .map(|addr| (Self::addr_to_endpoint(addr.clone()), addr))
+            .collect();
 
         let endpoints = endpoints.clone();
 
@@ -1864,7 +1820,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
-             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
+            ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1874,6 +1830,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
+            ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1985,42 +1942,4 @@ impl GrpcMetaClient {
 
 impl GrpcMetaClient {
     for_all_meta_rpc! { meta_rpc_client_method_impl }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::meta_client::MetaAddressStrategy;
-    use crate::MetaClient;
-
-    #[test]
-    fn test_parse_meta_addr() {
-        let results = vec![
-            (
-                "load-balance+http://abc",
-                Some(MetaAddressStrategy::LoadBalance("http://abc".to_string())),
-            ),
-            ("load-balance+http://abc,http://def", None),
-            ("load-balance+http://abc:xxx", None),
-            ("", None),
-            (
-                "http://abc,http://def",
-                Some(MetaAddressStrategy::List(vec![
-                    "http://abc".to_string(),
-                    "http://def".to_string(),
-                ])),
-            ),
-            ("http://abc:xx,http://def", None),
-        ];
-        for (addr, result) in results {
-            let parsed_result = MetaClient::parse_meta_addr(addr);
-            match result {
-                None => {
-                    assert!(parsed_result.is_err());
-                }
-                Some(strategy) => {
-                    assert_eq!(strategy, parsed_result.unwrap())
-                }
-            }
-        }
-    }
 }

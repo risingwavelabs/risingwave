@@ -105,3 +105,7 @@ macro_rules! git_sha {
 // `const_option_ext` was broken by https://github.com/rust-lang/rust/pull/110393
 // Tracking issue: https://github.com/rust-lang/rust/issues/91930
 pub const GIT_SHA: &str = git_sha!("GIT_SHA");
+
+pub fn current_cluster_version() -> String {
+    format!("PostgreSQL 9.5-RisingWave-{} ({})", RW_VERSION, GIT_SHA)
+}

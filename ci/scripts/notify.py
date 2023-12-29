@@ -59,6 +59,7 @@ INTEGRATION_TEST_MAP = {
     "doris-sink": ["xinhao"],
     "starrocks-sink": ["xinhao"],
     "deltalake-sink": ["xinhao"],
+    "client-library": ["tao"],
 }
 
 def get_failed_tests(get_test_status, test_map):
