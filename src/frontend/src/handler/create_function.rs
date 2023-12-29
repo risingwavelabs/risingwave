@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use arrow_schema::Fields;
 use bytes::Bytes;
 use itertools::Itertools;
@@ -145,7 +145,7 @@ pub async fn handle_create_function(
             {
                 let client = ArrowFlightUdfClient::connect(&link)
                     .await
-                    .context("failed to connect UDF server")?;
+                    .map_err(|e| anyhow!(e))?;
                 /// A helper function to create a unnamed field from data type.
                 fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
                     arrow_schema::Field::new("", data_type, true)
