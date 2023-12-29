@@ -47,7 +47,7 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   echo Docker image: $RW_IMAGE
 fi
 
-if [ "${case}" == "client-library"]; then
+if [ "${case}" == "client-library" ]; then
   cd integration_tests/client-library
   python3 client_test.py
   exit 0
