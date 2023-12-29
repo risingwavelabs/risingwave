@@ -66,6 +66,8 @@ pub struct Model {
     pub database_id: Option<DatabaseId>,
     pub initialized_at: DateTime,
     pub created_at: DateTime,
+    pub initialized_at_cluster_version: Option<String>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

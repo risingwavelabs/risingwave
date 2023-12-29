@@ -44,6 +44,8 @@ pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Varchar, "acl"),
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ]
 });
 
@@ -111,6 +113,14 @@ impl SysCatalogReaderImpl {
                             ),
                             source.initialized_at_epoch.map(|e| e.as_scalar()),
                             source.created_at_epoch.map(|e| e.as_scalar()),
+                            source
+                                .initialized_at_cluster_version
+                                .clone()
+                                .map(|v| ScalarImpl::Utf8(v.into())),
+                            source
+                                .created_at_cluster_version
+                                .clone()
+                                .map(|v| ScalarImpl::Utf8(v.into())),
                         ])
                     })
             })

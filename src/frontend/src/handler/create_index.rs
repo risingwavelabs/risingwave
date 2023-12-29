@@ -240,6 +240,8 @@ pub(crate) fn gen_create_index_plan(
         initialized_at_epoch: None,
         created_at_epoch: None,
         stream_job_status: PbStreamJobStatus::Creating.into(),
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
 
     let plan: PlanRef = materialize.into();
