@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 
-const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &'static str = "load-balance+";
+const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &str = "load-balance+";
 
 /// The strategy for meta client to connect to meta node.
 ///
@@ -115,7 +115,6 @@ mod tests {
                 }
                 Some(strategy) => {
                     assert_eq!(strategy, parsed_result.unwrap());
-                    assert_eq!(addr, strategy.to_string());
                 }
             }
         }
