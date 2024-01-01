@@ -4286,17 +4286,6 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-googleapis"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5453af21ac0cc1f3b2cfb5b687c174e701c10ec2d5c286aff7ca8cbbf08d31b4"
-dependencies = [
- "prost 0.11.9",
- "prost-types 0.11.9",
- "tonic 0.9.2",
-]
-
-[[package]]
-name = "google-cloud-googleapis"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db8a478015d079296167e3f08e096dc99cffc2cb50fa203dd38aaa9dd37f8354"
@@ -4327,7 +4316,7 @@ dependencies = [
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis 0.12.0",
+ "google-cloud-googleapis",
  "google-cloud-token",
  "prost-types 0.12.1",
  "thiserror",
@@ -7150,7 +7139,7 @@ name = "prepare_ci_pubsub"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "google-cloud-googleapis 0.11.0",
+ "google-cloud-googleapis",
  "google-cloud-pubsub",
  "madsim-tokio",
 ]
@@ -8522,7 +8511,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tokio-util",
- "tonic 0.9.2",
+ "tonic 0.10.2",
  "tracing",
  "tracing-futures",
  "tracing-subscriber",
@@ -11479,12 +11468,10 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3082666a3a6433f7f511c7192923fa1fe07c69332d3c6a2e6bb040b569199d5a"
 dependencies = [
- "async-stream",
  "async-trait",
  "axum",
  "base64 0.21.4",
  "bytes",
- "flate2",
  "futures-core",
  "futures-util",
  "h2",
@@ -11495,9 +11482,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.11.9",
- "rustls-pemfile",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
@@ -12408,7 +12393,6 @@ dependencies = [
  "hmac",
  "hyper",
  "indexmap 1.9.3",
- "itertools 0.10.5",
  "itertools 0.11.0",
  "jni",
  "lazy_static",
@@ -12441,7 +12425,6 @@ dependencies = [
  "postgres-types",
  "proc-macro2",
  "prometheus",
- "prost 0.11.9",
  "prost 0.12.1",
  "prost-types 0.12.1",
  "quote",
@@ -12484,7 +12467,6 @@ dependencies = [
  "toml_datetime",
  "toml_edit 0.19.15",
  "tonic 0.10.2",
- "tonic 0.9.2",
  "tower",
  "tracing",
  "tracing-core",
