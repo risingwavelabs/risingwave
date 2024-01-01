@@ -59,6 +59,7 @@ INTEGRATION_TEST_MAP = {
     "doris-sink": ["xinhao"],
     "starrocks-sink": ["xinhao"],
     "deltalake-sink": ["xinhao"],
+    "pinot-sink": ["yiming"],
     "client-library": ["tao"],
 }
 

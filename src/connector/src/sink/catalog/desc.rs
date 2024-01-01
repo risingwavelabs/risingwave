@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,6 +99,8 @@ impl SinkDesc {
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
             target_table: self.target_table,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         }
     }
 
