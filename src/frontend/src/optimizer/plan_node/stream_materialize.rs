@@ -254,6 +254,8 @@ impl StreamMaterialize {
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         })
     }
 

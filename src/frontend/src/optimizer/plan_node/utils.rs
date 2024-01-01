@@ -183,6 +183,8 @@ impl TableCatalogBuilder {
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         }
     }
 
