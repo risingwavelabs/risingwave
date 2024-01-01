@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
@@ -181,6 +182,9 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
+            incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         }
     }
 

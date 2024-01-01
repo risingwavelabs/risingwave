@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
+use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStoreRef;
 
@@ -48,6 +49,7 @@ pub struct DashboardService {
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
     pub meta_store: MetaStoreRef,
+    pub diagnose_command: DiagnoseCommandRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -330,6 +332,10 @@ pub(super) mod handlers {
 
         response.map_err(err)
     }
+
+    pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
+        Ok(srv.diagnose_command.report().await)
+    }
 }
 
 impl DashboardService {
@@ -366,6 +372,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

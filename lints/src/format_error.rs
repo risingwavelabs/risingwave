@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
 use clippy_utils::ty::implements_trait;
-use clippy_utils::{is_trait_method, match_function_call};
+use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method, match_function_call};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -63,6 +63,11 @@ const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
+        // Ignore if in test code.
+        if is_in_cfg_test(cx.tcx, expr.hir_id) || is_in_test_function(cx.tcx, expr.hir_id) {
+            return;
+        }
+
         // `%err`, `?err` in tracing events and spans.
         if let Some(args) = match_function_call(cx, expr, &TRACING_FIELD_DEBUG)
             .or_else(|| match_function_call(cx, expr, &TRACING_FIELD_DISPLAY))
@@ -74,7 +79,8 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
         // `{}`, `{:?}` in format macros.
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
-                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn) {
+                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
+            {
                 for piece in &format_args.template {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece
                         && let Ok(index) = placeholder.argument.index

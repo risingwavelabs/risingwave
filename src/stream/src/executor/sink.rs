@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::mem;
 
 use anyhow::anyhow;
 use futures::stream::select;
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
@@ -31,6 +31,7 @@ use risingwave_connector::sink::log_store::{
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
@@ -315,12 +316,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_writer_param: SinkWriterParam,
+        mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
         info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
-        let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
             .iter()
@@ -328,7 +328,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
-        let log_reader = log_reader
+        let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
                 if visible_columns.len() != columns.len() {
                     // Do projection here because we may have columns that aren't visible to
@@ -340,8 +340,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             })
             .monitored(metrics);
 
-        if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
-            let mut err_str = e.to_string();
+        log_reader.init().await?;
+
+        while let Err(e) = sink
+            .new_log_sinker(sink_writer_param.clone())
+            .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
+            .await
+        {
+            let mut err_str = e.to_report_string();
             if actor_context
                 .error_suppressor
                 .lock()
@@ -354,10 +360,29 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
             GLOBAL_ERROR_METRICS.user_sink_error.report([
                 S::SINK_NAME.to_owned(),
-                info.identity,
+                info.identity.clone(),
                 err_str,
             ]);
-            return Err(e.into());
+
+            match log_reader.rewind().await {
+                Ok((true, curr_vnode_bitmap)) => {
+                    warn!(
+                        error = %e.as_report(),
+                        executor_id = sink_writer_param.executor_id,
+                        "rewind successfully after sink error"
+                    );
+                    sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
+                    Ok(())
+                }
+                Ok((false, _)) => Err(e),
+                Err(rewind_err) => {
+                    error!(
+                        error = %rewind_err.as_report(),
+                        "fail to rewind log reader"
+                    );
+                    Err(e)
+                }
+            }?;
         }
         Err(anyhow!("end of stream").into())
     }
@@ -462,6 +487,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -589,6 +615,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {
@@ -713,6 +740,7 @@ mod test {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
+            target_table: None,
         };
 
         let info = ExecutorInfo {

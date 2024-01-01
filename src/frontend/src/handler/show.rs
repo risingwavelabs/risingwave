@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ pub fn get_columns_from_table(
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
-        Relation::BaseTable(t) => t.table_catalog.columns,
+        Relation::BaseTable(t) => t.table_catalog.columns.clone(),
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
             return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());

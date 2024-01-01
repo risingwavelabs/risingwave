@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
-#![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -32,6 +31,9 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
 
 use std::time::Duration;
 
@@ -52,6 +54,8 @@ pub mod source;
 pub mod common;
 
 pub use paste::paste;
+
+mod with_options;
 
 #[cfg(test)]
 mod with_options_test;
@@ -132,5 +136,376 @@ mod tests {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+    }
+
+    /// Test some serde behavior we rely on.
+    mod serde {
+        use std::collections::BTreeMap;
+
+        use expect_test::expect;
+        use serde::Deserialize;
+
+        // test deny_unknown_fields and flatten
+
+        // TL;DR: deny_unknown_fields
+        // - doesn't work with flatten map
+        // - can work with flatten struct
+        // - doesn't work with nested flatten struct (This makes a flatten struct behave like a flatten map)
+
+        #[test]
+        fn test_outer_deny() {
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct FlattenMap {
+                #[serde(flatten)]
+                flatten: BTreeMap<String, String>,
+            }
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct FlattenStruct {
+                #[serde(flatten)]
+                flatten_struct: Inner,
+            }
+
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct FlattenBoth {
+                #[serde(flatten)]
+                flatten: BTreeMap<String, String>,
+                #[serde(flatten)]
+                flatten_struct: Inner,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct Inner {
+                a: Option<String>,
+                b: Option<String>,
+            }
+
+            let json = r#"{
+                "a": "b"
+            }"#;
+            let foo: Result<FlattenMap, _> = serde_json::from_str(json);
+            let foo1: Result<FlattenStruct, _> = serde_json::from_str(json);
+            let foo2: Result<FlattenBoth, _> = serde_json::from_str(json);
+
+            // with `deny_unknown_fields`, we can't flatten ONLY a map
+            expect![[r#"
+                Err(
+                    Error("unknown field `a`", line: 3, column: 13),
+                )
+            "#]]
+            .assert_debug_eq(&foo);
+
+            // but can flatten a struct!
+            expect![[r#"
+                Ok(
+                    FlattenStruct {
+                        flatten_struct: Inner {
+                            a: Some(
+                                "b",
+                            ),
+                            b: None,
+                        },
+                    },
+                )
+            "#]]
+            .assert_debug_eq(&foo1);
+            // unknown fields can be denied.
+            let foo11: Result<FlattenStruct, _> =
+                serde_json::from_str(r#"{ "a": "b", "unknown":1 }"#);
+            expect_test::expect![[r#"
+                Err(
+                    Error("unknown field `unknown`", line: 1, column: 25),
+                )
+            "#]]
+            .assert_debug_eq(&foo11);
+
+            // When both struct and map are flattened, the map also works...
+            expect![[r#"
+                Ok(
+                    FlattenBoth {
+                        flatten: {
+                            "a": "b",
+                        },
+                        flatten_struct: Inner {
+                            a: Some(
+                                "b",
+                            ),
+                            b: None,
+                        },
+                    },
+                )
+            "#]]
+            .assert_debug_eq(&foo2);
+
+            let foo21: Result<FlattenBoth, _> =
+                serde_json::from_str(r#"{ "a": "b", "unknown":1 }"#);
+            expect_test::expect![[r#"
+                Err(
+                    Error("invalid type: integer `1`, expected a string", line: 1, column: 25),
+                )
+            "#]]
+            .assert_debug_eq(&foo21);
+            // This error above is a little funny, since even if we use string, it will still fail.
+            let foo22: Result<FlattenBoth, _> =
+                serde_json::from_str(r#"{ "a": "b", "unknown":"1" }"#);
+            expect_test::expect![[r#"
+                Err(
+                    Error("unknown field `unknown`", line: 1, column: 27),
+                )
+            "#]]
+            .assert_debug_eq(&foo22);
+        }
+
+        #[test]
+        fn test_inner_deny() {
+            // no outer deny now.
+            #[derive(Deserialize, Debug)]
+            struct FlattenStruct {
+                #[serde(flatten)]
+                flatten_struct: Inner,
+            }
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct Inner {
+                a: Option<String>,
+                b: Option<String>,
+            }
+
+            let json = r#"{
+                "a": "b", "unknown":1
+            }"#;
+            let foo: Result<FlattenStruct, _> = serde_json::from_str(json);
+            // unknown fields cannot be denied.
+            // I think this is because `deserialize_struct` is called, and required fields are passed.
+            // Other fields are left for the outer struct to consume.
+            expect_test::expect![[r#"
+                Ok(
+                    FlattenStruct {
+                        flatten_struct: Inner {
+                            a: Some(
+                                "b",
+                            ),
+                            b: None,
+                        },
+                    },
+                )
+            "#]]
+            .assert_debug_eq(&foo);
+        }
+
+        #[test]
+        fn test_multiple_flatten() {
+            #[derive(Deserialize, Debug)]
+            struct Foo {
+                /// struct will "consume" the used fields!
+                #[serde(flatten)]
+                flatten_struct: Inner1,
+
+                /// map will keep the unknown fields!
+                #[serde(flatten)]
+                flatten_map1: BTreeMap<String, String>,
+
+                #[serde(flatten)]
+                flatten_map2: BTreeMap<String, String>,
+
+                #[serde(flatten)]
+                flatten_struct2: Inner2,
+            }
+
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct Inner1 {
+                a: Option<String>,
+                b: Option<String>,
+            }
+            #[derive(Deserialize, Debug)]
+            struct Inner11 {
+                c: Option<String>,
+            }
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct Inner2 {
+                c: Option<String>,
+            }
+
+            let json = r#"{
+                "a": "b", "c":"d"
+            }"#;
+            let foo2: Result<Foo, _> = serde_json::from_str(json);
+
+            // When there are multiple flatten, all of them will be used.
+            // Also, with outer `flatten``, the inner `deny_unknown_fields` is ignored.
+            expect![[r#"
+            Ok(
+                Foo {
+                    flatten_struct: Inner1 {
+                        a: Some(
+                            "b",
+                        ),
+                        b: None,
+                    },
+                    flatten_map1: {
+                        "c": "d",
+                    },
+                    flatten_map2: {
+                        "c": "d",
+                    },
+                    flatten_struct2: Inner2 {
+                        c: Some(
+                            "d",
+                        ),
+                    },
+                },
+            )
+        "#]]
+            .assert_debug_eq(&foo2);
+        }
+
+        #[test]
+        fn test_nested_flatten() {
+            #[derive(Deserialize, Debug)]
+            #[serde(deny_unknown_fields)]
+            struct Outer {
+                #[serde(flatten)]
+                inner: Inner,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct Inner {
+                a: Option<String>,
+                b: Option<String>,
+                #[serde(flatten)]
+                nested: InnerInner,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct InnerInner {
+                c: Option<String>,
+            }
+
+            let json = r#"{ "a": "b", "unknown":"1" }"#;
+
+            let foo: Result<Outer, _> = serde_json::from_str(json);
+
+            // This is very unfortunate...
+            expect_test::expect![[r#"
+            Err(
+                Error("unknown field `a`", line: 1, column: 27),
+            )
+        "#]]
+            .assert_debug_eq(&foo);
+
+            // Actually, the nested `flatten` will makes the struct behave like a map.
+            // Let's remove `deny_unknown_fields` and see
+            #[derive(Deserialize, Debug)]
+            struct Outer2 {
+                #[serde(flatten)]
+                inner: Inner,
+                /// We can see the fields of `inner` are not consumed.
+                #[serde(flatten)]
+                map: BTreeMap<String, String>,
+            }
+            let foo2: Result<Outer2, _> = serde_json::from_str(json);
+            expect_test::expect![[r#"
+                Ok(
+                    Outer2 {
+                        inner: Inner {
+                            a: Some(
+                                "b",
+                            ),
+                            b: None,
+                            nested: InnerInner {
+                                c: None,
+                            },
+                        },
+                        map: {
+                            "a": "b",
+                            "unknown": "1",
+                        },
+                    },
+                )
+            "#]]
+            .assert_debug_eq(&foo2);
+        }
+
+        #[test]
+        fn test_flatten_option() {
+            #[derive(Deserialize, Debug)]
+            struct Foo {
+                /// flatten option struct can still consume the field
+                #[serde(flatten)]
+                flatten_struct: Option<Inner1>,
+
+                /// flatten option map is always `Some`
+                #[serde(flatten)]
+                flatten_map1: Option<BTreeMap<String, String>>,
+
+                /// flatten option struct is `None` if the required field is absent
+                #[serde(flatten)]
+                flatten_struct2: Option<Inner2>,
+
+                /// flatten option struct is `Some` if the required field is present and optional field is absent.
+                /// Note: if all fields are optional, the struct is always `Some`
+                #[serde(flatten)]
+                flatten_struct3: Option<Inner3>,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct Inner1 {
+                a: Option<String>,
+                b: Option<String>,
+            }
+            #[derive(Deserialize, Debug)]
+            struct Inner11 {
+                c: Option<String>,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct Inner2 {
+                c: Option<String>,
+                d: String,
+            }
+
+            #[derive(Deserialize, Debug)]
+            struct Inner3 {
+                e: Option<String>,
+                f: String,
+            }
+
+            let json = r#"{
+        "a": "b", "c": "d", "f": "g"
+     }"#;
+            let foo: Result<Foo, _> = serde_json::from_str(json);
+            expect![[r#"
+                Ok(
+                    Foo {
+                        flatten_struct: Some(
+                            Inner1 {
+                                a: Some(
+                                    "b",
+                                ),
+                                b: None,
+                            },
+                        ),
+                        flatten_map1: Some(
+                            {
+                                "c": "d",
+                                "f": "g",
+                            },
+                        ),
+                        flatten_struct2: None,
+                        flatten_struct3: Some(
+                            Inner3 {
+                                e: None,
+                                f: "g",
+                            },
+                        ),
+                    },
+                )
+            "#]]
+            .assert_debug_eq(&foo);
+        }
     }
 }

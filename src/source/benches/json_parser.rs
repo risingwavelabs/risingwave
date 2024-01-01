@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use paste::paste;
@@ -19,8 +21,11 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, Date, Timestamp};
-use risingwave_connector::parser::{DebeziumParser, JsonParser, SourceStreamChunkBuilder};
-use risingwave_connector::source::SourceColumnDesc;
+use risingwave_connector::parser::plain_parser::PlainParser;
+use risingwave_connector::parser::{
+    DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig,
+};
+use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 
 macro_rules! create_debezium_bench_helpers {
     ($op:ident, $op_sym:expr, $bench_function:expr) => {
@@ -122,21 +127,31 @@ fn get_descs() -> Vec<SourceColumnDesc> {
 
 fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
-    let parser = JsonParser::new_for_test(descs.clone()).unwrap();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
     let records = generate_json_rows();
+    let ctx = Arc::new(SourceContext::default());
     c.bench_function("json_parser", |b| {
         b.to_async(&rt).iter_batched(
             || records.clone(),
             |records| async {
+                let mut parser = rt
+                    .block_on(PlainParser::new(
+                        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+                        descs.clone(),
+                        ctx.clone(),
+                    ))
+                    .unwrap();
                 let mut builder =
                     SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
                 for record in records {
                     let writer = builder.row_writer();
-                    parser.parse_inner(record, writer).await.unwrap();
+                    parser
+                        .parse_inner(None, Some(record), writer)
+                        .await
+                        .unwrap();
                 }
             },
             BatchSize::SmallInput,

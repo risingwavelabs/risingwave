@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
+use thiserror_ext::AsReport;
 
 use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
@@ -48,6 +49,7 @@ use crate::{
 
 mod datetime;
 mod decimal;
+mod fields;
 mod interval;
 mod jsonb;
 mod macros;
@@ -58,12 +60,18 @@ mod ordered;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
+mod sentinel;
 mod serial;
 mod struct_type;
 mod successor;
 mod timestamptz;
 mod to_binary;
+mod to_sql;
 mod to_text;
+mod with_data_type;
+
+pub use fields::Fields;
+pub use risingwave_fields_derive::Fields;
 
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
@@ -75,12 +83,14 @@ pub use self::ops::{CheckedAdd, IsNegative};
 pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
+pub use self::sentinel::Sentinelled;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
+pub use self::with_data_type::WithDataType;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
@@ -94,9 +104,10 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 #[derive(
     Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
-#[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
+#[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
+#[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
 pub enum DataType {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]
@@ -138,7 +149,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^interval$")]
     Interval,
     #[display("{0}")]
-    #[from_str(ignore)]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
@@ -864,7 +875,7 @@ impl ScalarImpl {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(str.to_string().into()),
             DataType::Boolean => {
-                Self::Bool(bool::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+                Self::Bool(str_to_bool(str).map_err(|_| FromSqlError::from_text(str))?)
             }
             DataType::Int16 => {
                 Self::Int16(i16::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
@@ -921,12 +932,18 @@ impl ScalarImpl {
                 }
                 let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    if s.is_empty() {
+                        continue;
+                    } else if s.eq_ignore_ascii_case("null") {
+                        builder.append_null();
+                    } else {
+                        builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    }
                 }
                 Self::List(ListValue::new(builder.finish()))
             }
             DataType::Struct(s) => {
-                if !(str.starts_with('{') && str.ends_with('}')) {
+                if !(str.starts_with('(') && str.ends_with(')')) {
                     return Err(FromSqlError::from_text(str));
                 }
                 let mut fields = Vec::with_capacity(s.len());
@@ -961,29 +978,29 @@ impl ScalarImpl {
     ///
     /// For example, the user can input `1` or `true` directly, but they have to use
     /// `'2022-01-01'::date`.
-    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, String> {
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, BoxedError> {
         Ok(match t {
             DataType::Boolean => str_to_bool(s)?.into(),
-            DataType::Int16 => i16::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int32 => i32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int64 => i64::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Int256 => Int256::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int16 => i16::from_str(s)?.into(),
+            DataType::Int32 => i32::from_str(s)?.into(),
+            DataType::Int64 => i64::from_str(s)?.into(),
+            DataType::Int256 => Int256::from_str(s)?.into(),
             DataType::Serial => return Err("not supported".into()),
-            DataType::Decimal => Decimal::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float32 => F32::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Float64 => F64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Decimal => Decimal::from_str(s)?.into(),
+            DataType::Float32 => F32::from_str(s)?.into(),
+            DataType::Float64 => F64::from_str(s)?.into(),
             DataType::Varchar => s.into(),
-            DataType::Date => Date::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Timestamp => Timestamp::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Date => Date::from_str(s)?.into(),
+            DataType::Timestamp => Timestamp::from_str(s)?.into(),
             // We only handle the case with timezone here, and leave the implicit session timezone case
             // for later phase.
-            DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
-            DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
+            DataType::Time => Time::from_str(s)?.into(),
+            DataType::Interval => Interval::from_str(s)?.into(),
             DataType::List { .. } => ListValue::from_str(s, t)?.into(),
             // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
             DataType::Struct(_) => return Err("not supported".into()),
-            DataType::Jsonb => JsonbVal::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
         })
     }
@@ -1106,18 +1123,19 @@ impl ScalarImpl {
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
                 Time::with_secs_nano(secs, nano)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamp => Self::Timestamp({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
                 Timestamp::with_secs_nsecs(secs, nsecs)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
@@ -1457,6 +1475,18 @@ mod tests {
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
             DataType::List(Box::new(DataType::Interval))
+        );
+
+        assert_eq!(
+            DataType::from_str("record").unwrap(),
+            DataType::Struct(StructType::unnamed(vec![]))
+        );
+        assert_eq!(
+            DataType::from_str("struct<a int4, b varchar>").unwrap(),
+            DataType::Struct(StructType::new(vec![
+                ("a", DataType::Int32),
+                ("b", DataType::Varchar)
+            ]))
         );
     }
 }

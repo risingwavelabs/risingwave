@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -189,6 +189,7 @@ It only indicates the physical clustering of the data, which may improve the per
             if plan.inputs().is_empty() {
                 if let Some(scan) = plan.as_stream_table_scan() {
                     scan.stream_scan_type() == StreamScanType::Backfill
+                        || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
                 } else {
                     false
                 }
@@ -207,9 +208,9 @@ It only indicates the physical clustering of the data, which may improve the per
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        // Set the timezone for the stream environment
-        let env = graph.env.as_mut().unwrap();
-        env.timezone = context.get_session_timezone();
+        // Set the timezone for the stream context
+        let ctx = graph.ctx.as_mut().unwrap();
+        ctx.timezone = context.get_session_timezone();
 
         (table, graph, can_run_in_background)
     };

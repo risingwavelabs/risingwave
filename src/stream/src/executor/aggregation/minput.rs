@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -186,7 +186,8 @@ impl MaterializedInputState {
                     group_key.map(GroupKey::table_pk),
                     sub_range,
                     PrefetchOptions {
-                        preload: cache_filler.capacity().is_none(),
+                        prefetch: cache_filler.capacity().is_none(),
+                        for_large_query: false,
                     },
                 )
                 .await?;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,6 +70,16 @@ impl From<Kind> for FunctionKind {
             Kind::Scalar(_) => Self::Scalar,
             Kind::Table(_) => Self::Table,
             Kind::Aggregate(_) => Self::Aggregate,
+        }
+    }
+}
+
+impl From<FunctionKind> for Kind {
+    fn from(value: FunctionKind) -> Self {
+        match value {
+            FunctionKind::Scalar => Self::Scalar(Default::default()),
+            FunctionKind::Table => Self::Table(Default::default()),
+            FunctionKind::Aggregate => Self::Aggregate(Default::default()),
         }
     }
 }

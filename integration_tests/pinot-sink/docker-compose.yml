@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -34,8 +22,7 @@ services:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
   kafka:
-    image: confluentinc/cp-kafka:7.1.0
-    platform: linux/amd64
+    image: confluentinc/cp-kafka:latest
     hostname: kafka
     container_name: kafka
     ports:
@@ -52,8 +39,7 @@ services:
       [ zookeeper ]
     healthcheck: { test: nc -z localhost 9092, interval: 1s, start_period: 120s }
   pinot-controller:
-    image: apachepinot/pinot:0.12.0
-    platform: linux/amd64
+    image: apachepinot/pinot:latest
     command: "StartController -zkAddress zookeeper:2181"
     container_name: "pinot-controller"
     volumes:
@@ -64,8 +50,7 @@ services:
     depends_on:
       - zookeeper
   pinot-broker:
-    image: apachepinot/pinot:0.12.0
-    platform: linux/amd64
+    image: apachepinot/pinot:latest
     command: "StartBroker -zkAddress zookeeper:2181"
     restart: unless-stopped
     container_name: "pinot-broker"
@@ -74,16 +59,14 @@ services:
     depends_on:
       - pinot-controller
   pinot-server:
-    image: apachepinot/pinot:0.12.0
-    platform: linux/amd64
+    image: apachepinot/pinot:latest
     container_name: "pinot-server"
     command: "StartServer -zkAddress zookeeper:2181"
     restart: unless-stopped
     depends_on:
       - pinot-broker
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.1.0
-    platform: linux/amd64
+    image: confluentinc/cp-zookeeper:latest
     hostname: zookeeper
     container_name: zookeeper
     ports:
@@ -91,8 +74,15 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+  postgres:
+    image: postgres:latest
+    command: tail -f /dev/null
+    volumes:
+      - "./update.sql:/update.sql"
+    restart: on-failure
+    container_name: postgres
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

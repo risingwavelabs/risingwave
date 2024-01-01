@@ -6,6 +6,7 @@ heartbeat_interval_ms = 1000
 connection_pool_size = 16
 metrics_level = "Info"
 telemetry_enabled = true
+grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true
@@ -66,6 +67,7 @@ enable_emergency_picker = true
 
 [batch]
 enable_barrier_read = false
+statement_timeout_in_sec = 3600
 
 [batch.developer]
 batch_connector_message_buffer_size = 16

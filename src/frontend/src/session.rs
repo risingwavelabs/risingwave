@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,6 +62,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -213,7 +214,7 @@ impl FrontendEnv {
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, system_params_reader) = MetaClient::register_new(
-            opts.meta_addr.clone().as_str(),
+            opts.meta_addr,
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
@@ -435,7 +436,7 @@ impl FrontendEnv {
         Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
                 .worker_threads(4)
-                .thread_name("frontend-compute-threads")
+                .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
                 .unwrap(),
@@ -808,8 +809,9 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
+        let mut stmts = Parser::parse_sql(&sql).inspect_err(
+            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
+        )?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -823,27 +825,9 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            target: SLOW_QUERY_LOG,
-                            sql = sql.as_ref(),
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        let rsp = handle(self, stmt, sql.clone(), formats).await.inspect_err(
+            |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
+        )?;
         Ok(rsp)
     }
 
@@ -858,6 +842,14 @@ impl SessionImpl {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
+        }
+    }
+
+    pub fn statement_timeout(&self) -> Duration {
+        if self.config().statement_timeout() == 0 {
+            Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
+        } else {
+            Duration::from_secs(self.config().statement_timeout() as u64)
         }
     }
 }
@@ -1023,25 +1015,11 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            sql_str,
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        let rsp = handle(self, stmt, sql.clone(), vec![format])
+            .await
+            .inspect_err(
+                |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
+            )?;
         Ok(rsp)
     }
 
@@ -1084,24 +1062,9 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let rsp = {
-            let mut handle_fut = Box::pin(handle_execute(self, portal));
-            if cfg!(debug_assertions) {
-                // Report the SQL in the log periodically if the query is slow.
-                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
-                loop {
-                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
-                        Ok(result) => break result,
-                        Err(_) => tracing::warn!(
-                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
-                        ),
-                    }
-                }
-            } else {
-                handle_fut.await
-            }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle execute:\n{}", e))?;
+        let rsp = handle_execute(self, portal)
+            .await
+            .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
         Ok(rsp)
     }
 
@@ -1200,6 +1163,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                 DataType::Varchar.type_len(),
             ),
         ]),
+        Statement::ShowTransactionIsolationLevel => {
+            let name = "transaction_isolation";
+            Ok(infer_show_variable(name))
+        }
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))

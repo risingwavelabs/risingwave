@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::fmt::Display;
 
 use enum_as_inner::EnumAsInner;
@@ -115,9 +114,9 @@ impl Frame {
 }
 
 impl FrameBounds {
-    pub fn is_valid(&self) -> bool {
+    pub fn validate(&self) -> Result<()> {
         match self {
-            Self::Rows(start, end) => start.partial_cmp(end).map(|o| o.is_le()).unwrap_or(false),
+            Self::Rows(start, end) => FrameBound::validate_bounds(start, end),
         }
     }
 
@@ -165,33 +164,21 @@ pub enum FrameBound<T> {
     UnboundedFollowing,
 }
 
-impl<T: Ord> PartialOrd for FrameBound<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl<T> FrameBound<T> {
+    fn validate_bounds(start: &Self, end: &Self) -> Result<()> {
         use FrameBound::*;
-        match (self, other) {
-            (UnboundedPreceding, UnboundedPreceding) => None,
-            (UnboundedPreceding, _) => Some(Ordering::Less),
-            (_, UnboundedPreceding) => Some(Ordering::Greater),
-
-            (UnboundedFollowing, UnboundedFollowing) => None,
-            (UnboundedFollowing, _) => Some(Ordering::Greater),
-            (_, UnboundedFollowing) => Some(Ordering::Less),
-
-            (CurrentRow, CurrentRow) => Some(Ordering::Equal),
-
-            // it's ok to think preceding(0) < current row here
-            (Preceding(_), CurrentRow) => Some(Ordering::Less),
-            (CurrentRow, Preceding(_)) => Some(Ordering::Greater),
-
-            // it's ok to think following(0) > current row here
-            (Following(_), CurrentRow) => Some(Ordering::Greater),
-            (CurrentRow, Following(_)) => Some(Ordering::Less),
-
-            (Preceding(n1), Preceding(n2)) => n2.partial_cmp(n1),
-            (Following(n1), Following(n2)) => n1.partial_cmp(n2),
-            (Preceding(_), Following(_)) => Some(Ordering::Less),
-            (Following(_), Preceding(_)) => Some(Ordering::Greater),
+        match (start, end) {
+            (_, UnboundedPreceding) => bail!("frame end cannot be UNBOUNDED PRECEDING"),
+            (UnboundedFollowing, _) => bail!("frame start cannot be UNBOUNDED FOLLOWING"),
+            (Following(_), CurrentRow) | (Following(_), Preceding(_)) => {
+                bail!("frame starting from following row cannot have preceding rows")
+            }
+            (CurrentRow, Preceding(_)) => {
+                bail!("frame starting from current row cannot have preceding rows")
+            }
+            _ => {}
         }
+        Ok(())
     }
 }
 

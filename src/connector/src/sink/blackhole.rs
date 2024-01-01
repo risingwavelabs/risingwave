@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use async_trait::async_trait;
 
-use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
+use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkParam, SinkWriterParam,
+    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
+    SinkWriterParam,
 };
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -49,8 +50,7 @@ impl Sink for BlackHoleSink {
 
 #[async_trait]
 impl LogSinker for BlackHoleSink {
-    async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
-        log_reader.init().await?;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {

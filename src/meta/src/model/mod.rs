@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,7 +166,6 @@ macro_rules! for_all_metadata_models {
         $macro! {
             // These items should be included in a meta snapshot.
             // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersion },
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },
@@ -184,7 +183,7 @@ macro_rules! for_all_metadata_models {
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },
             { crate::hummock::compaction::CompactStatus },
-            { risingwave_pb::hummock::HummockVersionDelta },
+            { risingwave_hummock_sdk::version::HummockVersionDelta },
             { risingwave_pb::hummock::HummockPinnedSnapshot },
             { risingwave_pb::hummock::HummockPinnedVersion },
         }
@@ -470,6 +469,10 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        self.tree_ref
+    }
+
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
         self.tree_ref
     }
 

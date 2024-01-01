@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -173,6 +174,7 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
+                // FIXME(kwannoel): This may not hold for Arrangement Backfill.
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
@@ -258,7 +260,7 @@ impl ActorBuilder {
     }
 
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
         let rewritten_nodes = self.rewrite()?;
 
         // TODO: store each upstream separately
@@ -281,6 +283,7 @@ impl ActorBuilder {
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition,
+            expr_context: Some(expr_context),
         })
     }
 }
@@ -647,6 +650,7 @@ impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
     pub fn new(
+        streaming_job_id: u32,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
@@ -654,11 +658,12 @@ impl ActorGraphBuilder {
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
-        let distributions = schedule::Scheduler::new(
+        let scheduler = schedule::Scheduler::new(
+            streaming_job_id,
             cluster_info.parallel_units.values().cloned(),
             default_parallelism,
-        )
-        .schedule(&fragment_graph)?;
+        )?;
+        let distributions = scheduler.schedule(&fragment_graph)?;
 
         Ok(Self {
             distributions,
@@ -703,6 +708,7 @@ impl ActorGraphBuilder {
         self,
         id_gen_manager: IdGeneratorManagerRef,
         job: &StreamingJob,
+        expr_context: ExprContext,
     ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
@@ -741,7 +747,7 @@ impl ActorGraphBuilder {
             // and `Chain` are rewritten.
             for builder in actor_builders.into_values() {
                 let fragment_id = builder.fragment_id();
-                let actor = builder.build(job)?;
+                let actor = builder.build(job, expr_context.clone())?;
                 actors.entry(fragment_id).or_default().push(actor);
             }
 

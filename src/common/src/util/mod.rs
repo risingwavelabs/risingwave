@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,11 @@ mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
+pub mod meta_addr;
 pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
+pub mod query_log;
 pub mod resource_util;
 pub mod row_id;
 pub mod row_serde;

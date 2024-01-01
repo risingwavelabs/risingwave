@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::source::{ConnectorProperties, SourceColumnDesc, SourceColumnType};
+use risingwave_connector::source::{SourceColumnDesc, SourceColumnType};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -36,8 +36,6 @@ pub struct SourceDesc {
     pub source: ConnectorSource,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-
-    pub is_new_fs_source: bool,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -53,7 +51,7 @@ pub struct SourceDescBuilder {
     columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
-    properties: HashMap<String, String>,
+    with_properties: HashMap<String, String>,
     source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
@@ -66,7 +64,7 @@ impl SourceDescBuilder {
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
@@ -76,7 +74,7 @@ impl SourceDescBuilder {
             columns,
             metrics,
             row_id_index,
-            properties,
+            with_properties,
             source_info,
             connector_params,
             connector_message_buffer_size,
@@ -99,19 +97,13 @@ impl SourceDescBuilder {
         columns
     }
 
-    pub fn build(mut self) -> Result<SourceDesc> {
+    pub fn build(self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
-
-        let is_new_fs_source = ConnectorProperties::is_new_fs_connector_hash_map(&self.properties);
-        if is_new_fs_source {
-            // new fs source requires `connector='s3_v2' but we simply reuse S3 connector`
-            ConnectorProperties::rewrite_upstream_source_key_hash_map(&mut self.properties);
-        }
+        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let source = ConnectorSource::new(
-            self.properties,
+            self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
             psrser_config,
@@ -121,7 +113,6 @@ impl SourceDescBuilder {
             source,
             columns,
             metrics: self.metrics,
-            is_new_fs_source,
         })
     }
 
@@ -130,7 +121,7 @@ impl SourceDescBuilder {
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let parser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
             &parser_config.protocol_config,
@@ -151,7 +142,7 @@ impl SourceDescBuilder {
         let columns = self.column_catalogs_to_source_column_descs();
 
         let source = FsConnectorSource::new(
-            self.properties.clone(),
+            self.with_properties.clone(),
             columns.clone(),
             self.connector_params
                 .connector_client
@@ -181,7 +172,7 @@ pub mod test_utils {
         schema: &Schema,
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
-        properties: HashMap<String, String>,
+        with_properties: HashMap<String, String>,
         pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
@@ -204,7 +195,7 @@ pub mod test_utils {
             columns,
             metrics: Default::default(),
             row_id_index,
-            properties,
+            with_properties,
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,

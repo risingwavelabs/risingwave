@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -337,17 +337,17 @@ mod tests {
     #[test]
     fn test_chunk_to_json() -> Result<()> {
         let chunk = StreamChunk::from_pretty(
-            " i   f   {i,f}
-            + 0 0.0 {0,0.0}
-            + 1 1.0 {1,1.0}
-            + 2 2.0 {2,2.0}
-            + 3 3.0 {3,3.0}
-            + 4 4.0 {4,4.0}
-            + 5 5.0 {5,5.0}
-            + 6 6.0 {6,6.0}
-            + 7 7.0 {7,7.0}
-            + 8 8.0 {8,8.0}
-            + 9 9.0 {9,9.0}",
+            " i   f   <i,f>
+            + 0 0.0 (0,0.0)
+            + 1 1.0 (1,1.0)
+            + 2 2.0 (2,2.0)
+            + 3 3.0 (3,3.0)
+            + 4 4.0 (4,4.0)
+            + 5 5.0 (5,5.0)
+            + 6 6.0 (6,6.0)
+            + 7 7.0 (7,7.0)
+            + 8 8.0 (8,8.0)
+            + 9 9.0 (9,9.0)",
         );
 
         let schema = Schema::new(vec![

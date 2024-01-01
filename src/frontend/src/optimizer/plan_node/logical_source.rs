@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,7 +182,7 @@ impl LogicalSource {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "last_edit_time".to_string(),
-                            data_type: DataType::Timestamp,
+                            data_type: DataType::Timestamptz,
                             sub_fields: vec![],
                             type_name: "".to_string(),
                         },
@@ -544,7 +544,7 @@ impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
             bail_not_implemented!("New S3 connector for batch");
@@ -560,7 +560,7 @@ impl ToStream for LogicalSource {
         let mut plan: PlanRef;
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
+                &self.core.catalog.as_ref().unwrap().with_properties,
             )
         {
             plan_prefix = Some(self.rewrite_new_s3_plan()?);

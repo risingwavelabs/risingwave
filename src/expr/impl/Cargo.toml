@@ -24,7 +24,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-fancy-regex = "0.12"
+fancy-regex = "0.13"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4"
@@ -42,7 +42,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 tracing = "0.1"
 

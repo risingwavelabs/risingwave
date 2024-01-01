@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -167,6 +167,9 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
 
+    #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    ssl_endpoint_identification_algorithm: Option<String>,
+
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
@@ -219,9 +222,6 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
-
-    #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaPropertiesCommon,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -265,7 +265,7 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.message_max_bytes {
             c.set("message.max.bytes", v.to_string());
         }
-        if let Some(v) = self.message_max_bytes {
+        if let Some(v) = self.receive_message_max_bytes {
             c.set("receive.message.max.bytes", v.to_string());
         }
         if let Some(v) = self.client_id.as_ref() {
@@ -293,6 +293,15 @@ impl KafkaCommon {
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
+        }
+        if let Some(ssl_endpoint_identification_algorithm) =
+            self.ssl_endpoint_identification_algorithm.as_ref()
+        {
+            // accept only `none` and `http` here, let the sdk do the check
+            config.set(
+                "ssl.endpoint.identification.algorithm",
+                ssl_endpoint_identification_algorithm,
+            );
         }
 
         // SASL mechanism
@@ -337,10 +346,6 @@ impl KafkaCommon {
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
-
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
-        self.rdkafka_properties.set_client(c);
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -353,9 +358,6 @@ pub struct PulsarCommon {
 
     #[serde(rename = "auth.token")]
     pub auth_token: Option<String>,
-
-    #[serde(flatten)]
-    pub oauth: Option<PulsarOauthCommon>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -371,21 +373,21 @@ pub struct PulsarOauthCommon {
 
     #[serde(rename = "oauth.scope")]
     pub scope: Option<String>,
-
-    #[serde(flatten)]
-    pub aws_auth_props: AwsAuthProps,
 }
 
 impl PulsarCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+    pub(crate) async fn build_client(
+        &self,
+        oauth: &Option<PulsarOauthCommon>,
+        aws_auth_props: &AwsAuthProps,
+    ) -> anyhow::Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
-        if let Some(oauth) = &self.oauth {
+        if let Some(oauth) = oauth.as_ref() {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials =
-                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
+                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;

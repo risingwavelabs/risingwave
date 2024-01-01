@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -323,20 +323,6 @@ impl Num for Int256 {
 
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
         i256::from_str_radix(str, radix).map(Into::into)
-    }
-}
-
-impl From<arrow_buffer::i256> for Int256 {
-    fn from(value: arrow_buffer::i256) -> Self {
-        let buffer = value.to_be_bytes();
-        Int256::from_be_bytes(buffer)
-    }
-}
-
-impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
-    fn from(val: Int256Ref<'a>) -> Self {
-        let buffer = val.to_be_bytes();
-        arrow_buffer::i256::from_be_bytes(buffer)
     }
 }
 

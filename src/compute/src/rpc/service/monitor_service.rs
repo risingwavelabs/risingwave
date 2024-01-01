@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use risingwave_pb::monitor_service::{
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_stream::task::LocalStreamManager;
+use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
@@ -110,8 +111,8 @@ impl MonitorService for MonitorServiceImpl {
                 Ok(Response::new(ProfilingResponse { result: buf }))
             }
             Err(err) => {
-                tracing::warn!("failed to generate flamegraph: {}", err);
-                Err(Status::internal(err.to_string()))
+                tracing::warn!(error = %err.as_report(), "failed to generate flamegraph");
+                Err(err.to_status(Code::Internal, "monitor"))
             }
         }
     }

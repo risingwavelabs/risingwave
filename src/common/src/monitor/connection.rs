@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::any::type_name;
 use std::cmp::Ordering;
 use std::future::Future;
 use std::io::{Error, IoSlice};
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::{Context, Poll};
@@ -23,23 +24,23 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use http::Uri;
+use hyper::client::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
 use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
 use hyper::service::Service;
+use itertools::Itertools;
 use pin_project_lite::pin_project;
-use prometheus::Registry;
+use prometheus::{
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
+    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use crate::metrics::{
-    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
-    LabelGuardedIntGaugeVec,
-};
+use crate::metrics::LabelGuardedIntCounterVec;
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{
-    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
-};
+use crate::register_guarded_int_counter_vec_with_registry;
 
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
@@ -276,15 +277,15 @@ where
 
 #[derive(Clone)]
 pub struct ConnectionMetrics {
-    connection_count: LabelGuardedIntGaugeVec<2>,
-    connection_create_rate: LabelGuardedIntCounterVec<2>,
-    connection_err_rate: LabelGuardedIntCounterVec<2>,
+    connection_count: IntGaugeVec,
+    connection_create_rate: IntCounterVec,
+    connection_err_rate: IntCounterVec,
 
-    read_rate: LabelGuardedIntCounterVec<2>,
-    reader_count: LabelGuardedIntGaugeVec<2>,
+    read_rate: IntCounterVec,
+    reader_count: IntGaugeVec,
 
-    write_rate: LabelGuardedIntCounterVec<2>,
-    writer_count: LabelGuardedIntGaugeVec<2>,
+    write_rate: IntCounterVec,
+    writer_count: IntGaugeVec,
 
     io_err_rate: LabelGuardedIntCounterVec<4>,
 }
@@ -295,7 +296,7 @@ pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
 impl ConnectionMetrics {
     pub fn new(registry: &Registry) -> Self {
         let labels = ["connection_type", "uri"];
-        let connection_count = register_guarded_int_gauge_vec_with_registry!(
+        let connection_count = register_int_gauge_vec_with_registry!(
             "connection_count",
             "The number of current existing connection",
             &labels,
@@ -303,7 +304,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let connection_create_rate = register_guarded_int_counter_vec_with_registry!(
+        let connection_create_rate = register_int_counter_vec_with_registry!(
             "connection_create_rate",
             "Rate on creating new connection",
             &labels,
@@ -311,7 +312,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let connection_err_rate = register_guarded_int_counter_vec_with_registry!(
+        let connection_err_rate = register_int_counter_vec_with_registry!(
             "connection_err_rate",
             "Error rate on creating new connection",
             &labels,
@@ -319,7 +320,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let read_rate = register_guarded_int_counter_vec_with_registry!(
+        let read_rate = register_int_counter_vec_with_registry!(
             "connection_read_rate",
             "Read rate of a connection",
             &labels,
@@ -327,7 +328,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let reader_count = register_guarded_int_gauge_vec_with_registry!(
+        let reader_count = register_int_gauge_vec_with_registry!(
             "connection_reader_count",
             "The number of current existing reader",
             &labels,
@@ -335,7 +336,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let write_rate = register_guarded_int_counter_vec_with_registry!(
+        let write_rate = register_int_counter_vec_with_registry!(
             "connection_write_rate",
             "Write rate of a connection",
             &labels,
@@ -343,7 +344,7 @@ impl ConnectionMetrics {
         )
         .unwrap();
 
-        let writer_count = register_guarded_int_gauge_vec_with_registry!(
+        let writer_count = register_int_gauge_vec_with_registry!(
             "connection_writer_count",
             "The number of current existing writer",
             &labels,
@@ -390,6 +391,92 @@ pub fn monitor_connector<C>(
     MonitoredConnection::new(connector, MonitorNewConnectionImpl { connection_type })
 }
 
+pub struct MonitoredGaiAddrs {
+    inner: Vec<SocketAddr>,
+    pos: usize,
+}
+
+impl From<GaiAddrs> for MonitoredGaiAddrs {
+    fn from(value: GaiAddrs) -> Self {
+        Self {
+            inner: value.collect_vec(),
+            pos: 0,
+        }
+    }
+}
+
+impl Iterator for MonitoredGaiAddrs {
+    type Item = SocketAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let res = self.inner.get(self.pos).cloned();
+        self.pos += 1;
+        res
+    }
+}
+
+pub struct MonitoredGaiFuture {
+    name: Name,
+    inner: GaiFuture,
+}
+
+impl std::fmt::Debug for MonitoredGaiFuture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad("MonitoredGaiFuture")
+    }
+}
+
+impl Future for MonitoredGaiFuture {
+    type Output = Result<MonitoredGaiAddrs, Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.inner).poll(cx).map(|res| match res {
+            Ok(addrs) => {
+                let addrs: MonitoredGaiAddrs = addrs.into();
+                debug!("resolve {} => {:?}", self.name, addrs.inner);
+                Ok(addrs)
+            }
+            Err(err) => Err(err),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct MonitoredGaiResolver {
+    inner: GaiResolver,
+}
+
+impl std::fmt::Debug for MonitoredGaiResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad("MonitoredGaiResolver")
+    }
+}
+
+impl Default for MonitoredGaiResolver {
+    fn default() -> Self {
+        Self {
+            inner: GaiResolver::new(),
+        }
+    }
+}
+
+impl Service<Name> for MonitoredGaiResolver {
+    type Error = Error;
+    type Future = MonitoredGaiFuture;
+    type Response = MonitoredGaiAddrs;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Name) -> Self::Future {
+        MonitoredGaiFuture {
+            name: req.clone(),
+            inner: self.inner.call(req),
+        }
+    }
+}
+
 #[easy_ext::ext(EndpointExt)]
 impl Endpoint {
     pub async fn monitored_connect(
@@ -399,7 +486,9 @@ impl Endpoint {
     ) -> Result<Channel, tonic::transport::Error> {
         #[cfg(not(madsim))]
         {
-            let mut http = HttpConnector::new();
+            let resolver = MonitoredGaiResolver::default();
+            let mut http = HttpConnector::new_with_resolver(resolver);
+
             http.enforce_http(false);
             http.set_nodelay(config.tcp_nodelay);
             http.set_keepalive(config.keepalive_duration);
@@ -566,27 +655,27 @@ pub struct MonitorAsyncReadWriteImpl {
     connection_type: String,
 
     unreported_read_rate: u64,
-    read_rate: LabelGuardedIntCounter<2>,
-    reader_count_guard: LabelGuardedIntGauge<2>,
+    read_rate: IntCounter,
+    reader_count_guard: IntGauge,
     is_eof: bool,
 
     unreported_write_rate: u64,
-    write_rate: LabelGuardedIntCounter<2>,
-    writer_count_guard: LabelGuardedIntGauge<2>,
+    write_rate: IntCounter,
+    writer_count_guard: IntGauge,
     is_shutdown: bool,
 
-    connection_count_guard: LabelGuardedIntGauge<2>,
+    connection_count_guard: IntGauge,
 }
 
 impl MonitorAsyncReadWriteImpl {
     pub fn new(
         endpoint: String,
         connection_type: String,
-        read_rate: LabelGuardedIntCounter<2>,
-        reader_count: LabelGuardedIntGauge<2>,
-        write_rate: LabelGuardedIntCounter<2>,
-        writer_count: LabelGuardedIntGauge<2>,
-        connection_count: LabelGuardedIntGauge<2>,
+        read_rate: IntCounter,
+        reader_count: IntGauge,
+        write_rate: IntCounter,
+        writer_count: IntGauge,
+        connection_count: IntGauge,
     ) -> Self {
         reader_count.inc();
         writer_count.inc();
@@ -644,9 +733,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "read",
@@ -673,9 +764,11 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
+        // No need to store the value returned from with_label_values
+        // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "write",

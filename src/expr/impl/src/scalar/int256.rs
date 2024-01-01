@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_common::types::Int256;
 use risingwave_expr::ExprError::Parse;
 use risingwave_expr::{function, Result};
-
+use thiserror_ext::AsReport;
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 
 /// Returns the integer value of the hexadecimal string.
@@ -33,13 +33,13 @@ pub fn hex_to_int256(s: &str) -> Result<Int256> {
     Int256::from_str_hex(s).map_err(|e| {
         Parse(
             if s.len() <= MAX_AVAILABLE_HEX_STR_LEN {
-                format!("failed to parse hex '{}', {}", s, e)
+                format!("failed to parse hex '{}', {}", s, e.as_report())
             } else {
                 format!(
                     "failed to parse hex '{}...'(truncated, total {} bytes), {}",
                     &s[..MAX_AVAILABLE_HEX_STR_LEN],
                     s.len(),
-                    e
+                    e.as_report()
                 )
             }
             .into(),

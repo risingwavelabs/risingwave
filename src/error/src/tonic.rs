@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::error::Error;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tonic::metadata::{MetadataMap, MetadataValue};
 
 /// The key of the metadata field that contains the serialized error.
@@ -60,7 +61,7 @@ where
     let mut metadata = MetadataMap::new();
     metadata.insert_bin(ERROR_KEY, MetadataValue::from_bytes(&serialized));
 
-    let mut status = tonic::Status::with_metadata(code, error.to_string(), metadata);
+    let mut status = tonic::Status::with_metadata(code, error.to_report_string(), metadata);
     // Set the source of `tonic::Status`, though it's not likely to be used.
     // This is only available before serializing to the wire. That's why we need to manually embed it
     // into the `details` field.
@@ -145,6 +146,7 @@ impl std::fmt::Display for TonicStatusWrapper {
             write!(f, " to {} service", service_name)?;
         }
         write!(f, " failed: {}: ", self.0.code())?;
+        #[expect(rw::format_error)] // intentionally format the source itself
         if let Some(source) = self.source() {
             // Prefer the source chain from the `details` field.
             write!(f, "{}", source)

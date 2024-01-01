@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use await_tree::InstrumentAwait;
 use futures::{Future, StreamExt};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -92,7 +93,8 @@ pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskR
                 match item {
                     Ok(_) => tracing::error!("actor downstream subtask failed"),
                     Err(e) => tracing::error!(
-                        "after actor downstream subtask failed, another error occurs: {e}"
+                        error = %e.as_report(),
+                        "after actor downstream subtask failed, another error occurs"
                     ),
                 }
                 break;

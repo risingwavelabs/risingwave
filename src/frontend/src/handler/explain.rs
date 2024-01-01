@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use thiserror_ext::AsReport;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
@@ -62,6 +63,7 @@ async fn do_handle_explain(
                 source_watermarks,
                 append_only,
                 cdc_table_info,
+                include_column_options,
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
@@ -78,6 +80,7 @@ async fn do_handle_explain(
                     constraints,
                     source_watermarks,
                     append_only,
+                    include_column_options,
                 )
                 .await?;
                 let context = plan.ctx();
@@ -110,7 +113,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|plan| plan.sink_plan)
                     }
 
                     Statement::CreateIndex {
@@ -228,9 +231,9 @@ pub async fn handle_explain(
         if options.trace {
             // If `trace` is on, we include the error in the output with partial traces.
             blocks.push(if options.verbose {
-                format!("ERROR: {:?}", e)
+                format!("ERROR: {:?}", e.as_report())
             } else {
-                format!("ERROR: {}", e)
+                format!("ERROR: {}", e.as_report())
             });
         } else {
             // Else, directly return the error.

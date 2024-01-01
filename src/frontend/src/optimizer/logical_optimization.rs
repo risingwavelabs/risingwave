@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
+use risingwave_common::error::Result;
 
 use super::plan_node::RewriteExprsRecursive;
+use super::plan_visitor::has_logical_max_one_row;
 use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
@@ -24,7 +26,9 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
-use crate::optimizer::plan_visitor::{has_logical_apply, HasMaxOneRowApply, PlanVisitor};
+use crate::optimizer::plan_visitor::{
+    has_logical_apply, HasMaxOneRowApply, PlanCheckApplyEliminationExt, PlanVisitor,
+};
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -236,7 +240,7 @@ static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Push down filter with now into a left semijoin",
-        vec![FilterWithNowToJoinRule::create()],
+        vec![SplitNowOrRule::create(), FilterWithNowToJoinRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -436,12 +440,7 @@ impl LogicalOptimizer {
         }
         // Simple Unnesting.
         plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
+        debug_assert!(!HasMaxOneRowApply().visit(plan.clone()));
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);
@@ -456,9 +455,10 @@ impl LogicalOptimizer {
             plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
         };
         plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+
+        // Check if all `Apply`s are eliminated and the subquery is unnested.
+        plan.check_apply_elimination()?;
+
         Ok(plan)
     }
 
@@ -552,6 +552,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
+        if has_logical_max_one_row(plan.clone()) {
+            // `MaxOneRow` is currently only used for the runtime check of
+            // scalar subqueries, while it's not supported in streaming mode, so
+            // we raise a precise error here.
+            bail!("Scalar subquery might produce more than one row.");
+        }
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);

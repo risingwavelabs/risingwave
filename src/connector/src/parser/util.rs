@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use bytes::Bytes;
-use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{
     InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
@@ -63,36 +62,6 @@ pub(super) async fn download_from_http(location: &Url) -> Result<Bytes> {
     res.bytes()
         .await
         .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)).into())
-}
-
-// `results.len()` should greater that zero
-// if all results are errors, return err
-// if all ok, return ok
-// if part of them are errors, log err and return ok
-#[inline]
-pub(super) fn at_least_one_ok(mut results: Vec<Result<()>>) -> Result<()> {
-    let errors = results
-        .iter()
-        .filter_map(|r| r.as_ref().err())
-        .collect_vec();
-    let first_ok_index = results.iter().position(|r| r.is_ok());
-    let err_message = errors
-        .into_iter()
-        .map(|r| r.to_string())
-        .collect_vec()
-        .join(", ");
-
-    if let Some(first_ok_index) = first_ok_index {
-        if !err_message.is_empty() {
-            tracing::error!("failed to parse some columns: {}", err_message)
-        }
-        results.remove(first_ok_index)
-    } else {
-        Err(RwError::from(InternalError(format!(
-            "failed to parse all columns: {}",
-            err_message
-        ))))
-    }
 }
 
 // For parser that doesn't support key currently

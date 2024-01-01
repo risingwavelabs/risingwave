@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -248,14 +248,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let ordered = seq_scan_node.ordered;
 
         let epoch = source.epoch.clone();
-        let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
-            chunk_size_
-                .get_chunk_size()
-                .min(source.context.get_config().developer.chunk_size as u32)
+        let limit = seq_scan_node.limit;
+        let chunk_size = if let Some(limit) = seq_scan_node.limit {
+            (limit as u32).min(source.context.get_config().developer.chunk_size as u32)
         } else {
             source.context.get_config().developer.chunk_size as u32
         };
-        let limit = seq_scan_node.limit;
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
@@ -320,7 +318,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics
                 .executor_metrics()
                 .row_seq_scan_next_duration
-                .with_label_values(&metrics.executor_labels(&identity))
+                .with_guarded_label_values(&metrics.executor_labels(&identity))
         });
 
         if ordered {
@@ -336,7 +334,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         // the number of rows have been returned as execute result
         let mut returned = 0;
-        if let Some(limit) = &limit && returned >= *limit {
+        if let Some(limit) = &limit
+            && returned >= *limit
+        {
             return Ok(());
         }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
@@ -349,7 +349,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
                     yield chunk;
-                    if let Some(limit) = &limit && returned >= *limit {
+                    if let Some(limit) = &limit
+                        && returned >= *limit
+                    {
                         return Ok(());
                     }
                 }
@@ -358,7 +360,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         if let Some(chunk) = data_chunk_builder.consume_all() {
             returned += chunk.cardinality() as u64;
             yield chunk;
-            if let Some(limit) = &limit && returned >= *limit {
+            if let Some(limit) = &limit
+                && returned >= *limit
+            {
                 return Ok(());
             }
         }
@@ -382,7 +386,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let chunk = chunk?;
             returned += chunk.cardinality() as u64;
             yield chunk;
-            if let Some(limit) = &limit && returned >= *limit {
+            if let Some(limit) = &limit
+                && returned >= *limit
+            {
                 return Ok(());
             }
         }
@@ -469,7 +475,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
-                PrefetchOptions::new_with_exhaust_iter(limit.is_none()),
+                PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
     Query, StructField, TrimWhereField, UnaryOperator,
@@ -138,6 +139,12 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
                 list,
@@ -169,6 +176,7 @@ impl Binder {
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
             _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
@@ -411,6 +419,41 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    pub(super) fn bind_similar_to(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pat: Expr,
+        esc_text: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pat = self.bind_expr_inner(pat)?;
+
+        let esc_inputs = if let Some(et) = esc_text {
+            let esc_text = self.bind_expr_inner(*et)?;
+            vec![pat, esc_text]
+        } else {
+            vec![pat]
+        };
+
+        let esc_call =
+            FunctionCall::new_unchecked(ExprType::SimilarToEscape, esc_inputs, DataType::Varchar);
+
+        let regex_call = FunctionCall::new_unchecked(
+            ExprType::RegexpEq,
+            vec![expr, esc_call.into()],
+            DataType::Boolean,
+        );
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![regex_call.into()], DataType::Boolean)
+        } else {
+            regex_call
+        };
+
+        Ok(func_call.into())
+    }
+
     pub(super) fn bind_case(
         &mut self,
         operand: Option<Box<Expr>>,
@@ -574,6 +617,8 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
+        additional_column_type: AdditionalColumnType::Normal,
+        version: ColumnDescVersion::Pr13707,
     })
 }
 

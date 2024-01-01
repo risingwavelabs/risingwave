@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ use risingwave_pb::backup_service::BackupJobStatus;
 
 use crate::CtlContext;
 
-pub async fn backup_meta(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn backup_meta(context: &CtlContext, remarks: Option<String>) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let job_id = meta_client.backup_meta().await?;
+    let job_id = meta_client.backup_meta(remarks).await?;
     loop {
         let (job_status, message) = meta_client.get_backup_job_status(job_id).await?;
         match job_status {

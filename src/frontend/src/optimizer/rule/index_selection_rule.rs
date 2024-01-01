@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -227,7 +227,7 @@ impl IndexSelectionRule {
 
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
-            index.index_table.table_desc().into(),
+            index.index_table.clone(),
             vec![],
             logical_scan.ctx(),
             false,
@@ -236,7 +236,7 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            index.primary_table.table_desc().into(),
+            index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
             false,
@@ -335,7 +335,7 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             logical_scan.table_name().to_string(),
-            primary_table_desc.clone().into(),
+            logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
             false,
@@ -567,7 +567,7 @@ impl IndexSelectionRule {
                 .iter()
                 .map(|x| x.column_index)
                 .collect_vec(),
-            primary_table_desc.clone().into(),
+            logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
             Condition {
@@ -609,7 +609,7 @@ impl IndexSelectionRule {
                     .iter()
                     .map(|x| x.column_index)
                     .collect_vec(),
-                index.index_table.table_desc().into(),
+                index.index_table.clone(),
                 vec![],
                 ctx,
                 new_predicate,

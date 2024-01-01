@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,13 +20,20 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
-use crate::executor::StreamExecutorError;
+use crate::executor::{Barrier, StreamExecutorError};
+use crate::task::ActorId;
 
 /// A specialized Result type for streaming tasks.
 pub type StreamResult<T> = std::result::Result<T, StreamError>;
 
 /// The error type for streaming tasks.
-#[derive(thiserror::Error, Debug, thiserror_ext::Box)]
+#[derive(
+    thiserror::Error,
+    Debug,
+    thiserror_ext::Arc,
+    thiserror_ext::ContextInto,
+    thiserror_ext::Construct,
+)]
 #[thiserror_ext(newtype(name = StreamError, backtrace, report_debug))]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
@@ -50,19 +57,33 @@ pub enum ErrorKind {
         ArrayError,
     ),
 
-    #[error("Executor error: {0:?}")]
+    #[error("Executor error: {0}")]
     Executor(
         #[from]
         #[backtrace]
         StreamExecutorError,
     ),
 
-    #[error("Sink error: {0:?}")]
+    #[error("Sink error: {0}")]
     Sink(
         #[from]
         #[backtrace]
         SinkError,
     ),
+
+    #[error("Actor {actor_id} exited unexpectedly: {source}")]
+    UnexpectedExit {
+        actor_id: ActorId,
+        #[backtrace]
+        source: StreamError,
+    },
+
+    #[error("Failed to send barrier with epoch {epoch} to actor {actor_id}: {reason}", epoch = .barrier.epoch.curr)]
+    BarrierSend {
+        barrier: Barrier,
+        actor_id: ActorId,
+        reason: &'static str,
+    },
 
     #[error(transparent)]
     Internal(

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_hummock_sdk::version::HummockVersion;
 
 use crate::error::BackupResult;
 use crate::{xxhash64_checksum, xxhash64_verify, MetaSnapshotId};

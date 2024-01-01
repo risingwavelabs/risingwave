@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,8 +95,8 @@ where
                 .map(|r| serde_json::to_string(&r))
             {
                 Ok(Ok(report_json)) => report_json,
-                Ok(Err(e)) => {
-                    tracing::error!("Telemetry failed to serialize report to json, {}", e);
+                Ok(Err(_)) => {
+                    tracing::error!("Telemetry failed to serialize report to json");
                     continue;
                 }
                 Err(e) => {

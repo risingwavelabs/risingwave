@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,8 +101,11 @@ where
         RwConfig::default()
     } else {
         let config_str = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+            .with_context(|| format!("failed to open config file at `{path}`"))
+            .unwrap();
+        toml::from_str(config_str.as_str())
+            .context("failed to parse config file")
+            .unwrap()
     };
     cli_override.r#override(&mut config);
     config
@@ -389,6 +392,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub heap_profiling: HeapProfilingConfig,
 
+    // Number of max pending reset stream for grpc server.
+    #[serde(default = "default::server::grpc_max_reset_stream_size")]
+    pub grpc_max_reset_stream: u32,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -409,6 +416,10 @@ pub struct BatchConfig {
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
+
+    /// Timeout for a batch query in seconds.
+    #[serde(default = "default::batch::statement_timeout_in_sec")]
+    pub statement_timeout_in_sec: u32,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -520,7 +531,7 @@ pub struct StorageConfig {
 
     /// max memory usage for large query
     #[serde(default)]
-    pub large_query_memory_usage_mb: Option<usize>,
+    pub prefetch_buffer_capacity_mb: Option<usize>,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
@@ -1051,6 +1062,10 @@ pub mod default {
         pub fn telemetry_enabled() -> bool {
             true
         }
+
+        pub fn grpc_max_reset_stream_size() -> u32 {
+            200
+        }
     }
 
     pub mod storage {
@@ -1347,6 +1362,11 @@ pub mod default {
         pub fn enable_barrier_read() -> bool {
             false
         }
+
+        pub fn statement_timeout_in_sec() -> u32 {
+            // 1 hour
+            60 * 60
+        }
     }
 
     pub mod compaction_config {
@@ -1480,7 +1500,7 @@ pub struct StorageMemoryConfig {
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
-    pub large_query_memory_usage_mb: usize,
+    pub prefetch_buffer_capacity_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
 
@@ -1507,7 +1527,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .high_priority_ratio_in_percent
         .unwrap_or(default::storage::high_priority_ratio_in_percent());
-    let large_query_memory_usage_mb = s
+    let prefetch_buffer_capacity_mb = s
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
@@ -1519,7 +1539,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
-        large_query_memory_usage_mb,
+        prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
     }
 }

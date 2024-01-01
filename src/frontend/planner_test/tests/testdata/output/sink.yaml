@@ -65,3 +65,11 @@
       └─StreamHashAgg { group_key: [t1.v1, t1.v2], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
           └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4] }
+- id: create_emit_on_close_sink
+  sql: |
+    create table t2 (a int, b int, watermark for b as b - 4) append only;
+    explain create sink sk1 from t2 emit on window close with (connector='blackhole');
+  explain_output: |
+    StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], pk: [t2._row_id] }
+    └─StreamEowcSort { sort_column: t2.b }
+      └─StreamTableScan { table: t2, columns: [a, b, _row_id] }

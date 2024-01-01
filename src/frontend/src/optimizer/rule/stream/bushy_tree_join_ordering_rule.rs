@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use thiserror_ext::AsReport;
 
 use super::super::super::plan_node::*;
 use super::super::Rule;
@@ -36,7 +38,7 @@ impl Rule for BushyTreeJoinOrderingRule {
             match join.as_bushy_tree_join() {
                 Ok(plan) => Some(plan),
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!("{}", e.as_report());
                     None
                 }
             }

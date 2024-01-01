@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::PbAggNodeVersion;
@@ -22,7 +21,6 @@ use risingwave_storage::StateStore;
 use super::aggregation::AggStateStorage;
 use super::{Executor, ExecutorInfo};
 use crate::common::table::state_table::StateTable;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::ActorContextRef;
 use crate::task::AtomicU64Ref;
 
@@ -45,7 +43,7 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub intermediate_state_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
-    pub metrics: Arc<StreamingMetrics>,
+
     // extra
     pub extra: E,
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::anyhow;
 use apache_avro::schema::{DecimalSchema, RecordSchema};
@@ -24,6 +25,7 @@ use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::Result as RwResult;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -56,7 +58,13 @@ impl<'a> AvroParseOptions<'a> {
         self.schema
             .map(|schema| avro_extract_field_schema(schema, key))
             .transpose()
-            .map_err(|_err| tracing::error!("extract sub-schema"))
+            .map_err(|_err| {
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(suppressed_count, "extract sub-schema");
+                }
+            })
             .ok()
             .flatten()
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -327,7 +327,7 @@ pub enum ServiceConfig {
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Tempo(TempoConfig),
-    OpenDal(OpendalConfig),
+    Opendal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     Pubsub(PubsubConfig),
@@ -354,7 +354,7 @@ impl ServiceConfig {
             Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
-            Self::OpenDal(c) => &c.id,
+            Self::Opendal(c) => &c.id,
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ impl Rule for IndexDeltaJoinRule {
                     table_scan
                         .to_index_scan(
                             index.index_table.name.as_str(),
-                            index.index_table.table_desc().into(),
+                            index.index_table.clone(),
                             p2s_mapping,
                             index.function_mapping(),
                             stream_scan_type,

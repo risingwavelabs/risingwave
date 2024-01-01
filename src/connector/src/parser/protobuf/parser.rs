@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -213,6 +213,8 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
             })
         } else {
             *index += 1;
@@ -220,6 +222,8 @@ impl ProtobufParserConfig {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
+                additional_column_type: AdditionalColumnType::Normal as i32,
+                version: ColumnDescVersion::Pr13707 as i32,
                 ..Default::default()
             })
         }

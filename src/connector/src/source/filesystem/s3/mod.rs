@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-mod enumerator;
+pub mod enumerator;
+
+use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
@@ -20,12 +22,13 @@ pub use source::S3FileReader;
 
 use crate::common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
-use crate::source::SourceProperties;
+use crate::source::{SourceProperties, UnknownFields};
 
 pub const S3_CONNECTOR: &str = "s3";
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct S3Properties {
+/// These are supported by both `s3` and `s3_v2` (opendal) sources.
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+pub struct S3PropertiesCommon {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
     #[serde(rename = "s3.bucket_name")]
@@ -40,6 +43,24 @@ pub struct S3Properties {
     pub endpoint_url: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+pub struct S3Properties {
+    #[serde(flatten)]
+    pub common: S3PropertiesCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl From<S3PropertiesCommon> for S3Properties {
+    fn from(common: S3PropertiesCommon) -> Self {
+        Self {
+            common,
+            unknown_fields: HashMap::new(),
+        }
+    }
+}
+
 impl SourceProperties for S3Properties {
     type Split = FsSplit;
     type SplitEnumerator = S3SplitEnumerator;
@@ -48,8 +69,15 @@ impl SourceProperties for S3Properties {
     const SOURCE_NAME: &'static str = S3_CONNECTOR;
 }
 
+impl UnknownFields for S3Properties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
 impl From<&S3Properties> for AwsAuthProps {
     fn from(props: &S3Properties) -> Self {
+        let props = &props.common;
         Self {
             region: Some(props.region_name.clone()),
             endpoint: props.endpoint_url.clone(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -754,7 +754,7 @@ pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
 mod expr_visitable;
-pub use expr_rewritable::*;
+
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -783,6 +783,7 @@ mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
+mod batch_max_one_row;
 mod batch_nested_loop_join;
 mod batch_over_window;
 mod batch_project;
@@ -811,6 +812,7 @@ mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_limit;
+mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
 mod logical_over_window;
@@ -872,6 +874,7 @@ pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
+pub use batch_max_one_row::BatchMaxOneRow;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
@@ -900,6 +903,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
@@ -998,6 +1002,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1024,6 +1029,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1092,6 +1098,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MaxOneRow }
         }
     };
 }
@@ -1127,6 +1134,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, GroupTopN }
             , { Batch, Source }
             , { Batch, OverWindow }
+            , { Batch, MaxOneRow }
         }
     };
 }

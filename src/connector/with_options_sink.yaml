@@ -66,6 +66,26 @@ ClickHouseConfig:
   - name: r#type
     field_type: String
     required: true
+DeltaLakeConfig:
+  fields:
+  - name: s3.access.key
+    field_type: String
+    required: false
+  - name: s3.secret.key
+    field_type: String
+    required: false
+  - name: location
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: false
+  - name: s3.endpoint
+    field_type: String
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 DorisConfig:
   fields:
   - name: doris.url
@@ -150,6 +170,9 @@ KafkaConfig:
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
+    required: false
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -202,6 +225,18 @@ KafkaConfig:
     field_type: String
     comments: Configurations for SASL/OAUTHBEARER.
     required: false
+  - name: properties.retry.max
+    field_type: u32
+    required: false
+    default: '3'
+  - name: properties.retry.interval
+    field_type: Duration
+    required: false
+    default: 'Duration :: from_millis (100)'
+  - name: primary_key
+    field_type: String
+    comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
+    required: false
   - name: properties.message.max.bytes
     field_type: usize
     comments: Maximum Kafka protocol request message size. Due to differing framing overhead between  protocol versions the producer is unable to reliably enforce a strict max message limit at  produce time and may exceed the maximum size by one message in protocol ProduceRequests,  the broker will enforce the the topic's max.message.bytes limit
@@ -216,18 +251,6 @@ KafkaConfig:
   - name: properties.client.id
     field_type: String
     comments: Client identifier
-    required: false
-  - name: properties.retry.max
-    field_type: u32
-    required: false
-    default: '3'
-  - name: properties.retry.interval
-    field_type: Duration
-    required: false
-    default: 'Duration :: from_millis (100)'
-  - name: primary_key
-    field_type: String
-    comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
     required: false
   - name: properties.allow.auto.create.topics
     field_type: bool

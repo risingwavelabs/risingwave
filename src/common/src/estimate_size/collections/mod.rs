@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,11 @@ mod heap;
 pub mod lru;
 pub use heap::*;
 pub mod vecdeque;
-pub use vecdeque::EstimatedVecDeque as VecDeque;
+pub use vecdeque::EstimatedVecDeque;
 pub mod hashmap;
-pub use hashmap::EstimatedHashMap as HashMap;
+pub use hashmap::EstimatedHashMap;
+pub mod btreemap;
+pub use btreemap::EstimatedBTreeMap;
 
 mod private {
     use super::*;

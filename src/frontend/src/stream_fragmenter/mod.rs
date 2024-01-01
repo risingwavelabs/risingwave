@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ pub struct BuildFragmentGraphState {
     next_table_id: u32,
 
     /// rewrite will produce new operators, and we need to track next operator id
-    #[educe(Default(expression = "u32::MAX - 1"))]
+    #[educe(Default(expression = u32::MAX - 1))]
     next_operator_id: u32,
 
     /// dependent streaming job ids.

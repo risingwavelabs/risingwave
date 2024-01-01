@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 use std::str::FromStr;
 
+use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 #[rustfmt::skip]
@@ -157,7 +158,7 @@ pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
-        tonic::Status::new(tonic::Code::Internal, e.to_string())
+        e.to_status_unnamed(tonic::Code::Internal)
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
@@ -231,8 +231,8 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .map(|IndexAndExpr { index: i, expr: e }| {
                     Ok((
                         i as usize,
-                        build_from_prost(&e.ok_or_else(|| anyhow!("expression is None"))?)
-                            .map_err(|e| anyhow!("failed to build expression: {}", e))?,
+                        build_from_prost(&e.context("expression is None")?)
+                            .context("failed to build expression")?,
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;

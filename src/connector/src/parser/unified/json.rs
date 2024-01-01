@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use base64::Engine;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
@@ -464,7 +466,10 @@ impl JsonParseOptions {
                                     path: struct_type_info.to_string(), // TODO: this is not good, we should maintain a path stack
                                 };
                                 // TODO: is it possible to unify the logging with the one in `do_action`?
-                                tracing::warn!(%error, "undefined nested field, padding with `NULL`");
+                                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =  LazyLock::new(LogSuppresser::default);
+                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                    tracing::warn!(%error, suppressed_count, "undefined nested field, padding with `NULL`");
+                                }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });
                         self.parse(field_value, Some(field_type))

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,14 +28,17 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalGcs, OpendalS3, OpendalSource,
+};
+use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext,
-    SourceEnumeratorContext, SplitEnumerator, SplitReader,
+    ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
 };
 use tokio::time;
-use tokio::time::{Duration, MissedTickBehavior};
+use tokio::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct ConnectorSource {
@@ -61,8 +64,8 @@ impl ConnectorSource {
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
-        let config =
-            ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
+        let config = ConnectorProperties::extract(properties, false)
+            .map_err(|e| ConnectorError(e.into()))?;
 
         Ok(Self {
             config,
@@ -87,23 +90,21 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn get_source_list(&self) -> Result<BoxTryStream<FsPage>> {
+    pub fn get_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
-        let lister = match config {
-            ConnectorProperties::S3(prop) => {
-                S3SplitEnumerator::new(*prop, Arc::new(SourceEnumeratorContext::default())).await?
+        match config {
+            ConnectorProperties::Gcs(prop) => {
+                let lister: OpendalEnumerator<OpendalGcs> =
+                    OpendalEnumerator::new_gcs_source(*prop)?;
+                Ok(build_opendal_fs_list_stream(lister))
+            }
+            ConnectorProperties::OpendalS3(prop) => {
+                let lister: OpendalEnumerator<OpendalS3> =
+                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                Ok(build_opendal_fs_list_stream(lister))
             }
             other => bail!("Unsupported source: {:?}", other),
-        };
-
-        Ok(build_fs_list_stream(
-            FsListCtrlContext {
-                interval: Duration::from_secs(60),
-                last_tick: None,
-                filter_ctx: FsFilterCtrlCtx,
-            },
-            lister,
-        ))
+        }
     }
 
     pub async fn stream_reader(
@@ -137,14 +138,12 @@ impl ConnectorSource {
         };
 
         let support_multiple_splits = config.support_multiple_splits();
-
         dispatch_source_prop!(config, prop, {
             let readers = if support_multiple_splits {
                 tracing::debug!(
                     "spawning connector split reader for multiple splits {:?}",
                     splits
                 );
-
                 let reader =
                     create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
                         .await?;
@@ -171,34 +170,29 @@ impl ConnectorSource {
     }
 }
 
-#[try_stream(boxed, ok = FsPage, error = RwError)]
-async fn build_fs_list_stream(
-    mut ctrl_ctx: FsListCtrlContext,
-    mut list_op: impl FsListInner + Send + 'static,
-) {
-    let mut interval = time::interval(ctrl_ctx.interval);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+#[try_stream(boxed, ok = FsPageItem, error = RwError)]
+async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+    let matcher = lister.get_matcher();
+    let mut object_metadata_iter = lister.list().await?;
 
-    // controlling whether request for next page
-    fn page_ctrl_logic(_ctx: &FsListCtrlContext, has_finished: bool, _page_num: usize) -> bool {
-        !has_finished
-    }
-
-    loop {
-        let mut page_num = 0;
-        ctrl_ctx.last_tick = Some(time::Instant::now());
-        'inner: loop {
-            let (fs_page, has_finished) = list_op.get_next_page::<FsPageItem>().await?;
-            let matched_items = fs_page
-                .into_iter()
-                .filter(|item| list_op.filter_policy(&ctrl_ctx.filter_ctx, page_num, item))
-                .collect_vec();
-            yield matched_items;
-            page_num += 1;
-            if !page_ctrl_logic(&ctrl_ctx, has_finished, page_num) {
-                break 'inner;
+    while let Some(list_res) = object_metadata_iter.next().await {
+        match list_res {
+            Ok(res) => {
+                if matcher
+                    .as_ref()
+                    .map(|m| m.matches(&res.name))
+                    .unwrap_or(true)
+                {
+                    yield res
+                } else {
+                    // Currrntly due to the lack of prefix list, we just skip the unmatched files.
+                    continue;
+                }
+            }
+            Err(err) => {
+                tracing::error!("list object fail, err {}", err);
+                return Err(err.into());
             }
         }
-        interval.tick().await;
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -142,6 +142,7 @@ impl<S: StateStore> SortExecutor<S> {
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
                     vars.buffer_changed = true;
+                    this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     if vars.buffer_changed {

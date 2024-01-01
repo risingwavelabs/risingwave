@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::future::try_join_all;
+use futures::stream::FuturesUnordered;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
@@ -41,7 +43,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan};
-use crate::stream::{build_actor_connector_splits, RescheduleOptions};
+use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
 impl GlobalBarrierManager {
@@ -101,7 +103,7 @@ impl GlobalBarrierManager {
 
         // clean up source connector dirty changes.
         self.source_manager
-            .drop_source_change(&to_drop_table_fragments)
+            .drop_source_fragments(&to_drop_table_fragments)
             .await;
 
         Ok(())
@@ -413,38 +415,39 @@ impl GlobalBarrierManager {
             return Ok(false);
         }
 
-        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
-
-        let expired_worker_parallel_units: HashMap<_, _> = all_worker_parallel_units
-            .into_iter()
-            .filter(|(worker, _)| expired_workers.contains(worker))
-            .collect();
-
-        let fragment_worker_changes = {
+        let table_parallelisms = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
-            let mut policy = HashMap::new();
-            for table_fragments in guard.table_fragments().values() {
-                for fragment_id in table_fragments.fragment_ids() {
-                    policy.insert(
-                        fragment_id,
-                        PbWorkerChanges {
-                            exclude_worker_ids: expired_workers.iter().cloned().collect(),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-            policy
+
+            guard
+                .table_fragments()
+                .iter()
+                .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
+                .collect()
         };
+
+        let workers = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
 
         let plan = self
             .scale_controller
-            .generate_stable_resize_plan(
-                StableResizePolicy {
-                    fragment_worker_changes,
-                },
-                Some(expired_worker_parallel_units),
-            )
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms,
+            })
             .await?;
 
         let (reschedule_fragment, applied_reschedules) = self
@@ -454,12 +457,13 @@ impl GlobalBarrierManager {
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: true,
                 },
+                None,
             )
             .await?;
 
         if let Err(e) = self
             .scale_controller
-            .post_apply_reschedule(&reschedule_fragment)
+            .post_apply_reschedule(&reschedule_fragment, &Default::default())
             .await
         {
             tracing::error!(
@@ -592,40 +596,51 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        let mut actor_infos = vec![];
-        for (node_id, actors) in &info.actor_map {
-            let host = info
-                .node_map
-                .get(node_id)
-                .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
-                .host
-                .clone();
-            actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
-                actor_id,
-                host: host.clone(),
-            }));
-        }
+        let actor_infos: Vec<_> = info
+            .actor_map
+            .iter()
+            .map(|(node_id, actors)| {
+                let host = info
+                    .node_map
+                    .get(node_id)
+                    .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
+                    .host
+                    .clone();
+                Ok(actors.iter().map(move |&actor_id| ActorInfo {
+                    actor_id,
+                    host: host.clone(),
+                })) as MetaResult<_>
+            })
+            .flatten_ok()
+            .try_collect()?;
 
         let mut node_actors = self.fragment_manager.all_node_actors(false).await;
-        for (node_id, actors) in &info.actor_map {
+
+        info.actor_map.iter().map(|(node_id, actors)| {
+            let new_actors = node_actors.remove(node_id).unwrap_or_default();
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
+            let actor_infos = actor_infos.clone();
 
-            client
-                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos.clone(),
-                })
-                .await?;
+            async move {
+                let client = self.env.stream_client_pool().get(node).await?;
+                client
+                    .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
+                        info: actor_infos,
+                    })
+                    .await?;
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: node_actors.remove(node_id).unwrap_or_default(),
-                })
-                .await?;
-        }
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+                client
+                    .update_actors(UpdateActorsRequest {
+                        request_id,
+                        actors: new_actors,
+                    })
+                    .await?;
+
+                Ok(()) as MetaResult<()>
+            }
+        }).collect::<FuturesUnordered<_>>().try_collect::<()>().await?;
 
         Ok(())
     }
@@ -637,19 +652,27 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        for (node_id, actors) in &info.actor_map {
-            let node = info.node_map.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
+        info.actor_map
+            .iter()
+            .map(|(node_id, actors)| async move {
+                let actors = actors.clone();
+                let node = info.node_map.get(node_id).unwrap();
+                let client = self.env.stream_client_pool().get(node).await?;
 
-            let request_id = Uuid::new_v4().to_string();
-            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-            client
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: actors.to_owned(),
-                })
-                .await?;
-        }
+                let request_id = Uuid::new_v4().to_string();
+                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+                client
+                    .build_actors(BuildActorsRequest {
+                        request_id,
+                        actor_id: actors,
+                    })
+                    .await?;
+
+                Ok(()) as MetaResult<_>
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_collect::<()>()
+            .await?;
 
         Ok(())
     }

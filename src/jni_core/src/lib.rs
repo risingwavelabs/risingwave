@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
-#![feature(result_option_inspect)]
 #![feature(try_blocks)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
 mod macros;
+mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
@@ -54,8 +54,10 @@ use risingwave_pb::connector_service::{
 use risingwave_pb::data::Op;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing_slf4j::*;
 
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
@@ -214,7 +216,7 @@ where
                     // the exception is already thrown. No need to throw again
                 }
                 _ => {
-                    env.throw(format!("get error while processing: {:?}", e))
+                    env.throw(format!("get error while processing: {:?}", e.as_report()))
                         .expect("should be able to throw");
                 }
             }
@@ -853,7 +855,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = %e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -936,7 +938,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -958,7 +960,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
         match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }
@@ -1001,7 +1003,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::info!("send error.  {:?}", e);
+                tracing::info!(error = ?e.as_report(), "send error");
                 Ok(JNI_FALSE)
             }
         }

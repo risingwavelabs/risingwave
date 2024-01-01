@@ -1,24 +1,22 @@
 # CDC source basic test
 
-# enable cdc backfill in ci
 statement ok
-set cdc_backfill='true';
+create source mysql_mydb with (
+    connector = 'mysql-cdc',
+    hostname = 'mysql',
+    port = '3306',
+    username = 'root',
+    password = '123456',
+    database.name = 'my@db',
+    server.id = '2'
+);
 
 statement ok
 create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) with (
- connector = 'mysql-cdc',
- hostname = 'mysql',
- port = '3306',
- username = 'root',
- password = '123456',
- database.name = 'my@db',
- table.name = 'products',
- server.id = '5085'
-);
+) FROM mysql_mydb TABLE 'my@db.products';
 
 
 statement ok
@@ -36,6 +34,9 @@ CREATE SINK s1 AS select * from products WITH (
     s3.secret.key = 'hummockadmin',
     primary_key = 'id'
 );
+
+statement ok
+flush;
 
 query I
 select count(*) from products;

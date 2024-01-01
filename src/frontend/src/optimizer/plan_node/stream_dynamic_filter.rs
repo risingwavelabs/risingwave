@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,14 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::generic::{DynamicFilter, GenericPlanRef};
 use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
-use super::{generic, ExprRewritable};
+use super::utils::{
+    childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
+};
+use super::{generic, ExprRewritable, PlanTreeNodeUnary};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
+use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -33,18 +36,44 @@ pub struct StreamDynamicFilter {
     pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
+    condition_always_relax: bool,
 }
 
 impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
-        // TODO: derive from input
+        // TODO(st1page): here we just check if RHS
+        // is a `StreamNow`. It will be generalized to more cases
+        // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
+        let right_monotonically_increasing = {
+            if let Some(e) = core.right().as_stream_exchange()
+                && *e.distribution() == Distribution::Broadcast
+            {
+                if let Some(proj) = e.input().as_stream_project() {
+                    proj.input().as_stream_now().is_some()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        let condition_always_relax = right_monotonically_increasing
+            && matches!(
+                core.comparator(),
+                ExprType::LessThan | ExprType::LessThanOrEqual
+            );
+
+        let append_only = if condition_always_relax {
+            core.left().append_only()
+        } else {
+            false
+        };
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            false, /* we can have a new abstraction for append only and monotonically increasing
-                    * in the future */
+            append_only,
             false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
@@ -53,6 +82,7 @@ impl StreamDynamicFilter {
             base,
             core,
             cleaned_by_watermark,
+            condition_always_relax,
         }
     }
 
@@ -95,7 +125,19 @@ impl Distill for StreamDynamicFilter {
                 Pretty::display(&self.cleaned_by_watermark),
             ));
         }
-        childless_record("StreamDynamicFilter", vec)
+        if self.condition_always_relax {
+            vec.push((
+                "condition_always_relax",
+                Pretty::display(&self.condition_always_relax),
+            ));
+        }
+        childless_record(
+            plan_node_name!(
+                "StreamDynamicFilter",
+                { "append_only", self.append_only() },
+            ),
+            vec,
+        )
     }
 }
 
@@ -136,6 +178,7 @@ impl StreamNode for StreamDynamicFilter {
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
+            condition_always_relax: self.condition_always_relax,
         })
     }
 }

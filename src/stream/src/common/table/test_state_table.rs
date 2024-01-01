@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,13 +22,17 @@ use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Scalar, Timestamptz};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
+use crate::common::table::state_table::{
+    ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
+};
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
 
 #[tokio::test]
@@ -2024,4 +2028,186 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let res = iter.next().await;
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_replicated_state_table_replication() {
+    type TestReplicatedStateTable = ReplicatedStateTable<HummockStorage, BasicSerde>;
+    // Define the base table to replicate
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let order_types = vec![OrderType::ascending()];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize];
+    let read_prefix_len_hint = 1;
+    let table = gen_prost_table(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table(table.clone()).await;
+
+    // Create the base state table
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    // Create a replicated state table
+    let output_column_ids = vec![ColumnId::from(2), ColumnId::from(0)];
+    let mut replicated_state_table =
+        TestReplicatedStateTable::from_table_catalog_with_output_column_ids(
+            &table,
+            test_env.storage.clone(),
+            None,
+            output_column_ids,
+        )
+        .await;
+
+    let mut epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+    replicated_state_table.init_epoch(epoch).await.unwrap();
+
+    // Insert first record into base state table
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    replicated_state_table.commit(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    {
+        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+            std::ops::Bound::Included(OwnedRow::new(vec![Some(1_i32.into())])),
+            std::ops::Bound::Included(OwnedRow::new(vec![Some(2_i32.into())])),
+        );
+        let iter = state_table
+            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+        let replicated_iter = replicated_state_table
+            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+        pin_mut!(iter);
+        pin_mut!(replicated_iter);
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+            res.as_ref()
+        );
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(111_i32.into()), Some(1_i32.into()),]),
+            res.as_ref()
+        );
+    }
+
+    // Test replication
+    let state_table_chunk = [(
+        Op::Insert,
+        OwnedRow::new(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+    )];
+    let state_table_chunk = StreamChunk::from_rows(
+        &state_table_chunk,
+        &[DataType::Int32, DataType::Int32, DataType::Int32],
+    );
+    state_table.write_chunk(state_table_chunk);
+    let replicate_chunk = [(
+        Op::Insert,
+        OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into())]),
+    )];
+    let replicate_chunk =
+        StreamChunk::from_rows(&replicate_chunk, &[DataType::Int32, DataType::Int32]);
+    replicated_state_table.write_chunk(replicate_chunk);
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    replicated_state_table.commit(epoch).await.unwrap();
+
+    {
+        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+            std::ops::Bound::Excluded(OwnedRow::new(vec![Some(1_i32.into())])),
+            std::ops::Bound::Included(OwnedRow::new(vec![Some(2_i32.into())])),
+        );
+
+        let iter = state_table
+            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+
+        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+            std::ops::Bound::Excluded(OwnedRow::new(vec![Some(1_i32.into())])),
+            std::ops::Bound::Unbounded,
+        );
+        let replicated_iter = replicated_state_table
+            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+        pin_mut!(iter);
+        pin_mut!(replicated_iter);
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+            res.as_ref()
+        );
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into()),]),
+            res.as_ref()
+        );
+    }
+
+    // Test that after commit, the local state store can
+    // merge the replicated records with the local records
+    test_env.commit_epoch(epoch.prev).await;
+
+    {
+        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
+            (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        let replicated_iter = replicated_state_table
+            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .await
+            .unwrap();
+        pin_mut!(replicated_iter);
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(111_i32.into()), Some(1_i32.into()),]),
+            res.as_ref()
+        );
+
+        let res = replicated_iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into()),]),
+            res.as_ref()
+        );
+    }
 }

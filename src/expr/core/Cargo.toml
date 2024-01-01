@@ -45,8 +45,9 @@ risingwave_udf = { workspace = true }
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
+    "rt-multi-thread",
     "macros",
 ] }
 tracing = "0.1"
@@ -56,10 +57,6 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 expect-test = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt-multi-thread",
-    "macros",
-] }
 
 [lints]
 workspace = true

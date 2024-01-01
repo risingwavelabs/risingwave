@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ use risingwave_hummock_sdk::key::{next_key, TableKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
-use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
+use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
@@ -183,8 +183,8 @@ impl LogStoreRowSerde {
         self.vnodes = vnodes;
     }
 
-    pub(crate) fn vnodes(&self) -> &Bitmap {
-        self.vnodes.as_ref()
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {
@@ -247,11 +247,10 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
-        serialize_pk_with_vnode(
+    pub(crate) fn serialize_epoch(&self, epoch: u64) -> Bytes {
+        serialize_pk(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
-            vnode,
         )
     }
 
@@ -273,14 +272,16 @@ impl LogStoreRowSerde {
 
     pub(crate) fn serialize_truncation_offset_watermark(
         &self,
-        vnode: VirtualNode,
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
         let (epoch, seq_id) = offset;
-        let curr_offset = self.serialize_log_store_pk(vnode, epoch, seq_id);
-        let ret = Bytes::from(next_key(&curr_offset));
-        assert!(!ret.is_empty());
-        ret
+        Bytes::from(next_key(&serialize_pk(
+            [
+                Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
+                seq_id.map(ScalarImpl::Int32),
+            ],
+            &self.pk_serde,
+        )))
     }
 }
 
@@ -782,9 +783,7 @@ mod tests {
         fn remove_vnode_prefix(key: &Bytes) -> Bytes {
             key.slice(VirtualNode::SIZE..)
         }
-        let delete_range_right1 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right1 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
@@ -821,9 +820,7 @@ mod tests {
         seq_id = 1;
         epoch += 1;
 
-        let delete_range_right2 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);

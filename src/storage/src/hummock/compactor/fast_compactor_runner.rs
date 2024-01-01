@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,12 +29,13 @@ use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, L
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
@@ -46,7 +47,7 @@ use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct BlockStreamIterator {
     /// The downloading stream.
-    block_stream: BlockStream,
+    block_stream: BlockDataStream,
 
     next_block_index: usize,
 
@@ -69,11 +70,11 @@ impl BlockStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable: TableHolder,
-        block_stream: BlockStream,
+        block_stream: BlockDataStream,
         task_progress: Arc<TaskProgress>,
     ) -> Self {
         Self {
@@ -85,16 +86,13 @@ impl BlockStreamIterator {
         }
     }
 
-    pub fn is_first_block(&self) -> bool {
-        self.next_block_index == 0
-    }
-
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let (data, meta) = match self.block_stream.next().await? {
+        let (data, _) = match self.block_stream.next_block_impl().await? {
             None => return Ok(None),
             Some(ret) => ret,
         };
+        let meta = self.sstable.value().meta.block_metas[self.next_block_index].clone();
         let filter_block = self
             .sstable
             .value()
@@ -216,19 +214,6 @@ impl ConcatSstableIterator {
         self.sstable_iter.as_mut().unwrap()
     }
 
-    pub fn estimate_key_count(&self, uncompressed_block_size: u64) -> (u64, u64) {
-        let total_size = self.sstables[self.cur_idx].uncompressed_file_size;
-        if total_size == 0 {
-            return (0, 0);
-        }
-        // use ratio to avoid multiply overflow
-        let ratio = uncompressed_block_size * 10000 / total_size;
-        (
-            self.sstables[self.cur_idx].stale_key_count * ratio / 10000,
-            self.sstables[self.cur_idx].total_key_count * ratio / 10000,
-        )
-    }
-
     pub async fn init_block_iter(&mut self) -> HummockResult<()> {
         if let Some(sstable) = self.sstable_iter.as_mut() {
             if sstable.iter.is_some() {
@@ -262,7 +247,7 @@ impl ConcatSstableIterator {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let block_stream = self
                 .sstable_store
-                .get_stream_by_position(sstable.value().id, 0, &sstable.value().meta.block_metas)
+                .get_stream_for_blocks(sstable.value().id, &sstable.value().meta.block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
@@ -481,7 +466,10 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                if self.executor.builder.need_flush() {
+                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
+                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
+                    && self.executor.last_key_is_delete;
+                if self.executor.builder.need_flush() || need_deleted {
                     let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;

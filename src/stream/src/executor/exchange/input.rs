@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@ use anyhow::Context as _;
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
-use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::task_service::{permits, GetStreamResponse};
+use risingwave_rpc_client::error::TonicStatusWrapper;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 
 use super::permit::Receiver;
 use crate::error::StreamResult;
@@ -189,16 +190,15 @@ impl RemoteInput {
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
-                    match msg_res {
-                        Ok(msg) => yield msg,
-                        Err(e) => bail!("RemoteInput decode message error: {}", e),
-                    }
+                    let msg = msg_res.context("RemoteInput decode message error")?;
+                    yield msg;
                 }
                 Err(e) => {
+                    // TODO(error-handling): maintain the source chain
                     return Err(StreamExecutorError::channel_closed(format!(
                         "RemoteInput tonic error: {}",
-                        e
-                    )))
+                        TonicStatusWrapper::from(e).as_report()
+                    )));
                 }
             }
         }

@@ -1,4 +1,4 @@
-# Copyright 2023 RisingWave Labs
+# Copyright 2024 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -141,13 +141,6 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
         epoch_list = []
         # construct request
         for payload in payload_input:
-            request_list.append(
-                connector_service_pb2.SinkWriterStreamRequest(
-                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
-                        epoch=epoch
-                    )
-                )
-            )
             request_list.append(
                 connector_service_pb2.SinkWriterStreamRequest(
                     write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(

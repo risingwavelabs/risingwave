@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
@@ -22,9 +23,7 @@ use risingwave_meta_model_v2::{
     hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
     HummockVersionId, WorkerId,
 };
-use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionDelta,
-};
+use risingwave_pb::hummock::{CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
@@ -192,7 +191,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            full_version_delta: Set(FullVersionDelta(self.clone())),
+            full_version_delta: Set(FullVersionDelta(self.to_protobuf())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(
