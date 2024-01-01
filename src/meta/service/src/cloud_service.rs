@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -133,7 +133,7 @@ impl CloudService for CloudServiceImpl {
         }
         // try fetch kafka metadata, return error message on failure
         let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
-        let props = ConnectorProperties::extract(source_cfg);
+        let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

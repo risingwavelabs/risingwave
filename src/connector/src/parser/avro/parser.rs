@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,12 +60,9 @@ impl AvroAccessBuilder {
         } = config;
         Ok(Self {
             schema: match encoding_type {
-                EncodingType::Key => key_schema.map_or(
-                    Err(RwError::from(ProtocolError(
-                        "Avro with empty key schema".to_string(),
-                    ))),
-                    Ok,
-                )?,
+                EncodingType::Key => key_schema.ok_or(RwError::from(ProtocolError(
+                    "Avro with empty key schema".to_string(),
+                )))?,
                 EncodingType::Value => schema,
             },
             schema_resolver,

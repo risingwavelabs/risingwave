@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,9 @@ use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, Funct
 /// It also mutates the `inputs` by adding necessary casts.
 pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataType> {
     // special cases
-    if let FuncName::Scalar(func_type) = func_name && let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+    if let FuncName::Scalar(func_type) = func_name
+        && let Some(res) = infer_type_for_special(func_type, inputs).transpose()
+    {
         return res;
     }
     if let FuncName::Aggregate(AggKind::Grouping) = func_name {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,6 @@ public class TracingSlf4jImpl {
     public static final int TRACE = 4;
 
     public static void event(String name, int level, String message) {
-        Binding.tracingSlf4jEvent(name, level, message);
+        Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
     }
 }

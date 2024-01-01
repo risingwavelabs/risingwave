@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,9 +136,15 @@ impl From<TracedTableOption> for TableOption {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+pub enum TracedOpConsistencyLevel {
+    Inconsistent,
+    ConsistentOldValue,
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
-    pub is_consistent_op: bool,
+    pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
 }
@@ -148,7 +154,7 @@ impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
         Self {
             table_id: TracedTableId { table_id },
-            is_consistent_op: true,
+            op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
             table_option: TracedTableOption {
                 retention_seconds: None,
             },
@@ -219,4 +225,7 @@ pub struct TracedInitOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
-pub struct TracedSealCurrentEpochOptions {}
+pub struct TracedSealCurrentEpochOptions {
+    // The watermark is serialized into protobuf
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
+}

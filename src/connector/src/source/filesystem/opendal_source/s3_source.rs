@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ use opendal::Operator;
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::source::filesystem::s3::enumerator::get_prefix;
-use crate::source::filesystem::S3Properties;
+use crate::source::filesystem::s3::S3PropertiesCommon;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal s3 source.
     pub fn new_s3_source(
-        s3_properties: S3Properties,
+        s3_properties: S3PropertiesCommon,
         assume_role: Option<String>,
     ) -> anyhow::Result<Self> {
         // Create s3 builder.

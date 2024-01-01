@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1381,7 +1381,7 @@ async fn test_replicated_local_hummock_storage() {
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
             TEST_TABLE_ID,
-            false,
+            OpConsistencyLevel::Inconsistent,
             TableOption {
                 retention_seconds: None,
             },

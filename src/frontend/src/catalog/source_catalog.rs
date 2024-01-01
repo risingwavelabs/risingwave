@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@ pub struct SourceCatalog {
     pub created_at_epoch: Option<Epoch>,
     pub initialized_at_epoch: Option<Epoch>,
     pub version: SourceVersionId,
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl SourceCatalog {
@@ -72,6 +74,8 @@ impl SourceCatalog {
                 .associated_table_id
                 .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
             version: self.version,
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -127,6 +131,8 @@ impl From<&PbSource> for SourceCatalog {
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             version,
+            created_at_cluster_version: prost.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
         }
     }
 }

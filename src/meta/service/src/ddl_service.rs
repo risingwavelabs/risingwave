@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -873,6 +873,22 @@ impl DdlService for DdlServiceImpl {
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
+    }
+
+    async fn alter_parallelism(
+        &self,
+        request: Request<AlterParallelismRequest>,
+    ) -> Result<Response<AlterParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let parallelism = req.get_parallelism()?.clone();
+
+        self.ddl_controller
+            .alter_parallelism(table_id, parallelism)
+            .await?;
+
+        Ok(Response::new(AlterParallelismResponse {}))
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -463,6 +463,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),

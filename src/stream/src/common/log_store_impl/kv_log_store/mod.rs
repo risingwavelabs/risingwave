@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
-use risingwave_storage::store::NewLocalOptions;
+use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
 use tokio::sync::watch;
 
@@ -237,7 +237,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                 table_id: TableId {
                     table_id: self.table_catalog.id,
                 },
-                is_consistent_op: false,
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
                 },

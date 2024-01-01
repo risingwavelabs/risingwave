@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -225,6 +225,7 @@ impl StreamManagerService for StreamServiceImpl {
                     |tf| list_table_fragment_states_response::TableFragmentState {
                         table_id: tf.table_id().table_id,
                         state: tf.state() as i32,
+                        parallelism: Some(tf.assigned_parallelism.into()),
                     },
                 )
                 .collect_vec(),

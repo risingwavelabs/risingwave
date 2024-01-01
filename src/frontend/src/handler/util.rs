@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -36,7 +36,7 @@ use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
 
 use crate::catalog::IndexCatalog;
-use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::{current, SessionImpl};
 
 pin_project! {
@@ -263,13 +263,6 @@ pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
         return false;
     };
     connector.contains("-cdc")
-}
-
-#[inline(always)]
-pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]

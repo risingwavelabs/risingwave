@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_hummock_sdk::table_watermark::merge_multiple_new_table_watermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    merge_multiple_new_table_watermarks, TableWatermarks,
+};
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -1166,7 +1168,9 @@ impl GlobalBarrierManager {
                     // Update the progress of all commands.
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
                         // Those with actors complete can be finished immediately.
-                        if let Some(command) = tracker.update(progress, &version_stats) && !command.tracks_sink() {
+                        if let Some(command) = tracker.update(progress, &version_stats)
+                            && !command.tracks_sink()
+                        {
                             tracing::trace!(?progress, "finish progress");
                             commands.push(command);
                         } else {
@@ -1289,7 +1293,22 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
     }
     CommitEpochInfo::new(
         synced_ssts,
-        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
+        merge_multiple_new_table_watermarks(
+            resps
+                .iter()
+                .map(|resp| {
+                    resp.table_watermarks
+                        .iter()
+                        .map(|(table_id, watermarks)| {
+                            (
+                                TableId::new(*table_id),
+                                TableWatermarks::from_protobuf(watermarks),
+                            )
+                        })
+                        .collect()
+                })
+                .collect_vec(),
+        ),
         sst_to_worker,
     )
 }

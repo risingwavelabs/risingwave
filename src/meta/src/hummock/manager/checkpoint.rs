@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
@@ -20,8 +21,10 @@ use function_name::named;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
-use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
+use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
+use risingwave_pb::hummock::PbHummockVersionCheckpoint;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
@@ -30,6 +33,32 @@ use crate::hummock::HummockManager;
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
+
+#[derive(Default)]
+pub struct HummockVersionCheckpoint {
+    pub version: HummockVersion,
+    pub stale_objects: HashMap<HummockSstableObjectId, PbStaleObjects>,
+}
+
+impl HummockVersionCheckpoint {
+    pub fn from_protobuf(checkpoint: &PbHummockVersionCheckpoint) -> Self {
+        Self {
+            version: HummockVersion::from_persisted_protobuf(checkpoint.version.as_ref().unwrap()),
+            stale_objects: checkpoint
+                .stale_objects
+                .iter()
+                .map(|(object_id, objects)| (*object_id as HummockSstableObjectId, objects.clone()))
+                .collect(),
+        }
+    }
+
+    pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
+        PbHummockVersionCheckpoint {
+            version: Some(self.version.to_protobuf()),
+            stale_objects: self.stale_objects.clone(),
+        }
+    }
+}
 
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
@@ -54,8 +83,8 @@ impl HummockManager {
                 return Err(e.into());
             }
         };
-        let ckpt = HummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(ckpt)
+        let ckpt = PbHummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
+        Ok(HummockVersionCheckpoint::from_protobuf(&ckpt))
     }
 
     pub(super) async fn write_checkpoint(
@@ -63,7 +92,7 @@ impl HummockManager {
         checkpoint: &HummockVersionCheckpoint,
     ) -> Result<()> {
         use prost::Message;
-        let buf = checkpoint.encode_to_vec();
+        let buf = checkpoint.to_protobuf().encode_to_vec();
         self.object_store
             .upload(&self.version_checkpoint_path, buf.into())
             .await?;
@@ -83,13 +112,13 @@ impl HummockManager {
         let current_version = &versioning.current_version;
         let old_checkpoint = &versioning.checkpoint;
         let new_checkpoint_id = current_version.id;
-        let old_checkpoint_id = old_checkpoint.version.as_ref().unwrap().id;
+        let old_checkpoint_id = old_checkpoint.version.id;
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
             return Ok(0);
         }
         let mut stale_objects = old_checkpoint.stale_objects.clone();
         // `object_sizes` is used to calculate size of stale objects.
-        let mut object_sizes = object_size_map(old_checkpoint.version.as_ref().unwrap());
+        let mut object_sizes = object_size_map(&old_checkpoint.version);
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -120,7 +149,7 @@ impl HummockManager {
             );
         }
         let new_checkpoint = HummockVersionCheckpoint {
-            version: Some(current_version.clone()),
+            version: current_version.clone(),
             stale_objects,
         };
         drop(versioning_guard);
@@ -129,11 +158,7 @@ impl HummockManager {
         // 3. hold write lock and update in memory state
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
-        assert!(
-            versioning.checkpoint.version.is_none()
-                || new_checkpoint.version.as_ref().unwrap().id
-                    >= versioning.checkpoint.version.as_ref().unwrap().id
-        );
+        assert!(new_checkpoint.version.id >= versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
         versioning.mark_objects_for_deletion();
 
@@ -191,11 +216,6 @@ impl HummockManager {
     #[named]
     pub async fn get_checkpoint_version(&self) -> HummockVersion {
         let versioning_guard = read_lock!(self, versioning).await;
-        versioning_guard
-            .checkpoint
-            .version
-            .as_ref()
-            .unwrap()
-            .clone()
+        versioning_guard.checkpoint.version.clone()
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -183,7 +183,7 @@ impl NotificationServiceImpl {
 
         MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version),
+            hummock_version: Some(hummock_version.to_protobuf()),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()
