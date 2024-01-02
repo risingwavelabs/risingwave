@@ -575,8 +575,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -747,7 +746,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         state_store
             .ingest_batch(
@@ -767,7 +765,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         assert_eq!(
             state_store

@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod delta_btree_map;
 mod eowc;
-mod estimated_btree_map;
 mod general;
 mod over_partition;
-mod sentinel;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 pub use general::{OverWindowExecutor, OverWindowExecutorArgs};

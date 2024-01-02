@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
@@ -31,13 +31,13 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{Locations, ScaleController, ScaleControllerRef};
+use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv, StreamingJob,
 };
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -513,10 +513,8 @@ impl GlobalStreamManager {
 
             let dummy_table_id = table_fragments.table_id();
 
-            let init_split_assignment = self
-                .source_manager
-                .pre_allocate_splits(&dummy_table_id)
-                .await?;
+            let init_split_assignment =
+                self.source_manager.allocate_splits(&dummy_table_id).await?;
 
             replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
@@ -536,7 +534,7 @@ impl GlobalStreamManager {
 
         let table_id = table_fragments.table_id();
 
-        let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
+        let init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
 
         let command = Command::CreateStreamingJob {
             table_fragments,
@@ -587,10 +585,7 @@ impl GlobalStreamManager {
 
         let dummy_table_id = table_fragments.table_id();
 
-        let init_split_assignment = self
-            .source_manager
-            .pre_allocate_splits(&dummy_table_id)
-            .await?;
+        let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
@@ -633,7 +628,7 @@ impl GlobalStreamManager {
             .await?;
 
         self.source_manager
-            .drop_source_change(&table_fragments_vec)
+            .drop_source_fragments(&table_fragments_vec)
             .await;
 
         self.barrier_scheduler
@@ -709,6 +704,44 @@ impl GlobalStreamManager {
 
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
+    }
+
+    pub(crate) async fn alter_table_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: TableParallelism,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock.write().await;
+
+        let worker_nodes = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let worker_ids = worker_nodes
+            .iter()
+            .filter(|w| w.property.as_ref().map_or(true, |p| !p.is_unschedulable))
+            .map(|node| node.id)
+            .collect::<BTreeSet<_>>();
+
+        let reschedules = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids,
+                table_parallelisms: vec![(table_id, parallelism)].into_iter().collect(),
+            })
+            .await?;
+
+        self.reschedule_actors(
+            reschedules,
+            RescheduleOptions {
+                resolve_no_shuffle_upstream: false,
+            },
+            Some(HashMap::from([(TableId::new(table_id), parallelism)])),
+        )
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -1029,6 +1062,7 @@ mod tests {
                 fragments,
                 &locations.actor_locations,
                 Default::default(),
+                TableParallelism::Auto,
             );
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,

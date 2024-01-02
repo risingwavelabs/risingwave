@@ -34,12 +34,12 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::external::CdcTableType;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
@@ -76,7 +76,6 @@ use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
-pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -1093,17 +1092,16 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
                 POSTGRES_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
                 ),
                 CITUS_CDC_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(

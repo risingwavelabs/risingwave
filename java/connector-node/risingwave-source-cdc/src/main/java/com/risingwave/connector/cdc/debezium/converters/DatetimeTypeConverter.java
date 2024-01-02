@@ -39,7 +39,8 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
         SchemaBuilder schemaBuilder = null;
         Converter converter = null;
         if ("DATE".equals(sqlType)) {
-            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string");
+            // field schema should be optional
+            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string").optional();
             converter = this::convertDate;
         }
         if (schemaBuilder != null) {

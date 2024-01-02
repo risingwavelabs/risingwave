@@ -48,6 +48,13 @@ pub fn generate_with_options_yaml_sink() -> String {
 
 /// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
 /// and generate a YAML file.
+///
+/// Note: here we assumes the struct is parsed by `serde`. If it's not the case,
+/// the generated `yaml` might be inconsistent with the actual parsing logic.
+/// TODO: improve the test to check whether serde is used.
+///
+/// - For sources, the parsing logic is in `TryFromHashMap`.
+/// - For sinks, the parsing logic is in `TryFrom<SinkParam>`.
 fn generate_with_options_yaml_inner(path: &Path) -> String {
     let mut structs = vec![];
     let mut functions = BTreeMap::<String, FunctionInfo>::new();
@@ -88,6 +95,10 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
         for field in struct_item.fields {
             // Process each field
             if let Some(field_name) = &field.ident {
+                if field_name == "unknown_fields" {
+                    continue;
+                }
+
                 let SerdeProperties {
                     default_func,
                     rename,
@@ -194,7 +205,12 @@ fn has_with_options_attribute(attrs: &[Attribute]) -> bool {
         if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
             return meta_list.path.is_ident("derive")
                 && meta_list.nested.iter().any(|nested| match nested {
-                    syn::NestedMeta::Meta(Meta::Path(path)) => path.is_ident("WithOptions"),
+                    syn::NestedMeta::Meta(Meta::Path(path)) => {
+                        // Check if the path contains WithOptions
+                        path.segments
+                            .iter()
+                            .any(|segment| segment.ident == "WithOptions")
+                    }
                     _ => false,
                 });
         }
@@ -273,6 +289,9 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
 ///     // ...
 /// }
 /// ```
+///
+/// Note: here we assumes `#[serde(flatten)]` is used for struct fields. If it's not the case,
+/// the generated `yaml` might be inconsistent with the actual parsing logic.
 fn flatten_nested_options(options: BTreeMap<String, StructInfo>) -> BTreeMap<String, StructInfo> {
     let mut deleted_keys = HashSet::new();
 
