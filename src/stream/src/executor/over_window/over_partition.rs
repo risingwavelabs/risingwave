@@ -381,7 +381,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         //     self.extend_cache_by_range(table, delta_first..=delta_last)
         //         .await?;
         // }
-        self.extend_cache_to_boundary(table).await?;
+        self.extend_cache_by_range(table, delta_first..=delta_last)
+            .await?;
 
         loop {
             // Terminateability: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
