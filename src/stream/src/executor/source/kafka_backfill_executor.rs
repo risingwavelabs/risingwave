@@ -616,11 +616,11 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                             }
                             _ => {}
                         }
-                        self.backfill_state_store
-                            .state_store
-                            .commit(barrier.epoch)
-                            .await?;
                     }
+                    self.backfill_state_store
+                        .state_store
+                        .commit(barrier.epoch)
+                        .await?;
                     yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
@@ -758,7 +758,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                 // trim dropped splits' state
                 self.backfill_state_store.trim_state(dropped_splits).await?;
             }
-
+            tracing::info!(old_state=?stage.states, new_state=?target_state, "finish split change");
             stage.states = target_state;
         }
 

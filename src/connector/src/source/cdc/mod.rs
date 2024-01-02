@@ -144,7 +144,7 @@ where
         };
         self.table_schema = table_schema;
         if let Some(info) = source.info.as_ref() {
-            self.is_multi_table_shared = info.cdc_source_job;
+            self.is_multi_table_shared = info.has_streaming_job;
         }
     }
 

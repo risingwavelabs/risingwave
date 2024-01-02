@@ -58,6 +58,12 @@ impl From<&SourceCatalog> for BoundSource {
     }
 }
 
+impl BoundSource {
+    pub fn can_backfill(&self) -> bool {
+        self.catalog.info.has_streaming_job
+    }
+}
+
 impl Binder {
     /// Binds table or source, or logical view according to what we get from the catalog.
     pub fn bind_relation_by_name_inner(

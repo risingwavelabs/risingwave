@@ -401,11 +401,13 @@ impl DatabaseManager {
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(
-                // filter cdc source jobs
                 self.sources
                     .iter()
                     .filter(|(_, source)| {
-                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
+                        source
+                            .info
+                            .as_ref()
+                            .is_some_and(|info| info.has_streaming_job)
                     })
                     .map(|(id, _)| id)
                     .copied(),

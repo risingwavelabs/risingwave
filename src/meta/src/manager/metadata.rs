@@ -590,6 +590,22 @@ impl MetadataManager {
         }
     }
 
+    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+        &self,
+        id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .get_running_actors_and_upstream_fragment_of_fragment(id)
+                    .await
+            }
+            MetadataManager::V2(_mgr) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],

@@ -816,7 +816,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().cdc_source_job
+                && source_info.inner_ref().has_streaming_job
             {
                 vec![source_id]
             } else {
@@ -851,6 +851,7 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
+        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {

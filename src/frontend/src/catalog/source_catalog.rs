@@ -21,6 +21,7 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
@@ -82,6 +83,13 @@ impl SourceCatalog {
     /// Get a reference to the source catalog's version.
     pub fn version(&self) -> SourceVersionId {
         self.version
+    }
+
+    pub fn connector_name(&self) -> String {
+        self.with_properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.to_lowercase())
+            .unwrap()
     }
 }
 

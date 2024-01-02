@@ -1022,6 +1022,29 @@ impl FragmentManager {
         bail!("fragment not found: {}", fragment_id)
     }
 
+    pub async fn get_running_actors_and_upstream_fragment_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
     /// Add the newly added Actor to the `FragmentManager`
     pub async fn pre_apply_reschedules(
         &self,

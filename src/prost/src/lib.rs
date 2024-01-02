@@ -196,6 +196,61 @@ impl stream_plan::MaterializeNode {
     }
 }
 
+impl stream_plan::SourceNode {
+    pub fn column_ids(&self) -> Option<Vec<i32>> {
+        Some(
+            self.source_inner
+                .as_ref()?
+                .columns
+                .iter()
+                .map(|c| c.get_column_desc().unwrap().column_id)
+                .collect(),
+        )
+    }
+}
+
+impl stream_plan::StreamNode {
+    /// Find the external stream source info inside the stream node, if any.
+    ///
+    /// Returns `source_id`.
+    pub fn find_stream_source(&self) -> Option<u32> {
+        if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
+            self.node_body.as_ref()
+        {
+            if let Some(inner) = &source.source_inner {
+                return Some(inner.source_id);
+            }
+        }
+
+        for child in &self.input {
+            if let Some(source) = child.find_stream_source() {
+                return Some(source);
+            }
+        }
+
+        None
+    }
+
+    /// Find the external stream source info inside the stream node, if any.
+    ///
+    /// Returns `source_id`.
+    pub fn find_source_backfill(&self) -> Option<u32> {
+        if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
+            self.node_body.as_ref()
+        {
+            return Some(source.source_id);
+        }
+
+        for child in &self.input {
+            if let Some(source) = child.find_source_backfill() {
+                return Some(source);
+            }
+        }
+
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

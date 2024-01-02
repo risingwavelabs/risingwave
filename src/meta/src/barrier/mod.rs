@@ -824,6 +824,7 @@ impl GlobalBarrierManager {
                     }
                     commands
                 };
+                tracing::trace!("finished_commands: {}", finished_commands.len());
 
                 for command in finished_commands {
                     tracker.stash_command_to_finish(command);

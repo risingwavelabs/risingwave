@@ -34,6 +34,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
     IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, info, warn};
@@ -549,7 +550,7 @@ impl<L> tonic::transport::server::Router<L> {
             config.tcp_nodelay,
             config.keepalive_duration,
         )
-        .unwrap();
+        .unwrap_or_else(|err| panic!("failed to connect to {listen_addr}: {}", err.as_report()));
         let incoming = MonitoredConnection::new(
             incoming,
             MonitorNewConnectionImpl {

@@ -54,3 +54,29 @@ where
 {
     a.into_iter().zip_eq_fast(b)
 }
+
+pub trait IntoIteratorExt
+where
+    for<'a> &'a Self: IntoIterator,
+{
+    /// Shorter version of `self.iter().map(f).collect()`.
+    fn map_collect<A, B, F, BCollection>(&self, f: F) -> BCollection
+    where
+        F: FnMut(&A) -> B,
+        for<'a> &'a Self: IntoIterator<Item = &'a A>,
+        BCollection: FromIterator<B>,
+    {
+        self.into_iter().map(f).collect()
+    }
+
+    /// Shorter version of `self.iter().map(f).collect_vec()`.
+    fn map_to_vec<A, B, F>(&self, f: F) -> Vec<B>
+    where
+        F: FnMut(&A) -> B,
+        for<'a> &'a Self: IntoIterator<Item = &'a A>,
+    {
+        self.map_collect(f)
+    }
+}
+
+impl<T> IntoIteratorExt for T where for<'a> &'a Self: IntoIterator {}

@@ -205,6 +205,11 @@ impl TrackingJob {
     pub(crate) fn notify_finished(self) {
         match self {
             TrackingJob::New(command) => {
+                tracing::trace!(
+                    "notify finished, command: {:?}, curr_epoch: {:?}",
+                    command.context.command,
+                    command.context.curr_epoch
+                );
                 command
                     .notifiers
                     .into_iter()
@@ -405,6 +410,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
         let actors = command.context.actors_to_track();
+        tracing::trace!("add actors to track: {:?}", actors);
         if actors.is_empty() {
             // The command can be finished immediately.
             return Some(TrackingJob::New(command));
@@ -463,6 +469,7 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
+        tracing::trace!("add progress: {:?}", progress);
         if *ddl_type == DdlType::Sink {
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
@@ -487,6 +494,7 @@ impl CreateMviewProgressTracker {
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
+        tracing::trace!("update progress: {:?}", progress);
         let actor = progress.backfill_actor_id;
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
