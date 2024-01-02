@@ -233,7 +233,7 @@ impl Binder {
             if func.language == "sql" {
                 // This represents the current user defined function is `language sql`
                 let parse_result =
-                    risingwave_sqlparser::parser::Parser::parse_sql(func.identifier.as_str());
+                    risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_str());
                 if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
                     parse_result
                 {
