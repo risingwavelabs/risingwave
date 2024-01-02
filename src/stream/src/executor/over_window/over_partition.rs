@@ -514,11 +514,19 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let cache_real_last_key = self.cache_real_last_key().unwrap();
 
         if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
+            let rs = self.row_conv.state_key_to_table_sub_pk(range.start())?;
+            let re = self.row_conv.state_key_to_table_sub_pk(range.end())?;
+            let crfk = self
+                .row_conv
+                .state_key_to_table_sub_pk(cache_real_first_key)?;
+            let crlk = self
+                .row_conv
+                .state_key_to_table_sub_pk(cache_real_last_key)?;
             tracing::trace!(
                 partition=?self.this_partition_key,
-                range=?range,
-                cache_real_first_key=?cache_real_first_key,
-                cache_real_last_key=?cache_real_last_key,
+                range=?(rs..=re),
+                cache_real_first_key=?crfk,
+                cache_real_last_key=?crlk,
                 "[rc] just trace the range"
             );
 
