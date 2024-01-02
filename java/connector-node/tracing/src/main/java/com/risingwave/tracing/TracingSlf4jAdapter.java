@@ -28,20 +28,20 @@ public class TracingSlf4jAdapter implements Logger {
 
     private final String name;
 
-    void logIfEnabled(int level, String msg) {
+    private void logIfEnabled(int level, String msg) {
         if (TracingSlf4jImpl.isEnabled(level)) {
             TracingSlf4jImpl.event(name, level, msg);
         }
     }
 
-    void logIfEnabled(int level, String format, Object arg) {
+    private void logIfEnabled(int level, String format, Object arg) {
         if (TracingSlf4jImpl.isEnabled(level)) {
             TracingSlf4jImpl.event(
                     name, level, new ParameterizedMessage(format, arg).getFormattedMessage());
         }
     }
 
-    void logIfEnabled(int level, String format, Object arg1, Object arg2) {
+    private void logIfEnabled(int level, String format, Object arg1, Object arg2) {
         if (TracingSlf4jImpl.isEnabled(level)) {
             TracingSlf4jImpl.event(
                     name,
@@ -50,14 +50,14 @@ public class TracingSlf4jAdapter implements Logger {
         }
     }
 
-    void logIfEnabled(int level, String format, Object... arguments) {
+    private void logIfEnabled(int level, String format, Object... arguments) {
         if (TracingSlf4jImpl.isEnabled(level)) {
             TracingSlf4jImpl.event(
                     name, level, new ParameterizedMessage(format, arguments).getFormattedMessage());
         }
     }
 
-    void logIfEnabled(int level, String msg, Throwable t) {
+    private void logIfEnabled(int level, String msg, Throwable t) {
         if (TracingSlf4jImpl.isEnabled(level)) {
             String sStackTrace = ExceptionUtils.getStackTrace(t);
             TracingSlf4jImpl.event(name, level, String.format("%s: %s", msg, sStackTrace));
