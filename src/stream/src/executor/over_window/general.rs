@@ -357,6 +357,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let (part_changes, accessed_range) =
                 Self::build_changes_for_partition(this, &mut partition, delta).await?;
 
+            for (k, v) in &part_changes {
+                println!("[rc] fuck change: {:?}", v);
+            }
+
             for (key, record) in part_changes {
                 // Build chunk and yield if needed.
                 if !key_change_updated_pks.contains(&key.pk) {

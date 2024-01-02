@@ -375,12 +375,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let mut delta_str = String::new();
         for (k, v) in delta {
+            println!("[rc] fuck delta v = {:?}", v);
             match v {
                 Change::Insert(_) => delta_str += "+",
                 Change::Delete => delta_str += "-",
             }
         }
-        tracing::trace!("[rc] fuck delta_str = {}", delta_str);
+        println!("[rc] fuck delta_str = {}", delta_str);
 
         // if self.cache_policy.is_full() {
         //     // ensure everything is in the cache
@@ -483,25 +484,40 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         {
             // TODO(): construct a bug case
             let s = format!("{:?}", table.get_data_types());
-            if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" && fuck_delta_str == "+++" {
-                tracing::trace!("[rc] the fuck case");
+            println!(
+                "[rc] fucking table schema: {}, len = {}",
+                s,
+                table.get_data_types().len()
+            );
+            // if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" && fuck_delta_str == "+++" {
+            if table.get_data_types().len() == 16
+                && fuck_delta_str == "+++"
+                && self.cache_real_len() != 0
+            {
+                println!("[rc] the fuck case");
                 let mut remove_keys = BTreeSet::new();
                 for (k, v) in self.range_cache.inner() {
                     if k.is_normal() {
-                        let sk = self.row_conv.state_key_to_table_sub_pk(k.as_normal_expect())?;
-                        if *sk[0].as_ref().unwrap().as_int32() != 100002 {
+                        let sk = self
+                            .row_conv
+                            .state_key_to_table_sub_pk(k.as_normal_expect())?;
+                        println!("[rc] fuck cache k = {:?}, v = {:?}", sk, v);
+
+                        let v = *sk[0].as_ref().unwrap().as_int32();
+                        if v >= 100000 && v != 100002 {
                             remove_keys.insert(k.clone());
                         }
-                        tracing::trace!("[rc] fuck cache k = {:?}, v = {:?}", sk, v);
                     } else {
-                        tracing::trace!("[rc] fuck cache k = {:?}", k);
+                        println!("[rc] fuck cache k = {:?}", k);
                     }
                 }
                 for k in remove_keys {
                     self.range_cache.remove(&k);
                 }
-                self.range_cache.insert(Sentinelled::Smallest, OwnedRow::empty());
-                self.range_cache.insert(Sentinelled::Largest, OwnedRow::empty());
+                self.range_cache
+                    .insert(Sentinelled::Smallest, OwnedRow::empty());
+                self.range_cache
+                    .insert(Sentinelled::Largest, OwnedRow::empty());
                 // *self.range_cache = new_empty_partition_cache();
             }
         }
@@ -545,31 +561,30 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await;
         }
 
-        // get the first and last keys again, now we are guaranteed to have at least a normal key
-        let cache_real_first_key = self.cache_real_first_key().unwrap();
-        let cache_real_last_key = self.cache_real_last_key().unwrap();
+        for (key, value) in self.range_cache.inner() {
+            println!("[rc] fuck before, value = {:?}", value);
+        }
 
-        if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
-            let rs = self.row_conv.state_key_to_table_sub_pk(range.start())?;
-            let re = self.row_conv.state_key_to_table_sub_pk(range.end())?;
-            let crfk = self
-                .row_conv
-                .state_key_to_table_sub_pk(cache_real_first_key)?;
-            let crlk = self
-                .row_conv
-                .state_key_to_table_sub_pk(cache_real_last_key)?;
-            tracing::trace!(
-                partition=?self.this_partition_key,
-                range=?(rs..=re),
-                cache_real_first_key=?crfk,
-                cache_real_last_key=?crlk,
-                table_schema=?table.get_data_types(),
-                fuck_delta_str,
-                "[rc] just trace"
-            );
-            for (key, value) in self.range_cache.inner() {
-                tracing::trace!("[rc] fuck before, key = {:?}, value = {:?}", key, value);
-            }
+        let cache_real_first_key = self
+            .cache_real_first_key()
+            .expect("cache real len is not 0");
+        if self.cache_left_is_sentinel() && *range.start() < &cache_real_first_key {
+            // let rs = self.row_conv.state_key_to_table_sub_pk(range.start())?;
+            // let re = self.row_conv.state_key_to_table_sub_pk(range.end())?;
+            // let crfk = self
+            //     .row_conv
+            //     .state_key_to_table_sub_pk(&cache_real_first_key)?;
+            // let crlk = self
+            //     .row_conv
+            //     .state_key_to_table_sub_pk(&cache_real_last_key)?;
+            // tracing::trace!(
+            //     partition=?self.this_partition_key,
+            //     range=?(rs..=re),
+            //     cache_real_first_key=?crfk,
+            //     cache_real_last_key=?crlk,
+            //     fuck_delta_str,
+            //     "[rc] just trace"
+            // );
 
             // extend leftward only if there's smallest sentinel
             let table_sub_range = (
@@ -588,16 +603,15 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
-            let res = self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
-            for (key, value) in self.range_cache.inner() {
-                tracing::trace!("[rc] fuck after, key = {:?}, value = {:?}", key, value);
-            }
-            return res;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
+        }
+        for (key, value) in self.range_cache.inner() {
+            println!("[rc] fuck after, value = {:?}", value);
         }
 
-        if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
+        let cache_real_last_key = self.cache_real_last_key().expect("cache real len is not 0");
+        if self.cache_right_is_sentinel() && *range.end() > &cache_real_last_key {
             // extend rightward only if there's largest sentinel
             let table_sub_range = (
                 Bound::Excluded(
@@ -611,9 +625,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the right half of given range"
             );
-            return self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
+        }
+
+        for (key, value) in self.range_cache.inner() {
+            println!("[rc] fuck after 2, value = {:?}", value);
         }
 
         // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
