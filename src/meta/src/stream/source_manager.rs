@@ -80,12 +80,12 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_existing_source(source: &Source) -> MetaResult<ConnectorProperties> {
+fn extract_prop_from_existing_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
-fn extract_prop_from_new_source(source: &Source) -> MetaResult<ConnectorProperties> {
+fn extract_prop_from_new_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -721,7 +721,7 @@ impl SourceManager {
     }
 
     /// register connector worker for source.
-    pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
+    pub async fn register_source(&self, source: &Source) -> anyhow::Result<()> {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -732,7 +732,8 @@ impl SourceManager {
                 &mut core.managed_sources,
                 self.metrics.clone(),
             )
-            .await?;
+            .await
+            .context("failed to create source worker")?;
         }
         Ok(())
     }
@@ -814,7 +815,7 @@ impl SourceManager {
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<()> {
+    ) -> anyhow::Result<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
