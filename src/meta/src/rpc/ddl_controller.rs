@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use rand::Rng;
-use risingwave_common::bail;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -29,6 +28,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont,
 };
+use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
@@ -451,6 +451,7 @@ impl DdlController {
                 source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
+                source.initialized_at_cluster_version = Some(current_cluster_version());
 
                 mgr.catalog_manager
                     .start_create_source_procedure(&source)
@@ -1892,8 +1893,30 @@ impl DdlController {
                     .alter_set_schema(mgr.fragment_manager.clone(), object, new_schema_id)
                     .await
             }
-            MetadataManager::V2(_) => {
-                unimplemented!("support set schema in v2")
+            MetadataManager::V2(mgr) => {
+                let (obj_type, id) = match object {
+                    alter_set_schema_request::Object::TableId(id) => {
+                        (ObjectType::Table, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::ViewId(id) => {
+                        (ObjectType::View, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SourceId(id) => {
+                        (ObjectType::Source, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SinkId(id) => {
+                        (ObjectType::Sink, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::FunctionId(id) => {
+                        (ObjectType::Function, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::ConnectionId(id) => {
+                        (ObjectType::Connection, id as ObjectId)
+                    }
+                };
+                mgr.catalog_controller
+                    .alter_schema(obj_type, id, new_schema_id as _)
+                    .await
             }
         }
     }
