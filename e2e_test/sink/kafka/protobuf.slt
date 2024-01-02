@@ -66,7 +66,7 @@ select
 t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) 42
 f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               (0,0)  0
 
-statement error failed to read file
+statement error No such file
 create sink sink_err from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',

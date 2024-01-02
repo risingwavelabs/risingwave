@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,6 +77,15 @@ impl Decimal {
     pub fn from_scientific(value: &str) -> Option<Self> {
         let decimal = RustDecimal::from_scientific(value).ok()?;
         Some(Normalized(decimal))
+    }
+
+    pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
+            s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
+        }
     }
 }
 

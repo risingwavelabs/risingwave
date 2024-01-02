@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -184,7 +184,7 @@ pub async fn compactor_serve(
 
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.risingwave.tracing;
 
 // Import log4j's ParameterizedMessage, so that we can format the messages
 // with the same interpolation as log4j (i.e. "{}" instead of "%s").
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
@@ -73,8 +74,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void trace(String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -113,8 +115,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void trace(Marker marker, String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -153,8 +156,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void debug(String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -193,8 +197,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void debug(Marker marker, String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -233,8 +238,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void info(String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -273,8 +279,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void info(Marker marker, String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -313,8 +320,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void warn(String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -353,8 +361,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void warn(Marker marker, String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -393,8 +402,9 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void error(String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, sStackTrace));
     }
 
     @Override
@@ -433,7 +443,8 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public void error(Marker marker, String msg, Throwable t) {
+        String sStackTrace = ExceptionUtils.getStackTrace(t);
         TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, t.toString()));
+                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, sStackTrace));
     }
 }

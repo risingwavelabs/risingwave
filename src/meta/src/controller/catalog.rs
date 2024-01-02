@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -144,6 +144,8 @@ impl CatalogController {
             database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
+            initialized_at_cluster_version: Default::default(),
+            created_at_cluster_version: Default::default(),
         };
         Ok(active_db.insert(txn).await?)
     }

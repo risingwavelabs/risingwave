@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -298,6 +298,9 @@ pub struct SinkCatalog {
     pub sink_from_name: String,
 
     pub target_table: Option<TableId>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl SinkCatalog {
@@ -336,6 +339,8 @@ impl SinkCatalog {
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -425,6 +430,8 @@ impl From<PbSink> for SinkCatalog {
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
             target_table: pb.target_table.map(TableId::new),
+            initialized_at_cluster_version: pb.initialized_at_cluster_version,
+            created_at_cluster_version: pb.created_at_cluster_version,
         }
     }
 }
