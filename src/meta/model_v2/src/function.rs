@@ -41,7 +41,7 @@ pub struct Model {
     pub language: String,
     pub link: String,
     pub identifier: String,
-    pub body: String,
+    pub body: Option<String>,
     pub kind: FunctionKind,
 }
 
@@ -95,7 +95,7 @@ impl From<PbFunction> for ActiveModel {
             language: Set(function.language),
             link: Set(function.link),
             identifier: Set(function.identifier),
-            body: Set(function.body),
+            body: Set(Some(function.body)),
             kind: Set(function.kind.unwrap().into()),
         }
     }
