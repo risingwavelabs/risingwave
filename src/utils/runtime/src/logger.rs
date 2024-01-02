@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
@@ -59,10 +60,12 @@ impl LoggerSettings {
     ///
     /// If env var `RW_TRACING_ENDPOINT` is not set, the meta address will be used
     /// as the default tracing endpoint, which means that the embedded tracing
-    /// collector will be used.
+    /// collector will be used. This can be disabled by setting env var
+    /// `RW_DISABLE_EMBEDDED_TRACING` to `true`.
     pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
         let mut settings = Self::new(O::name());
-        if settings.tracing_endpoint.is_none() // no explicit env var is set
+        if settings.tracing_endpoint.is_none() // no explicit endpoint
+            && !env_var_is_true("RW_DISABLE_EMBEDDED_TRACING") // not disabled by env var
             && let Some(addr) = opts.meta_addr().exactly_one() // meta address is valid
             && !Deployment::current().is_ci()
         // not in CI
