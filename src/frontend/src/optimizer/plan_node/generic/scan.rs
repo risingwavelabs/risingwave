@@ -24,8 +24,8 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
-use crate::catalog::{ColumnId, IndexCatalog};
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
