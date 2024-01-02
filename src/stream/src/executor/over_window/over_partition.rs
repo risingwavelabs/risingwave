@@ -480,18 +480,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         range: RangeInclusive<&StateKey>,
         fuck_delta_str: String,
     ) -> StreamExecutorResult<()> {
-        // {
-        //     // TODO(): construct a bug case
-        //     let s = format!("{:?}", table.get_data_types());
-        //     if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" {
-        //         let mut keys = HashSet::new();
-        //         for (key, value) in self.range_cache.inner() {
-        //             if let Some(skey) = key.as_normal() {
-
-        //             }
-        //         }
-        //     }
-        // }
+        {
+            // TODO(): construct a bug case
+            let s = format!("{:?}", table.get_data_types());
+            if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" && fuck_delta_str == "+++" {
+                tracing::trace!("[rc] just fucking reset the cache");
+                *self.range_cache = new_empty_partition_cache();
+            }
+        }
 
         if self.cache_real_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
