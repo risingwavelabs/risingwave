@@ -30,16 +30,25 @@ message SinkParam {
   optional uint32 target_table = 8;
 }
 
-enum SinkPayloadFormat {
-  FORMAT_UNSPECIFIED = 0;
-  JSON = 1;
-  STREAM_CHUNK = 2;
+message JsonFormat{}
+
+message StreamChunkFormat{}
+
+message UnspecifiedFormat{}
+
+message StreamChunkWithSchemaFormat{
+  TableSchema table_schema = 1;
 }
 
 message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
-    SinkPayloadFormat format = 2;
+    oneof sink_payload_format {
+      JsonFormat json_format = 11;
+      StreamChunkFormat stream_chunk_format = 12;
+      UnspecifiedFormat unspecified_format = 13;
+      StreamChunkWithSchemaFormat stream_chunk_with_schema_format = 14;
+    }
   }
 
   message WriteBatch {

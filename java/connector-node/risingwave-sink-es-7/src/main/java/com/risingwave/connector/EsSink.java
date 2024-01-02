@@ -72,9 +72,6 @@ public class EsSink extends SinkWriterBase {
     // Used to handle the return message of ES and throw errors
     private final RequestTracker requestTracker;
 
-    // For bulk listener
-    private final List<Integer> primaryKeyIndexes;
-
     class RequestTracker {
         // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
         private final BlockingQueue<EsWriteResultResp> blockingQueue = new LinkedBlockingQueue<>();
@@ -189,11 +186,6 @@ public class EsSink extends SinkWriterBase {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
         this.bulkProcessor = createBulkProcessor(this.requestTracker);
-
-        primaryKeyIndexes = new ArrayList<Integer>();
-        for (String primaryKey : getTableSchema().getPrimaryKeys()) {
-            primaryKeyIndexes.add(getTableSchema().getColumnIndex(primaryKey));
-        }
     }
 
     private static RestClientBuilder configureRestClientBuilder(

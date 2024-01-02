@@ -40,7 +40,8 @@ use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
-use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_pb::connector_service::sink_writer_stream_request::start_sink::SinkPayloadFormat;
+use risingwave_pb::connector_service::{JsonFormat, StreamChunkFormat};
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -332,8 +333,10 @@ pub async fn compute_node_serve(
     let connector_params = risingwave_connector::ConnectorParams {
         connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
-            Some("json") => SinkPayloadFormat::Json,
+            None | Some("stream_chunk") => {
+                SinkPayloadFormat::StreamChunkFormat(StreamChunkFormat {})
+            }
+            Some("json") => SinkPayloadFormat::JsonFormat(JsonFormat {}),
             _ => {
                 unreachable!(
                     "invalid sink payload format: {:?}. Should be either json or stream_chunk",

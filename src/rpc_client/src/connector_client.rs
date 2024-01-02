@@ -24,6 +24,7 @@ use risingwave_pb::connector_service::connector_service_client::ConnectorService
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,
 };
+use risingwave_pb::connector_service::sink_writer_stream_request::start_sink::SinkPayloadFormat;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Barrier, Request as SinkRequest, StartSink, WriteBatch,
@@ -273,7 +274,7 @@ impl ConnectorClient {
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_param),
-                    format: sink_payload_format as i32,
+                    sink_payload_format: Some(sink_payload_format),
                 })),
             },
             |rx| async move {

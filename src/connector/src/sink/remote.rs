@@ -28,7 +28,7 @@ use prost::Message;
 use risingwave_common::array::{
     ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::anyhow_error;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, JsonbVal, Scalar, ToText};
@@ -38,13 +38,15 @@ use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
 };
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
+use risingwave_pb::connector_service::sink_writer_stream_request::start_sink::SinkPayloadFormat;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Request as SinkRequest, StartSink,
 };
 use risingwave_pb::connector_service::{
     sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
-    SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata, SinkPayloadFormat,
-    SinkWriterStreamRequest, SinkWriterStreamResponse, ValidateSinkRequest, ValidateSinkResponse,
+    SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
+    SinkWriterStreamRequest, SinkWriterStreamResponse, StreamChunkFormat,
+    StreamChunkWithSchemaFormat, TableSchema, ValidateSinkRequest, ValidateSinkResponse,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
@@ -68,6 +70,8 @@ use crate::sink::{
     SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
 use crate::ConnectorParams;
+
+const ES_OPTION_DELIMITER: &str = "delimiter";
 
 macro_rules! def_remote_sink {
     () => {
@@ -151,28 +155,19 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        RemoteLogSinker::new(
-            self.param.clone(),
-            writer_param,
-            Self::SINK_NAME,
-            self.param.schema(),
-            self.param.downstream_pk.clone(),
-            self.param.properties.clone(),
-        )
-        .await
+        RemoteLogSinker::new(self.param.clone(), writer_param, Self::SINK_NAME).await
     }
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param, Self::SINK_NAME).await
     }
 }
 
-async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
+async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> Result<()> {
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
-        if matches!(
-                col.data_type,
-                DataType::Int16
+        match col.data_type {
+            DataType::Int16
                     | DataType::Int32
                     | DataType::Int64
                     | DataType::Float32
@@ -186,19 +181,23 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
                     | DataType::Time
                     | DataType::Interval
                     | DataType::Jsonb
-                    | DataType::Bytea
-                    | DataType::List(_)
-                    | DataType::Struct(_)
-            ) {
-            Ok(())
-        } else {
-            Err(SinkError::Remote(anyhow_error!(
-                    "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea, Struct and Varchar, got {:?}: {:?}",
-                    col.name,
-                    col.data_type,
-                )))
-        }
-    }).try_collect()?;
+                    | DataType::Bytea => Ok(()),
+            DataType::List(_) | DataType::Struct(_) => {
+                if sink_name.eq(ElasticSearchSink::SINK_NAME){
+                    Ok(())
+                }else{
+                    Err(SinkError::Remote(anyhow_error!(
+                        "Only Es sink support list and struct, got {:?}: {:?}",
+                        col.name,
+                        col.data_type,
+                    )))
+                }
+            },
+            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow_error!(
+                            "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, and Varchar, (Es sink support Struct and List) got {:?}: {:?}",
+                            col.name,
+                            col.data_type,
+                        )))}}).try_collect()?;
 
     let jvm = JVM.get_or_init()?;
     let sink_param = param.to_proto();
@@ -251,40 +250,71 @@ impl StreamChunkConverter {
     fn new(
         sink_name: &str,
         schema: Schema,
-        pk_indices: Vec<usize>,
-        properties: HashMap<String, String>,
-    ) -> Self {
-        if sink_name.eq("elasticsearch") {
-            StreamChunkConverter::Es(EsStreamChunkConverter::new(
+        pk_indices: &Vec<usize>,
+        properties: &HashMap<String, String>,
+    ) -> Result<Self> {
+        if sink_name.eq(ElasticSearchSink::SINK_NAME) {
+            Ok(StreamChunkConverter::Es(EsStreamChunkConverter::new(
                 schema,
-                pk_indices,
-                properties.get("delimiter").cloned(),
-            ))
+                pk_indices.clone(),
+                properties.get(ES_OPTION_DELIMITER).cloned(),
+            )?))
         } else {
-            StreamChunkConverter::Other
+            Ok(StreamChunkConverter::Other)
         }
     }
 
     fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         match self {
             StreamChunkConverter::Es(es) => es.convert_chunk(chunk),
-            _ => Ok(chunk),
+            StreamChunkConverter::Other => Ok(chunk),
         }
     }
 }
 struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
-    pk_indices: Vec<usize>,
-    delimiter: Option<String>,
+    fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send>,
 }
 impl EsStreamChunkConverter {
-    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>) -> Self {
+    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>) -> Result<Self> {
+        let fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send> = if pk_indices.is_empty()
+        {
+            Box::new(|row: RowRef<'_>| {
+                Ok(row
+                    .datum_at(0)
+                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .to_text())
+            })
+        } else if pk_indices.len() == 1 {
+            let index = *pk_indices.get(0).unwrap();
+            Box::new(move |row: RowRef<'_>| {
+                Ok(row
+                    .datum_at(index)
+                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .to_text())
+            })
+        } else {
+            let delimiter = delimiter
+                .as_ref()
+                .ok_or_else(|| anyhow!("Please set delimiter in with option"))?
+                .clone();
+            Box::new(move |row: RowRef<'_>| {
+                let mut keys = vec![];
+                for index in &pk_indices {
+                    keys.push(
+                        row.datum_at(*index)
+                            .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                            .to_text(),
+                    );
+                }
+                Ok(keys.join(&delimiter))
+            })
+        };
         let json_encoder = JsonEncoder::new_with_es(schema, None);
-        Self {
+        Ok(Self {
             json_encoder,
-            pk_indices,
-            delimiter,
-        }
+            fn_build_id,
+        })
     }
 
     fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
@@ -317,32 +347,7 @@ impl EsStreamChunkConverter {
     }
 
     fn build_id(&self, row: RowRef<'_>) -> Result<String> {
-        if self.pk_indices.is_empty() {
-            Ok(row
-                .datum_at(0)
-                .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
-                .to_text())
-        } else if self.pk_indices.len() == 1 {
-            let index = self.pk_indices.get(0).unwrap();
-            Ok(row
-                .datum_at(*index)
-                .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
-                .to_text())
-        } else {
-            let mut keys = vec![];
-            for index in &self.pk_indices {
-                keys.push(
-                    row.datum_at(*index)
-                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
-                        .to_text(),
-                );
-            }
-            Ok(keys.join(
-                self.delimiter
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("Please set delimiter in with option"))?,
-            ))
-        }
+        (self.fn_build_id)(row)
     }
 }
 pub struct RemoteLogSinker {
@@ -357,15 +362,26 @@ impl RemoteLogSinker {
         sink_param: SinkParam,
         writer_param: SinkWriterParam,
         sink_name: &str,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        properties: HashMap<String, String>,
     ) -> Result<Self> {
+        let sink_payload_format = if sink_name.eq(ElasticSearchSink::SINK_NAME) {
+            let columns = vec![
+                ColumnDesc::unnamed(ColumnId::from(3), DataType::Varchar).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(4), DataType::Jsonb).to_protobuf(),
+            ];
+            SinkPayloadFormat::StreamChunkWithSchemaFormat(StreamChunkWithSchemaFormat {
+                table_schema: Some(TableSchema {
+                    columns,
+                    pk_indices: vec![],
+                }),
+            })
+        } else {
+            SinkPayloadFormat::StreamChunkFormat(StreamChunkFormat {})
+        };
         let SinkWriterStreamHandle {
             request_sender,
             response_stream,
         } = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(sink_param, SinkPayloadFormat::StreamChunk)
+            .start_sink_writer_stream(&sink_param, sink_payload_format)
             .await?;
 
         let sink_metrics = writer_param.sink_metrics;
@@ -374,8 +390,11 @@ impl RemoteLogSinker {
             response_stream,
             sink_metrics,
             stream_chunk_converter: StreamChunkConverter::new(
-                sink_name, schema, pk_indices, properties,
-            ),
+                sink_name,
+                sink_param.schema(),
+                &sink_param.downstream_pk,
+                &sink_param.properties,
+            )?,
         })
     }
 }
@@ -586,7 +605,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param, Self::SINK_NAME).await
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -633,7 +652,7 @@ impl CoordinatedRemoteSinkWriter {
         sink_metrics: SinkMetrics,
     ) -> Result<Self> {
         let stream_handle = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(param.clone(), connector_params.sink_payload_format)
+            .start_sink_writer_stream(&param, connector_params.sink_payload_format)
             .await?;
 
         Ok(Self {
@@ -767,14 +786,14 @@ impl EmbeddedConnectorClient {
 
     async fn start_sink_writer_stream(
         &self,
-        sink_param: SinkParam,
+        sink_param: &SinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle<JniSinkWriterStreamRequest>> {
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_param.to_proto()),
-                    format: sink_payload_format as i32,
+                    sink_payload_format: Some(sink_payload_format),
                 })),
             },
             |rx| async move {

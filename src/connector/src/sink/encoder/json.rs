@@ -219,7 +219,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            _ => {
+            CustomJsonType::Es | CustomJsonType::None => {
                 json!(v.to_text())
             }
         },
@@ -271,7 +271,7 @@ fn datum_to_json_object(
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
             CustomJsonType::Es => JsonbVal::from(jsonb_ref).take(),
-            _ => json!(jsonb_ref.to_string()),
+            CustomJsonType::Doris(_) | CustomJsonType::None => json!(jsonb_ref.to_string()),
         },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
@@ -315,7 +315,7 @@ fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                _ => {
+                CustomJsonType::Es | CustomJsonType::None => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()

@@ -23,10 +23,7 @@ import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.Data;
-import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.stub.StreamObserver;
-import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,7 +101,7 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
                 sinkId = sinkTask.getStart().getSinkParam().getSinkId();
-                bindSink(sinkTask.getStart().getSinkParam(), sinkTask.getStart().getFormat());
+                bindSink(sinkTask.getStart());
                 currentEpoch = null;
                 currentBatchId = null;
                 epochStarted = false;
@@ -204,34 +201,34 @@ public class SinkWriterStreamObserver
     }
 
     private void bindSink(
-            ConnectorServiceProto.SinkParam sinkParam,
-            ConnectorServiceProto.SinkPayloadFormat format) {
+            com.risingwave.proto.ConnectorServiceProto.SinkWriterStreamRequest.StartSink
+                    startSink) {
+        var sinkParam = startSink.getSinkParam();
+        var format = startSink.getSinkPayloadFormatCase();
         tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
         String connectorName = getConnectorName(sinkParam);
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
         sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
-        if (connectorName.equals("elasticsearch")) {
-            tableSchema =
-                    new TableSchema(
-                            List.of("id", "json_result"),
-                            List.of(
-                                    Data.DataType.newBuilder()
-                                            .setTypeName(TypeName.VARCHAR)
-                                            .build(),
-                                    Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build()),
-                            List.of());
-        }
+
         switch (format) {
-            case FORMAT_UNSPECIFIED:
-            case UNRECOGNIZED:
+            case UNSPECIFIED_FORMAT:
+            case SINKPAYLOADFORMAT_NOT_SET:
                 throw INVALID_ARGUMENT
                         .withDescription("should specify payload format in request")
                         .asRuntimeException();
-            case JSON:
+            case JSON_FORMAT:
                 deserializer = new JsonDeserializer(tableSchema);
                 break;
-            case STREAM_CHUNK:
+            case STREAM_CHUNK_FORMAT:
                 deserializer = new StreamChunkDeserializer(tableSchema);
+                break;
+            case STREAM_CHUNK_WITH_SCHEMA_FORMAT:
+                deserializer =
+                        new StreamChunkDeserializer(
+                                TableSchema.fromProto(
+                                        startSink
+                                                .getStreamChunkWithSchemaFormat()
+                                                .getTableSchema()));
                 break;
         }
         this.connectorName = connectorName.toUpperCase();
