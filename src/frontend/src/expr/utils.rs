@@ -512,86 +512,93 @@ impl WatermarkAnalyzer {
                     _ => WatermarkDerivation::None,
                 }
             }
-            ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
-                (Constant, Constant) => Constant,
-                (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
-                    if !(func_call.return_type() == DataType::Timestamptz
-                        && func_call.inputs()[0].return_type() == DataType::Timestamp)
-                        && func_call.inputs()[1]
-                            .as_literal()
-                            .and_then(|literal| literal.get_data().as_ref())
-                            .map_or(true, |time_zone| {
-                                !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
-                            })
-                    {
-                        WatermarkDerivation::None
-                    } else {
-                        derivation
+            ExprType::AtTimeZone => match func_call.inputs().len() {
+                // using capture context based implementation
+                1 => match self.visit_unary_op(func_call.inputs()) {
+                    Constant => Constant,
+                    derivation @ (Watermark(_) | Nondecreasing) => {
+                        if !(func_call.return_type() == DataType::Timestamptz
+                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
+                        {
+                            WatermarkDerivation::None
+                        } else {
+                            derivation
+                        }
+                    }
+                    _ => WatermarkDerivation::None,
+                },
+                // using rewrite based implementation
+                2 => match self.visit_binary_op(func_call.inputs()) {
+                    (Constant, Constant) => Constant,
+                    (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
+                        if !(func_call.return_type() == DataType::Timestamptz
+                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
+                            && func_call.inputs()[1]
+                                .as_literal()
+                                .and_then(|literal| literal.get_data().as_ref())
+                                .map_or(true, |time_zone| {
+                                    !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
+                                })
+                        {
+                            WatermarkDerivation::None
+                        } else {
+                            derivation
+                        }
+                    }
+                    _ => WatermarkDerivation::None,
+                },
+                _ => unreachable!(),
+            },
+            ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => match func_call
+                .inputs()
+                .len()
+            {
+                // using capture context based implementation
+                2 => {
+                    let interval = match &func_call.inputs()[1] {
+                        ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
+                        _ => return WatermarkDerivation::None,
+                    };
+                    // null interval is treated same as const `interval '1' second`, to be
+                    // consistent with other match arms.
+                    let quantitative_only =
+                        interval.map_or(true, |v| v.months() == 0 && v.days() == 0);
+                    match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
+                        (Constant, _) => Constant,
+                        (Watermark(idx), true) => Watermark(idx),
+                        (Nondecreasing, true) => Nondecreasing,
+                        (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
+                        (WatermarkDerivation::None, _) => WatermarkDerivation::None,
                     }
                 }
-                _ => WatermarkDerivation::None,
-            },
-            // ExprType::AtTimeZone => {
-            //     if func_call.inputs().len() == 1 {
-            //         match self.visit_unary_op(func_call.inputs()) {
-            //             Constant => Constant,
-            //             derivation @ (Watermark(_) | Nondecreasing) => {
-            //                 if !(func_call.return_type() == DataType::Timestamptz
-            //                     && func_call.inputs()[0].return_type() == DataType::Timestamp)
-            //                 {
-            //                     WatermarkDerivation::None
-            //                 } else {
-            //                     derivation
-            //                 }
-            //             }
-            //             _ => WatermarkDerivation::None,
-            //         }
-            //     } else {
-            //         match self.visit_binary_op(func_call.inputs()) {
-            //             (Constant, Constant) => Constant,
-            //             (derivation @ (Watermark(_) | Nondecreasing), Constant) => {
-            //                 if !(func_call.return_type() == DataType::Timestamptz
-            //                     && func_call.inputs()[0].return_type() == DataType::Timestamp)
-            //                     && func_call.inputs()[1]
-            //                         .as_literal()
-            //                         .and_then(|literal| literal.get_data().as_ref())
-            //                         .map_or(true, |time_zone| {
-            //                             !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
-            //                         })
-            //                 {
-            //                     WatermarkDerivation::None
-            //                 } else {
-            //                     derivation
-            //                 }
-            //             }
-            //             _ => WatermarkDerivation::None,
-            //         }
-            //     }
-            // }
-            ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
-                // Requires time zone and interval to be literal, at least for now.
-                let time_zone = match &func_call.inputs()[2] {
-                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
-                    _ => return WatermarkDerivation::None,
-                };
-                let interval = match &func_call.inputs()[1] {
-                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
-                    _ => return WatermarkDerivation::None,
-                };
-                // null zone or null interval is treated same as const `interval '1' second`, to be
-                // consistent with other match arms.
-                let zone_without_dst = time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
-                let quantitative_only = interval.map_or(true, |v| {
-                    v.months() == 0 && (v.days() == 0 || zone_without_dst)
-                });
-                match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
-                    (Constant, _) => Constant,
-                    (Watermark(idx), true) => Watermark(idx),
-                    (Nondecreasing, true) => Nondecreasing,
-                    (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
-                    (WatermarkDerivation::None, _) => WatermarkDerivation::None,
+                // using rewrite based implementation
+                3 => {
+                    // Requires time zone and interval to be literal, at least for now.
+                    let time_zone = match &func_call.inputs()[2] {
+                        ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
+                        _ => return WatermarkDerivation::None,
+                    };
+                    let interval = match &func_call.inputs()[1] {
+                        ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
+                        _ => return WatermarkDerivation::None,
+                    };
+                    // null zone or null interval is treated same as const `interval '1' second`, to be
+                    // consistent with other match arms.
+                    let zone_without_dst: bool =
+                        time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
+                    let quantitative_only = interval.map_or(true, |v| {
+                        v.months() == 0 && (v.days() == 0 || zone_without_dst)
+                    });
+                    match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
+                        (Constant, _) => Constant,
+                        (Watermark(idx), true) => Watermark(idx),
+                        (Nondecreasing, true) => Nondecreasing,
+                        (Watermark(_) | Nondecreasing, false) => WatermarkDerivation::None,
+                        (WatermarkDerivation::None, _) => WatermarkDerivation::None,
+                    }
                 }
-            }
+                _ => unreachable!(),
+            },
             ExprType::DateTrunc => match func_call.inputs().len() {
                 2 => match self.visit_binary_op(func_call.inputs()) {
                     (Constant, any_derivation) => any_derivation,
