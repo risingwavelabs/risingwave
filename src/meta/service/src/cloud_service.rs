@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.use risingwave
+// limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
@@ -22,6 +22,7 @@ use risingwave_connector::source::kafka::private_link::insert_privatelink_broker
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
@@ -30,18 +31,17 @@ use risingwave_pb::cloud_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::CatalogManagerRef;
 use crate::rpc::cloud_provider::AwsEc2Client;
 
 pub struct CloudServiceImpl {
-    catalog_manager: CatalogManagerRef,
+    metadata_manager: MetadataManager,
     aws_client: Option<AwsEc2Client>,
 }
 
 impl CloudServiceImpl {
-    pub fn new(catalog_manager: CatalogManagerRef, aws_client: Option<AwsEc2Client>) -> Self {
+    pub fn new(metadata_manager: MetadataManager, aws_client: Option<AwsEc2Client>) -> Self {
         Self {
-            catalog_manager,
+            metadata_manager,
             aws_client,
         }
     }
@@ -80,10 +80,20 @@ impl CloudService for CloudServiceImpl {
             let connection_id = connection_id_str.parse().map_err(|e| {
                 Status::invalid_argument(format!("connection.id is not an integer: {}", e))
             })?;
-            let connection = self
-                .catalog_manager
-                .get_connection_by_id(connection_id)
-                .await;
+
+            let connection = match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
+                        .get_connection_by_id(connection_id)
+                        .await
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .get_connection_by_id(connection_id as _)
+                        .await
+                }
+            };
+
             if let Err(e) = connection {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkConnectionNotFound,
@@ -133,7 +143,7 @@ impl CloudService for CloudServiceImpl {
         }
         // try fetch kafka metadata, return error message on failure
         let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
-        let props = ConnectorProperties::extract(source_cfg);
+        let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ use crate::source::SourceProperties;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct DatagenProperties {
     /// split_num means data source partition
     #[serde(rename = "datagen.split.num")]
@@ -63,6 +63,13 @@ impl SourceProperties for DatagenProperties {
     type SplitReader = DatagenSplitReader;
 
     const SOURCE_NAME: &'static str = DATAGEN_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for DatagenProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        // FIXME: datagen does not handle unknown fields yet
+        HashMap::new()
+    }
 }
 
 fn default_rows_per_second() -> u64 {

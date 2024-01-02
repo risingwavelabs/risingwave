@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
-  RUSTDOCFLAGS: "--cfg docsrs --markdown-css rust.css --markdown-no-toc --index-page /home/runner/work/risingwave/risingwave/docs/rustdoc/index.md -Zunstable-options"
+  RUSTDOCFLAGS: "--markdown-css rust.css --markdown-no-toc --index-page /home/runner/work/risingwave/risingwave/docs/rustdoc/index.md -Zunstable-options"
 
 jobs:
   build:

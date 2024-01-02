@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ pub struct CurrWindow<'a, K> {
 
 impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     pub fn new(frame: Frame, enable_delta: bool) -> Self {
-        assert!(frame.bounds.is_valid());
+        assert!(frame.bounds.validate().is_ok());
         if enable_delta {
             // TODO(rc): currently only support `FrameExclusion::NoOthers` for delta
             assert!(frame.exclusion.is_no_others());

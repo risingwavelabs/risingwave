@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
+use super::strict::Strict;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
 use super::wrapper::EvalErrorReport;
@@ -33,7 +34,8 @@ use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    ExprBuilder::new_strict().build(prost)
+    let expr = ExprBuilder::new_strict().build(prost)?;
+    Ok(Strict::new(expr).boxed())
 }
 
 /// Build an expression from protobuf in non-strict mode.

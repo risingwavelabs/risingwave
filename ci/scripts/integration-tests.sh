@@ -34,14 +34,6 @@ docker volume prune -f
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-echo "--- install postgresql"
-sudo yum install -y postgresql15
-
-echo "--- download rwctest-key"
-aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
-
-cd integration_tests/scripts
-
 echo "--- case: ${case}, format: ${format}"
 
 if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
@@ -54,6 +46,20 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
   echo Docker image: $RW_IMAGE
 fi
+
+if [ "${case}" == "client-library" ]; then
+  cd integration_tests/client-library
+  python3 client_test.py
+  exit 0
+fi
+
+echo "--- install postgresql"
+sudo yum install -y postgresql15
+
+echo "--- download rwctest-key"
+aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
+
+cd integration_tests/scripts
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then

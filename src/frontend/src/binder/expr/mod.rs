@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -139,6 +139,12 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
                 list,
@@ -408,6 +414,41 @@ impl Binder {
                 ],
                 DataType::Boolean,
             )
+        };
+
+        Ok(func_call.into())
+    }
+
+    /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    pub(super) fn bind_similar_to(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pat: Expr,
+        esc_text: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pat = self.bind_expr_inner(pat)?;
+
+        let esc_inputs = if let Some(et) = esc_text {
+            let esc_text = self.bind_expr_inner(*et)?;
+            vec![pat, esc_text]
+        } else {
+            vec![pat]
+        };
+
+        let esc_call =
+            FunctionCall::new_unchecked(ExprType::SimilarToEscape, esc_inputs, DataType::Varchar);
+
+        let regex_call = FunctionCall::new_unchecked(
+            ExprType::RegexpEq,
+            vec![expr, esc_call.into()],
+            DataType::Boolean,
+        );
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![regex_call.into()], DataType::Boolean)
+        } else {
+            regex_call
         };
 
         Ok(func_call.into())

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -463,6 +463,10 @@ impl ArrayBuilderImpl {
 
     pub fn append_null(&mut self) {
         dispatch_array_builder_variants!(self, inner, { inner.append(None) })
+    }
+
+    pub fn append_n_null(&mut self, n: usize) {
+        dispatch_array_builder_variants!(self, inner, { inner.append_n(n, None) })
     }
 
     /// Append a [`Datum`] or [`DatumRef`] multiple times,

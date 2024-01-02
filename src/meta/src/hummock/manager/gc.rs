@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use std::time::Duration;
 use function_name::named;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -29,7 +28,7 @@ use risingwave_pb::hummock::FullScanTask;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock, ResponseEvent};
 use crate::hummock::HummockManager;
-use crate::manager::ClusterManagerRef;
+use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::Transaction;
 
@@ -72,7 +71,7 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         let deltas_to_delete = versioning
             .hummock_version_deltas
-            .range(..=versioning.checkpoint.version.as_ref().unwrap().id)
+            .range(..=versioning.checkpoint.version.id)
             .map(|(k, _)| *k)
             .collect_vec();
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
@@ -116,7 +115,7 @@ impl HummockManager {
             let mut tracked_object_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_object_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_object_ids.extend(delta.get_gc_object_ids());
+                tracked_object_ids.extend(delta.gc_object_ids.iter().cloned());
             }
             tracked_object_ids
         };
@@ -173,7 +172,7 @@ impl HummockManager {
         let spin_interval =
             Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
         let watermark =
-            collect_global_gc_watermark(self.cluster_manager().clone(), spin_interval).await?;
+            collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
         metrics.full_gc_last_object_id_watermark.set(watermark as _);
         let candidate_sst_number = object_ids.len();
         metrics
@@ -202,15 +201,19 @@ impl HummockManager {
 /// Returns a global GC watermark. The watermark only guards SSTs created before this
 /// invocation.
 pub async fn collect_global_gc_watermark(
-    cluster_manager: ClusterManagerRef,
+    metadata_manager: MetadataManager,
     spin_interval: Duration,
 ) -> Result<HummockSstableObjectId> {
     let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = [
-        cluster_manager.list_active_streaming_compute_nodes().await,
-        cluster_manager
+        metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await
+            .map_err(|err| Error::MetaStore(err.into()))?,
+        metadata_manager
             .list_worker_node(Some(WorkerType::Compactor), Some(Running))
-            .await,
+            .await
+            .map_err(|err| Error::MetaStore(err.into()))?,
     ]
     .concat();
 
@@ -225,11 +228,14 @@ pub async fn collect_global_gc_watermark(
         // which doesn't correctly guard target SSTs.
         // The second heartbeat guarantees its watermark is took after the start of this method.
         let worker_id = worker.id;
-        let cluster_manager_clone = cluster_manager.clone();
+        let metadata_manager_clone = metadata_manager.clone();
         worker_futures.push(tokio::spawn(async move {
             let mut init_version_id: Option<u64> = None;
             loop {
-                let worker_info = match cluster_manager_clone.get_worker_by_id(worker_id).await {
+                let worker_info = match metadata_manager_clone
+                    .get_worker_info_by_id(worker_id)
+                    .await
+                {
                     None => {
                         return None;
                     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::CdcSourceTypeTrait;
-use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.

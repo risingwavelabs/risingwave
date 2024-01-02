@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,10 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         properties: PulsarProperties,
         _context: SourceEnumeratorContextRef,
     ) -> Result<PulsarSplitEnumerator> {
-        let pulsar = properties.common.build_client().await?;
+        let pulsar = properties
+            .common
+            .build_client(&properties.oauth, &properties.aws_auth_props)
+            .await?;
         let topic = properties.common.topic;
         let parsed_topic = parse_topic(&topic)?;
 

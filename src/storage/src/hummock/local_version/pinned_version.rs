@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,16 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    HummockVersionExt, HummockVersionUpdateExt,
-};
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -145,7 +142,7 @@ impl PinnedVersion {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
         #[auto_enum(Iterator)]
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => {
@@ -172,8 +169,8 @@ impl PinnedVersion {
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> HummockVersion {
-        self.version.deref().clone()
+    pub fn version(&self) -> &HummockVersion {
+        &self.version
     }
 }
 

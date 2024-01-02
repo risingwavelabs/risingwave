@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,6 +68,7 @@ mod repeat;
 mod replace;
 mod round;
 mod sha;
+mod similar_to_escape;
 mod split_part;
 mod string;
 mod string_to_array;

@@ -33,7 +33,6 @@ etcd-client = { workspace = true }
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { workspace = true }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.12"
@@ -95,6 +94,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+expect-test = "1.4"
 maplit = "1.0.2"
 rand = "0.8"
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -388,7 +388,7 @@ public class EsSink extends SinkWriterBase {
         } else {
             List<String> keys =
                     primaryKeyIndexes.stream()
-                            .map(index -> row.get(primaryKeyIndexes.get(index)).toString())
+                            .map(index -> row.get(index).toString())
                             .collect(Collectors.toList());
             id = String.join(config.getDelimiter(), keys);
         }
@@ -400,14 +400,14 @@ public class EsSink extends SinkWriterBase {
         final String key = buildId(row);
 
         UpdateRequest updateRequest =
-                new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
+                new UpdateRequest(config.getIndex(), "_doc", key).doc(doc).upsert(doc);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
     private void processDelete(SinkRow row) {
         final String key = buildId(row);
-        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
+        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
     }
