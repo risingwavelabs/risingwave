@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -684,6 +684,8 @@ fn gen_table_plan_inner(
             TableId::placeholder().table_id,
         )),
         version: INITIAL_SOURCE_VERSION_ID,
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
