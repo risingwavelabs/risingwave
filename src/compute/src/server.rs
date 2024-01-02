@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -251,6 +251,11 @@ impl TableFragments {
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
+    }
+
+    /// Returns whether the table fragments is in `Initial` state.
+    pub fn is_initial(&self) -> bool {
+        self.state == State::Initial
     }
 
     /// Set the table ID.
