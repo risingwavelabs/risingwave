@@ -527,8 +527,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 range=?(rs..=re),
                 cache_real_first_key=?crfk,
                 cache_real_last_key=?crlk,
+                table_schema=?table.get_data_types(),
                 "[rc] just trace the range"
             );
+            for (key, value) in self.range_cache.inner() {
+                println!("[rc] fuck, key = {:?}, value = {:?}", key, value);
+            }
 
             // extend leftward only if there's smallest sentinel
             let table_sub_range = (
@@ -547,9 +551,13 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
-            return self
+            let res = self
                 .extend_cache_by_range_inner(table, table_sub_range)
                 .await;
+            for (key, value) in self.range_cache.inner() {
+                println!("[rc] fuck, key = {:?}, value = {:?}", key, value);
+            }
+            return res;
         }
 
         if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
