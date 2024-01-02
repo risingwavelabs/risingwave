@@ -27,6 +27,7 @@ use futures::prelude::stream::PollNext;
 use futures::stream::select_with_strategy;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::anyhow_error;
 use risingwave_connector::dispatch_sink;
@@ -34,11 +35,12 @@ use risingwave_connector::parser::{
     EncodingProperties, ParserConfig, ProtocolProperties, SpecificParserConfig,
 };
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
-use risingwave_connector::sink::iceberg::{IcebergSink, RemoteIcebergSink};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
-use risingwave_connector::sink::{build_sink, LogSinker, Sink, SinkParam, SinkWriterParam};
+use risingwave_connector::sink::{
+    build_sink, LogSinker, MetaClientForSink, MockMetaClient, Sink, SinkParam, SinkWriterParam,
+};
 use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
 };
@@ -102,8 +104,8 @@ impl LogReader for MockRangeLogReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<bool> {
-        Ok(false)
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        Ok((false, None))
     }
 }
 
@@ -263,21 +265,19 @@ impl MockDatagenSource {
 
 async fn consume_log_stream<S: Sink>(
     sink: S,
-    log_reader: MockRangeLogReader,
-    sink_writer_param: SinkWriterParam,
-    connector: &str,
-) -> Result<(), String> {
-    let log_sinker = match connector {
-        IcebergSink::SINK_NAME | RemoteIcebergSink::SINK_NAME => {
-            let coordinator = sink.new_coordinator().await.unwrap();
-            sink.mock_log_sinker_with_coordinator(sink_writer_param, coordinator)
-                .await
-                .unwrap()
-        }
-        _ => sink.new_log_sinker(sink_writer_param).await.unwrap(),
-    };
-
-    if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
+    mut log_reader: MockRangeLogReader,
+    mut sink_writer_param: SinkWriterParam,
+) -> Result<(), String>
+where
+    <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
+    <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
+{
+    sink_writer_param.meta_client = Some(MetaClientForSink::MockMetaClient(MockMetaClient::new(
+        Box::new(sink.new_coordinator().await.unwrap()),
+    )));
+    sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
+    let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
+    if let Err(e) = log_sinker.consume_log_and_sink(&mut log_reader).await {
         return Err(e.to_string());
     }
     Err("Stream closed".to_string())
@@ -404,15 +404,13 @@ async fn main() {
             format_desc,
             db_name: "not_need_set".to_string(),
             sink_from_name: "not_need_set".to_string(),
-            target_table: None,
         };
         let sink = build_sink(sink_param).unwrap();
         let mut sink_writer_param = SinkWriterParam::for_test();
         sink_writer_param.connector_params.sink_payload_format = SinkPayloadFormat::StreamChunk;
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
-                consume_log_stream(sink, mock_range_log_reader, sink_writer_param, &connector)
-                    .boxed()
+                consume_log_stream(sink, mock_range_log_reader, sink_writer_param).boxed()
             })
             .await
             .unwrap();

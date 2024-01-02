@@ -18,46 +18,29 @@ use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
+use risingwave_rpc_client::CoordinatorStreamHandle;
 use tracing::warn;
 
-#[cfg(feature = "sink_bench")]
-use super::boxed::BoxCoordinator;
+use super::SinkCoordinationRpcClientEnum;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkError, SinkParam};
 
 pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     epoch: u64,
     coordinator_stream_handle: Option<CoordinatorStreamHandle>,
-    #[cfg(feature = "sink_bench")]
-    mock_coordinator_stream_handle: Option<BoxCoordinator>,
     inner: W,
 }
 
 impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter<W> {
     pub async fn new(
-        client: SinkCoordinationRpcClient,
+        client: SinkCoordinationRpcClientEnum,
         param: SinkParam,
         vnode_bitmap: Bitmap,
         inner: W,
     ) -> Result<Self> {
         Ok(Self {
             epoch: 0,
-            coordinator_stream_handle: Some(
-                CoordinatorStreamHandle::new(client, param.to_proto(), vnode_bitmap).await?,
-            ),
-            #[cfg(feature = "sink_bench")]
-            mock_coordinator_stream_handle: None,
-            inner,
-        })
-    }
-
-    #[cfg(feature = "sink_bench")]
-    pub fn mock(mock_coordinator_stream_handle: BoxCoordinator, inner: W) -> Result<Self> {
-        Ok(Self {
-            epoch: 0,
-            coordinator_stream_handle: None,
-            mock_coordinator_stream_handle: Some(mock_coordinator_stream_handle),
+            coordinator_stream_handle: Some(client.new_stream_handle(param, vnode_bitmap).await?),
             inner,
         })
     }
@@ -67,13 +50,6 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter
         if let Some(coordinator_stream_handle) = self.coordinator_stream_handle.as_mut() {
             coordinator_stream_handle
                 .commit(self.epoch, metadata)
-                .await?;
-            return Ok(());
-        }
-        #[cfg(feature = "sink_bench")]
-        if let Some(mock_coordinator_stream_handle) = self.mock_coordinator_stream_handle.as_mut() {
-            mock_coordinator_stream_handle
-                .commit(self.epoch, vec![metadata])
                 .await?;
             return Ok(());
         }
