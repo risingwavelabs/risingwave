@@ -1893,8 +1893,30 @@ impl DdlController {
                     .alter_set_schema(mgr.fragment_manager.clone(), object, new_schema_id)
                     .await
             }
-            MetadataManager::V2(_) => {
-                unimplemented!("support set schema in v2")
+            MetadataManager::V2(mgr) => {
+                let (obj_type, id) = match object {
+                    alter_set_schema_request::Object::TableId(id) => {
+                        (ObjectType::Table, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::ViewId(id) => {
+                        (ObjectType::View, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SourceId(id) => {
+                        (ObjectType::Source, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SinkId(id) => {
+                        (ObjectType::Sink, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::FunctionId(id) => {
+                        (ObjectType::Function, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::ConnectionId(id) => {
+                        (ObjectType::Connection, id as ObjectId)
+                    }
+                };
+                mgr.catalog_controller
+                    .alter_schema(obj_type, id, new_schema_id as _)
+                    .await
             }
         }
     }
