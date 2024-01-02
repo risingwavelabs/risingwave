@@ -462,7 +462,7 @@ impl DdlController {
                     mgr.catalog_manager
                         .cancel_create_source_procedure(&source)
                         .await?;
-                    return Err(e);
+                    return Err(e.into());
                 }
 
                 mgr.catalog_manager
