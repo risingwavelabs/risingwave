@@ -43,7 +43,7 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator,
+    Forward, ForwardMergeRangeIterator, HummockIterator, SkipWatermarkIterator,
     UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
@@ -140,6 +140,7 @@ impl CompactorRunner {
             .await?;
         Ok((self.split_index, ssts, compaction_stat))
     }
+
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(
         &self,
@@ -228,7 +229,10 @@ impl CompactorRunner {
         // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         Ok((
-            UnorderedMergeIteratorInner::for_compactor(table_iters),
+            SkipWatermarkIterator::from_safe_epoch_watermarks(
+                UnorderedMergeIteratorInner::for_compactor(table_iters),
+                &self.compact_task.table_watermarks,
+            ),
             CompactionDeleteRangeIterator::new(del_iter),
         ))
     }
@@ -306,6 +310,9 @@ pub async fn compact(
     compact_table_ids.sort();
     compact_table_ids.dedup();
     let single_table = compact_table_ids.len() == 1;
+    let no_watermark_table = compact_table_ids
+        .iter()
+        .all(|table_id| !compact_task.table_watermarks.contains_key(table_id));
 
     let existing_table_ids: HashSet<u32> =
         HashSet::from_iter(compact_task.existing_table_ids.clone());
@@ -384,6 +391,7 @@ pub async fn compact(
         && !has_tombstone
         && !has_ttl
         && single_table
+        && no_watermark_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
@@ -503,7 +511,9 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
-        check_compaction_result(&compact_task, context.clone()).await.unwrap();
+        check_compaction_result(&compact_task, context.clone())
+            .await
+            .unwrap();
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
