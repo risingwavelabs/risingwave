@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -373,6 +373,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
+        for (k, v) in delta {
+            tracing::trace!(
+                "[rc] fuck delta, key = {:?}, value = {:?}",
+                k.as_normal_expect(),
+                v
+            );
+        }
+
         // if self.cache_policy.is_full() {
         //     // ensure everything is in the cache
         //     self.extend_cache_to_boundary(table).await?;
@@ -470,6 +478,19 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         table: &StateTable<S>,
         range: RangeInclusive<&StateKey>,
     ) -> StreamExecutorResult<()> {
+        // {
+        //     // TODO(): construct a bug case
+        //     let s = format!("{:?}", table.get_data_types());
+        //     if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" {
+        //         let mut keys = HashSet::new();
+        //         for (key, value) in self.range_cache.inner() {
+        //             if let Some(skey) = key.as_normal() {
+
+        //             }
+        //         }
+        //     }
+        // }
+
         if self.cache_real_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
