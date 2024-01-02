@@ -75,7 +75,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
         // Currently we only support `StaticDirective` in `tracing-subscriber`, so
         // filtering by fields like `thread` and `class` is not supported.
         // TODO: should we support dynamic `Directive`?
-        macro_rules! event {
+        macro_rules! event_enabled {
             ($lvl:expr) => {
                 tracing::event_enabled!(
                     target: TARGET,
@@ -86,11 +86,11 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
 
         // See `com.risingwave.tracing.TracingSlf4jImpl`.
         let enabled = match level {
-            0 => event!(Level::ERROR),
-            1 => event!(Level::WARN),
-            2 => event!(Level::INFO),
-            3 => event!(Level::DEBUG),
-            4 => event!(Level::TRACE),
+            0 => event_enabled!(Level::ERROR),
+            1 => event_enabled!(Level::WARN),
+            2 => event_enabled!(Level::INFO),
+            3 => event_enabled!(Level::DEBUG),
+            4 => event_enabled!(Level::TRACE),
             _ => unreachable!(),
         };
 
