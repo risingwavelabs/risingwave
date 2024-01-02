@@ -26,11 +26,31 @@ public class TracingSlf4jImpl {
     public static final int DEBUG = 3;
     public static final int TRACE = 4;
 
+    // TODO: We may support changing the log level at runtime in the future.
+    static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(ERROR);
+    static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(WARN);
+    static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(INFO);
+    static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(DEBUG);
+    static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(TRACE);
+
     public static void event(String name, int level, String message) {
         Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
     }
 
     public static boolean isEnabled(int level) {
-        return Binding.tracingSlf4jEventEnabled(level);
+        switch (level) {
+            case ERROR:
+                return isErrorEnabled;
+            case WARN:
+                return isWarnEnabled;
+            case INFO:
+                return isInfoEnabled;
+            case DEBUG:
+                return isDebugEnabled;
+            case TRACE:
+                return isTraceEnabled;
+            default:
+                return false;
+        }
     }
 }
