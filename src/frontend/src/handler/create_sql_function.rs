@@ -46,15 +46,11 @@ pub async fn handle_create_sql_function(
 
     let language = "sql".to_string();
     // Just a basic sanity check for language
-    if let Some(lang) = params.language {
-        let lang = lang.real_value().to_lowercase();
-        debug_assert!(lang == "sql", "`language` for sql udf must be sql");
-        if lang != "sql" {
-            return Err(ErrorCode::InvalidParameterValue(
-                "`language` for sql udf must be sql".to_string(),
-            )
-            .into());
-        }
+    if !matches!(params.language, Some(lang) if lang.real_value().to_lowercase() == "sql") {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`language` for sql udf must be `sql`".to_string(),
+        )
+        .into());
     }
 
     // SQL udf function supports both single quote (i.e., as 'select $1 + $2')

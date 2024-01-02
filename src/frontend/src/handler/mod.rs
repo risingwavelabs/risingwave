@@ -228,17 +228,6 @@ pub async fn handle(
                 )
                 .await
             } else {
-                // SQL user defined function, the logic is mostly inlined
-                debug_assert!(
-                    params.using.is_none() && params.language.is_some(),
-                    "`params.using` must be none && `params.language` must be specified for sql udf function"
-                );
-                if params.language.is_none() {
-                    return Err(ErrorCode::InvalidParameterValue(
-                        "`language` must be specified for sql udf".to_string(),
-                    )
-                    .into());
-                }
                 create_sql_function::handle_create_sql_function(
                     handler_args,
                     or_replace,
