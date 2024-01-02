@@ -55,6 +55,8 @@ impl UserDefinedFunction {
             return_type,
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
+            // TODO: Ensure if we need `body` here
+            body: None,
             link: udf.get_link().clone(),
         };
 
