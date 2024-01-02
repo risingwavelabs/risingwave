@@ -233,13 +233,14 @@ impl Binder {
             if func.language == "sql" {
                 if func.body.is_none() {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "`body` must exist for sql udf".to_string()
+                        "`body` must exist for sql udf".to_string(),
                     )
                     .into());
                 }
                 // This represents the current user defined function is `language sql`
-                let parse_result =
-                    risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_ref().unwrap().as_str());
+                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
+                    func.body.as_ref().unwrap().as_str(),
+                );
                 if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
                     parse_result
                 {
