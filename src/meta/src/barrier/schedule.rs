@@ -431,6 +431,7 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
+            + 1
             >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }
