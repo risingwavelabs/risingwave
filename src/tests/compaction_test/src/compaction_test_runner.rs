@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -237,7 +237,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -248,7 +248,7 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
 
     let (new_meta_client, _) = MetaClient::register_new(
-        new_meta_endpoint,
+        new_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -280,7 +280,7 @@ async fn pull_version_deltas(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, _) = MetaClient::register_new(
-        cluster_meta_endpoint,
+        cluster_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -329,7 +329,7 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address.parse()?,
         WorkerType::RiseCtl,
         &advertise_addr,
         Default::default(),

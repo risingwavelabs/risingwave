@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,6 +157,10 @@ pub struct TableCatalog {
 
     /// Incoming sinks, used for sink into table
     pub incoming_sinks: Vec<SinkId>,
+
+    pub created_at_cluster_version: Option<String>,
+
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 // How the stream job was created will determine
@@ -445,6 +449,8 @@ impl TableCatalog {
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
             incoming_sinks: self.incoming_sinks.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -560,6 +566,8 @@ impl From<PbTable> for TableCatalog {
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
             incoming_sinks: tb.incoming_sinks.clone(),
+            created_at_cluster_version: tb.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
         }
     }
 }
@@ -656,6 +664,8 @@ mod tests {
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
             incoming_sinks: vec![],
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         }
         .into();
 
@@ -716,6 +726,8 @@ mod tests {
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
                 incoming_sinks: vec![],
+                created_at_cluster_version: None,
+                initialized_at_cluster_version: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
