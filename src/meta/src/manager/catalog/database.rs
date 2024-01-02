@@ -329,6 +329,14 @@ impl DatabaseManager {
         self.sources.values().cloned().collect_vec()
     }
 
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
+    }
+
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.sources
             .values()
