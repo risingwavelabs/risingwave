@@ -162,7 +162,7 @@ pub async fn handle_create_function(
         return_type: Some(return_type.into()),
         language,
         identifier,
-        body: "".to_string(),
+        body: None,
         link,
         owner: session.user_id(),
     };

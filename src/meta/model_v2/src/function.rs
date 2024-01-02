@@ -95,7 +95,7 @@ impl From<PbFunction> for ActiveModel {
             language: Set(function.language),
             link: Set(function.link),
             identifier: Set(function.identifier),
-            body: Set(Some(function.body)),
+            body: Set(function.body),
             kind: Set(function.kind.unwrap().into()),
         }
     }

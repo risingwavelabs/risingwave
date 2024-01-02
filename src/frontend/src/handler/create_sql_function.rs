@@ -169,7 +169,7 @@ pub async fn handle_create_sql_function(
         return_type: Some(return_type.into()),
         language,
         identifier: "".to_string(),
-        body,
+        body: Some(body),
         link: "".to_string(),
         owner: session.user_id(),
     };

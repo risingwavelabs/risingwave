@@ -30,7 +30,7 @@ pub struct FunctionCatalog {
     pub return_type: DataType,
     pub language: String,
     pub identifier: String,
-    pub body: String,
+    pub body: Option<String>,
     pub link: String,
 }
 
