@@ -272,7 +272,7 @@ impl ConnectorClient {
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    table_schema: sink_param.table_schema.clone(),
+                    payload_schema: sink_param.table_schema.clone(),
                     sink_param: Some(sink_param),
                     format: sink_payload_format as i32,
                 })),

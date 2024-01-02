@@ -202,7 +202,7 @@ public class SinkWriterStreamObserver
 
     private void bindSink(ConnectorServiceProto.SinkWriterStreamRequest.StartSink startSink) {
         var sinkParam = startSink.getSinkParam();
-        tableSchema = TableSchema.fromProto(startSink.getTableSchema());
+        tableSchema = TableSchema.fromProto(startSink.getPayloadSchema());
         String connectorName = getConnectorName(sinkParam);
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
         sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
