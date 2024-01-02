@@ -31,9 +31,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, FragmentTypeFlag,
-    PauseMutation, ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor,
-    ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers, PauseMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
@@ -691,24 +691,11 @@ impl CommandContext {
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
             Command::CreateStreamingJob {
-                dispatchers,
-                table_fragments,
-                ..
-            } => {
-                // cdc backfill table job doesn't need to be tracked
-                if table_fragments.fragments().iter().any(|fragment| {
-                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
-                }) {
-                    Default::default()
-                } else {
-                    dispatchers
-                        .values()
-                        .flatten()
-                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                        .chain(table_fragments.values_actor_ids())
-                        .collect()
-                }
-            }
+                table_fragments, ..
+            } => table_fragments
+                .tracking_progress_actor_ids()
+                .into_iter()
+                .collect(),
             _ => Default::default(),
         }
     }
@@ -789,7 +776,7 @@ impl CommandContext {
                     .await?;
                 self.barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
                     .await;
             }
 
@@ -952,11 +939,12 @@ impl CommandContext {
 
                 // Extract the fragments that include source operators.
                 let source_fragments = table_fragments.stream_source_fragments();
-
+                let backfill_fragments = table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )
@@ -1020,10 +1008,13 @@ impl CommandContext {
                     .drop_source_fragments(std::slice::from_ref(old_table_fragments))
                     .await;
                 let source_fragments = new_table_fragments.stream_source_fragments();
+                // XXX: is it possible to have backfill fragments here?
+                let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
                 self.barrier_manager_context
                     .source_manager
                     .apply_source_change(
                         Some(source_fragments),
+                        Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )

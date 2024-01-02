@@ -1970,7 +1970,7 @@ impl CatalogController {
             .map(|obj| obj.oid)
             .collect_vec();
 
-        // cdc source streaming job.
+        // source streaming job.
         if object_type == ObjectType::Source {
             let source_info: Option<StreamSourceInfo> = Source::find_by_id(object_id)
                 .select_only()
@@ -1980,7 +1980,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
             if let Some(source_info) = source_info
-                && source_info.into_inner().cdc_source_job
+                && source_info.into_inner().has_streaming_job
             {
                 to_drop_streaming_jobs.push(object_id);
             }

@@ -185,6 +185,67 @@ pub fn build_additional_column_catalog(
     Ok(catalog)
 }
 
+pub fn add_partition_offset_cols(
+    columns: &[ColumnCatalog],
+    connector_name: &str,
+) -> ([bool; 2], [ColumnCatalog; 2]) {
+    let mut columns_exist = [false; 2];
+    let mut last_column_id = columns
+        .iter()
+        .map(|c| c.column_desc.column_id)
+        .max()
+        .unwrap_or(ColumnId::placeholder());
+
+    let additional_columns: Vec<_> = {
+        let compat_col_types = COMPATIBLE_ADDITIONAL_COLUMNS
+            .get(connector_name)
+            .unwrap_or(&COMMON_COMPATIBLE_ADDITIONAL_COLUMNS);
+        ["partition", "file", "offset"]
+            .iter()
+            .filter_map(|col_type| {
+                last_column_id = last_column_id.next();
+                if compat_col_types.contains(col_type) {
+                    Some(
+                        build_additional_column_catalog(
+                            last_column_id,
+                            connector_name,
+                            col_type,
+                            None,
+                            None,
+                            None,
+                            false,
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    assert_eq!(additional_columns.len(), 2);
+
+    // Check if partition/file/offset columns are included explicitly.
+    for col in columns {
+        use risingwave_pb::plan_common::additional_column::ColumnType;
+        match col.column_desc.additional_column {
+            AdditionalColumn {
+                column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
+            } => {
+                columns_exist[0] = true;
+            }
+            AdditionalColumn {
+                column_type: Some(ColumnType::Offset(_)),
+            } => {
+                columns_exist[1] = true;
+            }
+            _ => (),
+        }
+    }
+
+    (columns_exist, additional_columns.try_into().unwrap())
+}
+
 fn build_header_catalog(
     column_id: ColumnId,
     col_name: &str,

@@ -15,21 +15,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::additional_column::ColumnType;
-use risingwave_pb::plan_common::{AdditionalColumn, PbColumnCatalog};
+use risingwave_pb::plan_common::PbColumnCatalog;
 
 #[expect(deprecated)]
 use super::fs_reader::FsSourceReader;
 use super::reader::SourceReader;
 use crate::error::ConnectorResult;
-use crate::parser::additional_columns::{
-    build_additional_column_catalog, COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
-    COMPATIBLE_ADDITIONAL_COLUMNS,
-};
+use crate::parser::additional_columns::add_partition_offset_cols;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
@@ -94,65 +91,18 @@ impl SourceDescBuilder {
     /// This function builds `SourceColumnDesc` from `ColumnCatalog`, and handle the creation
     /// of hidden columns like partition/file, offset that are not specified by user.
     pub fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
-        let mut columns_exist = [false; 2];
-        let mut last_column_id = self
-            .columns
-            .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().column_id.into())
-            .max()
-            .unwrap_or(ColumnId::placeholder());
         let connector_name = self
             .with_properties
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-
-        let additional_columns: Vec<_> = {
-            let compat_col_types = COMPATIBLE_ADDITIONAL_COLUMNS
-                .get(&*connector_name)
-                .unwrap_or(&COMMON_COMPATIBLE_ADDITIONAL_COLUMNS);
-            ["partition", "file", "offset"]
-                .iter()
-                .filter_map(|col_type| {
-                    last_column_id = last_column_id.next();
-                    if compat_col_types.contains(col_type) {
-                        Some(
-                            build_additional_column_catalog(
-                                last_column_id,
-                                &connector_name,
-                                col_type,
-                                None,
-                                None,
-                                None,
-                                false,
-                            )
-                            .unwrap()
-                            .to_protobuf(),
-                        )
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-        assert_eq!(additional_columns.len(), 2);
-
-        // Check if partition/file/offset columns are included explicitly.
-        for col in &self.columns {
-            match col.column_desc.as_ref().unwrap().get_additional_column() {
-                Ok(AdditionalColumn {
-                    column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
-                }) => {
-                    columns_exist[0] = true;
-                }
-                Ok(AdditionalColumn {
-                    column_type: Some(ColumnType::Offset(_)),
-                }) => {
-                    columns_exist[1] = true;
-                }
-                _ => (),
-            }
-        }
+        let columns = self
+            .columns
+            .iter()
+            .map(|c| ColumnCatalog::from(c.clone()))
+            .collect_vec();
+        let (columns_exist, additional_columns) =
+            add_partition_offset_cols(&columns, &connector_name);
 
         let mut columns: Vec<_> = self
             .columns
@@ -163,7 +113,7 @@ impl SourceDescBuilder {
         for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
             if !existed {
                 columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(
-                    &ColumnDesc::from(c.column_desc.as_ref().unwrap()),
+                    &c.column_desc,
                 ));
             }
         }

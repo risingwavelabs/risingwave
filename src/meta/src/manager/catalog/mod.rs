@@ -1168,7 +1168,7 @@ impl CatalogManager {
         let mut all_subscription_ids: HashSet<SubscriptionId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
-        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
+        let mut all_streaming_job_source_ids: HashSet<SourceId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1452,11 +1452,10 @@ impl CatalogManager {
                         continue;
                     }
 
-                    // cdc source streaming job
                     if let Some(info) = source.info
-                        && info.cdc_source_job
+                        && info.has_streaming_job
                     {
-                        all_cdc_source_ids.insert(source.id);
+                        all_streaming_job_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
                             .await?;
@@ -1779,7 +1778,7 @@ impl CatalogManager {
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
             .chain(all_subscription_ids.into_iter().map(|id| id.into()))
-            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
+            .chain(all_streaming_job_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))

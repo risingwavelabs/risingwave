@@ -28,7 +28,8 @@ use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalSource, LogicalSourceBackfill, LogicalSysScan, LogicalTableFunction, LogicalValues,
+    PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -91,6 +92,8 @@ impl Planner {
                 "Should not create MATERIALIZED VIEW directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
             .into())
+        } else if source.can_backfill() {
+            Ok(LogicalSourceBackfill::new(Rc::new(source.catalog), self.ctx())?.into())
         } else {
             Ok(LogicalSource::with_catalog(
                 Rc::new(source.catalog),

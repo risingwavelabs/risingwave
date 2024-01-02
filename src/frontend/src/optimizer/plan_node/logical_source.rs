@@ -22,6 +22,8 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -67,12 +69,27 @@ pub struct LogicalSource {
 impl LogicalSource {
     pub fn new(
         source_catalog: Option<Rc<SourceCatalog>>,
-        column_catalog: Vec<ColumnCatalog>,
+        mut column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
+
+        // for sources with streaming job, we will include partition and offset cols in the output.
+        if let Some(source_catalog) = &source_catalog
+            && matches!(kind, SourceNodeKind::CreateSourceWithStreamjob)
+        {
+            let (columns_exist, additional_columns) =
+                add_partition_offset_cols(&column_catalog, &source_catalog.connector_name());
+            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
+                c.is_hidden = true;
+                if !existed {
+                    column_catalog.push(c);
+                }
+            }
+        }
+
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
@@ -503,9 +520,11 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef;
+
         match self.core.kind {
             SourceNodeKind::CreateTable | SourceNodeKind::CreateSourceWithStreamjob => {
-                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan
+                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
+                // for backfill-able source, row_id and generated columns is created after SourceBackfill node.
                 if self.core.is_new_fs_connector() {
                     plan = Self::create_fs_list_plan(self.core.clone())?;
                     plan = StreamFsFetch::new(plan, self.core.clone()).into();

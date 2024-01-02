@@ -62,9 +62,16 @@ message StreamSourceInfo {
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
   plan_common.ExternalTableDesc external_table = 12;
-  // Whether the stream source is a cdc source streaming job.
-  // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
-  bool cdc_source_job = 13;
+  // Whether the stream source has a streaming job.
+  // This is related with [RFC: Reusable Source Executor](https://github.com/risingwavelabs/rfcs/pull/72).
+  // Currently, the following sources have streaming jobs:
+  // - Direct CDC sources (mysql & postgresql)
+  // - MQ sources (Kafka, Pulsar, Kinesis, etc.)
+  bool has_streaming_job = 13;
+  // Only used when `has_streaming_job` is `true`.
+  // If `false`, `requires_singleton` will be set in the stream plan.
+  bool is_distributed = 15;
+  reserved "cdc_source_job"; // deprecated
   // Options specified by user in the FORMAT ENCODE clause.
   map<string, string> format_encode_options = 14;
 }

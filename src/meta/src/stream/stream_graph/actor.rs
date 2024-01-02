@@ -122,7 +122,7 @@ impl ActorBuilder {
     /// During this process, the following things will be done:
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
     /// compute nodes.
-    /// 2. Fill the upstream mview info of the `Merge` node under the `StreamScan` node.
+    /// 2. Fill the upstream mview info of the `Merge` node under the other "leaf" nodes.
     fn rewrite(&self) -> MetaResult<StreamNode> {
         self.rewrite_inner(&self.nodes, 0)
     }
@@ -248,6 +248,44 @@ impl ActorBuilder {
                         ..merge_node.clone()
                     },
                 ];
+                Ok(StreamNode {
+                    input,
+                    ..stream_node.clone()
+                })
+            }
+
+            // "Leaf" node `SourceBackfill`.
+            NodeBody::SourceBackfill(source_backfill) => {
+                let input = stream_node.get_input();
+                assert_eq!(input.len(), 1);
+
+                let merge_node = &input[0];
+                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+
+                let upstream_source_id = source_backfill.source_id;
+
+                // Index the upstreams by the an external edge ID.
+                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
+                    upstream_table_id: upstream_source_id.into(),
+                    downstream_fragment_id: self.fragment_id,
+                }];
+
+                let upstream_actor_id = upstreams.actors.as_global_ids();
+
+                // rewrite the input of `SourceBackfill`
+                let input = vec![
+                    // Fill the merge node body with correct upstream info.
+                    StreamNode {
+                        node_body: Some(NodeBody::Merge(MergeNode {
+                            upstream_actor_id,
+                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            fields: merge_node.fields.clone(),
+                        })),
+                        ..merge_node.clone()
+                    },
+                ];
+
                 Ok(StreamNode {
                     input,
                     ..stream_node.clone()
@@ -622,6 +660,7 @@ impl ActorGraphBuildState {
 
 /// The result of a built actor graph. Will be further embedded into the `Context` for building
 /// actors on the compute nodes.
+#[derive(Debug)]
 pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,

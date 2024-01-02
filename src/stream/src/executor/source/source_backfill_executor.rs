@@ -611,11 +611,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             }
                             _ => {}
                         }
-                        self.backfill_state_store
-                            .state_store
-                            .commit(barrier.epoch)
-                            .await?;
                     }
+                    self.backfill_state_store
+                        .state_store
+                        .commit(barrier.epoch)
+                        .await?;
                     yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
@@ -725,11 +725,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         if split_changed {
-            tracing::info!(
-                state = ?target_state,
-                "apply split change"
-            );
-
             stage
                 .unfinished_splits
                 .retain(|split| target_state.get(split.id().as_ref()).is_some());
@@ -743,7 +738,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 // trim dropped splits' state
                 self.backfill_state_store.trim_state(dropped_splits).await?;
             }
-
+            tracing::info!(old_state=?stage.states, new_state=?target_state, "finish split change");
             stage.states = target_state;
         }
 

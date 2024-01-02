@@ -732,7 +732,7 @@ impl ScaleController {
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if TableFragments::find_stream_source(stream_node).is_some() {
+                if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -1738,6 +1738,7 @@ impl ScaleController {
         if !stream_source_actor_splits.is_empty() {
             self.source_manager
                 .apply_source_change(
+                    None,
                     None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),

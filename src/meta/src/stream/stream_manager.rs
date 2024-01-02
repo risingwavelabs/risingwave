@@ -456,7 +456,7 @@ impl GlobalStreamManager {
             }
 
             let dummy_table_id = table_fragments.table_id();
-
+            // TODO: does this need change? for replace_table
             let init_split_assignment =
                 self.source_manager.allocate_splits(&dummy_table_id).await?;
 
@@ -473,7 +473,16 @@ impl GlobalStreamManager {
 
         let table_id = table_fragments.table_id();
 
-        let init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        // Here we need to consider:
+        // - Source with streaming job (backfill-able source)
+        // - Table with connector
+        // - MV on backfill-able source
+        let mut init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
+        init_split_assignment.extend(
+            self.source_manager
+                .allocate_splits_for_backfill(&table_id, &dispatchers)
+                .await?,
+        );
 
         let command = Command::CreateStreamingJob {
             table_fragments,
@@ -484,7 +493,6 @@ impl GlobalStreamManager {
             ddl_type,
             replace_table: replace_table_command,
         };
-
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
             if create_type == CreateType::Foreground || err.is_cancelled() {
                 let mut table_ids = HashSet::from_iter(std::iter::once(table_id));
@@ -519,7 +527,7 @@ impl GlobalStreamManager {
             .await?;
 
         let dummy_table_id = table_fragments.table_id();
-
+        // TODO: does this need change? for replace_table
         let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
         if let Err(err) = self

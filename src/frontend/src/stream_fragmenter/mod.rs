@@ -264,9 +264,9 @@ fn build_fragment(
 
             if let Some(source) = node.source_inner.as_ref()
                 && let Some(source_info) = source.info.as_ref()
-                && source_info.cdc_source_job
+                && source_info.has_streaming_job
+                && !source_info.is_distributed
             {
-                tracing::debug!("mark cdc source job as singleton");
                 current_fragment.requires_singleton = true;
             }
         }
@@ -294,6 +294,7 @@ fn build_fragment(
         }
 
         NodeBody::StreamCdcScan(_) => {
+            // XXX: Should we use a different flag for CDC scan?
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // the backfill algorithm is not parallel safe
             current_fragment.requires_singleton = true;
@@ -308,6 +309,13 @@ fn build_fragment(
             current_fragment
                 .upstream_table_ids
                 .push(node.upstream_source_id);
+        }
+        NodeBody::SourceBackfill(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceBackfill as u32;
+            // memorize upstream source id for later use
+            let source_id = node.source_id;
+            state.dependent_table_ids.insert(source_id.into());
+            current_fragment.upstream_table_ids.push(source_id);
         }
 
         NodeBody::Now(_) => {
