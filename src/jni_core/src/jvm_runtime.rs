@@ -37,11 +37,12 @@ pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        match JVM_RESULT.get_or_init(|| {
-            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e.as_report()))
-        }) {
+        match JVM_RESULT.get_or_init(Self::inner_new) {
             Ok(jvm) => Ok(jvm),
-            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+            Err(e) => {
+                error!("failed to init jvm: {:?}", e.as_report());
+                Err(anyhow!(e).context("jvm not initialized properly"))
+            }
         }
     }
 

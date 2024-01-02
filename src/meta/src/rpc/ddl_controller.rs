@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
@@ -56,6 +56,7 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;
@@ -707,7 +708,9 @@ impl DdlController {
             // Do some type-specific work for each type of stream job.
             match stream_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
-                    Self::validate_cdc_table(table, &table_fragments).await?;
+                    Self::validate_cdc_table(table, &table_fragments)
+                        .await
+                        .context("failed to validate CDC table")?;
                 }
                 StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
@@ -789,18 +792,14 @@ impl DdlController {
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &TableFragments,
-    ) -> MetaResult<()> {
+    ) -> anyhow::Result<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
             .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
             .exactly_one()
-            .map_err(|err| {
-                anyhow!(format!(
-                    "expect exactly one stream scan fragment, got {}",
-                    err
-                ))
-            })?;
+            .map_err(|e| anyhow::anyhow!("{}", e.to_report_string()))
+            .context("expect exactly one stream scan fragment")?;
 
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
