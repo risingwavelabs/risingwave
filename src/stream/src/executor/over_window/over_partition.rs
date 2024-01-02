@@ -484,7 +484,15 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // TODO(): construct a bug case
             let s = format!("{:?}", table.get_data_types());
             if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" && fuck_delta_str == "+++" {
-                tracing::trace!("[rc] just fucking reset the cache");
+                tracing::trace!("[rc] the fuck case");
+                for (k, v) in self.range_cache.inner() {
+                    if k.is_normal() {
+                        let sk = self.row_conv.state_key_to_table_sub_pk(k.as_normal_expect())?;
+                        tracing::trace!("[rc] fuck cache k = {:?}, v = {:?}", sk, v);
+                    } else {
+                        tracing::trace!("[rc] fuck cache k = {:?}", k);
+                    }
+                }
                 *self.range_cache = new_empty_partition_cache();
             }
         }
