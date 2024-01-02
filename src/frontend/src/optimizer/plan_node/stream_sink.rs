@@ -34,7 +34,6 @@ use risingwave_connector::sink::{
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
 use super::generic::GenericPlanRef;
@@ -150,13 +149,6 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "deltalake" => {
-                        // iceberg with multiple parallelism will fail easily with concurrent commit
-                        // on metadata
-                        // TODO: reset iceberg sink to have multiple parallelism
-                        info!("setting iceberg sink parallelism to singleton");
-                        RequiredDist::single()
-                    }
                     Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
                         if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
                             return Err(ErrorCode::SinkError(Box::new(Error::new(
