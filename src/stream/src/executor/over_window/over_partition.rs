@@ -81,6 +81,7 @@ pub(super) fn shrink_partition_cache(
             return;
         }
         CachePolicy::Recent => {
+            return;
             let (sk_start, sk_end) = recently_accessed_range.into_inner();
             let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
 
