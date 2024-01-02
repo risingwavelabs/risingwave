@@ -14,6 +14,9 @@ include ./generated/main.slt.part
 include ./generated/main.slt.part
 include ./generated/main.slt.part
 include ./generated/main.slt.part
+include ./generated/main.slt.part
+include ./generated/main.slt.part
+include ./generated/main.slt.part
 
 #statement ok
 #set rw_streaming_over_window_cache_policy = recent_first_n;
