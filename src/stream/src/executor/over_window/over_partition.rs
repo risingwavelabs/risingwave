@@ -515,12 +515,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
             // extend leftward only if there's smallest sentinel
+            // let table_sub_range = (
+            //     Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.start())?),
+            //     Bound::Excluded(
+            //         self.row_conv
+            //             .state_key_to_table_sub_pk(cache_real_first_key)?,
+            //     ),
+            // );
             let table_sub_range = (
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.start())?),
-                Bound::Excluded(
-                    self.row_conv
-                        .state_key_to_table_sub_pk(cache_real_first_key)?,
-                ),
+                Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.end())?),
             );
             tracing::trace!(
                 partition=?self.this_partition_key,
