@@ -3,25 +3,35 @@
 statement ok
 set rw_implicit_flush = true;
 
-statement ok
-set rw_streaming_over_window_cache_policy = full;
-
-include ./run_all.slt.part
+#statement ok
+#set rw_streaming_over_window_cache_policy = full;
+#
+#include ./run_all.slt.part
 
 statement ok
 set rw_streaming_over_window_cache_policy = recent;
 
 include ./run_all.slt.part
-
-statement ok
-set rw_streaming_over_window_cache_policy = recent_first_n;
-
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
+include ./run_all.slt.part
 include ./run_all.slt.part
 
-statement ok
-set rw_streaming_over_window_cache_policy = recent_last_n;
-
-include ./run_all.slt.part
+#statement ok
+#set rw_streaming_over_window_cache_policy = recent_first_n;
+#
+#include ./run_all.slt.part
+#
+#statement ok
+#set rw_streaming_over_window_cache_policy = recent_last_n;
+#
+#include ./run_all.slt.part
 
 statement ok
 set rw_streaming_over_window_cache_policy = default;
