@@ -200,35 +200,23 @@ public class SinkWriterStreamObserver
         ConnectorNodeMetrics.decActiveSinkConnections(connectorName, "node1");
     }
 
-    private void bindSink(
-            com.risingwave.proto.ConnectorServiceProto.SinkWriterStreamRequest.StartSink
-                    startSink) {
+    private void bindSink(ConnectorServiceProto.SinkWriterStreamRequest.StartSink startSink) {
         var sinkParam = startSink.getSinkParam();
-        var format = startSink.getSinkPayloadFormatCase();
-        tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
+        tableSchema = TableSchema.fromProto(startSink.getTableSchema());
         String connectorName = getConnectorName(sinkParam);
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
         sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
-
-        switch (format) {
-            case UNSPECIFIED_FORMAT:
-            case SINKPAYLOADFORMAT_NOT_SET:
+        switch (startSink.getFormat()) {
+            case FORMAT_UNSPECIFIED:
+            case UNRECOGNIZED:
                 throw INVALID_ARGUMENT
                         .withDescription("should specify payload format in request")
                         .asRuntimeException();
-            case JSON_FORMAT:
+            case JSON:
                 deserializer = new JsonDeserializer(tableSchema);
                 break;
-            case STREAM_CHUNK_FORMAT:
+            case STREAM_CHUNK:
                 deserializer = new StreamChunkDeserializer(tableSchema);
-                break;
-            case STREAM_CHUNK_WITH_SCHEMA_FORMAT:
-                deserializer =
-                        new StreamChunkDeserializer(
-                                TableSchema.fromProto(
-                                        startSink
-                                                .getStreamChunkWithSchemaFormat()
-                                                .getTableSchema()));
                 break;
         }
         this.connectorName = connectorName.toUpperCase();

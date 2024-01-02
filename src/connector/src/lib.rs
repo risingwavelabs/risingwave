@@ -38,8 +38,7 @@
 use std::time::Duration;
 
 use duration_str::parse_std;
-use risingwave_pb::connector_service::sink_writer_stream_request::start_sink::SinkPayloadFormat;
-use risingwave_pb::connector_service::UnspecifiedFormat;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
@@ -61,18 +60,10 @@ mod with_options;
 #[cfg(test)]
 mod with_options_test;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_client: Option<ConnectorClient>,
     pub sink_payload_format: SinkPayloadFormat,
-}
-impl Default for ConnectorParams {
-    fn default() -> Self {
-        Self {
-            connector_client: Default::default(),
-            sink_payload_format: SinkPayloadFormat::UnspecifiedFormat(UnspecifiedFormat {}),
-        }
-    }
 }
 
 impl ConnectorParams {

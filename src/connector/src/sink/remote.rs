@@ -38,15 +38,14 @@ use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
 };
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
-use risingwave_pb::connector_service::sink_writer_stream_request::start_sink::SinkPayloadFormat;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Request as SinkRequest, StartSink,
 };
 use risingwave_pb::connector_service::{
     sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
-    SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
-    SinkWriterStreamRequest, SinkWriterStreamResponse, StreamChunkFormat,
-    StreamChunkWithSchemaFormat, TableSchema, ValidateSinkRequest, ValidateSinkResponse,
+    SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata, SinkPayloadFormat,
+    SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema, ValidateSinkRequest,
+    ValidateSinkResponse,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
@@ -363,25 +362,11 @@ impl RemoteLogSinker {
         writer_param: SinkWriterParam,
         sink_name: &str,
     ) -> Result<Self> {
-        let sink_payload_format = if sink_name.eq(ElasticSearchSink::SINK_NAME) {
-            let columns = vec![
-                ColumnDesc::unnamed(ColumnId::from(3), DataType::Varchar).to_protobuf(),
-                ColumnDesc::unnamed(ColumnId::from(4), DataType::Jsonb).to_protobuf(),
-            ];
-            SinkPayloadFormat::StreamChunkWithSchemaFormat(StreamChunkWithSchemaFormat {
-                table_schema: Some(TableSchema {
-                    columns,
-                    pk_indices: vec![],
-                }),
-            })
-        } else {
-            SinkPayloadFormat::StreamChunkFormat(StreamChunkFormat {})
-        };
         let SinkWriterStreamHandle {
             request_sender,
             response_stream,
         } = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(&sink_param, sink_payload_format)
+            .start_sink_writer_stream(&sink_param, SinkPayloadFormat::StreamChunk, sink_name)
             .await?;
 
         let sink_metrics = writer_param.sink_metrics;
@@ -625,6 +610,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                 self.param.clone(),
                 writer_param.connector_params,
                 writer_param.sink_metrics.clone(),
+                Self::SINK_NAME,
             )
             .await?,
         )
@@ -650,9 +636,10 @@ impl CoordinatedRemoteSinkWriter {
         param: SinkParam,
         connector_params: ConnectorParams,
         sink_metrics: SinkMetrics,
+        sink_name: &str,
     ) -> Result<Self> {
         let stream_handle = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(&param, connector_params.sink_payload_format)
+            .start_sink_writer_stream(&param, connector_params.sink_payload_format, sink_name)
             .await?;
 
         Ok(Self {
@@ -788,12 +775,27 @@ impl EmbeddedConnectorClient {
         &self,
         sink_param: &SinkParam,
         sink_payload_format: SinkPayloadFormat,
+        sink_name: &str,
     ) -> Result<SinkWriterStreamHandle<JniSinkWriterStreamRequest>> {
+        let sink_proto = sink_param.to_proto();
+        let table_schema = if sink_name.eq(ElasticSearchSink::SINK_NAME) {
+            let columns = vec![
+                ColumnDesc::unnamed(ColumnId::from(3), DataType::Varchar).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(4), DataType::Jsonb).to_protobuf(),
+            ];
+            Some(TableSchema {
+                columns,
+                pk_indices: vec![],
+            })
+        } else {
+            sink_proto.table_schema.clone()
+        };
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    sink_param: Some(sink_param.to_proto()),
-                    sink_payload_format: Some(sink_payload_format),
+                    sink_param: Some(sink_proto),
+                    format: sink_payload_format as i32,
+                    table_schema,
                 })),
             },
             |rx| async move {
