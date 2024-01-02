@@ -244,8 +244,8 @@ pub(crate) mod tests {
                 .clone()
                 .sstable_id_remote_fetch_number,
         ));
-        let worker_node2 = hummock_manager_ref
-            .cluster_manager
+        let worker_node_id2 = hummock_manager_ref
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::ComputeNode,
                 HostAddress::default(),
@@ -255,7 +255,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let _snapshot = hummock_manager_ref
-            .pin_snapshot(worker_node2.id)
+            .pin_snapshot(worker_node_id2)
             .await
             .unwrap();
         let key = key.freeze();
