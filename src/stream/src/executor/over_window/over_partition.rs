@@ -373,14 +373,15 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
-        if self.cache_policy.is_full() {
-            // ensure everything is in the cache
-            self.extend_cache_to_boundary(table).await?;
-        } else {
-            // ensure the cache covers all delta (if possible)
-            self.extend_cache_by_range(table, delta_first..=delta_last)
-                .await?;
-        }
+        // if self.cache_policy.is_full() {
+        //     // ensure everything is in the cache
+        //     self.extend_cache_to_boundary(table).await?;
+        // } else {
+        //     // ensure the cache covers all delta (if possible)
+        //     self.extend_cache_by_range(table, delta_first..=delta_last)
+        //         .await?;
+        // }
+        self.extend_cache_to_boundary(table).await?;
 
         loop {
             // Terminateability: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
