@@ -318,11 +318,19 @@ pub async fn check_compaction_result(
 ) -> HummockResult<()> {
     let mut table_iters = Vec::new();
     let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
+    let mut input_key_count = 0;
+    let mut input_stale_key_count = 0;
+    let mut output_key_count = 0;
+    let mut output_stale_key_count = 0;
     for level in &compact_task.input_ssts {
         if level.table_infos.is_empty() {
             continue;
         }
 
+        for sst in &level.table_infos {
+            input_key_count += sst.total_key_count;
+            input_stale_key_count += sst.stale_key_count;
+        }
         // Do not need to filter the table because manager has done it.
         if level.level_type == LevelType::Nonoverlapping as i32 {
             debug_assert!(can_concat(&level.table_infos));
@@ -348,6 +356,13 @@ pub async fn check_compaction_result(
                 ));
             }
         }
+    }
+    for sst in &compact_task.sorted_output_ssts {
+        output_key_count += sst.total_key_count;
+        output_stale_key_count += sst.stale_key_count;
+    }
+    if output_key_count == input_key_count && output_stale_key_count == input_stale_key_count {
+        return Ok(());
     }
     let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
     let mut left_iter = UserIterator::new(

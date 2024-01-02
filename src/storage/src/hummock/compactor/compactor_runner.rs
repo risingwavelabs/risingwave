@@ -511,9 +511,13 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
-        check_compaction_result(&compact_task, context.clone())
-            .await
-            .unwrap();
+        // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
+        if let Err(e) = check_compaction_result(&compact_task, context.clone()).await {
+            tracing::error!(
+                "Failed to check fast compaction task {}",
+                compact_task.task_id
+            );
+        }
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
