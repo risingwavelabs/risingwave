@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(arc_unwrap_or_clone)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
@@ -22,7 +21,6 @@
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
-#![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(test)]

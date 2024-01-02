@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ pub struct LoggerSettings {
     colorful: bool,
     /// Output to `stderr` instead of `stdout`.
     stderr: bool,
+    /// Whether to include thread name in the log.
+    with_thread_name: bool,
     /// Override target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
     /// Override the default level.
@@ -57,6 +59,7 @@ impl LoggerSettings {
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             stderr: false,
+            with_thread_name: false,
             targets: vec![],
             default_level: None,
         }
@@ -71,6 +74,12 @@ impl LoggerSettings {
     /// Output to `stderr` instead of `stdout`.
     pub fn stderr(mut self, enabled: bool) -> Self {
         self.stderr = enabled;
+        self
+    }
+
+    /// Whether to include thread name in the log.
+    pub fn with_thread_name(mut self, enabled: bool) -> Self {
+        self.with_thread_name = enabled;
         self
     }
 
@@ -149,6 +158,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
             .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("risingwave_connector_node", Level::INFO)
             .with_target("pgwire", Level::INFO)
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
@@ -170,7 +180,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
             .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
+            .with_target("sled", Level::INFO)
+            // Expose hyper connection socket addr log.
+            .with_target("hyper::client::connect::http", Level::DEBUG);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
@@ -210,6 +222,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_thread_names(settings.with_thread_name)
             .with_timer(default_timer.clone())
             .with_ansi(settings.colorful)
             .with_writer(move || {
@@ -359,7 +372,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let otel_tracer = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
-                .thread_name("risingwave-otel")
+                .thread_name("rw-otel")
                 .worker_threads(2)
                 .build()
                 .unwrap();

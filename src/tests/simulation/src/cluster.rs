@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,11 +114,31 @@ impl Configuration {
         }
     }
 
-    pub fn for_auto_scale() -> Self {
+    pub fn for_auto_parallelism(
+        max_heartbeat_interval_secs: u64,
+        enable_auto_scale_in: bool,
+        enable_auto_parallelism: bool,
+    ) -> Self {
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("risingwave-auto-scale.toml"))
+
+            let config_data = format!(
+                r#"[meta]
+max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
+enable_scale_in_when_recovery = {enable_auto_scale_in}
+enable_automatic_parallelism_control = {enable_auto_parallelism}
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 4
+
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+"#
+            );
+            file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()
         };

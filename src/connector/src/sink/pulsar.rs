@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::common::PulsarCommon;
+use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
@@ -116,6 +116,12 @@ pub struct PulsarConfig {
     pub common: PulsarCommon,
 
     #[serde(flatten)]
+    pub oauth: Option<PulsarOauthCommon>,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+
+    #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
 }
 
@@ -200,7 +206,11 @@ impl Sink for PulsarSink {
         .await?;
 
         // Validate pulsar connection.
-        let pulsar = self.config.common.build_client().await?;
+        let pulsar = self
+            .config
+            .common
+            .build_client(&self.config.oauth, &self.config.aws_auth_props)
+            .await?;
         build_pulsar_producer(&pulsar, &self.config).await?;
 
         Ok(())
@@ -248,7 +258,10 @@ impl PulsarSinkWriter {
             &config.common.topic,
         )
         .await?;
-        let pulsar = config.common.build_client().await?;
+        let pulsar = config
+            .common
+            .build_client(&config.oauth, &config.aws_auth_props)
+            .await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
             formatter,

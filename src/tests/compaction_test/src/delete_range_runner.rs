@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -159,6 +159,8 @@ async fn compaction_test(
         create_type: PbCreateType::Foreground.into(),
         description: None,
         incoming_sinks: vec![],
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -269,7 +271,7 @@ async fn compaction_test(
     )
     .await
     .unwrap();
-    let version = store.get_pinned_version().version();
+    let version = store.get_pinned_version().version().clone();
     let remote_version = meta_client.get_current_version().await.unwrap();
     println!(
         "version-{}, remote version-{}",

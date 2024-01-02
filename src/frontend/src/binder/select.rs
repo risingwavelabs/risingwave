@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -827,16 +827,13 @@ impl Binder {
                                     ))
                                     .into())
                                 }
-                                _ => {
-                                    InputRef::new(*index, select_items[*index].return_type()).into()
-                                }
+                                _ => select_items[*index].clone(),
                             }
                         }
                         Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                             Ok(index) if 1 <= index && index <= select_items.len() => {
                                 let idx_from_0 = index - 1;
-                                InputRef::new(idx_from_0, select_items[idx_from_0].return_type())
-                                    .into()
+                                select_items[idx_from_0].clone()
                             }
                             _ => {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(

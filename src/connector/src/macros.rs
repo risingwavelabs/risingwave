@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -131,6 +131,7 @@ macro_rules! match_source_name_str_inner {
     }}
 }
 
+/// Matches against `SourceProperties::SOURCE_NAME` to dispatch logic.
 #[macro_export]
 macro_rules! match_source_name_str {
     ($source_name_str:expr, $prop_type_name:ident, $body:expr, $on_other_closure:expr) => {{

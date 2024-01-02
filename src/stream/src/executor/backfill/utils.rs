@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::external::{
+use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
 };
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
@@ -346,7 +346,7 @@ fn mark_cdc_chunk_inner(
     let offset_col_idx = data.dimension() - 1;
     for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
-        let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
+        let event_offset = table_reader.parse_cdc_offset(offset_datum.into_utf8())?;
         let visible = {
             // filter changelog events with binlog range
             let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
@@ -537,9 +537,8 @@ pub(crate) fn get_cdc_chunk_last_offset(
 ) -> StreamExecutorResult<Option<CdcOffset>> {
     let row = chunk.rows().last().unwrap().1;
     let offset_col = row.iter().last().unwrap();
-    let output = offset_col.map(|scalar| {
-        Ok::<_, ConnectorError>(table_reader.parse_binlog_offset(scalar.into_utf8()))?
-    });
+    let output = offset_col
+        .map(|scalar| Ok::<_, ConnectorError>(table_reader.parse_cdc_offset(scalar.into_utf8()))?);
     output.transpose().map_err(|e| e.into())
 }
 
@@ -729,14 +728,8 @@ pub fn create_builder(
     if let Some(rate_limit) = rate_limit
         && rate_limit < chunk_size
     {
-        DataChunkBuilder::new(
-            data_types,
-            rate_limit,
-        )
+        DataChunkBuilder::new(data_types, rate_limit)
     } else {
-        DataChunkBuilder::new(
-            data_types,
-            chunk_size,
-        )
+        DataChunkBuilder::new(data_types, chunk_size)
     }
 }

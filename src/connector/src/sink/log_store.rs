@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,7 +169,9 @@ pub trait LogReader: Send + Sized + 'static {
     /// Reset the log reader to after the latest truncate offset
     ///
     /// The return flag means whether the log store support rewind
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_;
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 
 pub trait LogStoreFactory: 'static {
@@ -210,7 +212,9 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         self.inner.truncate(offset)
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_ {
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
         self.inner.rewind()
     }
 }
@@ -244,7 +248,9 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         self.inner.truncate(offset).await
     }
 
-    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<bool>> + Send + '_ {
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
         self.inner.rewind()
     }
 }

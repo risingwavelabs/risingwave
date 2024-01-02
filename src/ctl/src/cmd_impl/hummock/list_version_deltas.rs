@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,6 @@ pub async fn list_version_deltas(
     let resp = meta_client
         .list_version_deltas(start_id, num_epochs, HummockEpoch::MAX)
         .await?;
-    println!("{:#?}", resp.version_deltas);
+    println!("{:#?}", resp);
     Ok(())
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::PbIndex;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue::Set;
 
-use crate::{ExprNodeArray, I32Array, IndexId, JobStatus, TableId};
+use crate::{ExprNodeArray, IndexId, TableId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "index")]
@@ -25,8 +27,7 @@ pub struct Model {
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
     pub index_items: ExprNodeArray,
-    pub original_columns: I32Array,
-    pub job_status: JobStatus,
+    pub index_columns_len: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -64,3 +65,16 @@ impl Related<super::object::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbIndex> for ActiveModel {
+    fn from(pb_index: PbIndex) -> Self {
+        Self {
+            index_id: Set(pb_index.id as _),
+            name: Set(pb_index.name),
+            index_table_id: Set(pb_index.index_table_id as _),
+            primary_table_id: Set(pb_index.primary_table_id as _),
+            index_items: Set(pb_index.index_item.into()),
+            index_columns_len: Set(pb_index.index_columns_len as _),
+        }
+    }
+}

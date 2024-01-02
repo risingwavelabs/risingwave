@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -234,8 +234,8 @@ impl LogReader for BoundedInMemLogStoreReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<bool> {
-        Ok(false)
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        Ok((false, None))
     }
 }
 

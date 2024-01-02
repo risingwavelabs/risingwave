@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
-use risingwave_storage::store::NewLocalOptions;
+use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
 use tokio::sync::watch;
 
@@ -36,6 +36,8 @@ mod serde;
 #[cfg(test)]
 mod test_utils;
 mod writer;
+
+pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
 
 type SeqIdType = i32;
 type RowOpCodeType = i16;
@@ -66,6 +68,8 @@ impl KvLogStoreReadMetrics {
 pub(crate) struct KvLogStoreMetrics {
     pub storage_write_count: LabelGuardedIntCounter<3>,
     pub storage_write_size: LabelGuardedIntCounter<3>,
+    pub rewind_count: LabelGuardedIntCounter<3>,
+    pub rewind_delay: LabelGuardedHistogram<3>,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -79,12 +83,13 @@ impl KvLogStoreMetrics {
     ) -> Self {
         let executor_id = format!("{}", writer_param.executor_id);
         let sink_id = format!("{}", sink_param.sink_id.sink_id);
+        let labels = &[executor_id.as_str(), connector, sink_id.as_str()];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
-            .with_guarded_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
+            .with_guarded_label_values(labels);
         let storage_write_count = metrics
             .kv_log_store_storage_write_count
-            .with_guarded_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
+            .with_guarded_label_values(labels);
 
         const READ_PERSISTENT_LOG: &str = "persistent_log";
         const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
@@ -123,8 +128,17 @@ impl KvLogStoreMetrics {
                 READ_FLUSHED_BUFFER,
             ]);
 
+        let rewind_count = metrics
+            .kv_log_store_rewind_count
+            .with_guarded_label_values(labels);
+
+        let rewind_delay = metrics
+            .kv_log_store_rewind_delay
+            .with_guarded_label_values(labels);
+
         Self {
             storage_write_size,
+            rewind_count,
             storage_write_count,
             persistent_log_read_metrics: KvLogStoreReadMetrics {
                 storage_read_size: persistent_log_read_size,
@@ -134,6 +148,7 @@ impl KvLogStoreMetrics {
                 storage_read_count: flushed_buffer_read_count,
                 storage_read_size: flushed_buffer_read_size,
             },
+            rewind_delay,
         }
     }
 
@@ -142,6 +157,8 @@ impl KvLogStoreMetrics {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),
+            rewind_count: LabelGuardedIntCounter::test_int_counter(),
+            rewind_delay: LabelGuardedHistogram::test_histogram(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }
@@ -220,7 +237,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                 table_id: TableId {
                     table_id: self.table_catalog.id,
                 },
-                is_consistent_op: false,
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
                 table_option: TableOption {
                     retention_seconds: None,
                 },

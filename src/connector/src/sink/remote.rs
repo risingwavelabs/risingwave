@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,11 +55,11 @@ use tracing::warn;
 
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
+use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
-    SinkMetrics, SinkParam, SinkWriterParam,
+    SinkLogReader, SinkMetrics, SinkParam, SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -254,7 +254,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_metrics = self.sink_metrics;
@@ -277,12 +277,10 @@ impl LogSinker for RemoteLogSinker {
         };
 
         let poll_consume_log_and_sink = async move {
-            log_reader.init().await?;
-
             async fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
-                log_reader: &mut impl LogReader,
+                log_reader: &mut impl SinkLogReader,
                 metrics: &SinkMetrics,
             ) -> Result<()> {
                 while let Some((sent_offset, _)) = queue.front()
@@ -346,7 +344,7 @@ impl LogSinker for RemoteLogSinker {
                                         epoch,
                                         chunk_id: batch_id as _,
                                     },
-                                    &mut log_reader,
+                                    log_reader,
                                     &sink_metrics,
                                 )
                                 .await?;
@@ -366,7 +364,7 @@ impl LogSinker for RemoteLogSinker {
                                 truncate_matched_offset(
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
-                                    &mut log_reader,
+                                    log_reader,
                                     &sink_metrics,
                                 )
                                 .await?;

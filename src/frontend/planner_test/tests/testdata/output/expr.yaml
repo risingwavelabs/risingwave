@@ -50,6 +50,12 @@
   logical_plan: |-
     LogicalProject { exprs: [(null:Varchar < null:Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: hex bitwise-or bin
+  sql: |
+    SELECT 0x25 | 0b110;
+  logical_plan: |-
+    LogicalProject { exprs: [(37:Int32 | 6:Int32) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2
