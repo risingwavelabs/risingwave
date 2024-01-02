@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -485,15 +485,24 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             let s = format!("{:?}", table.get_data_types());
             if s == "[Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int32, Int32, Int32, Int64, Int64, Serial, Int32, Int32]" && fuck_delta_str == "+++" {
                 tracing::trace!("[rc] the fuck case");
+                let mut remove_keys = BTreeSet::new();
                 for (k, v) in self.range_cache.inner() {
                     if k.is_normal() {
                         let sk = self.row_conv.state_key_to_table_sub_pk(k.as_normal_expect())?;
+                        if *sk[0].as_ref().unwrap().as_int32() != 100002 {
+                            remove_keys.insert(k.clone());
+                        }
                         tracing::trace!("[rc] fuck cache k = {:?}, v = {:?}", sk, v);
                     } else {
                         tracing::trace!("[rc] fuck cache k = {:?}", k);
                     }
                 }
-                *self.range_cache = new_empty_partition_cache();
+                for k in remove_keys {
+                    self.range_cache.remove(&k);
+                }
+                self.range_cache.insert(Sentinelled::Smallest, OwnedRow::empty());
+                self.range_cache.insert(Sentinelled::Largest, OwnedRow::empty());
+                // *self.range_cache = new_empty_partition_cache();
             }
         }
 
