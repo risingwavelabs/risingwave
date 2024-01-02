@@ -531,7 +531,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 "[rc] just trace the range"
             );
             for (key, value) in self.range_cache.inner() {
-                println!("[rc] fuck, key = {:?}, value = {:?}", key, value);
+                tracing::trace!("[rc] fuck before, key = {:?}, value = {:?}", key, value);
             }
 
             // extend leftward only if there's smallest sentinel
@@ -555,7 +555,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .extend_cache_by_range_inner(table, table_sub_range)
                 .await;
             for (key, value) in self.range_cache.inner() {
-                println!("[rc] fuck, key = {:?}, value = {:?}", key, value);
+                tracing::trace!("[rc] fuck after, key = {:?}, value = {:?}", key, value);
             }
             return res;
         }
