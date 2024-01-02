@@ -373,13 +373,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
+        let mut delta_str = String::new();
         for (k, v) in delta {
-            tracing::trace!(
-                "[rc] fuck delta, key = {:?}, value = {:?}",
-                k.as_normal_expect(),
-                v
-            );
+            match v {
+                Change::Insert(_) => delta_str += "+",
+                Change::Delete => delta_str += "-",
+            }
         }
+        tracing::trace!("[rc] fuck delta_str = {}", delta_str);
 
         // if self.cache_policy.is_full() {
         //     // ensure everything is in the cache
@@ -389,7 +390,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         //     self.extend_cache_by_range(table, delta_first..=delta_last)
         //         .await?;
         // }
-        self.extend_cache_by_range(table, delta_first..=delta_last)
+        self.extend_cache_by_range(table, delta_first..=delta_last, delta_str)
             .await?;
 
         loop {
@@ -477,6 +478,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         &mut self,
         table: &StateTable<S>,
         range: RangeInclusive<&StateKey>,
+        fuck_delta_str: String,
     ) -> StreamExecutorResult<()> {
         // {
         //     // TODO(): construct a bug case
@@ -549,7 +551,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 cache_real_first_key=?crfk,
                 cache_real_last_key=?crlk,
                 table_schema=?table.get_data_types(),
-                "[rc] just trace the range"
+                fuck_delta_str,
+                "[rc] just trace"
             );
             for (key, value) in self.range_cache.inner() {
                 tracing::trace!("[rc] fuck before, key = {:?}, value = {:?}", key, value);
