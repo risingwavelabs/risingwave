@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -240,6 +240,8 @@ pub(crate) fn gen_create_index_plan(
         initialized_at_epoch: None,
         created_at_epoch: None,
         stream_job_status: PbStreamJobStatus::Creating.into(),
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
 
     let plan: PlanRef = materialize.into();
