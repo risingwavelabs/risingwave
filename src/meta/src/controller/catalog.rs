@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::{bail, current_cluster_version};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
@@ -145,8 +145,8 @@ impl CatalogController {
             database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
-            initialized_at_cluster_version: Default::default(),
-            created_at_cluster_version: Default::default(),
+            initialized_at_cluster_version: Set(Some(current_cluster_version())),
+            created_at_cluster_version: Set(Some(current_cluster_version())),
         };
         Ok(active_db.insert(txn).await?)
     }
@@ -480,9 +480,13 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
-        // update `created_at` as now().
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
             .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
             .filter(object::Column::Oid.eq(job_id))
             .exec(&txn)
             .await?;
