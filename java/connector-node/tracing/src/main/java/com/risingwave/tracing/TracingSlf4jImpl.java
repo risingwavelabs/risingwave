@@ -29,4 +29,8 @@ public class TracingSlf4jImpl {
     public static void event(String name, int level, String message) {
         Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
     }
+
+    public static boolean isEnabled(int level) {
+        return Binding.tracingSlf4jEventEnabled(level);
+    }
 }
