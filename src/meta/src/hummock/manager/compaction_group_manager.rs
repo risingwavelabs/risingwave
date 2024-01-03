@@ -663,8 +663,8 @@ impl HummockManager {
         let mut changed_sst_ids: HashSet<u64> = HashSet::default();
         for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
             changed_sst_ids.insert(parent_old_sst_id);
-            match branched_ssts.get_mut(object_id) {
-                Some(mut entry) => {
+            match branched_ssts.get_mut(&object_id) {
+                Some(entry) => {
                     entry.insert(parent_group_id, parent_new_sst_id);
                     entry.insert(target_compaction_group_id, sst_id);
                 }
@@ -921,7 +921,6 @@ impl CompactionGroupManager {
             BTreeMapTransaction::new(&mut self.compaction_groups,)
         );
         let stale_group = compaction_groups
-            .tree_ref()
             .keys()
             .cloned()
             .filter(|k| !existing_groups.contains(k))
@@ -930,7 +929,7 @@ impl CompactionGroupManager {
             return Ok(());
         }
         for group in stale_group {
-            compaction_groups.remove(group);
+            compaction_groups.remove(&group);
         }
         commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
         Ok(())

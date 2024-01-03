@@ -62,8 +62,8 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut versioning.pinned_snapshots,)
         );
         for context_id in context_ids.as_ref() {
-            pinned_versions.remove(*context_id);
-            pinned_snapshots.remove(*context_id);
+            pinned_versions.remove(context_id);
+            pinned_snapshots.remove(context_id);
         }
         commit_multi_var!(
             self.env.meta_store(),
