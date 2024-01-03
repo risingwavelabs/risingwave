@@ -131,34 +131,29 @@ SELECT * FROM t_nao_pk;
 20	20	200
 200	20	200
 
-statement error
-update t_nao_source where v1 = 20;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  sql parser error: Expected SET, found: where at line:1, column:26
-Near "update t_nao_source"
-
+statement ok
+update t_nao_source set v2 = 1000 where v1 = 20;
 
 query III rowsort
 SELECT * FROM t_nao_npk;
 ----
 1	10	100
+2	20	1000
 2	20	200
 
 query III rowsort
 SELECT * FROM t_ao_npk;
 ----
 1	10	100
+2	20	1000
 2	20	200
 
 query III rowsort
 SELECT * FROM t_nao_pk;
 ----
 1	10	100
-20	20	200
-200	20	200
+20	20	1000
+200	20	1000
 
 statement ok
 delete from t_nao_source where v1 = 20;
@@ -167,19 +162,21 @@ query III rowsort
 SELECT * FROM t_nao_npk;
 ----
 1	10	100
+2	20	1000
 2	20	200
 
 query III rowsort
 SELECT * FROM t_ao_npk;
 ----
 1	10	100
+2	20	1000
 2	20	200
 
 query III rowsort
 SELECT * FROM t_nao_pk;
 ----
 1	10	100
-200	20	200
+200	20	1000
 
 
 statement ok
