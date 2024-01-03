@@ -491,7 +491,10 @@ pub async fn start_service_as_election_leader(
         MetadataManager::V2(_) => None,
     };
 
-    let trace_state = otlp_embedded::State::new(opts.cached_traces_num);
+    let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
+        max_length: opts.cached_traces_num,
+        max_memory_usage: 1 << 27, // hard-code to limit memory usage to 128 MiB
+    });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
     #[cfg(not(madsim))]
