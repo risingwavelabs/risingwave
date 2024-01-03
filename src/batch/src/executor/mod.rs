@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
@@ -235,8 +235,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::BlockExecutor => BlockExecutorBuilder,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
         }
         .await?;
 

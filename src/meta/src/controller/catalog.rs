@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,7 @@ pub struct CatalogController {
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
     pub(crate) streaming_jobs: Vec<ObjectId>,
+    #[allow(dead_code)]
     pub(crate) state_table_ids: Vec<TableId>,
     pub(crate) source_ids: Vec<SourceId>,
     pub(crate) connections: Vec<PrivateLinkService>,

@@ -20,7 +20,7 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 fs-err = "2.11.0"
 glob = "0.3"
-google-cloud-pubsub = "0.21"
+google-cloud-pubsub = "0.22"
 indicatif = "0.17"
 itertools = "0.12"
 rdkafka = { workspace = true }
