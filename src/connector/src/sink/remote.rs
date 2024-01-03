@@ -149,7 +149,8 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param).await;
+        Ok(())
     }
 }
 
@@ -450,7 +451,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param).await?;
+        Ok(())
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
