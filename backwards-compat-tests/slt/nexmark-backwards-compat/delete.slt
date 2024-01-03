@@ -6,3 +6,6 @@ DELETE FROM auction;
 
 statement ok
 DELETE FROM bid;
+
+statement ok
+flush;
