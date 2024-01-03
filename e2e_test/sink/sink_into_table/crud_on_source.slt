@@ -22,21 +22,21 @@ create table t_nao_source (k int, v1 int, v2 int);
 # sinks to t_nao_npk
 statement ok
 create sink s1_to_t_nao_npk into t_nao_npk
-as select k, v1, v2 
-from t_ao_source 
+as select k, v1, v2
+from t_ao_source
 with (
     type = 'append-only',
 );
 
 statement error Only append-only sinks can sink to a table without primary keys.
 create sink s2_to_t_nao_npk into t_nao_npk
-as select k, v1, v2 
+as select k, v1, v2
 from t_nao_source;
 
 statement ok
 create sink s2_to_t_nao_npk into t_nao_npk
-as select k, v1, v2 
-from t_nao_source 
+as select k, v1, v2
+from t_nao_source
 with (
     type = 'append-only',
     force_append_only='true'
@@ -45,7 +45,7 @@ with (
 # sinks to t_ao_npk
 statement ok
 create sink s1_to_t_ao_npk into t_ao_npk
-as select k, v1, v2 
+as select k, v1, v2
 from t_ao_source
 with (
     type = 'append-only',
@@ -53,12 +53,12 @@ with (
 
 statement error Only append-only sinks can sink to a table without primary keys.
 create sink s2_to_t_ao_npk into t_ao_npk
-as select k, v1, v2 
+as select k, v1, v2
 from t_nao_source;
 
 statement ok
 create sink s2_to_t_ao_npk into t_ao_npk
-as select k, v1, v2 
+as select k, v1, v2
 from t_nao_source
 with (
     type = 'append-only',
@@ -68,7 +68,7 @@ with (
 # sinks to t_nao_pk
 statement ok
 create sink s1_to_t_nao_pk into t_nao_pk
-as select k, v1, v2 
+as select k, v1, v2
 from t_ao_source
 with (
     type = 'append-only',
@@ -76,12 +76,12 @@ with (
 
 statement ok
 create sink s2_to_t_nao_pk into t_nao_pk
-as select k*10 as k, v1, v2 
+as select k*10 as k, v1, v2
 from t_nao_source;
 
 statement ok
 create sink s3_to_t_nao_pk into t_nao_pk
-as select k*100 as k, v1, v2 
+as select k*100 as k, v1, v2
 from t_nao_source
 with (
     type = 'append-only',
