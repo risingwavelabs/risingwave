@@ -34,6 +34,12 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+enum EventType {
+    HEARTBEAT,
+    TRANSACTION,
+    DATA,
+}
+
 public class DbzCdcEventConsumer
         implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
     static final Logger LOG = LoggerFactory.getLogger(DbzCdcEventConsumer.class);
@@ -42,14 +48,18 @@ public class DbzCdcEventConsumer
     private final long sourceId;
     private final JsonConverter converter;
     private final String heartbeatTopicPrefix;
+    private final String transactionTopic;
 
     DbzCdcEventConsumer(
             long sourceId,
             String heartbeatTopicPrefix,
-            BlockingQueue<GetEventStreamResponse> store) {
+            String transactionTopic,
+            BlockingQueue<GetEventStreamResponse> queue) {
         this.sourceId = sourceId;
-        this.outputChannel = store;
+        this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
+        this.transactionTopic = transactionTopic;
+        LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
 
         // The default JSON converter will output the schema field in the JSON which is unnecessary
         // to source parser, we use a customized JSON converter to avoid outputting the `schema`
@@ -64,11 +74,27 @@ public class DbzCdcEventConsumer
         this.converter = jsonConverter;
     }
 
+    private EventType getEventType(SourceRecord record) {
+        LOG.info("event topic: {}", record.topic());
+        if (isHeartbeatEvent(record)) {
+            return EventType.HEARTBEAT;
+        } else if (isTransactionMetaEvent(record)) {
+            return EventType.TRANSACTION;
+        } else {
+            return EventType.DATA;
+        }
+    }
+
     private boolean isHeartbeatEvent(SourceRecord record) {
         String topic = record.topic();
         return topic != null
                 && heartbeatTopicPrefix != null
                 && topic.startsWith(heartbeatTopicPrefix);
+    }
+
+    private boolean isTransactionMetaEvent(SourceRecord record) {
+        String topic = record.topic();
+        return topic != null && topic.equals(transactionTopic);
     }
 
     @Override
@@ -77,12 +103,15 @@ public class DbzCdcEventConsumer
             DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
             throws InterruptedException {
         var respBuilder = GetEventStreamResponse.newBuilder();
+        LOG.info("event batch size => {}", events.size());
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            boolean isHeartbeat = isHeartbeatEvent(record);
+            EventType eventType = getEventType(record);
             DebeziumOffset offset =
                     new DebeziumOffset(
-                            record.sourcePartition(), record.sourceOffset(), isHeartbeat);
+                            record.sourcePartition(),
+                            record.sourceOffset(),
+                            (eventType == EventType.HEARTBEAT));
             // serialize the offset to a JSON, so that kernel doesn't need to
             // aware its layout
             String offsetStr = "";
@@ -98,43 +127,69 @@ public class DbzCdcEventConsumer
                             .setOffset(offsetStr)
                             .setPartition(String.valueOf(sourceId));
 
-            if (isHeartbeat) {
-                var message = msgBuilder.build();
-                LOG.debug("heartbeat => {}", message.getOffset());
-                respBuilder.addEvents(message);
-            } else {
+            switch (eventType) {
+                case HEARTBEAT:
+                    {
+                        var message = msgBuilder.build();
+                        LOG.debug("heartbeat => {}", message.getOffset());
+                        respBuilder.addEvents(message);
 
-                // Topic naming conventions
-                // - PG: serverName.schemaName.tableName
-                // - MySQL: serverName.databaseName.tableName
-                // We can extract the full table name from the topic
-                var fullTableName = record.topic().substring(record.topic().indexOf('.') + 1);
+                        break;
+                    }
+                case TRANSACTION:
+                    {
+                        long trxTs = ((Struct) record.value()).getInt64("ts_ms");
+                        byte[] payload =
+                                converter.fromConnectData(
+                                        record.topic(), record.valueSchema(), record.value());
+                        var message =
+                                msgBuilder
+                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
+                                        .setSourceTsMs(trxTs)
+                                        .build();
+                        LOG.info("transaction => {}", message.getPayload());
+                        respBuilder.addEvents(message);
 
-                // ignore null record
-                if (record.value() == null) {
-                    committer.markProcessed(event);
-                    continue;
-                }
-                // get upstream event time from the "source" field
-                var sourceStruct = ((Struct) record.value()).getStruct("source");
-                long sourceTsMs =
-                        sourceStruct == null
-                                ? System.currentTimeMillis()
-                                : sourceStruct.getInt64("ts_ms");
-                byte[] payload =
-                        converter.fromConnectData(
-                                record.topic(), record.valueSchema(), record.value());
-                msgBuilder
-                        .setFullTableName(fullTableName)
-                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                        .setSourceTsMs(sourceTsMs)
-                        .build();
-                var message = msgBuilder.build();
-                LOG.debug("record => {}", message.getPayload());
+                        break;
+                    }
+                case DATA:
+                    {
+                        // Topic naming conventions
+                        // - PG: serverName.schemaName.tableName
+                        // - MySQL: serverName.databaseName.tableName
+                        // We can extract the full table name from the topic
+                        var fullTableName =
+                                record.topic().substring(record.topic().indexOf('.') + 1);
 
-                respBuilder.addEvents(message);
-                committer.markProcessed(event);
+                        // ignore null record
+                        if (record.value() == null) {
+                            break;
+                        }
+                        // get upstream event time from the "source" field
+                        var sourceStruct = ((Struct) record.value()).getStruct("source");
+                        long sourceTsMs =
+                                sourceStruct == null
+                                        ? System.currentTimeMillis()
+                                        : sourceStruct.getInt64("ts_ms");
+                        byte[] payload =
+                                converter.fromConnectData(
+                                        record.topic(), record.valueSchema(), record.value());
+                        var message =
+                                msgBuilder
+                                        .setFullTableName(fullTableName)
+                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
+                                        .setSourceTsMs(sourceTsMs)
+                                        .build();
+                        LOG.debug("record => {}", message.getPayload());
+                        respBuilder.addEvents(message);
+                        break;
+                    }
+                default:
+                    break;
             }
+
+            // mark the event as processed
+            committer.markProcessed(event);
         }
 
         // skip empty batch

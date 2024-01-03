@@ -151,3 +151,71 @@ impl ByteStreamSourceParser for DebeziumParser {
         self.parse_inner(key, payload, writer).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Deref;
+    use std::str::FromStr;
+
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{JsonbVal, ScalarImpl};
+
+    use super::*;
+    use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
+    use crate::source::DataType;
+
+    #[tokio::test]
+    async fn test_parse_transaction_metadata() {
+        let schema = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
+                is_hidden: false,
+            },
+            ColumnCatalog::offset_column(),
+            ColumnCatalog::cdc_table_name_column(),
+        ];
+
+        let columns = schema
+            .iter()
+            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .collect::<Vec<_>>();
+
+        let mut parser = DebeziumParser::new_for_test(columns.clone()).await.unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+
+        // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
+        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
+        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(begin_msg.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        println!("res: {:?}", res);
+        match res {
+            Ok(ParseResult::TransactionControl(TransactionControl::Begin { id })) => {
+                assert_eq!(id.deref(), "35352");
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(commit_msg.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        println!("res: {:?}", res);
+        match res {
+            Ok(ParseResult::TransactionControl(TransactionControl::Commit { id })) => {
+                assert_eq!(id.deref(), "35352");
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
+    }
+}

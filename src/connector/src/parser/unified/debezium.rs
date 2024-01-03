@@ -67,12 +67,13 @@ where
                 accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
                 accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
             ) {
+                let (tx_id, _) = id.split_once(':').unwrap();
                 match status.as_ref() {
                     DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
-                        return Ok(TransactionControl::Begin { id })
+                        return Ok(TransactionControl::Begin { id: tx_id.into() })
                     }
                     DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
-                        return Ok(TransactionControl::Commit { id })
+                        return Ok(TransactionControl::Commit { id: tx_id.into() })
                     }
                     _ => {}
                 }

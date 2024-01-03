@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use auto_enums::auto_enum;
@@ -575,10 +576,15 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 );
                 *len = 0; // reset `len` while keeping `id`
                 yield_asap = false;
-                yield StreamChunkWithState {
+                let parsed_chunk = StreamChunkWithState {
                     chunk: builder.take(batch_len),
                     split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
                 };
+                tracing::info!(
+                    "transaction is larger than max row limit, emit parsed chunk: {} rows",
+                    parsed_chunk.chunk.cardinality()
+                );
+                yield parsed_chunk;
             } else {
                 // Normal transaction. After the transaction is committed, we should yield the last
                 // batch immediately, so set `yield_asap` to true.
@@ -665,6 +671,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
                                 tracing::warn!(current_id, id, "already in transaction");
                             }
+                            tracing::info!("begin upstream transaction: id={}", id);
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
@@ -672,6 +679,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if current_id != Some(&id) {
                                 tracing::warn!(?current_id, id, "transaction id mismatch");
                             }
+                            tracing::info!("commit upstream transaction: id={}", id);
                             current_transaction = None;
                         }
                     }
@@ -680,22 +688,36 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     // chunk now.
                     if current_transaction.is_none() && yield_asap {
                         yield_asap = false;
-                        yield StreamChunkWithState {
+                        let parsed_chunk = StreamChunkWithState {
                             chunk: builder.take(batch_len - (i + 1)),
                             split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
                         };
+                        tracing::info!(
+                            "Not in a trxn and yield_asap, emit parsed chunk: {} rows",
+                            parsed_chunk.chunk.cardinality()
+                        );
+                        yield parsed_chunk;
                     }
                 }
             }
+            tracing::info!("parsed one message, sleep for 1 second");
+            // FAKE: process 1msg needs 1 sec
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
             yield_asap = false;
-            yield StreamChunkWithState {
+
+            let schunk = StreamChunkWithState {
                 chunk: builder.take(0),
                 split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
             };
+            tracing::info!(
+                "Not in a trxn, emit parsed chunk: {} rows",
+                schunk.chunk.cardinality()
+            );
+            yield schunk;
         }
     }
 }
