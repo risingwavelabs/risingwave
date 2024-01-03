@@ -83,6 +83,8 @@ enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
+    #[cfg(test)]
+    Flush(oneshot::Sender<()>),
 }
 
 /// [`LocalBarrierWorker`] manages barrier control flow, used by local stream manager.
@@ -166,6 +168,8 @@ impl LocalBarrierWorker {
                 } => {
                     self.update_create_mview_progress(current_epoch, actor, state);
                 }
+                #[cfg(test)]
+                LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
             }
         }
     }
@@ -377,5 +381,11 @@ impl LocalBarrierManager {
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
         )
+    }
+
+    pub async fn flush_all_events(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::Flush(tx));
+        rx.await.unwrap()
     }
 }

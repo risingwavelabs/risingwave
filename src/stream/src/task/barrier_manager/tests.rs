@@ -59,6 +59,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
+        manager.flush_all_events().await;
         let notified = complete_receiver
             .complete_receiver
             .as_mut()
@@ -124,6 +125,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
+        manager.flush_all_events().await;
         let notified = complete_receiver
             .complete_receiver
             .as_mut()
