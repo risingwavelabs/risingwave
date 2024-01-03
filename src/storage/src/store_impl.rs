@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -317,24 +317,19 @@ pub mod verify {
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        async fn ingest_batch(
+        fn ingest_batch(
             &self,
             kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
-            let actual = self
-                .actual
-                .ingest_batch(
-                    kv_pairs.clone(),
-                    delete_ranges.clone(),
-                    write_options.clone(),
-                )
-                .await;
+            let actual = self.actual.ingest_batch(
+                kv_pairs.clone(),
+                delete_ranges.clone(),
+                write_options.clone(),
+            );
             if let Some(expected) = &self.expected {
-                let expected = expected
-                    .ingest_batch(kv_pairs, delete_ranges, write_options)
-                    .await;
+                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
                 assert_eq!(actual.is_err(), expected.is_err());
             }
             actual

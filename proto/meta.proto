@@ -288,11 +288,12 @@ message AddWorkerNodeResponse {
   reserved 3;
   reserved "system_params";
   common.Status status = 1;
-  common.WorkerNode node = 2;
+  optional uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeRequest {
   common.HostAddress host = 1;
+  uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeResponse {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,6 +66,7 @@ mod struct_type;
 mod successor;
 mod timestamptz;
 mod to_binary;
+mod to_sql;
 mod to_text;
 mod with_data_type;
 

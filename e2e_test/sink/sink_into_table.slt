@@ -6,6 +6,9 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create table t_simple (v1 int, v2 int);
 
+statement error unsupported sink type table
+create sink table_sink from t_simple with (connector = 'table');
+
 statement ok
 create table m_simple (v1 int primary key, v2 int);
 
@@ -55,7 +58,7 @@ statement error Only append-only sinks can sink to a table without primary keys.
 create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1;
 
 statement ok
-create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1 FORMAT PLAIN ENCODE NATIVE(force_append_only='true');
+create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1 with (type = 'append-only', force_append_only = 'true');
 
 statement ok
 flush;
@@ -154,7 +157,7 @@ statement error Only append-only sinks can sink to a table without primary keys.
 create sink s2 into t_append_only as select v1, v2 from t_s2;
 
 statement ok
-create sink s2 into t_append_only as select v1, v2 from t_s2 FORMAT PLAIN ENCODE NATIVE(force_append_only='true');
+create sink s2 into t_append_only as select v1, v2 from t_s2 with (type = 'append-only', force_append_only = 'true');
 
 statement ok
 flush;

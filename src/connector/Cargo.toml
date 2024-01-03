@@ -23,7 +23,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16c
 ] }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
-async-nats = "0.32"
+async-nats = "0.33"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"
@@ -54,7 +54,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.21"
+google-cloud-pubsub = "0.22"
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
@@ -128,10 +128,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-postgres = "0.7"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic_0_9 = { package = "tonic", version = "0.9" }
+tonic = "0.10.2"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"

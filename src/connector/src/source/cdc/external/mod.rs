@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+pub mod mock_external_table;
+mod postgres;
 
 use std::collections::HashMap;
 
@@ -30,8 +33,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::ConnectorError;
-use crate::parser::mysql_row_to_datums;
-use crate::source::MockExternalTableReader;
+use crate::parser::mysql_row_to_owned_row;
+use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
+use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
@@ -58,7 +62,7 @@ impl CdcTableType {
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql)
+        matches!(self, Self::MySql | Self::Postgres)
     }
 
     pub async fn create_table_reader(
@@ -69,6 +73,9 @@ impl CdcTableType {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(with_properties, schema).await?,
+            )),
+            Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
+                PostgresExternalTableReader::new(with_properties, schema).await?,
             )),
             _ => bail!(ConnectorError::Config(anyhow!(
                 "invalid external table type: {:?}",
@@ -133,13 +140,6 @@ impl MySqlOffset {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct PostgresOffset {
-    pub txid: u64,
-    pub lsn: u64,
-    pub tx_usec: u64,
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum CdcOffset {
     MySql(MySqlOffset),
@@ -182,15 +182,15 @@ pub struct DebeziumSourceOffset {
     pub file: Option<String>,
     pub pos: Option<u64>,
 
-    // postgres binlog offset
+    // postgres offset
     pub lsn: Option<u64>,
     #[serde(rename = "txId")]
-    pub txid: Option<u64>,
+    pub txid: Option<i64>,
     pub tx_usec: Option<u64>,
 }
 
 impl MySqlOffset {
-    pub fn parse_str(offset: &str) -> ConnectorResult<Self> {
+    pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
         let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
             ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
         })?;
@@ -213,7 +213,7 @@ pub trait ExternalTableReader {
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset>;
+    fn parse_cdc_offset(&self, dbz_offset: &str) -> ConnectorResult<CdcOffset>;
 
     fn snapshot_read(
         &self,
@@ -226,6 +226,7 @@ pub trait ExternalTableReader {
 #[derive(Debug)]
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
+    Postgres(PostgresExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -275,8 +276,10 @@ impl ExternalTableReader for MySqlExternalTableReader {
         }))
     }
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        Ok(CdcOffset::MySql(MySqlOffset::parse_str(offset)?))
+    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
+        Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+            offset,
+        )?))
     }
 
     fn snapshot_read(
@@ -366,7 +369,7 @@ impl MySqlExternalTableReader {
                 let row_stream = rs_stream.map(|row| {
                     // convert mysql row into OwnedRow
                     let mut row = row?;
-                    Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
+                    Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
                 });
 
                 pin_mut!(row_stream);
@@ -427,7 +430,7 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_datums(&mut row, &self.rw_schema))
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
 
             pin_mut!(row_stream);
@@ -484,6 +487,9 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.get_normalized_table_name(table_name),
+            ExternalTableReaderImpl::Postgres(postgres) => {
+                postgres.get_normalized_table_name(table_name)
+            }
             ExternalTableReaderImpl::Mock(mock) => mock.get_normalized_table_name(table_name),
         }
     }
@@ -491,14 +497,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
+            ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
 
-    fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
+    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.parse_binlog_offset(offset),
-            ExternalTableReaderImpl::Mock(mock) => mock.parse_binlog_offset(offset),
+            ExternalTableReaderImpl::MySql(mysql) => mysql.parse_cdc_offset(offset),
+            ExternalTableReaderImpl::Postgres(postgres) => postgres.parse_cdc_offset(offset),
+            ExternalTableReaderImpl::Mock(mock) => mock.parse_cdc_offset(offset),
         }
     }
 
@@ -524,6 +532,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(mysql) => {
                 mysql.snapshot_read(table_name, start_pk, primary_keys)
             }
+            ExternalTableReaderImpl::Postgres(postgres) => {
+                postgres.snapshot_read(table_name, start_pk, primary_keys)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys)
             }
@@ -544,12 +555,10 @@ mod tests {
     use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::sink::catalog::SinkType;
-    use crate::sink::SinkParam;
-    use crate::source::external::{
+    use crate::source::cdc::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
     };
 
@@ -575,11 +584,11 @@ mod tests {
         let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
         let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
 
-        let off0 = CdcOffset::MySql(MySqlOffset::parse_str(off0_str).unwrap());
-        let off1 = CdcOffset::MySql(MySqlOffset::parse_str(off1_str).unwrap());
-        let off2 = CdcOffset::MySql(MySqlOffset::parse_str(off2_str).unwrap());
-        let off3 = CdcOffset::MySql(MySqlOffset::parse_str(off3_str).unwrap());
-        let off4 = CdcOffset::MySql(MySqlOffset::parse_str(off4_str).unwrap());
+        let off0 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off0_str).unwrap());
+        let off1 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off1_str).unwrap());
+        let off2 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off2_str).unwrap());
+        let off3 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off3_str).unwrap());
+        let off4 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off4_str).unwrap());
 
         assert!(off0 <= off1);
         assert!(off1 > off2);
@@ -591,24 +600,15 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let param = SinkParam {
-            sink_id: Default::default(),
-            properties: Default::default(),
-            columns: vec![
-                ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
-                ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
-                ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
-                ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
-            ],
-            downstream_pk: vec![0],
-            sink_type: SinkType::AppendOnly,
-            format_desc: None,
-            db_name: "db".into(),
-            sink_from_name: "table".into(),
-            target_table: None,
+        let columns = vec![
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
+            ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("v4", ColumnId::new(4), DataType::Date),
+        ];
+        let rw_schema = Schema {
+            fields: columns.iter().map(Field::from).collect(),
         };
-
-        let rw_schema = param.schema();
         let props = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",

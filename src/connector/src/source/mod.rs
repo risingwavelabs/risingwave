@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,13 +31,10 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
-pub mod external;
 mod manager;
-mod mock_external_table;
 pub mod test_source;
 
 pub use manager::{SourceColumnDesc, SourceColumnType};
-pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::parser::additional_columns::{
     get_connector_compatible_additional_columns, CompatibleAdditionalColumnsFn,

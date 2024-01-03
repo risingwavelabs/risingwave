@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -506,10 +506,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await;
         }
 
-        // get the first and last keys again, now we are guaranteed to have at least a normal key
-        let cache_real_first_key = self.cache_real_first_key().unwrap();
-        let cache_real_last_key = self.cache_real_last_key().unwrap();
-
+        let cache_real_first_key = self
+            .cache_real_first_key()
+            .expect("cache real len is not 0");
         if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
             // extend leftward only if there's smallest sentinel
             let table_sub_range = (
@@ -524,11 +523,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
-            return self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
         }
 
+        let cache_real_last_key = self.cache_real_last_key().expect("cache real len is not 0");
         if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
             // extend rightward only if there's largest sentinel
             let table_sub_range = (
@@ -543,9 +542,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the right half of given range"
             );
-            return self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
         }
 
         // TODO(rc): Uncomment the following to enable prefetching rows before the start of the

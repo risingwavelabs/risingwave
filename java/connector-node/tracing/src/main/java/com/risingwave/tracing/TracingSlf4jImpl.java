@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,31 @@ public class TracingSlf4jImpl {
     public static final int DEBUG = 3;
     public static final int TRACE = 4;
 
+    // TODO: We may support changing the log level at runtime in the future.
+    private static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(ERROR);
+    private static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(WARN);
+    private static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(INFO);
+    private static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(DEBUG);
+    private static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(TRACE);
+
     public static void event(String name, int level, String message) {
         Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
+    }
+
+    public static boolean isEnabled(int level) {
+        switch (level) {
+            case ERROR:
+                return isErrorEnabled;
+            case WARN:
+                return isWarnEnabled;
+            case INFO:
+                return isInfoEnabled;
+            case DEBUG:
+                return isDebugEnabled;
+            case TRACE:
+                return isTraceEnabled;
+            default:
+                return false;
+        }
     }
 }
