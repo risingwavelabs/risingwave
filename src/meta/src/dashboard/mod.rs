@@ -404,7 +404,7 @@ impl DashboardService {
             )
             .layer(cors_layer);
 
-        let jaeger_ui_router = otlp_embedded::jaeger_ui_app(srv.trace_state.clone(), "/trace/");
+        let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
 
         let dashboard_router = if let Some(ui_path) = ui_path {
             get_service(ServeDir::new(ui_path))
@@ -430,7 +430,7 @@ impl DashboardService {
         let app = Router::new()
             .fallback_service(dashboard_router)
             .nest("/api", api_router)
-            .nest("/trace", jaeger_ui_router);
+            .nest("/trace", trace_ui_router);
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

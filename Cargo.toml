@@ -118,7 +118,7 @@ hashbrown = { version = "0.14.0", features = [
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
-otlp-embedded = { git = "https://github.com/BugenZhao/otlp-embedded", rev = "c224f787a2de8528c83bbf242349355afd79e60e" }
+otlp-embedded = "0.0.1"
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "3f7b53ba5b563524212c25810345d1314678e7fc", features = [
   "prometheus",

@@ -6460,8 +6460,9 @@ dependencies = [
 
 [[package]]
 name = "otlp-embedded"
-version = "0.1.0"
-source = "git+https://github.com/BugenZhao/otlp-embedded?rev=c224f787a2de8528c83bbf242349355afd79e60e#c224f787a2de8528c83bbf242349355afd79e60e"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19d038568375e66e7414e3ecf4426627c715a40f5969cd41ac39f1583375e82c"
 dependencies = [
  "axum",
  "hex",
