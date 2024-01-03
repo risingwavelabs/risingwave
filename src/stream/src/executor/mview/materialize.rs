@@ -1257,7 +1257,7 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // test double insert one pk, the latter needs to be ignored.
+        // test insert after delete one pk, the latter insert should succeed.
         let chunk1 = StreamChunk::from_pretty(
             " i i
             + 1 3
