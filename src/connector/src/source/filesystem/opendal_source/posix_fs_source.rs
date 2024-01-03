@@ -22,6 +22,10 @@ use opendal::Operator;
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{OpendalSource, PosixFsProperties};
 
+// Posix fs source should only be used for testing.
+// For a single-CN cluster, the behavior is well-defined. It will read from the local file system.
+// For a multi-CN cluster, each CN will read from its own local file system under the given directory.
+
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal posix fs source.
     pub fn new_posix_fs_source(posix_fs_properties: PosixFsProperties) -> anyhow::Result<Self> {

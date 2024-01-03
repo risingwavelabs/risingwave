@@ -122,7 +122,6 @@ if __name__ == "__main__":
             f.write(file_str)
             os.fsync(f.fileno())
         file_name = _posix(idx)
-        print(f"Wrote {file_name} to /tmp")
         file_bytes = file_str.encode('utf-8')
         op.write(file_name, file_bytes)
 
@@ -134,5 +133,4 @@ if __name__ == "__main__":
     print("clean up local files in /tmp")
     for idx, _ in enumerate(formatted_files):
         file_name = _posix(idx)
-        print(f"Removed {file_name} from /tmp")
         op.delete(file_name)

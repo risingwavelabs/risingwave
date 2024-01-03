@@ -42,7 +42,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{POSIX_FS_CONNECTOR, OPENDAL_S3_CONNECTOR};
+use super::{OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;

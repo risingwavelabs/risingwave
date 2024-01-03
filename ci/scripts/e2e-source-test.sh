@@ -56,6 +56,9 @@ echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
 
+echo "--- opendal source test"
+sqllogictest -p 4566 -d dev './e2e_test/source/opendal/**/*.slt'
+
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'

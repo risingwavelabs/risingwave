@@ -131,8 +131,11 @@ impl SourceProperties for OpendalS3Properties {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct PosixFsProperties {
+    // The root directly of the files to search. The files will be searched recursively.
     #[serde(rename = "posix_fs.root")]
     pub root: String,
+
+    // The regex pattern to match files under root directory.
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 

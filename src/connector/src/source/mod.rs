@@ -40,7 +40,7 @@ pub use crate::parser::additional_columns::{
     get_connector_compatible_additional_columns, CompatibleAdditionalColumnsFn,
 };
 pub use crate::source::filesystem::opendal_source::{
-    GCS_CONNECTOR, POSIX_FS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
 pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
