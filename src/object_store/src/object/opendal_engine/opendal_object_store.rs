@@ -199,7 +199,6 @@ impl ObjectStore for OpendalObjectStore {
     }
 }
 
-
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
