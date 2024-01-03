@@ -798,8 +798,13 @@ impl DdlController {
             .values()
             .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
             .exactly_one()
-            .map_err(|e| anyhow::anyhow!("{}", e.to_report_string()))
-            .context("expect exactly one stream scan fragment")?;
+            .ok()
+            .with_context(|| {
+                format!(
+                    "expect exactly one stream scan fragment, got: {:?}",
+                    table_fragments.fragments
+                )
+            })?;
 
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
