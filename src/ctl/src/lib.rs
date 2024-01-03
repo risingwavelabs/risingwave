@@ -266,6 +266,11 @@ enum HummockCommands {
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
+
+    CancelCompactTask {
+        #[clap(short, long)]
+        task_id: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -654,6 +659,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::RebuildTableStats) => {
             cmd_impl::hummock::rebuild_table_stats(context).await?;
+        }
+        Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
+            cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

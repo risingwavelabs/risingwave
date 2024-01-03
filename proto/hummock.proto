@@ -749,6 +749,15 @@ message ListCompactTaskProgressResponse {
   repeated CompactTaskProgress task_progress = 1;
 }
 
+message CancelCompactTaskRequest {
+  uint64 task_id = 1;
+  CompactTask.TaskStatus task_status = 2;
+}
+
+message CancelCompactTaskResponse {
+  bool ret = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -787,6 +796,7 @@ service HummockManagerService {
   rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
+  rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
 }
 
 message CompactionConfig {
