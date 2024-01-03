@@ -133,7 +133,7 @@ pub struct RestartPoint {
 
 impl RestartPoint {
     fn size_of() -> usize {
-        // store key_len_type and value_len_type in u8 related to `BlockBuidler::build`
+        // store key_len_type and value_len_type in u8 related to `BlockBuilder::build`
         // encoding_value = (key_len_type << 4) | value_len_type
         std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
     }

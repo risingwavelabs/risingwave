@@ -1654,7 +1654,7 @@ impl ScaleController {
 
         for worker_id in &worker_ids {
             if unschedulable_worker_ids.contains(worker_id) {
-                bail!("Cannot include unscheduable worker {}", worker_id)
+                bail!("Cannot include unschedulable worker {}", worker_id)
             }
         }
 
