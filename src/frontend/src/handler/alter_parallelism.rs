@@ -23,6 +23,7 @@ use risingwave_sqlparser::keywords::Keyword;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::CatalogError;
 use crate::Binder;
 
 pub async fn handle_alter_parallelism(
@@ -50,7 +51,12 @@ pub async fn handle_alter_parallelism(
                     reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
                 match (table.table_type(), stmt_type) {
-                    (TableType::Internal, _) => unreachable!(),
+                    (TableType::Internal, _) => {
+                        // we treat internal table as NOT FOUND
+                        return Err(
+                            CatalogError::NotFound("table", table.name().to_string()).into()
+                        );
+                    }
                     (TableType::Table, StatementType::ALTER_TABLE)
                     | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
                     | (TableType::Index, StatementType::ALTER_INDEX) => {}
@@ -69,14 +75,6 @@ pub async fn handle_alter_parallelism(
                 table.id.table_id()
             }
             StatementType::ALTER_SINK => {
-                if stmt_type != StatementType::ALTER_SINK {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot alter parallelism of sink by {}",
-                        stmt_type,
-                    ))
-                    .into());
-                }
-
                 let (sink, schema_name) =
                     reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
 
