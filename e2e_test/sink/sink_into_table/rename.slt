@@ -1,0 +1,48 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table source(v int) append only;
+
+statement ok
+create table target(v int);
+
+statement ok
+create sink s into target as select * from source with (type = 'append-only');
+
+statement ok
+SELECT name, definition from rw_sinks;
+
+statement ok
+ALTER SINK s RENAME TO s1;
+
+query TT
+SELECT name, definition from rw_sinks;
+----
+s1	CREATE SINK s1 INTO target AS SELECT * FROM source WITH (type = 'append-only')
+
+statement ok
+ALTER TABLE source RENAME TO src;
+
+statement ok
+ALTER TABLE target RENAME TO tar;
+
+query TT
+SELECT name, definition from rw_tables;
+----
+tar	CREATE TABLE tar (v INT)
+src	CREATE TABLE src (v INT) APPEND ONLY
+
+query TT
+SELECT name, definition from rw_sinks;
+----
+s1	CREATE SINK s1 INTO target AS SELECT * FROM src AS source WITH (type = 'append-only')
+
+statement ok
+drop sink s1;
+
+statement ok
+drop table src;
+
+statement ok
+drop table tar;
