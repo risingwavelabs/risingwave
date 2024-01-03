@@ -268,10 +268,10 @@ impl RemoteLogSinker {
         sink_name: &str,
     ) -> Result<Self> {
         let sink_proto = sink_param.to_proto();
-        let table_schema = if sink_name == ElasticSearchSink::SINK_NAME {
+        let payload_schema = if sink_name == ElasticSearchSink::SINK_NAME {
             let columns = vec![
-                ColumnDesc::unnamed(ColumnId::from(3), DataType::Varchar).to_protobuf(),
-                ColumnDesc::unnamed(ColumnId::from(4), DataType::Jsonb).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(1), DataType::Jsonb).to_protobuf(),
             ];
             Some(TableSchema {
                 columns,
@@ -285,7 +285,7 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
         } = EmbeddedConnectorClient::new()?
-            .start_sink_writer_stream(table_schema, sink_proto, SinkPayloadFormat::StreamChunk)
+            .start_sink_writer_stream(payload_schema, sink_proto, SinkPayloadFormat::StreamChunk)
             .await?;
 
         let sink_metrics = writer_param.sink_metrics;
