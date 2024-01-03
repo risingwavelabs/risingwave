@@ -9042,7 +9042,11 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
+<<<<<<< HEAD
  "opendal 0.44.0",
+=======
+ "opendal 0.43.0",
+>>>>>>> 8f4b503f60 (feat(connector): support posix as local fs source)
  "prometheus",
  "risingwave_common",
  "rustls",
