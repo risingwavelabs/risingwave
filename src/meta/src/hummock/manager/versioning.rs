@@ -42,8 +42,8 @@ use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::model::{ValTransaction, VarTransaction};
-use crate::storage::Transaction;
+use crate::model::{VarTransaction, VarTransactionWrapper};
+use crate::storage::MetaStore;
 use crate::MetaResult;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
@@ -290,11 +290,17 @@ impl HummockManager {
 
     #[named]
     pub async fn rebuild_table_stats(&self) -> Result<()> {
+        use crate::model::ValTransaction;
         let mut versioning = write_lock!(self, versioning).await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
-        let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
+        let mut version_stats = match self.sql_meta_store() {
+            None => VarTransactionWrapper::V1(VarTransaction::new(&mut versioning.version_stats)),
+            Some(_) => {
+                VarTransactionWrapper::V2(VarTransaction::new(&mut versioning.version_stats))
+            }
+        };
         *version_stats = new_stats;
-        commit_multi_var!(self, None, Transaction::default(), version_stats)?;
+        commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
         Ok(())
     }
 }
