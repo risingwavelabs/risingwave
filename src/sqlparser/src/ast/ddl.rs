@@ -92,7 +92,13 @@ pub enum AlterTableOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
-    RenameIndex { index_name: ObjectName },
+    RenameIndex {
+        index_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism>`
+    SetParallelism {
+        parallelism: SetVariableValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -250,6 +256,9 @@ impl fmt::Display for AlterIndexOperation {
         match self {
             AlterIndexOperation::RenameIndex { index_name } => {
                 write!(f, "RENAME TO {index_name}")
+            }
+            AlterIndexOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
             }
         }
     }
