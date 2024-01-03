@@ -1,8 +1,6 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# currently, we only support single sink into table
-
 statement ok
 create table t_simple (v1 int, v2 int);
 
