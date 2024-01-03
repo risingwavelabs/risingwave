@@ -1246,6 +1246,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ignore_delete_then_insert() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // test double insert one pk, the latter needs to be ignored.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 3
+            - 1 3
+            + 1 6",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+            ],
+        );
+
+        let order_types = vec![OrderType::ascending()];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![ColumnOrder::new(0, OrderType::ascending())],
+                column_ids,
+                1,
+                Arc::new(AtomicU64::new(0)),
+                ConflictBehavior::IgnoreConflict,
+            )
+            .await,
+        )
+        .execute();
+        let _msg1 = materialize_executor
+            .next()
+            .await
+            .transpose()
+            .unwrap()
+            .unwrap()
+            .as_barrier()
+            .unwrap();
+        let _msg2 = materialize_executor
+            .next()
+            .await
+            .transpose()
+            .unwrap()
+            .unwrap()
+            .as_chunk()
+            .unwrap();
+        let _msg3 = materialize_executor
+            .next()
+            .await
+            .transpose()
+            .unwrap()
+            .unwrap()
+            .as_barrier()
+            .unwrap();
+
+        let row = table
+            .get_row(
+                &OwnedRow::new(vec![Some(1_i32.into())]),
+                HummockReadEpoch::NoWait(u64::MAX),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            row,
+            Some(OwnedRow::new(vec![Some(1_i32.into()), Some(6_i32.into())]))
+        );
+    }
+
+    #[tokio::test]
     async fn test_ignore_delete_and_update_conflict() {
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();
