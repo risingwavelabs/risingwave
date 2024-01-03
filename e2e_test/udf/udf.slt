@@ -124,6 +124,12 @@ select decimal_add(1.11, 2.22);
 ----
 3.33
 
+# impilcit cast
+query R
+select decimal_add(1, 2);
+----
+3
+
 query T
 select array_access(ARRAY['a', 'b', 'c'], 2);
 ----
