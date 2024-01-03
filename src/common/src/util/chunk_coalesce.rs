@@ -65,12 +65,12 @@ impl LimitPolicy for LimitBySize {
     }
 }
 
-struct Either<P1, P2> {
+struct Or<P1, P2> {
     p1: P1,
     p2: P2,
 }
 
-impl<P1: LimitPolicy, P2: LimitPolicy> LimitPolicy for Either<P1, P2> {
+impl<P1: LimitPolicy, P2: LimitPolicy> LimitPolicy for Or<P1, P2> {
     fn reach(&self, builder: &DataChunkBuilder) -> bool {
         self.p1.reach(builder) || self.p2.reach(builder)
     }
@@ -106,7 +106,7 @@ impl<P: LimitPolicy> LimitPolicy for Rough<P> {
     }
 }
 
-type DefaultLimitPolicy = Either<LimitByCount, Rough<LimitBySize>>;
+type DefaultLimitPolicy = Or<LimitByCount, Rough<LimitBySize>>;
 
 impl DefaultLimitPolicy {
     fn with_batch_cnt(batch_cnt: usize) -> Self {
