@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,10 @@ public class Binding {
         }
     }
 
-    public static native void tracingSlf4jEvent(String name, int level, String message);
+    public static native void tracingSlf4jEvent(
+            String threadName, String name, int level, String message);
+
+    public static native boolean tracingSlf4jEventEnabled(int level);
 
     public static native int vnodeCount();
 

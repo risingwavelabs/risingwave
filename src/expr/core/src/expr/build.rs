@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
-use super::non_strict::NonStrictNoFallback;
+use super::strict::Strict;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
 use super::wrapper::EvalErrorReport;
@@ -34,7 +34,8 @@ use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    ExprBuilder::new_strict().build(prost)
+    let expr = ExprBuilder::new_strict().build(prost)?;
+    Ok(Strict::new(expr).boxed())
 }
 
 /// Build an expression from protobuf in non-strict mode.
@@ -76,15 +77,11 @@ where
 
     /// Attach wrappers to an expression.
     #[expect(clippy::let_and_return)]
-    fn wrap(&self, expr: impl Expression + 'static, no_fallback: bool) -> BoxedExpression {
+    fn wrap(&self, expr: impl Expression + 'static) -> BoxedExpression {
         let checked = Checked(expr);
 
         let may_non_strict = if let Some(error_report) = &self.error_report {
-            if no_fallback {
-                NonStrictNoFallback::new(checked, error_report.clone()).boxed()
-            } else {
-                NonStrict::new(checked, error_report.clone()).boxed()
-            }
+            NonStrict::new(checked, error_report.clone()).boxed()
         } else {
             checked.boxed()
         };
@@ -95,9 +92,7 @@ where
     /// Build an expression with `build_inner` and attach some wrappers.
     fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
         let expr = self.build_inner(prost)?;
-        // no fallback to row-based evaluation for UDF
-        let no_fallback = matches!(prost.get_rex_node().unwrap(), RexNode::Udf(_));
-        Ok(self.wrap(expr, no_fallback))
+        Ok(self.wrap(expr))
     }
 
     /// Build an expression from protobuf.
@@ -216,7 +211,7 @@ pub fn build_func_non_strict(
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<NonStrictExpression> {
     let expr = build_func(func, ret_type, children)?;
-    let wrapped = NonStrictExpression(ExprBuilder::new_non_strict(error_report).wrap(expr, false));
+    let wrapped = NonStrictExpression(ExprBuilder::new_non_strict(error_report).wrap(expr));
 
     Ok(wrapped)
 }

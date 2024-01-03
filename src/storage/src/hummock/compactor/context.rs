@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use more_asserts::assert_ge;
 use parking_lot::RwLock;
 
 use super::task_progress::TaskProgressManagerRef;
@@ -47,7 +48,9 @@ pub struct CompactorContext {
 
     pub await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 
-    pub running_task_count: Arc<AtomicU32>,
+    pub running_task_parallelism: Arc<AtomicU32>,
+
+    pub max_task_parallelism: Arc<AtomicU32>,
 }
 
 impl CompactorContext {
@@ -75,7 +78,56 @@ impl CompactorContext {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_count: Arc::new(AtomicU32::new(0)),
+            running_task_parallelism: Arc::new(AtomicU32::new(0)),
+            max_task_parallelism: Arc::new(AtomicU32::new(u32::MAX)),
+        }
+    }
+
+    pub fn acquire_task_quota(&self, parallelism: u32) -> bool {
+        let mut running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
+        let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
+
+        while parallelism + running_u32 <= max_u32 {
+            match self.running_task_parallelism.compare_exchange(
+                running_u32,
+                running_u32 + parallelism,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return true;
+                }
+                Err(old_running_u32) => {
+                    running_u32 = old_running_u32;
+                }
+            }
+        }
+
+        false
+    }
+
+    pub fn release_task_quota(&self, parallelism: u32) {
+        let prev = self
+            .running_task_parallelism
+            .fetch_sub(parallelism, Ordering::SeqCst);
+
+        assert_ge!(
+            prev,
+            parallelism,
+            "running {} parallelism {}",
+            prev,
+            parallelism
+        );
+    }
+
+    pub fn get_free_quota(&self) -> u32 {
+        let running_u32 = self.running_task_parallelism.load(Ordering::SeqCst);
+        let max_u32 = self.max_task_parallelism.load(Ordering::SeqCst);
+
+        if max_u32 > running_u32 {
+            max_u32 - running_u32
+        } else {
+            0
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -382,7 +382,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::info!(
+                        tracing::debug!(
                             "source exector: actor {:?} boot with splits: {:?}",
                             self.actor_ctx.id,
                             splits
@@ -414,7 +414,7 @@ impl<S: StateStore> SourceExecutor<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")

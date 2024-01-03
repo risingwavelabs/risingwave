@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,19 +16,22 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -152,7 +155,7 @@ pub trait StateStoreWrite: StaticSendSync {
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    ) -> StorageResult<usize>;
 }
 
 #[derive(Default, Debug)]
@@ -394,6 +397,18 @@ impl From<TracedWriteOptions> for WriteOptions {
     }
 }
 
+pub trait CheckOldValueEquality = Fn(&Bytes, &Bytes) -> bool + Send + Sync;
+
+pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
+    LazyLock::new(|| Arc::new(|first: &Bytes, second: &Bytes| first == second));
+
+#[derive(Default, Clone)]
+pub enum OpConsistencyLevel {
+    #[default]
+    Inconsistent,
+    ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -404,7 +419,7 @@ pub struct NewLocalOptions {
     ///
     /// 2. The old value passed from
     /// `update` and `delete` should match the original stored value.
-    pub is_consistent_op: bool,
+    pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
@@ -416,7 +431,12 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistency_level: match value.op_consistency_level {
+                TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                TracedOpConsistencyLevel::ConsistentOldValue => {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -427,7 +447,12 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
-            is_consistent_op: value.is_consistent_op,
+            op_consistency_level: match value.op_consistency_level {
+                OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::ConsistentOldValue(_) => {
+                    TracedOpConsistencyLevel::ConsistentOldValue
+                }
+            },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
         }
@@ -435,10 +460,14 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 }
 
 impl NewLocalOptions {
-    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+    pub fn new(
+        table_id: TableId,
+        op_consistency_level: OpConsistencyLevel,
+        table_option: TableOption,
+    ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistency_level,
             table_option,
             is_replicated: false,
         }
@@ -446,12 +475,12 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
-        is_consistent_op: bool,
+        op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
     ) -> Self {
         NewLocalOptions {
             table_id,
-            is_consistent_op,
+            op_consistency_level,
             table_option,
             is_replicated: true,
         }
@@ -460,7 +489,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
-            is_consistent_op: false,
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
             },
@@ -503,30 +532,64 @@ impl From<TracedInitOptions> for InitOptions {
 }
 
 #[derive(Clone, Debug)]
-pub struct SealCurrentEpochOptions {}
+pub struct SealCurrentEpochOptions {
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+}
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
-    fn from(_value: SealCurrentEpochOptions) -> Self {
-        TracedSealCurrentEpochOptions {}
+    fn from(value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
+                (
+                    direction == WatermarkDirection::Ascending,
+                    watermarks
+                        .iter()
+                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .collect(),
+                )
+            }),
+        }
     }
 }
 
-impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
-        Ok(SealCurrentEpochOptions {})
+impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
+    fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
+        SealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
+                (
+                    if is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    watermarks
+                        .iter()
+                        .map(|serialized_watermark| {
+                            Message::decode(serialized_watermark.as_slice())
+                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .expect("should not failed")
+                        })
+                        .collect(),
+                )
+            }),
+        }
     }
 }
 
 impl SealCurrentEpochOptions {
-    #[expect(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
+        Self {
+            table_watermarks: Some((direction, watermarks)),
+        }
     }
 
-    #[cfg(any(test, feature = "test"))]
+    pub fn no_watermark() -> Self {
+        Self {
+            table_watermarks: None,
+        }
+    }
+
     pub fn for_test() -> Self {
-        Self::new()
+        Self::no_watermark()
     }
 }

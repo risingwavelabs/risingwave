@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -298,6 +298,11 @@ impl ParallelUnitMapping {
     /// `new_uniform`.
     pub fn build(parallel_units: &[ParallelUnit]) -> Self {
         Self::new_uniform(parallel_units.iter().map(|pu| pu.id))
+    }
+
+    /// Create a uniform parallel unit mapping from the given parallel units ids
+    pub fn build_from_ids(parallel_unit_ids: &[ParallelUnitId]) -> Self {
+        Self::new_uniform(parallel_unit_ids.iter().cloned())
     }
 
     /// Transform this parallel unit mapping to an actor mapping, essentially `transform`.

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,8 +50,8 @@ impl FsConnectorSource {
         let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         connector_node_addr
             .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let config = ConnectorProperties::extract(source_props, false)
+            .map_err(|e| ConnectorError(e.into()))?;
 
         Ok(Self {
             config,

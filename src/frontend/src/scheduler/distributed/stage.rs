@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -370,7 +370,12 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    Some(worker),
+                    expr_context.clone(),
+                ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -383,7 +388,12 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -394,7 +404,12 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         }
 

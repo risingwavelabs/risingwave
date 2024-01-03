@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -892,6 +892,7 @@ impl BatchPlanFragmenter {
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
                     source_catalog.with_properties.clone().into_iter().collect(),
+                    false,
                 )?;
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {

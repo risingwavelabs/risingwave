@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -151,7 +151,12 @@ pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFu
             ))
         })?;
 
-    if let FuncBuilder::Aggregate{ append_only: Some(f), .. } = sig.build && prefer_append_only {
+    if let FuncBuilder::Aggregate {
+        append_only: Some(f),
+        ..
+    } = sig.build
+        && prefer_append_only
+    {
         return f(agg);
     }
     sig.build_aggregate(agg)

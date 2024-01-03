@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -754,7 +754,7 @@ pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
 mod expr_visitable;
-pub use expr_rewritable::*;
+
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;

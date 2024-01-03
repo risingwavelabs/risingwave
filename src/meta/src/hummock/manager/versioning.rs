@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,22 +20,23 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
-    HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats, SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+    SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::error::Result;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
@@ -43,6 +44,7 @@ use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::model::{ValTransaction, VarTransaction};
 use crate::storage::Transaction;
+use crate::MetaResult;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
@@ -188,14 +190,18 @@ impl HummockManager {
     pub async fn list_workers(
         &self,
         context_ids: &[HummockContextId],
-    ) -> HashMap<HummockContextId, WorkerNode> {
+    ) -> MetaResult<HashMap<HummockContextId, WorkerNode>> {
         let mut workers = HashMap::new();
         for context_id in context_ids {
-            if let Some(worker) = self.cluster_manager.get_worker_by_id(*context_id).await {
-                workers.insert(*context_id, worker.worker_node);
+            if let Some(worker_node) = self
+                .metadata_manager()
+                .get_worker_by_id(*context_id)
+                .await?
+            {
+                workers.insert(*context_id, worker_node);
             }
         }
-        workers
+        Ok(workers)
     }
 
     #[named]
@@ -399,12 +405,12 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
     use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersion, HummockVersionStats, KeyRange, Level,
-        OverlappingLevel, SstableInfo,
+        HummockPinnedVersion, HummockVersionStats, KeyRange, Level, OverlappingLevel, SstableInfo,
     };
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

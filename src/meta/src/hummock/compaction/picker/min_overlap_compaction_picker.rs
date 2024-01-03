@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,7 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
-use super::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, TrivialMovePicker,
-    MAX_COMPACT_LEVEL_COUNT,
-};
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -55,55 +52,79 @@ impl MinOverlappingPicker {
         target_tables: &[SstableInfo],
         level_handlers: &[LevelHandler],
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let mut scores = vec![];
-        for left in 0..select_tables.len() {
-            if level_handlers[self.level].is_pending_compact(&select_tables[left].sst_id) {
+        let mut select_file_ranges = vec![];
+        for (idx, sst) in select_tables.iter().enumerate() {
+            if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 continue;
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
+            overlap_info.update(sst);
+            let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
+
+            if overlap_files_range.is_empty() {
+                return (vec![sst.clone()], vec![]);
+            }
+            select_file_ranges.push((idx, overlap_files_range));
+        }
+        select_file_ranges.retain(|(_, range)| {
+            let mut pending_compact = false;
+            for other in &target_tables[range.clone()] {
+                if level_handlers[self.target_level].is_pending_compact(&other.sst_id) {
+                    pending_compact = true;
+                    break;
+                }
+            }
+            !pending_compact
+        });
+
+        let mut min_score = u64::MAX;
+        let mut min_score_select_range = 0..0;
+        let mut min_score_target_range = 0..0;
+        let mut min_score_select_file_size = 0;
+        for left in 0..select_file_ranges.len() {
             let mut select_file_size = 0;
-            for (right, table) in select_tables.iter().enumerate().skip(left) {
-                if level_handlers[self.level].is_pending_compact(&table.sst_id) {
+            let mut target_level_overlap_range = select_file_ranges[left].1.clone();
+            let mut total_file_size = 0;
+            for other in &target_tables[target_level_overlap_range.clone()] {
+                total_file_size += other.file_size;
+            }
+            let start_idx = select_file_ranges[left].0;
+            let mut end_idx = start_idx + 1;
+            for (idx, range) in select_file_ranges.iter().skip(left) {
+                if select_file_size > self.max_select_bytes
+                    || *idx > end_idx
+                    || range.start >= target_level_overlap_range.end
+                {
                     break;
                 }
-                if select_file_size > self.max_select_bytes {
-                    break;
-                }
-                select_file_size += table.file_size;
-                overlap_info.update(table);
-                let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
-                let mut total_file_size = 0;
-                let mut pending_compact = false;
-                if !overlap_files_range.is_empty() {
-                    for other in &target_tables[overlap_files_range] {
-                        if level_handlers[self.target_level].is_pending_compact(&other.sst_id) {
-                            pending_compact = true;
-                            break;
-                        }
+                select_file_size += select_tables[*idx].file_size;
+                if range.end > target_level_overlap_range.end {
+                    for other in &target_tables[target_level_overlap_range.end..range.end] {
                         total_file_size += other.file_size;
                     }
+                    target_level_overlap_range.end = range.end;
                 }
-                if pending_compact {
-                    break;
+                let score = if select_file_size == 0 {
+                    total_file_size
+                } else {
+                    total_file_size * 100 / select_file_size
+                };
+                end_idx = idx + 1;
+                if score < min_score
+                    || (score == min_score && select_file_size < min_score_select_file_size)
+                {
+                    min_score = score;
+                    min_score_select_range = start_idx..end_idx;
+                    min_score_target_range = target_level_overlap_range.clone();
+                    min_score_select_file_size = select_file_size;
                 }
-                scores.push((total_file_size * 100 / select_file_size, (left, right)));
             }
         }
-        if scores.is_empty() {
+        if min_score == u64::MAX {
             return (vec![], vec![]);
         }
-        let (_, (left, right)) = scores
-            .iter()
-            .min_by(|(score1, x), (score2, y)| {
-                score1
-                    .cmp(score2)
-                    .then_with(|| (x.1 - x.0).cmp(&(y.1 - y.0)))
-            })
-            .unwrap();
-        let select_input_ssts = select_tables[*left..(right + 1)].to_vec();
-        let target_input_ssts = self
-            .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, target_tables);
+        let select_input_ssts = select_tables[min_score_select_range].to_vec();
+        let target_input_ssts = target_tables[min_score_target_range].to_vec();
         (select_input_ssts, target_input_ssts)
     }
 }
@@ -115,16 +136,6 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let picker =
-            TrivialMovePicker::new(self.level, self.target_level, self.overlap_strategy.clone());
-        if let Some(input) = picker.pick_trivial_move_task(
-            &levels.get_level(self.level).table_infos,
-            &levels.get_level(self.target_level).table_infos,
-            level_handlers,
-            stats,
-        ) {
-            return Some(input);
-        }
         assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
             &levels.get_level(self.level).table_infos,
@@ -473,8 +484,8 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         ret.add_pending_task(1, &mut level_handlers);
 
@@ -482,8 +493,8 @@ pub mod tests {
             .pick_compaction(&levels, &level_handlers, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
         assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
         assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
     }
 

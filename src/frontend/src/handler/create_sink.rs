@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -173,23 +173,13 @@ pub fn gen_sink_plan(
         }
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => {
-                if !allow_old_sink_type_syntax(&connector) {
-                    return Err(ErrorCode::BindError(format!(
-                        "connector {} does not support `type = '...'`, please use syntax `FORMAT ... ENCODE ...` instead.",
-                        connector
-                    ))
-                    .into());
-                } else {
-                    SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
-                        session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
-                        if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
-                              f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
-                        }
-                        f
-                    })
+            Some(t) => SinkFormatDesc::from_legacy_type(&connector, t)?.map(|mut f| {
+                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
-            }
+                f
+            }),
             // Case C: no format + encode required
             None => None,
         },
@@ -255,7 +245,7 @@ pub fn gen_sink_plan(
             || sink_catalog.sink_type == SinkType::ForceAppendOnly)
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys. Please try to add \"FORMAT PLAIN ENCODE NATIVE\"".to_string(),
+                "Only append-only sinks can sink to a table without primary keys.".to_string(),
             )));
         }
 
@@ -591,8 +581,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        E::Native => SinkEncode::Native,
-        e @ (E::Csv | E::Bytes) => {
+        e @ (E::Native | E::Csv | E::Bytes) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -637,16 +626,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json,Encode::Template],
                     Format::Upsert => vec![Encode::Json,Encode::Template],
                 ),
-                "table" => hashmap!(
-                    Format::Plain => vec![Encode::Native],
-                    Format::Upsert => vec![Encode::Native],
-                ),
         ))
     });
-
-pub fn allow_old_sink_type_syntax(connector: &str) -> bool {
-    !matches!(connector, "table")
-}
 
 pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS

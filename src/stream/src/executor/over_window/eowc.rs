@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::collections::VecDeque;
+use risingwave_common::estimate_size::collections::EstimatedVecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
@@ -46,7 +46,7 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: WindowStates,
-    curr_row_buffer: VecDeque<OwnedRow>,
+    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
 }
 
 impl EstimateSize for Partition {

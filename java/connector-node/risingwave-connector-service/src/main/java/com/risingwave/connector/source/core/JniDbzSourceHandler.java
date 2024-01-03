@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,12 @@
 
 package com.risingwave.connector.source.core;
 
+import static com.risingwave.proto.ConnectorServiceProto.SourceType.POSTGRES;
+
 import com.risingwave.connector.api.source.CdcEngineRunner;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -38,7 +41,7 @@ public class JniDbzSourceHandler {
     }
 
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
-            throws com.google.protobuf.InvalidProtocolBufferException {
+            throws Exception {
         var request =
                 ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
 
@@ -50,6 +53,12 @@ public class JniDbzSourceHandler {
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
         var commonParam = request.getCommonParam();
         boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+
+        if (request.getSourceType() == POSTGRES) {
+            DbzSourceUtils.createPostgresPublicationIfNeeded(
+                    request.getPropertiesMap(), request.getSourceId());
+        }
+
         var config =
                 new DbzConnectorConfig(
                         SourceTypeE.valueOf(request.getSourceType()),

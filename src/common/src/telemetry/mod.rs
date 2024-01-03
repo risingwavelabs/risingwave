@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ pub mod report;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 use thiserror_ext::AsReport;
 
 use crate::util::env_var::env_var_is_true_or;
@@ -95,21 +95,16 @@ struct Cpu {
 
 impl SystemData {
     pub fn new() -> Self {
-        let mut sys = System::new();
-
         let memory = {
             let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
             Memory { used, total }
         };
 
-        let os = {
-            sys.refresh_system();
-            Os {
-                name: sys.name().unwrap_or_default(),
-                kernel_version: sys.kernel_version().unwrap_or_default(),
-                version: sys.os_version().unwrap_or_default(),
-            }
+        let os = Os {
+            name: System::name().unwrap_or_default(),
+            kernel_version: System::kernel_version().unwrap_or_default(),
+            version: System::os_version().unwrap_or_default(),
         };
 
         let cpu = Cpu {

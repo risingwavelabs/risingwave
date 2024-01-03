@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,7 +104,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
@@ -206,17 +206,26 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
+
+            let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+            let max_task_parallelism = Arc::new(AtomicU32::new(
+                (compaction_executor.worker_num() as f32
+                    * storage_opts.compactor_max_task_multiplier)
+                    .ceil() as u32,
+            ));
+
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
-                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+                compaction_executor,
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
-                running_task_count: Arc::new(AtomicU32::new(0)),
+                running_task_parallelism: Arc::new(AtomicU32::new(0)),
+                max_task_parallelism,
             };
 
             let (handle, shutdown_sender) = start_compactor(

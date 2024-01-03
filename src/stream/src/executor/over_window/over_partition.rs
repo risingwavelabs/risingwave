@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,23 +19,22 @@ use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
+use delta_btree_map::{Change, DeltaBTreeMap};
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
+use risingwave_common::types::Sentinelled;
 use risingwave_expr::window_function::{FrameBounds, StateKey, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::delta_btree_map::Change;
-use super::estimated_btree_map::EstimatedBTreeMap;
 use super::general::RowConverter;
-use super::sentinel::KeyWithSentinel;
-use crate::executor::over_window::delta_btree_map::DeltaBTreeMap;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::StreamExecutorResult;
 
-pub(super) type CacheKey = KeyWithSentinel<StateKey>;
+pub(super) type CacheKey = Sentinelled<StateKey>;
 
 /// Range cache for one over window partition.
 /// The cache entries can be:
@@ -507,10 +506,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await;
         }
 
-        // get the first and last keys again, now we are guaranteed to have at least a normal key
-        let cache_real_first_key = self.cache_real_first_key().unwrap();
-        let cache_real_last_key = self.cache_real_last_key().unwrap();
-
+        let cache_real_first_key = self
+            .cache_real_first_key()
+            .expect("cache real len is not 0");
         if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
             // extend leftward only if there's smallest sentinel
             let table_sub_range = (
@@ -525,11 +523,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the left half of given range"
             );
-            return self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
         }
 
+        let cache_real_last_key = self.cache_real_last_key().expect("cache real len is not 0");
         if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
             // extend rightward only if there's largest sentinel
             let table_sub_range = (
@@ -544,9 +542,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 table_sub_range=?table_sub_range,
                 "loading the right half of given range"
             );
-            return self
-                .extend_cache_by_range_inner(table, table_sub_range)
-                .await;
+            self.extend_cache_by_range_inner(table, table_sub_range)
+                .await?;
         }
 
         // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
@@ -1198,7 +1195,7 @@ mod find_affected_ranges_tests {
 
     #[test]
     fn test_empty_with_sentinels() {
-        let cache: BTreeMap<KeyWithSentinel<StateKey>, OwnedRow> = create_cache!(..., , ...);
+        let cache: BTreeMap<Sentinelled<StateKey>, OwnedRow> = create_cache!(..., , ...);
         let delta = create_delta!((1, Insert), (2, Insert));
 
         {

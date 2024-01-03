@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use itertools::Itertools;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Datum, DefaultOrdered};
+use risingwave_common::types::{Datum, DefaultOrdered, Sentinelled};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use smallvec::SmallVec;
 
@@ -34,6 +34,12 @@ mod rank;
 pub struct StateKey {
     pub order_key: MemcmpEncoded,
     pub pk: DefaultOrdered<OwnedRow>,
+}
+
+impl From<StateKey> for Sentinelled<StateKey> {
+    fn from(key: StateKey) -> Self {
+        Self::Normal(key)
+    }
 }
 
 #[derive(Debug)]
