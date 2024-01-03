@@ -149,7 +149,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await;
+        validate_remote_sink(&self.param).await?;
         Ok(())
     }
 }
