@@ -4,6 +4,10 @@ include ./delete.slt.part
 include ../nexmark/insert_person.slt.part
 include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
+
+statement ok
+flush;
+
 include ../nexmark/test_mv_result.slt.part
 
 include ../nexmark/drop_views.slt.part
