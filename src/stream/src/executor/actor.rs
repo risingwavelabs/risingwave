@@ -219,7 +219,7 @@ where
             .into()));
 
             // Collect barriers to local barrier manager
-            self.context.lock_barrier_manager().collect(id, &barrier);
+            self.context.barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use super::{BarrierState, LocalBarrierManager};
+use super::LocalBarrierManager;
+use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
+use crate::task::barrier_manager::LocalBarrierWorker;
 use crate::task::{ActorId, SharedContext};
 
 type ConsumedEpoch = u64;
@@ -26,25 +26,33 @@ pub(super) enum BackfillState {
     Done(ConsumedRows),
 }
 
-impl LocalBarrierManager {
-    fn update_create_mview_progress(
+impl LocalBarrierWorker {
+    pub(crate) fn update_create_mview_progress(
         &mut self,
         current_epoch: u64,
         actor: ActorId,
         state: BackfillState,
     ) {
-        match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => {}
+        self.state
+            .create_mview_progress
+            .entry(current_epoch)
+            .or_default()
+            .insert(actor, state);
+    }
+}
 
-            BarrierState::Managed(managed_state) => {
-                managed_state
-                    .create_mview_progress
-                    .entry(current_epoch)
-                    .or_default()
-                    .insert(actor, state);
-            }
-        }
+impl LocalBarrierManager {
+    fn update_create_mview_progress(
+        &self,
+        current_epoch: u64,
+        actor: ActorId,
+        state: BackfillState,
+    ) {
+        self.send_event(ReportCreateProgress {
+            current_epoch,
+            actor,
+            state,
+        })
     }
 }
 
@@ -79,7 +87,7 @@ impl LocalBarrierManager {
 /// for arrangement backfill. We can use that to estimate the progress as well, and avoid recording
 /// `row_count` state for it.
 pub struct CreateMviewProgress {
-    barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
+    barrier_manager: LocalBarrierManager,
 
     /// The id of the actor containing the backfill executors.
     backfill_actor_id: ActorId,
@@ -88,10 +96,7 @@ pub struct CreateMviewProgress {
 }
 
 impl CreateMviewProgress {
-    pub fn new(
-        barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
-        backfill_actor_id: ActorId,
-    ) -> Self {
+    pub fn new(barrier_manager: LocalBarrierManager, backfill_actor_id: ActorId) -> Self {
         Self {
             barrier_manager,
             backfill_actor_id,
@@ -100,7 +105,7 @@ impl CreateMviewProgress {
     }
 
     #[cfg(test)]
-    pub fn for_test(barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>) -> Self {
+    pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
         Self::new(barrier_manager, 0)
     }
 
@@ -110,7 +115,7 @@ impl CreateMviewProgress {
 
     fn update_inner(&mut self, current_epoch: u64, state: BackfillState) {
         self.state = Some(state);
-        self.barrier_manager.lock().update_create_mview_progress(
+        self.barrier_manager.update_create_mview_progress(
             current_epoch,
             self.backfill_actor_id,
             state,

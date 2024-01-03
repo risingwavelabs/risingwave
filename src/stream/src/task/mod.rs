@@ -34,6 +34,8 @@ pub use env::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
+use crate::executor::monitor::StreamingMetrics;
+
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
@@ -77,7 +79,7 @@ pub struct SharedContext {
     // disconnected.
     pub(crate) compute_client_pool: ComputeClientPool,
 
-    pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
+    pub(crate) barrier_manager: LocalBarrierManager,
 
     pub(crate) config: StreamingConfig,
 }
@@ -91,13 +93,18 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
+    pub fn new(
+        addr: HostAddr,
+        state_store: StateStoreImpl,
+        config: &StreamingConfig,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
+            barrier_manager: LocalBarrierManager::new(state_store, streaming_metrics),
             config: config.clone(),
         }
     }
@@ -111,9 +118,7 @@ impl SharedContext {
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
-                StateStoreImpl::for_test(),
-            ))),
+            barrier_manager: LocalBarrierManager::for_test(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -126,8 +131,8 @@ impl SharedContext {
         }
     }
 
-    pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
-        self.barrier_manager.lock()
+    pub fn barrier_manager(&self) -> &LocalBarrierManager {
+        &self.barrier_manager
     }
 
     /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one

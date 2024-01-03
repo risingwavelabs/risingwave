@@ -21,8 +21,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {
-    let mut manager = LocalBarrierManager::new(StateStoreImpl::for_test());
-    assert!(!manager.is_local_mode());
+    let manager = LocalBarrierManager::for_test();
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -43,9 +42,10 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let epoch = 114514;
     let barrier = Barrier::new_test_barrier(epoch);
     manager
-        .send_barrier(&barrier, actor_ids.clone(), actor_ids, None)
+        .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
+        .await
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev).await?;
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -73,8 +73,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
-    let mut manager = LocalBarrierManager::new(StateStoreImpl::for_test());
-    assert!(!manager.is_local_mode());
+    let manager = LocalBarrierManager::for_test();
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -107,9 +106,10 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
 
     // Send the barrier to all actors
     manager
-        .send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, None)
+        .send_barrier(barrier.clone(), actor_ids_to_send, actor_ids_to_collect)
+        .await
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev).await?;
 
     // Collect barriers from actors
     let collected_barriers = rxs
