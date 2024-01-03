@@ -453,7 +453,7 @@ impl Binder {
                     Err(e)
                 } else {
                     Err(ErrorCode::WithHint(
-                        format!("maybe try add schema name in the rw_table expr? e.g. rw_table(1001, s)"),
+                        format!("maybe try to add the schema name in the rw_table expr? e.g. rw_table(1001, s)"),
                         e.into()).into())
                 }
             }
