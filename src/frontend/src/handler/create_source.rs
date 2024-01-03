@@ -53,8 +53,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
-    DebeziumAvroSchema, Encode, Format, Ident, ProtobufSchema, SourceWatermark,
+    get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
+    Ident, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -130,14 +130,20 @@ async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
+    is_debezium: bool,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     consume_aws_config_from_options(format_encode_options);
 
-    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
-    let vec_column_desc = conf.map_to_columns()?;
+    let vec_column_desc = if is_debezium {
+        let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
+        conf.map_to_columns()?;
+    } else {
+        let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
+        conf.map_to_columns()?
+    };
     Ok(vec_column_desc
         .into_iter()
         .map(|col| ColumnCatalog {
@@ -154,29 +160,6 @@ async fn extract_debezium_avro_table_pk_columns(
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
-}
-
-// Map an Avro schema to a relational schema and return the pk_column_ids.
-async fn extract_debezium_avro_table_schema(
-    info: &StreamSourceInfo,
-    with_properties: &HashMap<String, String>,
-    format_encode_options: &mut BTreeMap<String, String>,
-) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(info, with_properties)?;
-    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
-    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
-    consume_aws_config_from_options(format_encode_options);
-
-    let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
-    let vec_column_desc = conf.map_to_columns()?;
-    let column_catalog = vec_column_desc
-        .into_iter()
-        .map(|col| ColumnCatalog {
-            column_desc: col.into(),
-            is_hidden: false,
-        })
-        .collect_vec();
-    Ok(column_catalog)
 }
 
 /// Map a protobuf schema to a relational schema.
@@ -382,13 +365,15 @@ pub(crate) async fn bind_columns_from_source(
 
             columns
         }
-        (Format::Plain | Format::Upsert, Encode::Avro) => {
+        (format @ (Format::Plain | Format::Upsert | Format::Debezium), Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
-            let avro_schema = AvroSchema {
-                row_schema_location,
-                use_schema_registry,
-            };
+
+            if matches!(format, Format::Debezium) && !use_schema_registry {
+                return Err(RwError::from(ProtocolError(
+                    "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
+                )));
+            }
 
             let message_name = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
@@ -396,11 +381,11 @@ pub(crate) async fn bind_columns_from_source(
             );
             let name_strategy = get_sr_name_strategy_check(
                 &mut format_encode_options_to_consume,
-                avro_schema.use_schema_registry,
+                use_schema_registry,
             )?;
 
-            stream_source_info.use_schema_registry = avro_schema.use_schema_registry;
-            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
+            stream_source_info.use_schema_registry = use_schema_registry;
+            stream_source_info.row_schema_location = row_schema_location.0.clone();
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
@@ -412,6 +397,7 @@ pub(crate) async fn bind_columns_from_source(
                     &stream_source_info,
                     with_properties,
                     &mut format_encode_options_to_consume,
+                    matches!(format, Format::Debezium),
                 )
                 .await?,
             )
@@ -451,44 +437,6 @@ pub(crate) async fn bind_columns_from_source(
                 &mut format_encode_options_to_consume,
             )
             .await?
-        }
-        (Format::Debezium, Encode::Avro) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
-            if !use_schema_registry {
-                return Err(RwError::from(ProtocolError(
-                    "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
-                )));
-            }
-            let avro_schema = DebeziumAvroSchema {
-                row_schema_location,
-            };
-
-            // no need to check whether works schema registry because debezium avro always work with
-            // schema registry
-            let name_strategy =
-                get_sr_name_strategy_check(&mut format_encode_options_to_consume, true)?;
-            let message_name = try_consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MESSAGE_NAME_KEY,
-            );
-
-            stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
-            stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
-            stream_source_info.key_message_name =
-                get_key_message_name(&mut format_encode_options_to_consume);
-            stream_source_info.name_strategy =
-                name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
-
-            let full_columns = extract_debezium_avro_table_schema(
-                &stream_source_info,
-                with_properties,
-                &mut format_encode_options_to_consume,
-            )
-            .await?;
-
-            Some(full_columns)
         }
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
