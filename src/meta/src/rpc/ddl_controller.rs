@@ -56,7 +56,6 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
-use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::log::warn;

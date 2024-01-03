@@ -41,7 +41,9 @@ impl JavaVmWrapper {
             Ok(jvm) => Ok(jvm),
             Err(e) => {
                 error!("failed to init jvm: {:?}", e.as_report());
-                Err(anyhow!(e).context("jvm not initialized properly"))
+                // Note: anyhow!(e) doesn't preserve source
+                // https://github.com/dtolnay/anyhow/issues/341
+                Err(anyhow!(e.to_report_string()).context("jvm not initialized properly"))
             }
         }
     }
