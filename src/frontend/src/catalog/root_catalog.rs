@@ -37,6 +37,7 @@ use crate::catalog::system_catalog::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -727,6 +728,34 @@ impl Catalog {
                     .get_connection_by_name(connection_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
+    pub fn get_function_by_name_inputs<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+        inputs: &mut [ExprImpl],
+    ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_function_by_name_inputs(function_name, inputs))
+            })?
+            .ok_or_else(|| {
+                CatalogError::NotFound(
+                    "function",
+                    format!(
+                        "{}({})",
+                        function_name,
+                        inputs
+                            .iter()
+                            .map(|a| a.return_type().to_string())
+                            .join(", ")
+                    ),
+                )
+            })
     }
 
     pub fn get_function_by_name_args<'a>(

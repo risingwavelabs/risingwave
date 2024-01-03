@@ -28,7 +28,11 @@ use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, Funct
 /// is not supported on backend.
 ///
 /// It also mutates the `inputs` by adding necessary casts.
-pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataType> {
+pub fn infer_type_with_sigmap(
+    func_name: FuncName,
+    inputs: &mut [ExprImpl],
+    sig_map: &FunctionRegistry,
+) -> Result<DataType> {
     // special cases
     if let FuncName::Scalar(func_type) = func_name
         && let Some(res) = infer_type_for_special(func_type, inputs).transpose()
@@ -46,7 +50,7 @@ pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataTy
             false => Some(e.return_type()),
         })
         .collect_vec();
-    let sig = infer_type_name(&FUNCTION_REGISTRY, func_name, &actuals)?;
+    let sig = infer_type_name(sig_map, func_name, &actuals)?;
 
     // add implicit casts to inputs
     for (expr, t) in inputs.iter_mut().zip_eq_fast(&sig.inputs_type) {
@@ -65,6 +69,10 @@ pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataTy
     let input_types = inputs.iter().map(|expr| expr.return_type()).collect_vec();
     let return_type = (sig.type_infer)(&input_types)?;
     Ok(return_type)
+}
+
+pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataType> {
+    infer_type_with_sigmap(func_name, inputs, &FUNCTION_REGISTRY)
 }
 
 pub fn infer_some_all(
@@ -608,12 +616,12 @@ fn infer_type_for_special(
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
-fn infer_type_name<'a>(
+pub fn infer_type_name<'a>(
     sig_map: &'a FunctionRegistry,
     func_name: FuncName,
     inputs: &[Option<DataType>],
 ) -> Result<&'a FuncSign> {
-    let candidates = sig_map.get_with_arg_nums(func_name, inputs.len());
+    let candidates = sig_map.get_with_arg_nums(func_name.clone(), inputs.len());
 
     // Binary operators have a special `unknown` handling rule for exact match. We do not
     // distinguish operators from functions as of now.
