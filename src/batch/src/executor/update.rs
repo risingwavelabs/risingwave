@@ -150,10 +150,7 @@ impl UpdateExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            let cardinality = stream_chunk.cardinality();
-            write_handle.write_chunk(stream_chunk).await?;
-
-            Result::Ok(cardinality / 2)
+            write_handle.write_chunk(stream_chunk).await
         };
 
         let mut rows_updated = 0;
@@ -181,17 +178,21 @@ impl UpdateExecutor {
                 .rows()
                 .zip_eq_debug(updated_data_chunk.rows())
             {
-                let None = builder.append_one_row(row_delete) else {
-                    unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
-                };
-                if let Some(chunk) = builder.append_one_row(row_insert) {
-                    rows_updated += write_txn_data(chunk).await?;
+                rows_updated += 1;
+                // If row_delete == row_insert, we don't need to do a actual update
+                if row_delete != row_insert {
+                    let None = builder.append_one_row(row_delete) else {
+                        unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
+                    };
+                    if let Some(chunk) = builder.append_one_row(row_insert) {
+                        write_txn_data(chunk).await?;
+                    }
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            rows_updated += write_txn_data(chunk).await?;
+            write_txn_data(chunk).await?;
         }
         write_handle.end().await?;
 
