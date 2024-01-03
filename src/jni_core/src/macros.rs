@@ -444,6 +444,8 @@ macro_rules! for_all_plain_native_methods {
             {
                 public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
 
+                public static native boolean tracingSlf4jEventEnabled(int level);
+
                 public static native int vnodeCount();
 
                 // hummock iterator method
@@ -883,6 +885,7 @@ mod tests {
         let expected = expect_test::expect![[r#"
             [
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEventEnabled                 (I)Z,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,

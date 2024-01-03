@@ -81,10 +81,9 @@ use crate::hummock::metrics_utils::{
     trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
-use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, MetadataManager, TableId,
-    META_NODE_ID,
-};
+#[cfg(any(test, feature = "test"))]
+use crate::manager::{ClusterManagerRef, FragmentManagerRef};
+use crate::manager::{IdCategory, MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
     VarTransaction,
@@ -249,7 +248,8 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
         TaskStatus::InvalidGroupCanceled,
-        TaskStatus::NoAvailResourceCanceled,
+        TaskStatus::NoAvailMemoryResourceCanceled,
+        TaskStatus::NoAvailCpuResourceCanceled,
     ]
     .into_iter()
     .collect()

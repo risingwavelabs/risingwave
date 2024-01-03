@@ -1180,6 +1180,11 @@ impl DdlController {
                 )
                 .await?;
 
+            // Add table fragments to meta store with state: `State::Initial`.
+            mgr.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
+                .await?;
+
             self.stream_manager
                 .replace_table(table_fragments, context)
                 .await?;
