@@ -12,13 +12,114 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::Cell;
 use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
+
+trait LimitPolicy {
+    /// The limit policy is reached means that the [`DataChunkBuilder`] should complete a data chunk.
+    fn reach(&self, builder: &DataChunkBuilder) -> bool;
+
+    /// Expected count of the chunk which will be built.
+    ///
+    /// There is no any guarantee between the actual count and the count hint.
+    /// None means it's hard to give a hint.
+    fn count_hint(&self) -> Option<usize> {
+        None
+    }
+}
+
+struct LimitByCount {
+    batch_cnt: usize,
+}
+
+impl LimitPolicy for LimitByCount {
+    fn reach(&self, builder: &DataChunkBuilder) -> bool {
+        builder.buffered_count() >= self.batch_cnt
+    }
+
+    fn count_hint(&self) -> Option<usize> {
+        Some(self.batch_cnt)
+    }
+}
+
+/// Limit the chunk by its [estimate size][`EstimateSize::estimated_size`].
+struct LimitBySize {
+    max_size: usize,
+}
+
+impl LimitPolicy for LimitBySize {
+    fn reach(&self, builder: &DataChunkBuilder) -> bool {
+        builder
+            .array_builders
+            .iter()
+            .map(|builder| builder.estimated_size())
+            .sum::<usize>()
+            >= self.max_size
+    }
+}
+
+struct Either<P1, P2> {
+    p1: P1,
+    p2: P2,
+}
+
+impl<P1: LimitPolicy, P2: LimitPolicy> LimitPolicy for Either<P1, P2> {
+    fn reach(&self, builder: &DataChunkBuilder) -> bool {
+        self.p1.reach(builder) || self.p2.reach(builder)
+    }
+
+    fn count_hint(&self) -> Option<usize> {
+        match (self.p1.count_hint(), self.p2.count_hint()) {
+            (Some(cnt1), Some(cnt2)) => Some(std::cmp::min(cnt1, cnt2)),
+            (Some(cnt), None) | (None, Some(cnt)) => Some(cnt),
+            (None, None) => None,
+        }
+    }
+}
+
+/// An imprecise [`LimitPolicy`] that trades off reduced calls to `reach` for some error tolerance in favor of performance
+struct Rough<P> {
+    /// A counter that keeps the number of times that `reach` was ignored since it was last invoked.
+    cnt: Cell<usize>,
+    /// The number of times that `reach` will be ignored before it is invoked.
+    ignore_cnt: usize,
+
+    inner: P,
+}
+
+impl<P: LimitPolicy> LimitPolicy for Rough<P> {
+    fn reach(&self, builder: &DataChunkBuilder) -> bool {
+        self.cnt.set(self.cnt.get() + 1);
+        if self.cnt.get() > self.ignore_cnt {
+            self.cnt.set(0);
+            self.inner.reach(builder)
+        } else {
+            false
+        }
+    }
+}
+
+type DefaultLimitPolicy = Either<LimitByCount, Rough<LimitBySize>>;
+
+impl DefaultLimitPolicy {
+    fn with_batch_cnt(batch_cnt: usize) -> Self {
+        Self {
+            p1: LimitByCount { batch_cnt },
+            p2: Rough {
+                cnt: 0.into(),
+                ignore_cnt: 10,
+                inner: LimitBySize { max_size: 1 << 20 },
+            },
+        }
+    }
+}
 
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
 pub struct SlicedDataChunk {
@@ -30,7 +131,7 @@ pub struct SlicedDataChunk {
 pub struct DataChunkBuilder {
     /// Data types for build array
     data_types: Vec<DataType>,
-    batch_size: usize,
+    limit_policy: DefaultLimitPolicy,
 
     /// Buffers storing current data
     array_builders: Vec<ArrayBuilderImpl>,
@@ -38,15 +139,19 @@ pub struct DataChunkBuilder {
 }
 
 impl DataChunkBuilder {
-    pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
-        assert!(batch_size > 0);
+    pub fn new(data_types: Vec<DataType>, batch_cnt: usize) -> Self {
+        assert!(batch_cnt > 0);
 
         Self {
             data_types,
-            batch_size,
+            limit_policy: DefaultLimitPolicy::with_batch_cnt(batch_cnt),
             array_builders: vec![],
             buffered_count: 0,
         }
+    }
+
+    fn reach(&self) -> bool {
+        self.limit_policy.reach(self)
     }
 
     /// Lazily create the array builders if absent
@@ -55,20 +160,21 @@ impl DataChunkBuilder {
             self.array_builders = self
                 .data_types
                 .iter()
-                .map(|data_type| data_type.create_array_builder(self.batch_size))
+                .map(|data_type| {
+                    data_type.create_array_builder(self.limit_policy.count_hint().unwrap_or(0))
+                })
                 .collect::<Vec<ArrayBuilderImpl>>();
 
             assert!(self.buffered_count == 0);
         }
     }
 
-    /// Returns not consumed input chunked data as sliced data chunk, and a data chunk of
-    /// `batch_size`.
+    /// Returns not consumed input chunked data as sliced data chunk, and a completed data chunk.
     ///
     /// If `input_chunk` is not totally consumed, it's returned with a new offset, which is equal to
     /// `old_offset + consumed_rows`. Otherwise the first value is `None`.
     ///
-    /// If number of `batch_size` rows reached, it's returned as the second value of tuple.
+    /// If the `limit_policy` reached, it's returned as the second value of tuple.
     /// Otherwise it's `None`.
     #[must_use]
     fn append_chunk_inner(
@@ -87,23 +193,19 @@ impl DataChunkBuilder {
                 }
 
                 self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1);
-                if self.buffered_count >= self.batch_size {
+                if self.reach() {
                     break;
                 }
             }
         } else {
-            let num_rows_to_append = std::cmp::min(
-                self.batch_size - self.buffered_count,
-                input_chunk.data_chunk.capacity() - input_chunk.offset,
-            );
-            let end_offset = input_chunk.offset + num_rows_to_append;
-            for input_row_idx in input_chunk.offset..end_offset {
+            for input_row_idx in input_chunk.offset..input_chunk.data_chunk.capacity() {
                 new_return_offset += 1;
-                self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
+                self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx);
+                if self.reach() {
+                    break;
+                }
             }
         };
-
-        assert!(self.buffered_count <= self.batch_size);
 
         let returned_input_chunk = if input_chunk.data_chunk.capacity() > new_return_offset {
             Some(input_chunk.with_new_offset_checked(new_return_offset))
@@ -111,7 +213,7 @@ impl DataChunkBuilder {
             None
         };
 
-        let output_chunk = if self.buffered_count == self.batch_size {
+        let output_chunk = if self.reach() {
             Some(self.build_data_chunk())
         } else {
             None
@@ -159,7 +261,7 @@ impl DataChunkBuilder {
     #[must_use]
     pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
         self.append_one_row_no_finish(row);
-        if self.buffered_count == self.batch_size {
+        if self.reach() {
             Some(self.build_data_chunk())
         } else {
             None
@@ -167,7 +269,6 @@ impl DataChunkBuilder {
     }
 
     fn append_one_row_no_finish(&mut self, row: impl Row) {
-        assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
         self.do_append_one_row_from_datums(row.iter());
     }
@@ -186,7 +287,6 @@ impl DataChunkBuilder {
         I1: Iterator<Item = &'a ArrayImpl>,
         I2: Iterator<Item = &'a ArrayImpl>,
     {
-        assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
 
         for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq_debug(
@@ -199,7 +299,7 @@ impl DataChunkBuilder {
 
         self.buffered_count += 1;
 
-        if self.buffered_count == self.batch_size {
+        if self.reach() {
             Some(self.build_data_chunk())
         } else {
             None
