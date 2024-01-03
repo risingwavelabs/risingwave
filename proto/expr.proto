@@ -274,6 +274,7 @@ message ExprNode {
     // System information functions
     PG_GET_INDEXDEF = 2400;
     COL_DESCRIPTION = 2401;
+    PG_GET_VIEWDEF = 2402;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
