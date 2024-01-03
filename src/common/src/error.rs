@@ -87,6 +87,13 @@ pub struct NotImplemented {
 #[derive(Error, Debug, Box)]
 #[thiserror_ext(newtype(name = RwError, backtrace, report_debug))]
 pub enum ErrorCode {
+    #[error("hint: {0}")]
+    WithHint(
+        String,
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("internal error: {0}")]
     InternalError(String),
     // TODO: unify with the above

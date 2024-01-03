@@ -441,12 +441,23 @@ impl Binder {
             })?
             .into();
 
-        let schema = args
-            .get(1)
-            .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
+        let schema = args.get(1);
+        let schema_provided = schema.is_some();
+        let schema = schema.map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
+        match self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false) {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                if schema_provided {
+                    Err(e)
+                } else {
+                    Err(ErrorCode::WithHint(
+                        format!("maybe try add schema name in the rw_table expr? e.g. rw_table(1001, s)"),
+                        e.into()).into())
+                }
+            }
+        }
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
