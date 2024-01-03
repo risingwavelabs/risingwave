@@ -326,7 +326,7 @@ pub(crate) async fn bind_columns_from_source(
     };
 
     let columns = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) => None,
+        (Format::Native, Encode::Native) | (Format::Plain, Encode::Bytes) => None,
         (Format::Plain, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
@@ -437,20 +437,6 @@ pub(crate) async fn bind_columns_from_source(
 
             None
         }
-        (Format::Plain, Encode::Bytes) => None,
-        (Format::Upsert, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            let columns = extract_json_table_schema(
-                &schema_config,
-                with_properties,
-                &mut format_encode_options_to_consume,
-            )
-            .await?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
-
-            columns
-        }
         (Format::Upsert, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
@@ -485,8 +471,7 @@ pub(crate) async fn bind_columns_from_source(
 
             Some(columns)
         }
-
-        (Format::Debezium, Encode::Json) => {
+        (Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
                 json_schema_infer_use_schema_registry(&schema_config);
@@ -538,31 +523,6 @@ pub(crate) async fn bind_columns_from_source(
         }
         (Format::DebeziumMongo, Encode::Json) => None,
 
-        (Format::Maxwell, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
-
-            extract_json_table_schema(
-                &schema_config,
-                with_properties,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
-        }
-
-        (Format::Canal, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
-
-            extract_json_table_schema(
-                &schema_config,
-                with_properties,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
-        }
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
