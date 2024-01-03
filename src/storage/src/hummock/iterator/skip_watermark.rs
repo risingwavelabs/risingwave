@@ -204,7 +204,7 @@ impl SkipWatermarkState {
         }
     }
 
-    fn reset_watermark(&mut self) {
+    pub fn reset_watermark(&mut self) {
         self.remain_watermarks = self
             .watermarks
             .iter()

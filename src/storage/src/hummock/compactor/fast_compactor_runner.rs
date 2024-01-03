@@ -460,10 +460,9 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
-                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
-                    && self.executor.last_key_is_delete;
-                if self.executor.builder.need_flush() || need_deleted {
+                if self.executor.builder.need_flush()
+                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
+                {
                     let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
@@ -589,6 +588,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
+        self.state.reset_watermark();
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
@@ -657,7 +657,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
     }
 
     pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
-        if self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
+        if self.last_key_is_delete && self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
             // If the last key is delete tombstone, we can not append the origin block
             // because it would cause a deleted key could be see by user again.
             return false;
