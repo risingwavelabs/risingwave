@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::{build_sink, Sink, SinkParam};
@@ -25,5 +26,9 @@ pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
 
     let sink = build_sink(param)?;
 
-    dispatch_sink!(sink, sink, Ok(sink.validate().await?))
+    dispatch_sink!(
+        sink,
+        sink,
+        Ok(sink.validate().await.context("failed to validate sink")?)
+    )
 }
