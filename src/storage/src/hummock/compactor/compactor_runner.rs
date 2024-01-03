@@ -514,8 +514,9 @@ pub async fn compact(
         // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
         if let Err(e) = check_compaction_result(&compact_task, context.clone()).await {
             tracing::error!(
-                "Failed to check fast compaction task {}",
-                compact_task.task_id
+                "Failed to check fast compaction task {} because: {:?}",
+                compact_task.task_id,
+                e
             );
         }
         return (compact_task, table_stats);
