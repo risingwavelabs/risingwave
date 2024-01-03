@@ -36,6 +36,7 @@ pub struct CompactorMetrics {
     pub compact_sst_duration: Histogram,
     pub compact_task_duration: HistogramVec,
     pub compact_task_pending_num: IntGauge,
+    pub compact_task_pending_parallelism: IntGauge,
     pub write_build_l0_sst_duration: Histogram,
     pub shared_buffer_to_sstable_size: Histogram,
     pub get_table_id_total_time_duration: Histogram,
@@ -154,6 +155,13 @@ impl CompactorMetrics {
 
         let compact_task_pending_num = register_int_gauge_with_registry!(
             "storage_compact_task_pending_num",
+            "the num of storage compact task",
+            registry
+        )
+        .unwrap();
+
+        let compact_task_pending_parallelism = register_int_gauge_with_registry!(
+            "storage_compact_task_pending_parallelism",
             "the num of storage compact parallelism",
             registry
         )
@@ -255,6 +263,7 @@ impl CompactorMetrics {
             compact_sst_duration,
             compact_task_duration,
             compact_task_pending_num,
+            compact_task_pending_parallelism,
             write_build_l0_sst_duration,
             shared_buffer_to_sstable_size,
             get_table_id_total_time_duration,
