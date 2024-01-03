@@ -298,14 +298,15 @@ pub(crate) async fn bind_columns_from_source(
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
 
-    let get_key_message_name = |options: &mut BTreeMap<String, String>| -> Option<String> {
+    fn get_key_message_name(options: &mut BTreeMap<String, String>) -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
             .map(|ele| Some(ele.0))
             .unwrap_or(None)
-    };
-    let get_sr_name_strategy_check = |options: &mut BTreeMap<String, String>,
-                                      use_sr: bool|
-     -> Result<Option<i32>> {
+    }
+    fn get_sr_name_strategy_check(
+        options: &mut BTreeMap<String, String>,
+        use_sr: bool,
+    ) -> Result<Option<i32>> {
         let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
             options,
             NAME_STRATEGY_KEY,
@@ -316,7 +317,7 @@ pub(crate) async fn bind_columns_from_source(
             )));
         }
         Ok(name_strategy)
-    };
+    }
 
     let mut stream_source_info = StreamSourceInfo {
         format: format_to_prost(&source_schema.format) as i32,
@@ -326,7 +327,9 @@ pub(crate) async fn bind_columns_from_source(
     };
 
     let columns = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, Encode::Bytes) => None,
+        (Format::Native, Encode::Native)
+        | (Format::Plain, Encode::Bytes)
+        | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
@@ -343,8 +346,8 @@ pub(crate) async fn bind_columns_from_source(
                 protobuf_schema.use_schema_registry,
             )?;
 
-            stream_source_info.row_schema_location = protobuf_schema.row_schema_location.0.clone();
             stream_source_info.use_schema_registry = protobuf_schema.use_schema_registry;
+            stream_source_info.row_schema_location = protobuf_schema.row_schema_location.0.clone();
             stream_source_info.proto_message_name = protobuf_schema.message_name.0.clone();
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
@@ -379,7 +382,7 @@ pub(crate) async fn bind_columns_from_source(
 
             columns
         }
-        (Format::Plain, Encode::Avro) => {
+        (Format::Plain | Format::Upsert, Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
             let avro_schema = AvroSchema {
@@ -387,7 +390,6 @@ pub(crate) async fn bind_columns_from_source(
                 use_schema_registry,
             };
 
-            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
             let message_name = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
                 MESSAGE_NAME_KEY,
@@ -397,10 +399,11 @@ pub(crate) async fn bind_columns_from_source(
                 avro_schema.use_schema_registry,
             )?;
 
-            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
             stream_source_info.use_schema_registry = avro_schema.use_schema_registry;
+            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
-            stream_source_info.key_message_name = key_message_name;
+            stream_source_info.key_message_name =
+                get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
                 name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
 
@@ -437,40 +440,6 @@ pub(crate) async fn bind_columns_from_source(
 
             None
         }
-        (Format::Upsert, Encode::Avro) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
-            let avro_schema = AvroSchema {
-                row_schema_location,
-                use_schema_registry,
-            };
-
-            let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options_to_consume,
-                avro_schema.use_schema_registry,
-            )?
-            .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
-            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
-            let message_name = try_consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MESSAGE_NAME_KEY,
-            );
-
-            stream_source_info.key_message_name = key_message_name;
-            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
-            stream_source_info.use_schema_registry = avro_schema.use_schema_registry;
-            stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
-            stream_source_info.name_strategy = name_strategy;
-
-            let columns = extract_avro_table_schema(
-                &stream_source_info,
-                with_properties,
-                &mut format_encode_options_to_consume,
-            )
-            .await?;
-
-            Some(columns)
-        }
         (Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
@@ -503,14 +472,14 @@ pub(crate) async fn bind_columns_from_source(
                 &mut format_encode_options_to_consume,
                 MESSAGE_NAME_KEY,
             );
-            let key_message_name = get_key_message_name(&mut format_encode_options_to_consume);
 
             stream_source_info.use_schema_registry = use_schema_registry;
+            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
+            stream_source_info.key_message_name =
+                get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
                 name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
-            stream_source_info.row_schema_location = avro_schema.row_schema_location.0.clone();
-            stream_source_info.key_message_name = key_message_name;
 
             let full_columns = extract_debezium_avro_table_schema(
                 &stream_source_info,
@@ -521,8 +490,6 @@ pub(crate) async fn bind_columns_from_source(
 
             Some(full_columns)
         }
-        (Format::DebeziumMongo, Encode::Json) => None,
-
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
