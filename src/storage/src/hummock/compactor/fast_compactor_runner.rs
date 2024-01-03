@@ -34,6 +34,7 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
+use crate::hummock::iterator::SkipWatermarkState;
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -338,9 +339,10 @@ impl CompactorRunner {
             context.sstable_store,
             task_progress.clone(),
         ));
+        let state = SkipWatermarkState::from_safe_epoch_watermarks(&task.table_watermarks);
 
         Self {
-            executor: CompactTaskExecutor::new(sst_builder, task_config, task_progress),
+            executor: CompactTaskExecutor::new(sst_builder, task_config, task_progress, state),
             left,
             right,
             task_id: task.task_id,
@@ -381,15 +383,7 @@ impl CompactorRunner {
                     }
                     let smallest_key =
                         FullKey::decode(first.current_sstable().next_block_smallest());
-                    if self
-                        .executor
-                        .last_key
-                        .user_key
-                        .as_ref()
-                        .eq(&smallest_key.user_key)
-                    {
-                        // If the last key is delete tombstone, we can not append the origin block
-                        // because it would cause a deleted key could be see by user again.
+                    if !self.executor.shall_copy_raw_block(&smallest_key) {
                         break;
                     }
                     let smallest_key = smallest_key.to_vec();
@@ -531,12 +525,13 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     compaction_statistics: CompactionStatistics,
     last_table_id: Option<u32>,
     last_table_stats: TableStats,
-    watermark_can_see_last_key: bool,
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
+    state: SkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
+    watermark_can_see_last_key: bool,
 }
 
 impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
@@ -544,18 +539,20 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
+        state: SkipWatermarkState,
     ) -> Self {
         Self {
             builder,
             task_config,
             last_key: FullKey::default(),
-            watermark_can_see_last_key: false,
             last_key_is_delete: false,
             compaction_statistics: CompactionStatistics::default(),
             last_table_id: None,
             last_table_stats: TableStats::default(),
-            progress_key_num: 0,
             task_progress,
+            state,
+            progress_key_num: 0,
+            watermark_can_see_last_key: false,
         }
     }
 
@@ -615,7 +612,10 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             } else if epoch < self.task_config.watermark && self.watermark_can_see_last_key {
                 drop = true;
             }
-
+            if self.state.has_watermark() && self.state.should_delete(&iter.key()) {
+                drop = true;
+                self.last_key_is_delete = true;
+            }
             if epoch <= self.task_config.watermark {
                 self.watermark_can_see_last_key = true;
             }
@@ -654,5 +654,17 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             iter.next();
         }
         Ok(())
+    }
+
+    pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
+        if self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
+            // If the last key is delete tombstone, we can not append the origin block
+            // because it would cause a deleted key could be see by user again.
+            return false;
+        }
+        if self.state.has_watermark() && self.state.should_delete(smallest_key) {
+            return false;
+        }
+        true
     }
 }
