@@ -283,7 +283,7 @@ impl LocalBarrierWorker {
         self.state.clear_all_states();
     }
 
-    /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
+    /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         self.state.collect(actor_id, barrier)
@@ -358,7 +358,7 @@ impl LocalBarrierManager {
         self.send_event(LocalBarrierEvent::Reset)
     }
 
-    /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
+    /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
         self.send_event(ReportActorCollected {
