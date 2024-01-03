@@ -327,7 +327,11 @@ impl SchemaCatalog {
     pub fn get_func_sign(func: &FunctionCatalog) -> FuncSign {
         FuncSign {
             name: FuncName::Udf(func.name.clone()),
-            inputs_type: func.arg_types.iter().map(|t| t.clone().into()).collect_vec(),
+            inputs_type: func
+                .arg_types
+                .iter()
+                .map(|t| t.clone().into())
+                .collect_vec(),
             variadic: false,
             ret_type: func.return_type.clone().into(),
             build: FuncBuilder::Udf,

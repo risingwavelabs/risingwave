@@ -24,10 +24,9 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::window_function::{ 
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
@@ -161,11 +160,10 @@ impl Binder {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
                 Table { .. } => {
                     self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into())
+                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
                 }
                 Aggregate => todo!("support UDAF"),
             }
-
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
