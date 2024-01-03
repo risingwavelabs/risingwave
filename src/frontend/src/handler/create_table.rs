@@ -482,7 +482,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.session_ctx(),
         &source_schema,
         &with_properties,
-        false,
     )
     .await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;

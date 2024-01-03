@@ -139,7 +139,7 @@ async fn extract_avro_table_schema(
 
     let vec_column_desc = if is_debezium {
         let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
-        conf.map_to_columns()?;
+        conf.map_to_columns()?
     } else {
         let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
@@ -271,7 +271,6 @@ pub(crate) async fn bind_columns_from_source(
     session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
-    create_cdc_source_job: bool,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -346,25 +345,6 @@ pub(crate) async fn bind_columns_from_source(
                 .await?,
             )
         }
-        (Format::Plain, Encode::Json) => {
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            let columns = if create_cdc_source_job {
-                Some(debezium_cdc_source_schema())
-            } else {
-                extract_json_table_schema(
-                    &schema_config,
-                    with_properties,
-                    &mut format_encode_options_to_consume,
-                )
-                .await?
-            };
-
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
-            stream_source_info.cdc_source_job = create_cdc_source_job;
-
-            columns
-        }
         (format @ (Format::Plain | Format::Upsert | Format::Debezium), Encode::Avro) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
@@ -426,7 +406,10 @@ pub(crate) async fn bind_columns_from_source(
 
             None
         }
-        (Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium, Encode::Json) => {
+        (
+            Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
+            Encode::Json,
+        ) => {
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
                 json_schema_infer_use_schema_registry(&schema_config);
@@ -460,6 +443,52 @@ pub(crate) async fn bind_columns_from_source(
         session.notice_to_user(err_string);
     }
     Ok((columns, stream_source_info))
+}
+
+fn bind_columns_from_source_for_cdc(
+    session: &SessionImpl,
+    source_schema: &ConnectorSchema,
+    _with_properties: &HashMap<String, String>,
+) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
+    let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
+    let mut format_encode_options_to_consume = format_encode_options.clone();
+
+    match (&source_schema.format, &source_schema.row_encode) {
+        (Format::Plain, Encode::Json) => (),
+        (format, encoding) => {
+            // Note: parser will also check this. Just be extra safe here
+            return Err(RwError::from(ProtocolError(format!(
+                "Row format for CDC connectors should be either omitted or set to `FORMAT PLAIN ENCODE JSON`, got: {:?} {:?}",
+                format, encoding
+            ))));
+        }
+    };
+
+    let columns = debezium_cdc_source_schema();
+    let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
+
+    let stream_source_info = StreamSourceInfo {
+        format: format_to_prost(&source_schema.format) as i32,
+        row_encode: row_encode_to_prost(&source_schema.row_encode) as i32,
+        format_encode_options,
+        use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+        cdc_source_job: true,
+        ..Default::default()
+    };
+    if !format_encode_options_to_consume.is_empty() {
+        let err_string = format!(
+            "Get unknown format_encode_options for {:?} {:?}: {}",
+            source_schema.format,
+            source_schema.row_encode,
+            format_encode_options_to_consume
+                .keys()
+                .map(|k| k.to_string())
+                .collect::<Vec<String>>()
+                .join(","),
+        );
+        session.notice_to_user(err_string);
+    }
+    Ok((Some(columns), stream_source_info))
 }
 
 /// add connector-spec columns to the end of column catalog
@@ -1095,13 +1124,11 @@ pub async fn handle_create_source(
         false
     };
 
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        &session,
-        &source_schema,
-        &with_properties,
-        create_cdc_source_job,
-    )
-    .await?;
+    let (columns_from_resolve_source, source_info) = if create_cdc_source_job {
+        bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
+    } else {
+        bind_columns_from_source(&session, &source_schema, &with_properties).await?
+    };
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
