@@ -493,7 +493,7 @@ pub async fn start_service_as_election_leader(
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,
-        max_memory_usage: 1 << 27, // hard-code to limit memory usage to 128 MiB
+        max_memory_usage: opts.cached_traces_memory_limit_bytes,
     });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 

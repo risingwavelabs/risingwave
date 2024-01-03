@@ -387,6 +387,11 @@ pub struct MetaDeveloperConfig {
     /// embedded in the meta node.
     #[serde(default = "default::developer::meta_cached_traces_num")]
     pub cached_traces_num: u32,
+
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1321,6 +1326,10 @@ pub mod default {
     pub mod developer {
         pub fn meta_cached_traces_num() -> u32 {
             256
+        }
+
+        pub fn meta_cached_traces_memory_limit_bytes() -> usize {
+            1 << 27 // 128 MiB
         }
 
         pub fn batch_output_channel_size() -> usize {

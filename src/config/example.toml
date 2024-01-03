@@ -67,6 +67,7 @@ enable_emergency_picker = true
 
 [meta.developer]
 meta_cached_traces_num = 256
+meta_cached_traces_memory_limit_bytes = 134217728
 
 [batch]
 enable_barrier_read = false
