@@ -20,7 +20,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
@@ -38,8 +38,8 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -80,12 +80,12 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_existing_source(source: &Source) -> MetaResult<ConnectorProperties> {
+fn extract_prop_from_existing_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
-fn extract_prop_from_new_source(source: &Source) -> MetaResult<ConnectorProperties> {
+fn extract_prop_from_new_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -95,7 +95,7 @@ const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
-    async fn refresh(&mut self) -> MetaResult<()> {
+    async fn refresh(&mut self) -> anyhow::Result<()> {
         let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -106,7 +106,8 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 connector_client: self.connector_client.clone(),
             }),
         )
-        .await?;
+        .await
+        .context("failed to create SplitEnumerator")?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -122,7 +123,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<Self> {
+    ) -> anyhow::Result<Self> {
         let enumerator = P::SplitEnumerator::new(
             connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -133,7 +134,8 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 connector_client: connector_client.clone(),
             }),
         )
-        .await?;
+        .await
+        .context("failed to create SplitEnumerator")?;
 
         let source_is_up = metrics
             .source_is_up
@@ -220,7 +222,7 @@ impl ConnectorSourceWorkerHandle {
 }
 
 pub struct SourceManagerCore {
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
 
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -235,7 +237,7 @@ pub struct SourceManagerCore {
 
 impl SourceManagerCore {
     fn new(
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -248,7 +250,7 @@ impl SourceManagerCore {
         }
 
         Self {
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             fragment_sources,
@@ -281,7 +283,7 @@ impl SourceManagerCore {
 
             for fragment_id in fragment_ids {
                 let actor_ids = match self
-                    .fragment_manager
+                    .metadata_manager
                     .get_running_actors_of_fragment(*fragment_id)
                     .await
                 {
@@ -528,13 +530,12 @@ impl SourceManager {
     pub async fn new(
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = catalog_manager.list_sources().await;
+            let sources = metadata_manager.list_sources().await?;
             for source in sources {
                 Self::create_source_worker_async(
                     env.connector_client(),
@@ -547,18 +548,32 @@ impl SourceManager {
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-        {
-            source_fragments.extend(table_fragments.stream_source_fragments());
-            actor_splits.extend(table_fragments.actor_splits.clone());
+
+        match &metadata_manager {
+            MetadataManager::V1(mgr) => {
+                for table_fragments in mgr
+                    .fragment_manager
+                    .get_fragment_read_guard()
+                    .await
+                    .table_fragments()
+                    .values()
+                {
+                    source_fragments.extend(table_fragments.stream_source_fragments());
+                    actor_splits.extend(table_fragments.actor_splits.clone());
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                // TODO: optimize it.
+                for (_, pb_table_fragments) in mgr.catalog_controller.table_fragments().await? {
+                    let table_fragments = TableFragments::from_protobuf(pb_table_fragments);
+                    source_fragments.extend(table_fragments.stream_source_fragments());
+                    actor_splits.extend(table_fragments.actor_splits);
+                }
+            }
         }
 
         let core = Mutex::new(SourceManagerCore::new(
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             actor_splits,
@@ -650,8 +665,8 @@ impl SourceManager {
     pub async fn allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
-            .fragment_manager
-            .select_table_fragments_by_table_id(table_id)
+            .metadata_manager
+            .get_job_fragments_by_id(table_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();
@@ -706,7 +721,7 @@ impl SourceManager {
     }
 
     /// register connector worker for source.
-    pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
+    pub async fn register_source(&self, source: &Source) -> anyhow::Result<()> {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -717,7 +732,8 @@ impl SourceManager {
                 &mut core.managed_sources,
                 self.metrics.clone(),
             )
-            .await?;
+            .await
+            .context("failed to create source worker")?;
         }
         Ok(())
     }
@@ -799,7 +815,7 @@ impl SourceManager {
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<()> {
+    ) -> anyhow::Result<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));

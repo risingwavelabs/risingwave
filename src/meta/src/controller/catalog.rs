@@ -75,6 +75,7 @@ pub struct CatalogController {
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
     pub(crate) streaming_jobs: Vec<ObjectId>,
+    #[allow(dead_code)]
     pub(crate) state_table_ids: Vec<TableId>,
     pub(crate) source_ids: Vec<SourceId>,
     pub(crate) connections: Vec<PrivateLinkService>,
@@ -642,7 +643,7 @@ impl CatalogController {
             let ret = src_manager.register_source(&pb_source).await;
             if let Err(e) = ret {
                 txn.rollback().await?;
-                return Err(e);
+                return Err(e.into());
             }
         }
         txn.commit().await?;

@@ -18,7 +18,7 @@ use std::ops::Deref;
 use std::pin::pin;
 use std::time::Instant;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::select;
 use futures::{StreamExt, TryStreamExt};
@@ -149,11 +149,12 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param).await?;
+        Ok(())
     }
 }
 
-async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
+async fn validate_remote_sink(param: &SinkParam) -> anyhow::Result<()> {
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
         if matches!(
@@ -189,43 +190,36 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
     let sink_param = param.to_proto();
 
     spawn_blocking(move || {
-        let mut env = jvm
-            .attach_current_thread()
-            .map_err(|err| SinkError::Internal(err.into()))?;
+        let mut env = jvm.attach_current_thread()?;
         let validate_sink_request = ValidateSinkRequest {
             sink_param: Some(sink_param),
         };
-        let validate_sink_request_bytes = env
-            .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
-            .map_err(|err| SinkError::Internal(err.into()))?;
+        let validate_sink_request_bytes =
+            env.byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))?;
 
         let validate_sink_response_bytes = call_static_method!(
             env,
             {com.risingwave.connector.JniSinkValidationHandler},
             {byte[] validate(byte[] validateSourceRequestBytes)},
             &validate_sink_request_bytes
-        )
-        .map_err(|err| SinkError::Internal(err.into()))?;
+        )?;
 
         let validate_sink_response: ValidateSinkResponse = Message::decode(
-            risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
-                .map_err(|err| SinkError::Internal(err.into()))?
-                .deref(),
-        )
-        .map_err(|err| SinkError::Internal(err.into()))?;
+            risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)?.deref(),
+        )?;
 
         validate_sink_response.error.map_or_else(
             || Ok(()), // If there is no error message, return Ok here.
             |err| {
-                Err(SinkError::Remote(anyhow!(format!(
+                Err(anyhow!(format!(
                     "sink cannot pass validation: {}",
                     err.error_message
-                ))))
+                )))
             },
         )
     })
     .await
-    .map_err(|e| anyhow!("unable to validate: {:?}", e))?
+    .context("JoinHandle returns error")?
 }
 
 pub struct RemoteLogSinker {
@@ -457,7 +451,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
-        validate_remote_sink(&self.param).await
+        validate_remote_sink(&self.param).await?;
+        Ok(())
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -632,7 +627,9 @@ struct EmbeddedConnectorClient {
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM.get_or_init()?;
+        let jvm = JVM
+            .get_or_init()
+            .context("failed to create EmbeddedConnectorClient")?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 
