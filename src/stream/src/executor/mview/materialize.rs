@@ -283,10 +283,13 @@ fn generate_output(
                 new_rows.push(old_value);
             }
             KeyOp::Update((old_value, new_value)) => {
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
-                new_rows.push(old_value);
-                new_rows.push(new_value);
+                // if old_value == new_value, we don't need to emit updates to downstream.
+                if old_value != new_value {
+                    new_ops.push(Op::UpdateDelete);
+                    new_ops.push(Op::UpdateInsert);
+                    new_rows.push(old_value);
+                    new_rows.push(new_value);
+                }
             }
         }
     }
