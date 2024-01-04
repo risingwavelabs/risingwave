@@ -39,7 +39,7 @@ use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments};
+use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -564,12 +564,35 @@ impl SourceManager {
                 }
             }
             MetadataManager::V2(mgr) => {
-                // TODO: optimize it.
-                for (_, pb_table_fragments) in mgr.catalog_controller.table_fragments().await? {
-                    let table_fragments = TableFragments::from_protobuf(pb_table_fragments);
-                    source_fragments.extend(table_fragments.stream_source_fragments());
-                    actor_splits.extend(table_fragments.actor_splits);
-                }
+                source_fragments = mgr
+                    .catalog_controller
+                    .load_source_fragment_ids()
+                    .await?
+                    .into_iter()
+                    .map(|(source_id, fragment_ids)| {
+                        (
+                            source_id as SourceId,
+                            fragment_ids.into_iter().map(|id| id as _).collect(),
+                        )
+                    })
+                    .collect();
+                actor_splits = mgr
+                    .catalog_controller
+                    .load_actor_splits()
+                    .await?
+                    .into_iter()
+                    .map(|(actor_id, splits)| {
+                        (
+                            actor_id as ActorId,
+                            splits
+                                .into_inner()
+                                .splits
+                                .iter()
+                                .map(|split| SplitImpl::try_from(split).unwrap())
+                                .collect(),
+                        )
+                    })
+                    .collect();
             }
         }
 
