@@ -38,7 +38,7 @@ risingwave_rpc_client = { workspace = true }
 risingwave_source = { workspace = true }
 risingwave_storage = { workspace = true }
 scopeguard = "1"
-serde_json = "1"
+serde_json = { workspace = true }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

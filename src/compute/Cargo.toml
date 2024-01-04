@@ -40,7 +40,7 @@ risingwave_source = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { workspace = true }
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

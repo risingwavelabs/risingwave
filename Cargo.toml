@@ -141,6 +141,7 @@ deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd
   "s3-no-concurrent-write",
 ] }
 parquet = "49"
+serde_json = {version = "1" , features = ["arbitrary_precision"]}
 thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
