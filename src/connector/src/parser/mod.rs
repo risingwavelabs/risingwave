@@ -373,14 +373,14 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap_or(None),
                     ))
                 }
-                (
-                    _,
-                    &AdditionalColumnType::Filename, /* AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
-                                                      * AdditionalColumnType::Key is processed in normal process, together with Unspecified ones */
-                ) => Err(AccessError::Other(anyhow!(
-                    "Column type {:?} not implemented yet",
-                    &desc.additional_column_type
-                ))),
+                (_, &AdditionalColumnType::Filename) => {
+                    // Filename is used as partition in FS connectors
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
+                    ));
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     match f(desc) {

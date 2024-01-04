@@ -25,7 +25,11 @@ def do_test(client, config, N,  prefix):
         name TEXT,
         sex int,
         mark int,
-    ) WITH (
+    )
+    include file 
+    WITH (
+    
+    
         connector = 's3',
         match_pattern = '{prefix}*.json',
         s3.region_name = '{config['S3_REGION']}',

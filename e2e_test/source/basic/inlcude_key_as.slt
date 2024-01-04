@@ -49,7 +49,23 @@ WITH (
 FORMAT PLAIN ENCODE JSON
 
 statement ok
+create table additional_columns (a int)
+include key as key_col
+include partition as partition_col
+include offset as offset_col
+include timestamp as timestamp_col
+include header as header_col
+WITH (
+	connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+	topic = 'kafka_additional_columns')
+FORMAT PLAIN ENCODE JSON
+
+statement ok
 select * from upsert_students_default_key;
+
+statement ok
+select * from additional_columns;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 3s
@@ -59,5 +75,25 @@ select count(rw_key) from upsert_students_default_key
 ----
 15
 
+query I
+SELECT count(*)
+FROM   additional_columns
+WHERE  key_col IS NOT NULL
+       AND partition_col IS NOT NULL
+       AND offset_col IS NOT NULL
+       AND timestamp_col IS NOT NULL
+       AND header_col IS NOT NULL
+----
+101
+
+query TT
+SELECT (_rw_kafka_header[1]).key AS key,SELECT (_rw_kafka_header[1]).value::text AS value
+FROM   additional_columns limit 1;
+----
+header1 \x7631
+
 statement ok
 drop table upsert_students_default_key
+
+statement ok
+drop table additional_columns
