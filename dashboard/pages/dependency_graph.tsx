@@ -101,7 +101,7 @@ export default function StreamingGraph() {
               {streamingJobList?.map((r) => {
                 const match = router.query.id === r.id.toString()
                 return (
-                  <Link href={`?id=${r.id}`} key={r.id}>
+                  <Link href={`?id=${r.id}`} key={r.id} shallow>
                     <Button
                       colorScheme={match ? "blue" : "gray"}
                       color={match ? "blue.600" : "gray.500"}

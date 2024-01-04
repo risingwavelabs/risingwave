@@ -161,11 +161,14 @@ export default function Streaming() {
     return undefined
   }, [fragmentList, router.query.id])
 
+  const setRelationId = (id: number) =>
+    router.replace(`?id=${id}`, undefined, { shallow: true })
+
   useEffect(() => {
     if (relationList) {
       if (!router.query.id) {
         if (relationList.length > 0) {
-          router.replace(`?id=${relationList[0].id}`)
+          setRelationId(relationList[0].id)
         }
       }
     }
@@ -209,8 +212,6 @@ export default function Streaming() {
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
-
-  const setRelationId = (id: number) => router.replace(`?id=${id}`)
 
   const toast = useToast()
 
