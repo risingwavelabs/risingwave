@@ -87,7 +87,7 @@ WHERE  key_col IS NOT NULL
 101
 
 query TT
-SELECT (_rw_kafka_header[1]).key AS key,SELECT (_rw_kafka_header[1]).value::text AS value
+SELECT (_rw_kafka_header[1]).key AS key, (_rw_kafka_header[1]).value::text AS value
 FROM   additional_columns limit 1;
 ----
 header1 \x7631
