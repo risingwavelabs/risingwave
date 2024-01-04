@@ -26,6 +26,7 @@ pub struct KinesisMessage {
 }
 
 impl From<KinesisMessage> for SourceMessage {
+    // not in use
     fn from(msg: KinesisMessage) -> Self {
         SourceMessage {
             key: Some(msg.partition_key.into_bytes()),

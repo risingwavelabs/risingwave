@@ -208,6 +208,20 @@ fn kinesis_compatible_column_vec() -> Vec<(&'static str, CompatibleAdditionalCol
                 }
             }),
         ),
+        (
+            "timestamp",
+            Box::new(|id: ColumnId, name: &str| -> ColumnCatalog {
+                ColumnCatalog {
+                    column_desc: ColumnDesc::named_with_additional_column(
+                        name,
+                        id,
+                        DataType::Timestamptz,
+                        AdditionalColumnType::Timestamp,
+                    ),
+                    is_hidden: false,
+                }
+            }),
+        ),
     ]
 }
 
