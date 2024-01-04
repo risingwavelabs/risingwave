@@ -21,6 +21,7 @@ export default function useErrorToast() {
         description,
         status,
         duration: 5000,
+        isClosable: true,
       })
 
       console.error(e)
