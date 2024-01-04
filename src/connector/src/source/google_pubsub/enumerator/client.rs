@@ -15,7 +15,7 @@
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
 
 use crate::source::base::SplitEnumerator;
@@ -51,7 +51,8 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties.initialize_env();
 
         // Validate config
-        let client = Client::new(Default::default())
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config)
             .await
             .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
 
