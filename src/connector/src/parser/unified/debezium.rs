@@ -38,21 +38,37 @@ pub const DEBEZIUM_DELETE_OP: &str = "d";
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
 
+const PG_CDC: &str = "postgres-cdc";
+const MYSQL_CDC: &str = "mysql-cdc";
+
 pub fn parse_transaction_meta(
     accessor: &impl Access,
+    connector: &str,
 ) -> std::result::Result<TransactionControl, AccessError> {
     if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
         accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
         accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
     ) {
-        let (tx_id, _) = id.split_once(':').unwrap();
+        // The id field has different meanings for different databases:
+        // PG: txID:LSN
+        // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
         match status.as_ref() {
-            DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
-                return Ok(TransactionControl::Begin { id: tx_id.into() })
-            }
-            DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
-                return Ok(TransactionControl::Commit { id: tx_id.into() })
-            }
+            DEBEZIUM_TRANSACTION_STATUS_BEGIN => match connector {
+                PG_CDC => {
+                    let (tx_id, _) = id.split_once(':').unwrap();
+                    return Ok(TransactionControl::Begin { id: tx_id.into() });
+                }
+                MYSQL_CDC => return Ok(TransactionControl::Begin { id }),
+                _ => {}
+            },
+            DEBEZIUM_TRANSACTION_STATUS_COMMIT => match connector {
+                PG_CDC => {
+                    let (tx_id, _) = id.split_once(':').unwrap();
+                    return Ok(TransactionControl::Commit { id: tx_id.into() });
+                }
+                MYSQL_CDC => return Ok(TransactionControl::Commit { id }),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -87,13 +103,16 @@ where
     /// Returns the transaction metadata if exists.
     ///
     /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
-    pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
+    pub(crate) fn transaction_control(
+        &self,
+        connector: &str,
+    ) -> Result<TransactionControl, AccessError> {
         let Some(accessor) = &self.value_accessor else {
             return Err(AccessError::Other(anyhow!(
                 "value_accessor must be provided to parse transaction metadata"
             )));
         };
-        parse_transaction_meta(accessor)
+        parse_transaction_meta(accessor, connector)
     }
 }
 

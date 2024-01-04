@@ -96,6 +96,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let connector = source_desc
+            .source
+            .properties
+            .get("connector")
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default();
         let source_ctx = SourceContext::new_with_suppressor(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
@@ -104,6 +110,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.source_ctrl_opts.clone(),
             None,
             self.actor_ctx.error_suppressor.clone(),
+            connector,
         );
         source_desc
             .source

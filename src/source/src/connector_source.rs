@@ -46,6 +46,7 @@ pub struct ConnectorSource {
     pub columns: Vec<SourceColumnDesc>,
     pub parser_config: SpecificParserConfig,
     pub connector_message_buffer_size: usize,
+    pub connector: String,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,7 @@ impl ConnectorSource {
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
+        connector: String,
     ) -> Result<Self> {
         let config = ConnectorProperties::extract(properties, false)
             .map_err(|e| ConnectorError(e.into()))?;
@@ -72,6 +74,7 @@ impl ConnectorSource {
             columns,
             parser_config,
             connector_message_buffer_size,
+            connector,
         })
     }
 

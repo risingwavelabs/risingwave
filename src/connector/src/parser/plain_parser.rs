@@ -99,7 +99,7 @@ impl PlainParser {
                 .expect("expect transaction metadata access builder")
                 .generate_accessor(data)
                 .await?;
-            return match parse_transaction_meta(&accessor) {
+            return match parse_transaction_meta(&accessor, &self.source_ctx.connector) {
                 Ok(transaction_control) => Ok(ParseResult::TransactionControl(transaction_control)),
                 Err(err) => Err(err)?,
             };
@@ -197,11 +197,14 @@ mod tests {
             .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect::<Vec<_>>();
 
+        let mut source_ctx = SourceContext::default();
+        source_ctx.connector = "postgres-cdc".into();
+        let source_ctx = Arc::new(source_ctx);
         // format plain encode json parser
         let parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             columns.clone(),
-            Arc::new(SourceContext::default()),
+            source_ctx.clone(),
         )
         .await
         .unwrap();
@@ -238,7 +241,7 @@ mod tests {
         let parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             columns.clone(),
-            Arc::new(SourceContext::default()),
+            source_ctx,
         )
         .await
         .unwrap();
@@ -345,18 +348,20 @@ mod tests {
             .collect::<Vec<_>>();
 
         // format plain encode json parser
+        let mut source_ctx = SourceContext::default();
+        source_ctx.connector = "mysql-cdc".into();
         let mut parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             columns.clone(),
-            Arc::new(SourceContext::default()),
+            Arc::new(source_ctx),
         )
         .await
         .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
-        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
-        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
+        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
+        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
         let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta {
             full_table_name: "orders".to_string(),
@@ -369,6 +374,7 @@ mod tests {
             offset: "",
         };
 
+        let expect_tx_id = "3E11FA47-71CA-11E1-9E33-C80AA9429562:23";
         let res = parser
             .parse_one_with_txn(
                 None,
@@ -378,7 +384,7 @@ mod tests {
             .await;
         match res {
             Ok(ParseResult::TransactionControl(TransactionControl::Begin { id })) => {
-                assert_eq!(id.deref(), "35352");
+                assert_eq!(id.deref(), expect_tx_id);
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }
@@ -391,7 +397,7 @@ mod tests {
             .await;
         match res {
             Ok(ParseResult::TransactionControl(TransactionControl::Commit { id })) => {
-                assert_eq!(id.deref(), "35352");
+                assert_eq!(id.deref(), expect_tx_id);
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }

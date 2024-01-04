@@ -159,6 +159,7 @@ pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
+    pub connector: String,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -169,6 +170,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
+        connector: String,
     ) -> Self {
         Self {
             connector_client,
@@ -180,6 +182,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             error_suppressor: None,
+            connector,
         }
     }
 
@@ -191,6 +194,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+        connector: String,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -199,6 +203,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_client,
+            connector,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx

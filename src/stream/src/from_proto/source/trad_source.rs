@@ -83,6 +83,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
 
+                let connector = source
+                    .with_properties
+                    .get("connector")
+                    .map(|c| c.to_ascii_lowercase())
+                    .unwrap_or_default();
+
                 let source_desc_builder = SourceDescBuilder::new(
                     source_columns.clone(),
                     params.env.source_metrics(),
@@ -101,6 +107,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     // We should consdier add back the "pk_column_ids" field removed by #8841 in
                     // StreamSource
                     params.info.pk_indices.clone(),
+                    connector.clone(),
                 );
 
                 let source_ctrl_opts = SourceCtrlOpts {
@@ -125,11 +132,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let connector = source
-                    .with_properties
-                    .get("connector")
-                    .map(|c| c.to_ascii_lowercase())
-                    .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
                 let is_fs_v2_connector =
                     ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);

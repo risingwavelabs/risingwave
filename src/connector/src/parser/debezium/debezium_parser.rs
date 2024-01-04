@@ -109,7 +109,9 @@ impl DebeziumParser {
             Err(err) => {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
-                if let Ok(transaction_control) = row_op.transaction_control() {
+                if let Ok(transaction_control) =
+                    row_op.transaction_control(&self.source_ctx.connector)
+                {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
                     Err(err)?
@@ -155,6 +157,7 @@ impl ByteStreamSourceParser for DebeziumParser {
 #[cfg(test)]
 mod tests {
     use std::ops::Deref;
+    use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 
@@ -178,7 +181,18 @@ mod tests {
             .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect::<Vec<_>>();
 
-        let mut parser = DebeziumParser::new_for_test(columns.clone()).await.unwrap();
+        let props = SpecificParserConfig {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
+            protocol_config: ProtocolProperties::Debezium,
+        };
+        let mut source_ctx = SourceContext::default();
+        source_ctx.connector = "postgres-cdc".into();
+        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
+            .await
+            .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
