@@ -5,22 +5,20 @@ set rw_streaming_over_window_cache_policy = full;
 
 include ./generated/main.slt.part
 
-# TODO(rc): The following tests are temporarily commented out because of recovery test failure.
+statement ok
+set rw_streaming_over_window_cache_policy = recent;
 
-#statement ok
-#set rw_streaming_over_window_cache_policy = recent;
-#
-#include ./generated/main.slt.part
-#
-#statement ok
-#set rw_streaming_over_window_cache_policy = recent_first_n;
-#
-#include ./generated/main.slt.part
-#
-#statement ok
-#set rw_streaming_over_window_cache_policy = recent_last_n;
-#
-#include ./generated/main.slt.part
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_first_n;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_last_n;
+
+include ./generated/main.slt.part
 
 statement ok
 set rw_streaming_over_window_cache_policy = default;
