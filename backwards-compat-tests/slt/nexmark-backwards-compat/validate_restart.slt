@@ -1,6 +1,10 @@
 include ../nexmark/test_mv_result.slt.part
 
 include ./delete.slt.part
+
+statement ok
+flush;
+
 include ../nexmark/insert_person.slt.part
 include ../nexmark/insert_auction.slt.part
 include ../nexmark/insert_bid.slt.part
