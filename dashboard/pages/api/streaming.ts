@@ -103,9 +103,7 @@ export async function getSinks() {
 }
 
 export async function getSources() {
-  let sourceList: Source[] = (await api.get("/sources")).map(
-    Source.fromJSON
-  )
+  let sourceList: Source[] = (await api.get("/sources")).map(Source.fromJSON)
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
