@@ -24,11 +24,11 @@ import {
   Th,
   Thead,
   Tr,
-  useToast,
 } from "@chakra-ui/react"
 import { sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
+import useErrorToast from "../hook/useErrorToast"
 import { getActorBackPressures } from "../pages/api/metric"
 import RateBar from "./RateBar"
 import { Metrics } from "./metrics"
@@ -44,7 +44,7 @@ export default function BackPressureTable({
 }) {
   const [backPressuresMetrics, setBackPressuresMetrics] =
     useState<BackPressuresMetrics>()
-  const toast = useToast()
+  const toast = useErrorToast()
 
   useEffect(() => {
     async function doFetch() {
@@ -58,14 +58,7 @@ export default function BackPressureTable({
           setBackPressuresMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs
         } catch (e: any) {
-          toast({
-            title: "Error Occurred",
-            description: e.toString(),
-            status: "error",
-            duration: 5000,
-            isClosable: true,
-          })
-          console.error(e)
+          toast(e, "warning")
           break
         }
       }
