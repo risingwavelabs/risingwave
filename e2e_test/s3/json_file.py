@@ -26,10 +26,8 @@ def do_test(client, config, N,  prefix):
         sex int,
         mark int,
     )
-    include file 
+    include file as file_col
     WITH (
-    
-    
         connector = 's3',
         match_pattern = '{prefix}*.json',
         s3.region_name = '{config['S3_REGION']}',
@@ -64,13 +62,17 @@ def do_test(client, config, N,  prefix):
     cur.execute(
         'select count(*), sum(id), sum(sex), sum(mark) from s3_test_jsonfile')
     result = cur.fetchone()
-
     print(result)
 
     assert result[0] == total_row
     assert result[1] == int(((N - 1) * N / 2))
     assert result[2] == int(N / 2)
     assert result[3] == 0
+
+    cur.execute('select file_col from s3_test_jsonfile')
+    result = cur.fetchone()
+    file_col = result[0]
+    print(file_col)
 
     cur.execute('drop table s3_test_jsonfile')
 
