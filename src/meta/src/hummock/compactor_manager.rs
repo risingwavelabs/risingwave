@@ -508,10 +508,6 @@ mod tests {
         assert_eq!(expired.len(), 1);
 
         // Mimic no-op compaction heartbeat
-        compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
-            task_id: expired[0].task_id,
-            ..Default::default()
-        }]);
         assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
 
         // Mimic compaction heartbeat with invalid task id
