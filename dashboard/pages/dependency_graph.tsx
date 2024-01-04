@@ -15,7 +15,7 @@
  *
  */
 
-import { Box, Button, Flex, Text, useToast, VStack } from "@chakra-ui/react"
+import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
 import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import Link from "next/link"
@@ -23,8 +23,9 @@ import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
+import useErrorToast from "../hook/useErrorToast"
 import { ActorPoint } from "../lib/layout"
-import { getRelations, Relation, relationIsStreamingJob } from "./api/streaming"
+import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
@@ -47,7 +48,7 @@ function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
 }
 
 export default function StreamingGraph() {
-  const toast = useToast()
+  const toast = useErrorToast()
   const [streamingJobList, setStreamingJobList] = useState<Relation[]>()
 
   useEffect(() => {
@@ -55,14 +56,7 @@ export default function StreamingGraph() {
       try {
         setStreamingJobList(await getRelations())
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     doFetch()

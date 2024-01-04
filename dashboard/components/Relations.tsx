@@ -33,7 +33,6 @@ import {
   Thead,
   Tr,
   useDisclosure,
-  useToast,
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import Head from "next/head"
@@ -41,6 +40,7 @@ import Head from "next/head"
 import Link from "next/link"
 import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
+import useErrorToast from "../hook/useErrorToast"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation, StreamingJob } from "../pages/api/streaming"
 import {
@@ -121,7 +121,7 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const toast = useToast()
+  const toast = useErrorToast()
   const [relationList, setRelationList] = useState<R[]>([])
 
   useEffect(() => {
@@ -129,14 +129,7 @@ export function Relations<R extends Relation>(
       try {
         setRelationList(await getRelations())
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     doFetch()

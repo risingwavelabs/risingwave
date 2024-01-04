@@ -25,7 +25,6 @@ import {
   Input,
   Select,
   Text,
-  useToast,
   VStack,
 } from "@chakra-ui/react"
 import * as d3 from "d3"
@@ -37,6 +36,7 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import DependencyGraph from "../components/DependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
+import useErrorToast from "../hook/useErrorToast"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
@@ -161,8 +161,10 @@ export default function Streaming() {
     return undefined
   }, [fragmentList, router.query.id])
 
-  const setRelationId = (id: number) =>
-    router.replace(`?id=${id}`, undefined, { shallow: true })
+  const setRelationId = useCallback(
+    (id: number) => router.replace(`?id=${id}`, undefined, { shallow: true }),
+    [router]
+  )
 
   useEffect(() => {
     if (relationList) {
@@ -173,7 +175,7 @@ export default function Streaming() {
       }
     }
     return () => {}
-  }, [router, router.query.id, relationList])
+  }, [router, router.query.id, relationList, setRelationId])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -213,7 +215,7 @@ export default function Streaming() {
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
 
-  const toast = useToast()
+  const toast = useErrorToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
@@ -229,13 +231,7 @@ export default function Streaming() {
       }
     }
 
-    toast({
-      title: "Fragment not found",
-      description: "",
-      status: "error",
-      duration: 5000,
-      isClosable: true,
-    })
+    toast(new Error(`Fragment ${searchFragIdInt} not found`))
   }
 
   const handleSearchActor = () => {
@@ -255,13 +251,7 @@ export default function Streaming() {
       }
     }
 
-    toast({
-      title: "Actor not found",
-      description: "",
-      status: "error",
-      duration: 5000,
-      isClosable: true,
-    })
+    toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
   const retVal = (
