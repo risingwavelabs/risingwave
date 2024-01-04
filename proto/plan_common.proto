@@ -15,6 +15,27 @@ message Field {
   string name = 2;
 }
 
+enum AdditionalColumnType {
+  UNSPECIFIED = 0;
+  KEY = 1;
+  TIMESTAMP = 2;
+  PARTITION = 3;
+  OFFSET = 4;
+  HEADER = 5;
+  FILENAME = 6;
+  NORMAL = 7;
+}
+
+enum ColumnDescVersion {
+  COLUMN_DESC_VERSION_UNSPECIFIED = 0;
+  // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
+  // in case DEFAULT_KEY_COLUMN_NAME changes
+  COLUMN_DESC_VERSION_PR_13707 = 1;
+
+  // for test only
+  COLUMN_DESC_VERSION_MAX = 2147483647;
+}
+
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
@@ -40,6 +61,12 @@ message ColumnDesc {
 
   // This field is used to store the description set by the `comment on` clause.
   optional string description = 8;
+
+  // This field is used to represent the connector-spec additional column type.
+  // UNSPECIFIED or unset for normal column.
+  AdditionalColumnType additional_column_type = 9;
+
+  ColumnDescVersion version = 10;
 }
 
 message ColumnCatalog {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         let memory_usage_metrics = metrics_info
             .metrics
             .stream_memory_usage
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &metrics_info.table_id,
                 &metrics_info.actor_id,
                 &metrics_info.desc,
@@ -76,7 +76,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         let lru_evicted_watermark_time_ms = metrics_info
             .metrics
             .lru_evicted_watermark_time_ms
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &metrics_info.table_id,
                 &metrics_info.actor_id,
                 &metrics_info.desc,

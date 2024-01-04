@@ -1,1 +1,24 @@
+# Run generated streaming e2e tests with different cache policies.
+
+statement ok
+set rw_streaming_over_window_cache_policy = full;
+
 include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_first_n;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent_last_n;
+
+include ./generated/main.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = default;

@@ -22,7 +22,8 @@ async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
 bytes = "1"
-educe = "0.4"
+delta_btree_map = { path = "../utils/delta_btree_map" }
+educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
@@ -68,6 +69,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-metrics = "0.3.0"
+tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"

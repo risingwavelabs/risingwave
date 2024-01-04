@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,12 +27,14 @@ mod array_replace;
 mod array_sort;
 mod array_sum;
 mod array_to_string;
+mod array_transform;
 mod ascii;
 mod bitwise_op;
 mod cardinality;
 mod case;
 mod cast;
 mod cmp;
+mod coalesce;
 mod concat_op;
 mod concat_ws;
 mod conjunction;
@@ -41,8 +43,10 @@ mod delay;
 mod encdec;
 mod exp;
 mod extract;
+mod field;
 mod format;
 mod format_type;
+mod in_;
 mod int256;
 mod jsonb_access;
 mod jsonb_build;
@@ -64,6 +68,7 @@ mod repeat;
 mod replace;
 mod round;
 mod sha;
+mod similar_to_escape;
 mod split_part;
 mod string;
 mod string_to_array;
@@ -71,6 +76,7 @@ mod substr;
 mod timestamptz;
 mod to_char;
 mod to_jsonb;
+mod vnode;
 pub use to_jsonb::*;
 mod to_timestamp;
 mod translate;

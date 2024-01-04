@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,6 @@ use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
 use crate::ExprError;
-
-pub mod cast;
 
 /// The global registry of all function signatures.
 pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsafe {

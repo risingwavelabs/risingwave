@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
-use risingwave_common::{bail, bail_not_implemented, catalog};
+use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -318,10 +318,6 @@ pub async fn handle_create_sink(
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
-        if !table_catalog.incoming_sinks.is_empty() {
-            bail_not_implemented!(issue = 13818, "create sink into table with incoming sinks");
-        }
-
         check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
@@ -329,12 +325,11 @@ pub async fn handle_create_sink(
 
         table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
-        // for now we only support one incoming sink
-        assert!(table.incoming_sinks.is_empty());
-
-        for fragment in graph.fragments.values_mut() {
-            if let Some(node) = &mut fragment.node {
-                insert_merger_to_union(node);
+        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
+            for fragment in graph.fragments.values_mut() {
+                if let Some(node) = &mut fragment.node {
+                    insert_merger_to_union(node);
+                }
             }
         }
 

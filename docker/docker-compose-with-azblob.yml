@@ -1,7 +1,7 @@
 ---
 version: "3"
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.4.0}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.5.0}
 services:
   risingwave-standalone:
     <<: *image
@@ -48,10 +48,15 @@ services:
       - "5690"
       - "1250"
       - "5691"
+      - "2222"
     ports:
       - "4566:4566"
       - "5690:5690"
       - "5691:5691"
+      - "1222:1222"
+      - "1250:1250"
+      - "1260:1260"
+      - "2222:2222"
     depends_on:
       - etcd-0
     env_file: multiple_object_storage.env

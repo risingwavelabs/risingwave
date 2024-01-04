@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, FragmentTypeFlag, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
+use thiserror_ext::AsReport;
 
 pub type LocalFragmentId = u32;
 
@@ -156,7 +157,9 @@ impl StreamFragmentGraph {
             .map_err(|e| {
                 format!(
                     "edge between {} and {} already exists: {}",
-                    upstream_id, downstream_id, e
+                    upstream_id,
+                    downstream_id,
+                    e.to_report_string()
                 )
             })
     }

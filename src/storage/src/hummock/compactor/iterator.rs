@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,9 +26,10 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
@@ -38,7 +39,7 @@ pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
     block_metas: Vec<BlockMeta>,
     /// The downloading stream.
-    block_stream: Option<BlockStream>,
+    block_stream: Option<BlockDataStream>,
 
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
@@ -69,7 +70,7 @@ impl SstableStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
+    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         block_metas: Vec<BlockMeta>,
@@ -99,10 +100,9 @@ impl SstableStreamIterator {
     async fn create_stream(&mut self) -> HummockResult<()> {
         let block_stream = self
             .sstable_store
-            .get_stream_by_position(
+            .get_stream_for_blocks(
                 self.sstable_info.object_id,
-                self.seek_block_idx,
-                &self.block_metas,
+                &self.block_metas[self.seek_block_idx..],
             )
             .verbose_instrument_await("stream_iter_get_stream")
             .await?;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ import {
   Thead,
   Tr,
   useDisclosure,
-  useToast,
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import Head from "next/head"
@@ -41,9 +40,14 @@ import Head from "next/head"
 import Link from "next/link"
 import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
+import useErrorToast from "../hook/useErrorToast"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation, StreamingJob } from "../pages/api/streaming"
-import { Table as RwTable } from "../proto/gen/catalog"
+import {
+  Sink as RwSink,
+  Source as RwSource,
+  Table as RwTable,
+} from "../proto/gen/catalog"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -98,7 +102,13 @@ export const primaryKeyColumn: Column<RwTable> = {
       .join(", "),
 }
 
-export const connectorColumn: Column<Relation> = {
+export const connectorColumnSource: Column<RwSource> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.withProperties.connector ?? "unknown",
+}
+
+export const connectorColumnSink: Column<RwSink> = {
   name: "Connector",
   width: 3,
   content: (r) => r.properties.connector ?? "unknown",
@@ -111,7 +121,7 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const toast = useToast()
+  const toast = useErrorToast()
   const [relationList, setRelationList] = useState<R[]>([])
 
   useEffect(() => {
@@ -119,14 +129,7 @@ export function Relations<R extends Relation>(
       try {
         setRelationList(await getRelations())
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     doFetch()

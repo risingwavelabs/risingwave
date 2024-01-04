@@ -20,7 +20,7 @@ import {
   generateBoxLinks,
   layout,
 } from "../lib/layout"
-import { PlanNodeDatum } from "../pages/streaming_plan"
+import { PlanNodeDatum } from "../pages/fragment_graph"
 import BackPressureTable from "./BackPressureTable"
 
 const ReactJson = loadable(() => import("react-json-view"))
@@ -218,7 +218,7 @@ export default function FragmentGraph({
 
         text
           .attr("fill", "black")
-          .text(({ id }) => `Fragment #${id}`)
+          .text(({ id }) => `Fragment ${id}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
           .attr("dy", ({ height }) => height - actorMarginY + 12)

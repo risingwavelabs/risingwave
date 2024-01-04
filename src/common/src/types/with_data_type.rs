@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::{
-    DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, StructType, Time,
-    Timestamp, Timestamptz, F32, F64,
+    DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial, StructType,
+    Time, Timestamp, Timestamptz, F32, F64,
 };
 
 /// A trait for all physical types that can be associated with a [`DataType`].
@@ -27,10 +27,6 @@ use super::{
 /// This is also a helper for [`Fields`](derive@crate::types::Fields) derive macro.
 pub trait WithDataType {
     /// Returns the most obvious [`DataType`] for the rust type.
-    ///
-    /// There may be more than one [`DataType`] corresponding to the same rust type,
-    /// for example, [`Int64`](DataType::Int64) and [`Serial`](DataType::Serial) are
-    /// both expressed as i64. This method will return [`Int64`](DataType::Int64).
     fn default_data_type() -> DataType;
 }
 
@@ -94,6 +90,7 @@ impl_with_data_type!(f64, DataType::Float64);
 impl_with_data_type!(F64, DataType::Float64);
 impl_with_data_type!(rust_decimal::Decimal, DataType::Decimal);
 impl_with_data_type!(Decimal, DataType::Decimal);
+impl_with_data_type!(Serial, DataType::Serial);
 
 impl<'a> WithDataType for &'a str {
     fn default_data_type() -> DataType {

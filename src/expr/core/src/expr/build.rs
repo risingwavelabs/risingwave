@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
-use super::expr_array_transform::ArrayTransformExpression;
-use super::expr_coalesce::CoalesceExpression;
-use super::expr_field::FieldExpression;
-use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
-use super::expr_vnode::VnodeExpression;
+use super::strict::Strict;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
 use super::wrapper::EvalErrorReport;
@@ -38,7 +34,8 @@ use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    ExprBuilder::new_strict().build(prost)
+    let expr = ExprBuilder::new_strict().build(prost)?;
+    Ok(Strict::new(expr).boxed())
 }
 
 /// Build an expression from protobuf in non-strict mode.
@@ -112,10 +109,6 @@ where
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
                 E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
-                E::In => InExpression::build_boxed(prost, build_child),
-                E::Coalesce => CoalesceExpression::build_boxed(prost, build_child),
-                E::Field => FieldExpression::build_boxed(prost, build_child),
-                E::Vnode => VnodeExpression::build_boxed(prost, build_child),
 
                 // General types, lookup in the function signature map
                 _ => FuncCallBuilder::build_boxed(prost, build_child),
@@ -193,12 +186,6 @@ pub fn build_func(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
-    if func == PbType::ArrayTransform {
-        // TODO: The function framework can't handle the lambda arg now.
-        let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
-        return Ok(ArrayTransformExpression { array, lambda }.boxed());
-    }
-
     let args = children.iter().map(|c| c.return_type()).collect_vec();
     let desc = FUNCTION_REGISTRY
         .get(func, &args, &ret_type)
@@ -300,7 +287,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
                 let ty = self.parse_type();
                 let value = match value.as_str() {
-                    "null" => None,
+                    "null" | "NULL" => None,
                     _ => Some(
                         ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
                     ),
@@ -313,7 +300,10 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
     fn parse_type(&mut self) -> DataType {
         match self.tokens.next().expect("Unexpected end of input") {
-            Token::Literal(name) => name.parse::<DataType>().expect_str("type", &name),
+            Token::Literal(name) => name
+                .replace('_', " ")
+                .parse::<DataType>()
+                .expect_str("type", &name),
             t => panic!("Expected a Literal, got {t:?}"),
         }
     }

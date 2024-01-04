@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,19 @@ use syn::{Data, DeriveInput, Field, Result};
 
 #[proc_macro_derive(Fields)]
 pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input: DeriveInput = syn::parse_macro_input! {tokens};
+    inner(tokens.into()).into()
+}
 
-    match gen(input) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
+fn inner(tokens: TokenStream) -> TokenStream {
+    match gen(tokens) {
+        Ok(tokens) => tokens,
+        Err(err) => err.to_compile_error(),
     }
 }
 
-fn gen(input: DeriveInput) -> Result<TokenStream> {
+fn gen(tokens: TokenStream) -> Result<TokenStream> {
+    let input: DeriveInput = syn::parse2(tokens)?;
+
     let DeriveInput {
         attrs: _attrs,
         vis: _vis,
@@ -70,4 +74,39 @@ fn gen(input: DeriveInput) -> Result<TokenStream> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use syn::File;
+
+    fn pretty_print(output: TokenStream) -> String {
+        let output: File = syn::parse2(output).unwrap();
+        prettyplease::unparse(&output)
+    }
+
+    #[test]
+    fn test_gen() {
+        let code = indoc! {r#"
+            #[derive(Fields)]
+            struct Data {
+                v1: i16,
+                v2: std::primitive::i32,
+                v3: bool,
+                v4: Serial,
+            }
+        "#};
+
+        let input: TokenStream = str::parse(code).unwrap();
+
+        let output = super::gen(input).unwrap();
+
+        let output = pretty_print(output);
+
+        let expected = expect_test::expect_file!["gen/test_output.rs"];
+
+        expected.assert_eq(&output);
+    }
 }

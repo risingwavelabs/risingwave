@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 
 use bytes::Bytes;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
+use risingwave_pb::hummock::PbTableWatermarks;
 
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
@@ -39,6 +41,51 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
             remain_watermarks: VecDeque::new(),
             watermarks,
         }
+    }
+
+    pub fn from_safe_epoch_watermarks(
+        inner: I,
+        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+    ) -> Self {
+        let watermarks = safe_epoch_watermarks
+            .iter()
+            .map(|(table_id, watermarks)| {
+                assert_eq!(watermarks.epoch_watermarks.len(), 1);
+                let vnode_watermarks = &watermarks
+                    .epoch_watermarks
+                    .first()
+                    .expect("should exist")
+                    .watermarks;
+                let mut vnode_watermark_map = BTreeMap::new();
+                for vnode_watermark in vnode_watermarks {
+                    let watermark = Bytes::copy_from_slice(&vnode_watermark.watermark);
+                    for vnode in
+                        Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should exist"))
+                            .iter_vnodes()
+                    {
+                        assert!(
+                            vnode_watermark_map
+                                .insert(vnode, watermark.clone())
+                                .is_none(),
+                            "duplicate table watermark on vnode {}",
+                            vnode.to_index()
+                        );
+                    }
+                }
+                (
+                    TableId::from(*table_id),
+                    ReadTableWatermark {
+                        direction: if watermarks.is_ascending {
+                            WatermarkDirection::Ascending
+                        } else {
+                            WatermarkDirection::Descending
+                        },
+                        vnode_watermarks: vnode_watermark_map,
+                    },
+                )
+            })
+            .collect();
+        Self::new(inner, watermarks)
     }
 
     fn reset_watermark(&mut self) {

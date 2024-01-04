@@ -182,9 +182,10 @@
   expected_outputs:
   - stream_error
 - sql: |
-    SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
+    SELECT 1 a, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g')) b
   expected_outputs:
-  - batch_error
+    - optimized_logical_plan_for_batch
+    - stream_error
 - sql: |
     create table t1 (a int, b int);
     select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
@@ -299,5 +300,10 @@
 - name: While this one is allowed.
   sql: |
     SELECT generate_series(1, (select 1));
+  expected_outputs:
+    - batch_plan
+- name: array subquery
+  sql: |
+    select Array(select 1 union select 2);
   expected_outputs:
     - batch_plan

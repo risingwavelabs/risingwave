@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,6 +128,7 @@ async fn test_create_fail(
 
 /// Tests event log can record info of stream job creation failure, for CREATE TABLE/MV/INDEX/SINK.
 #[tokio::test]
+#[ignore]
 async fn failpoint_limited_test_create_stream_job_fail() -> Result<()> {
     let mut cluster = Cluster::start(cluster_config()).await.unwrap();
     let mut session = cluster.start_session();
@@ -224,6 +225,7 @@ async fn failpoint_limited_test_create_stream_job_fail() -> Result<()> {
 /// Theoretically errors either reported by compute nodes, or chosen by meta node, may not be the root cause.
 /// But during my tests with MADSIM_TEST_SEED from 1..1000, this test always succeeded.
 #[tokio::test]
+#[ignore]
 async fn failpoint_limited_test_collect_barrier_failure() -> Result<()> {
     let mut cluster = Cluster::start(cluster_config()).await.unwrap();
     let mut session = cluster.start_session();

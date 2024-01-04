@@ -6,16 +6,16 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create table t_simple (v1 int, v2 int);
 
+statement error unsupported sink type table
+create sink table_sink from t_simple with (connector = 'table');
+
 statement ok
 create table m_simple (v1 int primary key, v2 int);
 
 statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
 
-statement error Feature is not yet implemented: create sink into table with incoming sinks
-create sink s_simple_2 into m_simple as select v1, v2 from t_simple;
-
-# and we can't alter a table with incoming sinks
+# we can't alter a table with incoming sinks
 statement error Feature is not yet implemented: alter table with incoming sinks
 alter table m_simple add column v3 int;
 
@@ -354,6 +354,99 @@ drop sink s_a;
 
 statement ok
 drop sink s_b;
+
+statement ok
+drop table t_a;
+
+statement ok
+drop table t_b;
+
+statement ok
+drop table t_c;
+
+# multi sinks
+
+statement ok
+create table t_a(v int primary key);
+
+statement ok
+insert into t_a values (1), (2), (3);
+
+statement ok
+create table t_b(v int primary key);
+
+statement ok
+insert into t_b values (3), (4), (5);
+
+statement ok
+create table t_c(v int primary key);
+
+statement ok
+insert into t_c values (5), (6), (7);
+
+statement ok
+create table t_m(v int primary key);
+
+statement ok
+create sink s_a into t_m as select v from t_a;
+
+statement ok
+create sink s_b into t_m as select v from t_b;
+
+statement ok
+create sink s_c into t_m as select v from t_c;
+
+statement ok
+flush;
+
+query I rowsort
+select * from t_m order by v;
+----
+1
+2
+3
+4
+5
+6
+7
+
+statement ok
+drop sink s_a;
+
+statement ok
+insert into t_b values (11), (12), (13);
+
+query I
+select * from t_m order by v;
+----
+1
+2
+3
+4
+5
+6
+7
+11
+12
+13
+
+statement ok
+drop sink s_b;
+
+statement ok
+drop sink s_c;
+
+statement ok
+delete from t_m where v > 5;
+
+query I
+select * from t_m order by v;
+----
+1
+2
+3
+4
+5
 
 statement ok
 drop table t_a;

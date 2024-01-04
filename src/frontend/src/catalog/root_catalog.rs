@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -683,6 +683,20 @@ impl Catalog {
                     .get_index_by_name(index_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
+    }
+
+    pub fn get_index_by_id(
+        &self,
+        db_name: &str,
+        index_id: u32,
+    ) -> CatalogResult<&Arc<IndexCatalog>> {
+        let index_id = IndexId::from(index_id);
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(index) = schema.get_index_by_id(&index_id) {
+                return Ok(index);
+            }
+        }
+        Err(CatalogError::NotFound("index", index_id.to_string()))
     }
 
     pub fn get_view_by_name<'a>(

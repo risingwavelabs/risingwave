@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ pub fn apply_row_operation_on_stream_chunk_writer_with_op(
     writer: &mut SourceStreamChunkRowWriter<'_>,
     op: ChangeEventOperation,
 ) -> AccessResult<()> {
-    let f = |column: &SourceColumnDesc| row_op.access_field(&column.name, &column.data_type);
+    let f = |column: &SourceColumnDesc| row_op.access_field(column);
     match op {
         ChangeEventOperation::Upsert => writer.insert(f),
         ChangeEventOperation::Delete => writer.delete(f),

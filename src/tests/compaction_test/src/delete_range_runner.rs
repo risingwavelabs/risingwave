@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,7 +63,6 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
-
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
@@ -160,6 +159,8 @@ async fn compaction_test(
         create_type: PbCreateType::Foreground.into(),
         description: None,
         incoming_sinks: vec![],
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -216,7 +217,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
-        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
+        storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,
@@ -270,7 +271,7 @@ async fn compaction_test(
     )
     .await
     .unwrap();
-    let version = store.get_pinned_version().version();
+    let version = store.get_pinned_version().version().clone();
     let remote_version = meta_client.get_current_version().await.unwrap();
     println!(
         "version-{}, remote version-{}",
@@ -435,13 +436,10 @@ impl NormalState {
             .get(
                 TableKey(Bytes::copy_from_slice(key)),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -462,13 +460,12 @@ impl NormalState {
                     Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
-                    prefix_hint: None,
                     ignore_range_tombstone,
-                    retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -494,13 +491,12 @@ impl CheckState for NormalState {
                         Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
                     ),
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 )
                 .await
@@ -595,6 +591,12 @@ fn run_compactor_thread(
 ) {
     let filter_key_extractor_manager =
         FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
@@ -605,7 +607,8 @@ fn run_compactor_thread(
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
 
     start_compactor(

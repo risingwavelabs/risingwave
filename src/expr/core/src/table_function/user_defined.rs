@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use futures_util::stream;
 use risingwave_common::array::{ArrayError, DataChunk, I32Array};
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
+use thiserror_ext::AsReport;
 
 use super::*;
 
@@ -139,7 +140,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 Ok(Field::new(
                     "",
                     DataType::from(t).try_into().map_err(|e: ArrayError| {
-                        risingwave_udf::Error::unsupported(e.to_string())
+                        risingwave_udf::Error::unsupported(e.to_report_string())
                     })?,
                     true,
                 ))

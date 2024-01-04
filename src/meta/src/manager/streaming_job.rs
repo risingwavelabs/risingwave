@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,30 +15,25 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
+use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use strum::EnumDiscriminants;
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(name(DdlType))]
+#[strum_discriminants(vis(pub))]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DdlType {
-    MaterializedView,
-    Sink,
-    Table,
-    Index,
-    Source,
 }
 
 #[cfg(test)]
@@ -51,57 +46,63 @@ impl Default for DdlType {
     }
 }
 
-impl From<&StreamingJob> for DdlType {
-    fn from(job: &StreamingJob) -> Self {
-        match job {
-            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
-            StreamingJob::Sink(_, _) => DdlType::Sink,
-            StreamingJob::Table(_, _, _) => DdlType::Table,
-            StreamingJob::Index(_, _) => DdlType::Index,
-            StreamingJob::Source(_) => DdlType::Source,
-        }
-    }
-}
-
 impl StreamingJob {
     pub fn mark_created(&mut self) {
         let created_at_epoch = Some(Epoch::now().0);
+        let created_at_cluster_version = Some(current_cluster_version());
         match self {
-            StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::MaterializedView(table) => {
+                table.created_at_epoch = created_at_epoch;
+                table.created_at_cluster_version = created_at_cluster_version;
+            }
             StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
             StreamingJob::Table(source, table, ..) => {
                 table.created_at_epoch = created_at_epoch;
+                table.created_at_cluster_version = created_at_cluster_version.clone();
                 if let Some(source) = source {
                     source.created_at_epoch = created_at_epoch;
+                    source.created_at_cluster_version = created_at_cluster_version;
                 }
             }
             StreamingJob::Index(index, _) => {
                 index.created_at_epoch = created_at_epoch;
+                index.created_at_cluster_version = created_at_cluster_version;
             }
             StreamingJob::Source(source) => {
                 source.created_at_epoch = created_at_epoch;
+                source.created_at_cluster_version = created_at_cluster_version;
             }
         }
     }
 
     pub fn mark_initialized(&mut self) {
         let initialized_at_epoch = Some(Epoch::now().0);
+        let initialized_at_cluster_version = Some(current_cluster_version());
         match self {
             StreamingJob::MaterializedView(table) => {
-                table.initialized_at_epoch = initialized_at_epoch
+                table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version;
             }
-            StreamingJob::Sink(table, _) => table.initialized_at_epoch = initialized_at_epoch,
+            StreamingJob::Sink(table, _) => {
+                table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version;
+            }
             StreamingJob::Table(source, table, ..) => {
                 table.initialized_at_epoch = initialized_at_epoch;
+                table.initialized_at_cluster_version = initialized_at_cluster_version.clone();
+
                 if let Some(source) = source {
                     source.initialized_at_epoch = initialized_at_epoch;
+                    source.initialized_at_cluster_version = initialized_at_cluster_version;
                 }
             }
             StreamingJob::Index(index, _) => {
                 index.initialized_at_epoch = initialized_at_epoch;
+                index.initialized_at_cluster_version = initialized_at_cluster_version;
             }
             StreamingJob::Source(source) => {
                 source.initialized_at_epoch = initialized_at_epoch;
+                source.initialized_at_cluster_version = initialized_at_cluster_version;
             }
         }
     }
@@ -118,10 +119,8 @@ impl StreamingJob {
                 index.index_table_id = id;
                 index_table.id = id;
             }
-            StreamingJob::Source(_) => {
-                // The id of source is set in `DdlServiceImpl::create_source`,
-                // so do nothing here.
-                unreachable!()
+            StreamingJob::Source(src) => {
+                src.id = id;
             }
         }
     }
@@ -233,7 +232,7 @@ impl StreamingJob {
             Self::Sink(sink, _) => sink.properties.clone(),
             Self::Table(_, table, ..) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
-            Self::Source(source) => source.properties.clone(),
+            Self::Source(source) => source.with_properties.clone(),
         }
     }
 
@@ -265,6 +264,20 @@ impl StreamingJob {
             Some(*sub_type)
         } else {
             None
+        }
+    }
+
+    // TODO: record all objects instead.
+    pub fn dependent_relations(&self) -> Vec<u32> {
+        match self {
+            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
+            StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Index(index, index_table) => {
+                assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
+                vec![]
+            }
+            StreamingJob::Source(_) => vec![],
         }
     }
 

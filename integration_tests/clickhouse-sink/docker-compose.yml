@@ -12,7 +12,7 @@ services:
     expose:
       - 9009
     volumes:
-      - ./clickhouse-sql:/opt/clickhouse/clickhouse-sql
+      - ./clickhouse_prepare.sql:/clickhouse_prepare.sql
   risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
@@ -33,10 +33,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
 volumes:
   risingwave-standalone:
     external: false

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -228,6 +228,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,
     });

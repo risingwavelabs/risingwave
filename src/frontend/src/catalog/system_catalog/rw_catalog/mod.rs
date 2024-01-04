@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ mod rw_relations;
 mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
+mod rw_streaming_parallelism;
 mod rw_system_tables;
 mod rw_table_fragments;
 mod rw_table_stats;
@@ -78,6 +79,7 @@ pub use rw_relations::*;
 pub use rw_schemas::*;
 pub use rw_sinks::*;
 pub use rw_sources::*;
+pub use rw_streaming_parallelism::*;
 pub use rw_system_tables::*;
 pub use rw_table_fragments::*;
 pub use rw_table_stats::*;

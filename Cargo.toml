@@ -11,11 +11,13 @@ members = [
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
+  "src/connector/with_options",
   "src/ctl",
   "src/error",
   "src/expr/core",
   "src/expr/impl",
   "src/expr/macro",
+  "src/expr/udf",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
@@ -48,13 +50,12 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
-  "src/udf",
+  "src/utils/delta_btree_map",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
   "src/utils/variables",
-  "src/utils/with_options",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
@@ -62,7 +63,7 @@ exclude = ["lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.3.0-alpha"
+version = "1.5.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -118,7 +119,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "3f7b53ba5b563524212c25810345d1314678e7fc", features = [
   "prometheus",
 ] }
 arrow-array = "49"
@@ -130,6 +131,16 @@ arrow-flight = "49"
 arrow-select = "49"
 arrow-ord = "49"
 arrow-row = "49"
+arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
+arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
+arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
+arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
+# Use a forked version which removes the dependencies on dynamo db to reduce
+# compile time and binary size.
+deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
+  "s3-no-concurrent-write",
+] }
+parquet = "49"
 thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
@@ -170,7 +181,7 @@ risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }
 risingwave_storage = { path = "./src/storage" }
 risingwave_stream = { path = "./src/stream" }
 risingwave_test_runner = { path = "./src/test_runner" }
-risingwave_udf = { path = "./src/udf" }
+risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
@@ -196,8 +207,14 @@ explicit_iter_loop = "warn"
 inconsistent_struct_constructor = "warn"
 unused_async = "warn"
 map_flatten = "warn"
-no_effect_underscore_binding = "warn"
 await_holding_lock = "warn"
+# For private code, this is a little pedantic and not worth fixing.
+# &Vec or &String is acceptable
+ptr_arg = "allow"
+# a little pedantic
+get_first = "allow"
+# https://github.com/rust-lang/rust-clippy/issues/12016
+blocks_in_conditions = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

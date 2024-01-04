@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
@@ -169,7 +170,7 @@ impl ResolveQualifiedNameError {
 
 impl From<ResolveQualifiedNameError> for RwError {
     fn from(e: ResolveQualifiedNameError) -> Self {
-        ErrorCode::InvalidInputSyntax(format!("{}", e)).into()
+        ErrorCode::InvalidInputSyntax(format!("{}", e.as_report())).into()
     }
 }
 
@@ -433,7 +434,10 @@ impl Binder {
             .to_string()
             .parse::<u32>()
             .map_err(|err| {
-                RwError::from(ErrorCode::BindError(format!("invalid table id: {}", err)))
+                RwError::from(ErrorCode::BindError(format!(
+                    "invalid table id: {}",
+                    err.as_report()
+                )))
             })?
             .into();
 

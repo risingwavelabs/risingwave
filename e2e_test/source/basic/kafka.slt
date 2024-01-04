@@ -415,8 +415,10 @@ CREATE TABLE upsert_students_default_key (
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -425,13 +427,15 @@ FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    "ID" INT PRIMARY KEY,
+    "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -424,6 +424,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -438,6 +439,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }
@@ -446,7 +448,7 @@ impl TestCase {
                         create_source::handle_create_source(handler_args, stmt).await
                     {
                         let actual_result = TestCaseResult {
-                            planner_error: Some(error.to_string()),
+                            planner_error: Some(error.to_report_string()),
                             ..Default::default()
                         };
 
@@ -874,13 +876,14 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
-                "failed to parse yaml: {e}, at {}:{}:{}",
+                "failed to parse yaml: {}, at {}:{}:{}",
+                e.as_report(),
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {e}")
+            anyhow!("failed to parse yaml: {}", e.as_report())
         }
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");

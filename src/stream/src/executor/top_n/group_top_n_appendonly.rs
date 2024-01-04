@@ -1,18 +1,4 @@
-// Copyright 2023 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Copyright 2023 Singularity Data
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -163,7 +149,7 @@ where
 
         let data_types = self.info().schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
-        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let table_id_str = self.managed_state.table().table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
@@ -227,11 +213,7 @@ where
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let (_previous_vnode_bitmap, cache_may_stale) = self
-            .managed_state
-            .state_table
-            .update_vnode_bitmap(vnode_bitmap);
-
+        let cache_may_stale = self.managed_state.update_vnode_bitmap(vnode_bitmap);
         if cache_may_stale {
             self.caches.clear();
         }
@@ -246,14 +228,13 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         Ok(())
     }
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
-                .state_table
                 .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {

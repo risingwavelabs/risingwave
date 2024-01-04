@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
+use thiserror_ext::AsReport;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -98,8 +99,8 @@ impl UdfExpression {
                     .expect("failed covert ArrayRef to arrow_array::ArrayRef")
             })
             .collect();
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.count_ones()));
+        let opts = arrow_array::RecordBatchOptions::default()
+            .with_row_count(Some(compacted_chunk.capacity()));
         let input = arrow_array::RecordBatch::try_new_with_options(
             self.arg_schema.clone(),
             compacted_columns,
@@ -181,7 +182,7 @@ impl Build for UdfExpression {
                     Ok(Field::new(
                         "",
                         DataType::from(t).try_into().map_err(|e: ArrayError| {
-                            risingwave_udf::Error::unsupported(e.to_string())
+                            risingwave_udf::Error::unsupported(e.to_report_string())
                         })?,
                         true,
                     ))

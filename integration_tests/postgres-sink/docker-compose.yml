@@ -21,23 +21,10 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
-  datagen:
-    build: ../datagen
-    depends_on: [message_queue]
-    command:
-      - /bin/sh
-      - -c
-      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
-    restart: always
-    container_name: datagen
   # Use this command to connect to the DB from outside the container:
   #   docker exec postgres psql --username=myuser --dbname=mydb
   postgres:
-    image: postgres
+    image: postgres:latest
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=123456
@@ -50,20 +37,10 @@ services:
       timeout: 5s
       retries: 5
     command: [ "postgres", "-c", "wal_level=logical" ]
-    restart: always
-    container_name: postgres
-  prepare_postgres:
-    image: postgres
-    depends_on:
-      - postgres
-    command:
-      - /bin/sh
-      - -c
-      - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
     volumes:
       - "./postgres_prepare.sql:/postgres_prepare.sql"
-    container_name: prepare_postgres
-    restart: on-failure
+    restart: always
+    container_name: postgres
 volumes:
   risingwave-standalone:
     external: false

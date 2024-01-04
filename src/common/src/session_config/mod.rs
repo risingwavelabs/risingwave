@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ pub struct ConfigMap {
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]
-    transaction_isolation_level: IsolationLevel,
+    transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
@@ -195,12 +195,12 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     synchronize_seqscans: bool,
 
-    /// Abort any statement that takes more than the specified amount of time. If
+    /// Abort query statement that takes more than the specified amount of time in sec. If
     /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0)]
-    statement_timeout: i32,
+    #[parameter(default = 0u32)]
+    statement_timeout: u32,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
@@ -303,4 +303,26 @@ pub trait ConfigReporter {
 // Report nothing.
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(SessionConfig)]
+    struct TestConfig {
+        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        test_param: i32,
+    }
+
+    #[test]
+    fn test_session_config_alias() {
+        let mut config = TestConfig::default();
+        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "2");
+        config
+            .set("alias_param_test", "3".to_string(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "3");
+    }
 }

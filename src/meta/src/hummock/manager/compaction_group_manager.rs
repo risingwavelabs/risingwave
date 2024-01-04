@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt, TableGroupInfo,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -44,7 +44,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::{IdCategory, MetaSrvEnv, TableId};
+use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,
 };
@@ -306,6 +306,9 @@ impl HummockManager {
                         .len() as u64
                         - 1,
                 );
+            new_version_delta
+                .removed_table_ids
+                .push(TableId::new(*table_id));
         }
 
         // Remove empty group, GC SSTs and remove metric.
@@ -461,7 +464,7 @@ impl HummockManager {
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
         partition_vnode_count: u32,
-    ) -> Result<(CompactionGroupId, BTreeMap<TableId, u32>)> {
+    ) -> Result<(CompactionGroupId, BTreeMap<StateTableId, u32>)> {
         let mut table_to_partition = BTreeMap::default();
         if table_ids.is_empty() {
             return Ok((parent_group_id, table_to_partition));

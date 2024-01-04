@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@ impl SomeAllExpression {
         }
     }
 
+    // Notice that this function may not exhaust the iterator,
+    // so never pass an iterator created `by_ref`.
     fn resolve_bools(&self, bools: impl Iterator<Item = Option<bool>>) -> Option<bool> {
         match self.expr_type {
             Type::Some => {
@@ -160,12 +162,17 @@ impl Expression for SomeAllExpression {
         );
 
         let func_results = self.func.eval(&data_chunk).await?;
-        let mut func_results_iter = func_results.as_bool().iter();
+        let bools = func_results.as_bool();
+        let mut offset = 0;
         Ok(Arc::new(
             num_array
                 .into_iter()
                 .map(|num| match num {
-                    Some(num) => self.resolve_bools(func_results_iter.by_ref().take(num)),
+                    Some(num) => {
+                        let range = offset..offset + num;
+                        offset += num;
+                        self.resolve_bools(range.map(|i| bools.value_at(i)))
+                    }
                     None => None,
                 })
                 .collect::<BoolArray>()
@@ -260,5 +267,79 @@ impl Build for SomeAllExpression {
             outer_expr_type,
             eval_func,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::build_from_pretty;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_some() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::Some,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]        B
+             .          .
+             {}         f
+             {NULL}     .
+             {NULL,f}   .
+             {NULL,t}   t
+             {t,f}      t
+             {f,t}      t", // <- regression test for #14214
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_all() {
+        let expr = SomeAllExpression::new(
+            build_from_pretty("0:int4"),
+            build_from_pretty("$0:boolean"),
+            Type::All,
+            build_from_pretty("$1:boolean"),
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "B[]        B
+             .          .
+             {}         t
+             {NULL}     .
+             {NULL,t}   .
+             {NULL,f}   f
+             {f,f}      f
+             {t}        t", // <- regression test for #14214
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = expr.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,10 @@ use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned a
 async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
+    let source_parallelism = 6;
+
     let test_sink = SimulationTestSink::register_new();
-    let test_source = SimulationTestSource::register_new(6, 0..100000, 0.2, 20);
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
 
@@ -50,6 +52,11 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
 
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
+
+    assert_eq!(
+        source_parallelism,
+        test_source.create_stream_count.load(Relaxed)
+    );
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
@@ -72,7 +79,8 @@ async fn test_sink_decouple_basic() -> Result<()> {
 async fn test_sink_decouple_blackhole() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
-    let test_source = SimulationTestSource::register_new(6, 0..100000, 0.2, 20);
+    let source_parallelism = 6;
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
 
@@ -85,6 +93,11 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
 
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
+
+    assert_eq!(
+        source_parallelism,
+        test_source.create_stream_count.load(Relaxed)
+    );
 
     Ok(())
 }

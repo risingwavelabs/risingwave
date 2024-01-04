@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -133,7 +133,7 @@ pub struct RestartPoint {
 
 impl RestartPoint {
     fn size_of() -> usize {
-        // store key_len_type and value_len_type in u8 related to `BlockBuidler::build`
+        // store key_len_type and value_len_type in u8 related to `BlockBuilder::build`
         // encoding_value = (key_len_type << 4) | value_len_type
         std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
     }
@@ -170,6 +170,14 @@ impl Block {
     }
 
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
+        Self::decode_with_copy(buf, uncompressed_capacity, false)
+    }
+
+    pub fn decode_with_copy(
+        buf: Bytes,
+        uncompressed_capacity: usize,
+        copy: bool,
+    ) -> HummockResult<Self> {
         // Verify checksum.
 
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
@@ -180,7 +188,13 @@ impl Block {
         let compressed_data = &buf[..buf.len() - 9];
 
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
+            CompressionAlgorithm::None => {
+                if copy {
+                    buf.slice(0..(buf.len() - 9))
+                } else {
+                    Bytes::copy_from_slice(&buf[0..(buf.len() - 9)])
+                }
+            }
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;

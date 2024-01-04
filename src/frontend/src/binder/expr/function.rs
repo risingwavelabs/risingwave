@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
+use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -33,6 +33,7 @@ use risingwave_sqlparser::ast::{
     self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
+use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -322,18 +323,12 @@ impl Binder {
             ))
         })?;
 
-        let mut direct_args = {
-            let args: Vec<_> = f
-                .args
-                .into_iter()
-                .map(|arg| self.bind_function_arg(arg))
-                .flatten_ok()
-                .try_collect()?;
-            if args.iter().any(|arg| arg.as_literal().is_none()) {
-                bail_not_implemented!("non-constant direct arguments for ordered-set aggregation is not supported now");
-            }
-            args
-        };
+        let mut direct_args: Vec<_> = f
+            .args
+            .into_iter()
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
         let mut args =
             self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
@@ -341,26 +336,32 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
-                    && let Ok(casted) = fraction.fold_const()
-                {
-                    if let Some(ref casted) = casted
-                        && !(0.0..=1.0).contains(&casted.as_float64().0)
-                    {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "direct arg in `{}` must between 0.0 and 1.0",
-                            kind
-                        ))
-                        .into());
-                    }
-                    *fraction = Literal::new(casted, DataType::Float64).into();
-                } else {
+                if fraction.cast_implicit_mut(DataType::Float64).is_err() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must be castable to float64",
                         kind
                     ))
                     .into());
                 }
+
+                let Some(Ok(fraction_datum)) = fraction.try_fold_const() else {
+                    bail_not_implemented!(
+                        issue = 14079,
+                        "variable as direct argument of ordered-set aggregate",
+                    );
+                };
+
+                if let Some(ref fraction_value) = fraction_datum
+                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "direct arg in `{}` must between 0.0 and 1.0",
+                        kind
+                    ))
+                    .into());
+                }
+                // note that the fraction can be NULL
+                *fraction = Literal::new(fraction_datum, DataType::Float64).into();
 
                 if kind == AggKind::PercentileCont {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
@@ -533,12 +534,7 @@ impl Binder {
                     );
                 }
             };
-            if !bounds.is_valid() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame bounds `{bounds}` is not valid",
-                ))
-                .into());
-            }
+            bounds.validate()?;
             Some(Frame { bounds, exclusion })
         } else {
             None
@@ -788,7 +784,7 @@ impl Binder {
                         ""
                     };
                     inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
-                        ErrorCode::BindError(format!("{e} in `recv`.{hint}"))
+                        ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
                     })?;
                     Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
                 }))),
@@ -1000,6 +996,7 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
@@ -1192,11 +1189,7 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
-                ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 9.5-RisingWave-{} ({})",
-                    RW_VERSION,
-                    GIT_SHA
-                )))),
+                ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),

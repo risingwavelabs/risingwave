@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
+use anyhow::anyhow;
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
@@ -28,23 +30,27 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
+use risingwave_pb::plan_common::AdditionalColumnType;
 use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
-pub use self::mysql::mysql_row_to_datums;
+pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
+pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::parser::unified::AccessError;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
@@ -53,6 +59,7 @@ use crate::source::{
     StreamChunkWithState,
 };
 
+pub mod additional_columns;
 mod avro;
 mod bytes_parser;
 mod canal;
@@ -62,7 +69,8 @@ mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
-mod plain_parser;
+pub mod plain_parser;
+mod postgres;
 mod protobuf;
 mod unified;
 mod upsert_parser;
@@ -310,32 +318,70 @@ impl SourceStreamChunkRowWriter<'_> {
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
     ) -> AccessResult<()> {
         let mut wrapped_f = |desc: &SourceColumnDesc| {
-            if let Some(meta_value) =
-                (self.row_meta.as_ref()).and_then(|row_meta| row_meta.value_for_column(desc))
-            {
-                // For meta columns, fill in the meta data.
-                Ok(A::output_for(meta_value))
-            } else {
-                // For normal columns, call the user provided closure.
-                match f(desc) {
-                    Ok(output) => Ok(output),
+            match (&desc.column_type, &desc.additional_column_type) {
+                (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
+                    // SourceColumnType is for CDC source only.
+                    Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|row_meta| row_meta.value_for_column(desc))
+                            .unwrap(), // handled all match cases in internal match, unwrap is safe
+                    ))
+                }
+                (&SourceColumnType::Meta, _)
+                    if matches!(
+                        &self.row_meta.map(|ele| ele.meta),
+                        &Some(SourceMeta::Kafka(_) | SourceMeta::DebeziumCdc(_))
+                    ) =>
+                {
+                    // SourceColumnType is for CDC source only.
+                    return Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|row_meta| row_meta.value_for_column(desc))
+                            .unwrap(), // handled all match cases in internal match, unwrap is safe
+                    ));
+                }
+                (
+                    _,
+                    &AdditionalColumnType::Timestamp
+                    | &AdditionalColumnType::Partition
+                    | &AdditionalColumnType::Filename
+                    | &AdditionalColumnType::Offset
+                    | &AdditionalColumnType::Header,
+                    // AdditionalColumnType::Unspecified and AdditionalColumnType::Normal is means it comes from message payload
+                    // AdditionalColumnType::Key is processed in normal process, together with Unspecified ones
+                ) => Err(AccessError::Other(anyhow!(
+                    "Column type {:?} not implemented yet",
+                    &desc.additional_column_type
+                ))),
+                (_, _) => {
+                    // For normal columns, call the user provided closure.
+                    match f(desc) {
+                        Ok(output) => Ok(output),
 
-                    // Throw error for failed access to primary key columns.
-                    Err(e) if desc.is_pk => Err(e),
-                    // Ignore error for other columns and fill in `NULL` instead.
-                    Err(error) => {
-                        // TODO: figure out a way to fill in not-null default value if user specifies one
-                        // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                        //       see #13105
-                        tracing::warn!(
-                            %error,
-                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                            offset = self.row_meta.as_ref().map(|m| m.offset),
-                            column = desc.name,
-                            "failed to parse non-pk column, padding with `NULL`"
-                        );
-                        Ok(A::output_for(Datum::None))
+                        // Throw error for failed access to primary key columns.
+                        Err(e) if desc.is_pk => Err(e),
+                        // Ignore error for other columns and fill in `NULL` instead.
+                        Err(error) => {
+                            // TODO: figure out a way to fill in not-null default value if user specifies one
+                            // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                            // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                            //       see #13105
+                            static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                                LazyLock::new(LogSuppresser::default);
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                tracing::warn!(
+                                    %error,
+                                    split_id = self.row_meta.as_ref().map(|m| m.split_id),
+                                    offset = self.row_meta.as_ref().map(|m| m.offset),
+                                    column = desc.name,
+                                    suppressed_count,
+                                    "failed to parse non-pk column, padding with `NULL`"
+                                );
+                            }
+                            Ok(A::output_for(Datum::None))
+                        }
                     }
                 }
             }
@@ -598,12 +644,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        tracing::error!(
-                            %error,
-                            split_id = &*msg.split_id,
-                            offset = msg.offset,
-                            "failed to parse message, skipping"
-                        );
+                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                            LazyLock::new(LogSuppresser::default);
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::error!(
+                                %error,
+                                split_id = &*msg.split_id,
+                                offset = msg.offset,
+                                suppressed_count,
+                                "failed to parse message, skipping"
+                            );
+                        }
                         parser.source_ctx().report_user_source_error(error);
                     }
                 }
@@ -742,9 +793,6 @@ impl ByteStreamSourceParserImpl {
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
         match (protocol, encode) {
-            (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
-                JsonParser::new(parser_config.specific, rw_columns, source_ctx).map(Self::Json)
-            }
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
@@ -884,7 +932,7 @@ pub enum ProtocolProperties {
 
 impl SpecificParserConfig {
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, with_properties: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -925,12 +973,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -957,12 +1005,12 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = SchemaRegistryAuth::from(props);
+                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
                         serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(props).unwrap(),
+                            serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
@@ -980,8 +1028,8 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(props).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(props),
+                    topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
                     ..Default::default()
                 })
             }

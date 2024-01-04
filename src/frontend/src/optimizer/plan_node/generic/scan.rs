@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
@@ -23,11 +24,13 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
+use crate::TableCatalog;
 
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
@@ -37,7 +40,14 @@ pub struct Scan {
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
-    /// Descriptor of the table
+    /// Table Catalog of the upstream table that the descriptor is derived from.
+    pub table_catalog: Arc<TableCatalog>,
+    // FIXME(kwannoel): Currently many places in the code reference this,
+    // but now we have table catalog.
+    // We should remove this and use table catalog in those call-sites instead.
+    // It's introduced in https://github.com/risingwavelabs/risingwave/pull/13622.
+    // We kept this field to avoid extensive refactor in that PR.
+    /// Table Desc (subset of table catalog).
     pub table_desc: Rc<TableDesc>,
     /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
@@ -172,7 +182,7 @@ impl Scan {
     pub fn to_index_scan(
         &self,
         index_name: &str,
-        index_table_desc: Rc<TableDesc>,
+        index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
     ) -> Self {
@@ -221,7 +231,7 @@ impl Scan {
         Self::new(
             index_name.to_string(),
             new_output_col_idx,
-            index_table_desc,
+            index_table_catalog,
             vec![],
             self.ctx.clone(),
             new_predicate,
@@ -235,7 +245,7 @@ impl Scan {
     pub(crate) fn new(
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
-        table_desc: Rc<TableDesc>,
+        table_catalog: Arc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
@@ -245,7 +255,7 @@ impl Scan {
         Self::new_inner(
             table_name,
             output_col_idx,
-            table_desc,
+            table_catalog,
             indexes,
             ctx,
             predicate,
@@ -258,7 +268,7 @@ impl Scan {
     pub(crate) fn new_inner(
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
-        table_desc: Rc<TableDesc>,
+        table_catalog: Arc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
@@ -274,17 +284,20 @@ impl Scan {
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
         let mut required_col_idx = output_col_idx.clone();
-        let predicate_col_idx = predicate.collect_input_refs(table_desc.columns.len());
+        let predicate_col_idx = predicate.collect_input_refs(table_catalog.columns().len());
         predicate_col_idx.ones().for_each(|idx| {
             if !required_col_idx.contains(&idx) {
                 required_col_idx.push(idx);
             }
         });
 
+        let table_desc = Rc::new(table_catalog.table_desc());
+
         Self {
             table_name,
             required_col_idx,
             output_col_idx,
+            table_catalog,
             table_desc,
             indexes,
             predicate,
@@ -331,6 +344,9 @@ impl GenericPlanNode for Scan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
+        if matches!(self.table_catalog.table_type, TableType::Internal) {
+            return None;
+        }
         let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
         self.table_desc
             .stream_key

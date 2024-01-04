@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,13 @@ use futures::io::Cursor;
 use futures::AsyncBufReadExt;
 use futures_async_stream::try_stream;
 
+use crate::parser::EncodingProperties;
 use crate::source::{BoxSourceStream, SourceMessage};
+
+pub fn need_nd_streaming(encode_config: &EncodingProperties) -> bool {
+    matches!(encode_config, &EncodingProperties::Json(_))
+        || matches!(encode_config, EncodingProperties::Csv(_))
+}
 
 #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
 /// This function splits a byte stream by the newline separator "(\r)\n" into a message stream.

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
+use risingwave_common::error::anyhow_error;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
 use tokio::time::sleep;
 
@@ -73,11 +73,14 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>().join(",");
     let result = session.run(&format!("cancel jobs {};", ids)).await?;
-    tracing::info!("cancelled streaming jobs, {:#?}", result);
+    tracing::info!("cancelled streaming jobs, {}", result);
     let ids = result
         .split('\n')
-        .map(|s| s.parse::<u32>().unwrap())
-        .collect_vec();
+        .map(|s| {
+            s.parse::<u32>()
+                .map_err(|_e| anyhow_error!("failed to parse {}", s))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(ids)
 }
 
@@ -195,7 +198,7 @@ async fn test_ddl_cancel() -> Result<()> {
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE_500).await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_RATE_LIMIT_1).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
@@ -271,6 +274,97 @@ async fn test_ddl_cancel() -> Result<()> {
 
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_high_barrier_latency_cancel() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    // 100,000 fact records
+    session.run("CREATE TABLE fact (v1 int)").await?;
+    session
+        .run("INSERT INTO fact select 1 from generate_series(1, 100000)")
+        .await?;
+
+    // Amplification factor of 1000 per record.
+    session.run("CREATE TABLE dimension (v1 int)").await?;
+    session
+        .run("INSERT INTO dimension select 1 from generate_series(1, 1000)")
+        .await?;
+    session.flush().await?;
+
+    // With 10 rate limit, and amplification factor of 1000,
+    // We should expect 10,000 rows / s.
+    // That should be enough to cause barrier latency to spike.
+    session.run("SET STREAMING_RATE_LIMIT=10").await?;
+
+    tracing::info!("seeded base tables");
+
+    // Create high barrier latency scenario
+    // Keep creating mv1, if it's not created.
+    loop {
+        session.run(SET_BACKGROUND_DDL).await?;
+        session.run("CREATE MATERIALIZED VIEW mv1 as select fact.v1 from fact join dimension on fact.v1 = dimension.v1").await?;
+        tracing::info!("created mv in background");
+        sleep(Duration::from_secs(1)).await;
+
+        kill_cn_and_wait_recover(&cluster).await;
+
+        // Check if mv stream job is created in the background
+        match session
+            .run("select * from rw_catalog.rw_ddl_progress;")
+            .await
+        {
+            Ok(s) if s.is_empty() => {
+                // MV was dropped
+                continue;
+            }
+            Err(e) => {
+                if e.to_string().contains("in creating procedure") {
+                    // MV already created and recovered.
+                    break;
+                } else {
+                    return Err(e);
+                }
+            }
+            Ok(s) => {
+                tracing::info!("created mv stream job with status: {}", s);
+                break;
+            }
+        }
+    }
+
+    tracing::info!("restarted cn: trigger stream job recovery");
+
+    // Attempt to cancel
+    let mut session2 = cluster.start_session();
+    let handle = tokio::spawn(async move {
+        let result = cancel_stream_jobs(&mut session2).await;
+        assert!(result.is_err())
+    });
+
+    sleep(Duration::from_secs(2)).await;
+    kill_cn_and_wait_recover(&cluster).await;
+    tracing::info!("restarted cn: cancel should take effect");
+
+    handle.await.unwrap();
+
+    // Create MV with same relation name should succeed,
+    // since the previous job should be cancelled.
+    tracing::info!("recreating mv");
+    session.run("SET BACKGROUND_DDL=false").await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
+        .await?;
+    tracing::info!("recreated mv");
+
+    session.run(DROP_MV1).await?;
+    session.run("DROP TABLE fact").await?;
+    session.run("DROP TABLE dimension").await?;
 
     Ok(())
 }
@@ -366,6 +460,41 @@ async fn test_sink_create() -> Result<()> {
     // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
     session.run(DROP_TABLE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_background_agg_mv_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("CREATE TABLE t1 (v1 int)").await?;
+    session
+        .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session.flush().await?;
+    session.run(SET_RATE_LIMIT_1).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as select v1, count(*) from t1 group by v1;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // Now just wait for it to complete.
+    session.run(WAIT).await?;
+
+    let t_count = session.run("SELECT COUNT(v1) FROM t1").await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+    assert_eq!(t_count, mv1_count);
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
+    session.run("DROP MATERIALIZED VIEW mv1;").await?;
+    session.run("DROP TABLE t1;").await?;
 
     Ok(())
 }

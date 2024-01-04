@@ -881,6 +881,31 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    create table t (x int, y int);
+    select percentile_cont(null) within group (order by y) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + 0.3) within group (order by y) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + null) within group (order by y) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.8 + 0.8) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0.2 + x) within group (order by y) from t group by x;
+  expected_outputs:
+  - binder_error
+- sql: |
     create table t (x int, y varchar);
     select percentile_disc(1) within group (order by y desc) from t;
   expected_outputs:

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,10 @@ use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{
-    build_func, Context, Expression, ExpressionBoxExt, InputRefExpression,
-};
+use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
 use risingwave_expr::{function, ExprError, Result};
 use risingwave_pb::expr::expr_node::PbType;
+use thiserror_ext::AsReport;
 
 #[function("cast(varchar) -> *int")]
 #[function("cast(varchar) -> decimal")]
@@ -52,7 +51,7 @@ where
 #[function("pgwire_recv(bytea) -> int8")]
 pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
     let fixed_length =
-        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_string().into()))?;
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
     Ok(i64::from_be_bytes(fixed_length))
 }
 

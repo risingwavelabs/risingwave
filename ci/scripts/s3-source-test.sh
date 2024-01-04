@@ -29,7 +29,7 @@ echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
 
 echo "--- Run test"
-python3 -m pip install minio psycopg2-binary
+python3 -m pip install minio psycopg2-binary opendal
 python3 e2e_test/s3/$script
 
 echo "--- Kill cluster"
