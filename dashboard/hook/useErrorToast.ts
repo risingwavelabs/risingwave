@@ -1,11 +1,11 @@
 import { AlertStatus, useToast } from "@chakra-ui/react"
-import { useMemo } from "react"
+import { useCallback } from "react"
 
 export default function useErrorToast() {
   const toast = useToast()
 
-  return useMemo(() => {
-    return (e: any, status: AlertStatus = "error") => {
+  return useCallback(
+    (e: any, status: AlertStatus = "error") => {
       let title: string
       let description: string | undefined
 
@@ -25,6 +25,7 @@ export default function useErrorToast() {
       })
 
       console.error(e)
-    }
-  }, [toast])
+    },
+    [toast]
+  )
 }
