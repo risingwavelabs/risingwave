@@ -171,11 +171,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handle_conflict(
-                                    row_ops,
-                                    &self.state_table,
-                                    &self.conflict_behavior,
-                                )
+                                .handle(row_ops, &self.state_table, &self.conflict_behavior)
                                 .await?;
 
                             match generate_output(fixed_changes, data_types.clone())? {
@@ -419,13 +415,7 @@ pub struct MaterializeCache<SD> {
     _serde: PhantomData<SD>,
 }
 
-#[derive(EnumAsInner, EstimateSize)]
-pub enum CacheValue {
-    Overwrite(Option<CompactedRow>),
-    Ignore(Option<EmptyValue>),
-}
-
-type EmptyValue = ();
+type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
@@ -438,7 +428,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    pub async fn handle_conflict<'a, S: StateStore>(
+    pub async fn handle<'a, S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
@@ -459,7 +449,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 Op::Insert | Op::UpdateInsert => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key).as_overwrite().unwrap() {
+                            match self.force_get(&key) {
                                 Some(old_row) => fixed_changes.update(
                                     key.clone(),
                                     old_row.row.clone(),
@@ -470,7 +460,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             update_cache = true;
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key).as_ignore().unwrap() {
+                            match self.force_get(&key) {
                                 Some(_) => (),
                                 None => {
                                     fixed_changes.insert(key.clone(), value.clone());
@@ -484,13 +474,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     if update_cache {
                         match conflict_behavior {
                             ConflictBehavior::Overwrite => {
-                                self.data.push(
-                                    key,
-                                    CacheValue::Overwrite(Some(CompactedRow { row: value })),
-                                );
+                                self.data.push(key, Some(CompactedRow { row: value }));
                             }
                             ConflictBehavior::IgnoreConflict => {
-                                self.data.push(key, CacheValue::Ignore(Some(())));
+                                self.data.push(key, Some(CompactedRow { row: value }));
                             }
                             _ => unreachable!(),
                         }
@@ -500,7 +487,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 Op::Delete | Op::UpdateDelete => {
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key).as_overwrite().unwrap() {
+                            match self.force_get(&key) {
                                 Some(old_row) => {
                                     fixed_changes.delete(key.clone(), old_row.row.clone());
                                 }
@@ -508,20 +495,20 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             };
                             update_cache = true;
                         }
-                        ConflictBehavior::IgnoreConflict => (),
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key) {
+                                Some(old_row) => {
+                                    fixed_changes.delete(key.clone(), old_row.clone());
+                                    update_cache = true;
+                                }
+                                None => (), // delete a nonexistent value
+                            };
+                        }
                         _ => unreachable!(),
                     };
 
                     if update_cache {
-                        match conflict_behavior {
-                            ConflictBehavior::Overwrite => {
-                                self.data.push(key, CacheValue::Overwrite(None));
-                            }
-                            ConflictBehavior::IgnoreConflict => {
-                                self.data.push(key, CacheValue::Ignore(Some(())));
-                            }
-                            _ => unreachable!(),
-                        }
+                        self.data.push(key, None);
                     }
                 }
             }
