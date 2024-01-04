@@ -171,7 +171,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             .calls
             .iter()
             .any(|call| call.frame.bounds.is_unbounded());
-        let cache_policy = if has_unbounded_frame {
+        // TODO(rc): only support full cache for `RANGE` frame for now, for the sake of simplicity
+        let has_range_frame = args.calls.iter().any(|call| call.frame.bounds.is_range());
+        let cache_policy = if has_unbounded_frame || has_range_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.
             CachePolicy::Full
@@ -182,7 +184,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let order_key_data_types = args
             .order_key_indices
             .iter()
-            .map(|i| input_schema.fields()[*i].data_type.clone())
+            .map(|i| input_schema[*i].data_type())
             .collect();
 
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
