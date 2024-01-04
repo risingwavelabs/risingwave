@@ -179,29 +179,24 @@ impl SkipWatermarkState {
     }
 
     pub fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        loop {
-            if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
-                let key_table_id = key.user_key.table_id;
-                let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
-                match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
-                    Ordering::Less => {
-                        return false;
-                    }
-                    Ordering::Equal => {
-                        return direction.filter_by_watermark(inner_key, watermark);
-                    }
-                    Ordering::Greater => {
-                        // The current key has advanced over the watermark.
-                        // We may advance the watermark before advancing the key.
-                    }
+        if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
+            let key_table_id = key.user_key.table_id;
+            let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
+            match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
+                Ordering::Less => {
+                    return false;
                 }
-            } else {
-                return false;
-            }
-            if !self.advance_watermark(key) {
-                return false;
+                Ordering::Equal => {
+                    return direction.filter_by_watermark(inner_key, watermark);
+                }
+                Ordering::Greater => {
+                    // The current key has advanced over the watermark.
+                    // We may advance the watermark before advancing the key.
+                    return self.advance_watermark(key);
+                }
             }
         }
+        false
     }
 
     pub fn reset_watermark(&mut self) {
