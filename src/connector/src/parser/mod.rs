@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use anyhow::anyhow;
 use auto_enums::auto_enum;
@@ -159,7 +158,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// The meta data of the original message for a row writer.
 ///
 /// Extracted from the `SourceMessage`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
     meta: &'a SourceMeta,
     split_id: &'a str,
@@ -700,9 +699,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 }
             }
-            tracing::info!("parsed one message, sleep for 1 second");
-            // FAKE: process 1msg needs 1 sec
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
         // If we are not in a transaction, we should yield the chunk now.

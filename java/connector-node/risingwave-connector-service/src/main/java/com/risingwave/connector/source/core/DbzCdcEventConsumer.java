@@ -144,10 +144,11 @@ public class DbzCdcEventConsumer
                                         record.topic(), record.valueSchema(), record.value());
                         var message =
                                 msgBuilder
+                                        .setIsTransactionMeta(true)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(trxTs)
                                         .build();
-                        LOG.info("transaction => {}", message.getPayload());
+                        LOG.debug("transaction => {}", message);
                         respBuilder.addEvents(message);
 
                         break;

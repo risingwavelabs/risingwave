@@ -155,11 +155,8 @@ impl ByteStreamSourceParser for DebeziumParser {
 #[cfg(test)]
 mod tests {
     use std::ops::Deref;
-    use std::str::FromStr;
 
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{JsonbVal, ScalarImpl};
 
     use super::*;
     use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
@@ -195,7 +192,6 @@ mod tests {
                 builder.row_writer(),
             )
             .await;
-        println!("res: {:?}", res);
         match res {
             Ok(ParseResult::TransactionControl(TransactionControl::Begin { id })) => {
                 assert_eq!(id.deref(), "35352");
@@ -210,7 +206,6 @@ mod tests {
                 builder.row_writer(),
             )
             .await;
-        println!("res: {:?}", res);
         match res {
             Ok(ParseResult::TransactionControl(TransactionControl::Commit { id })) => {
                 assert_eq!(id.deref(), "35352");

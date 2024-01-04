@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, AccessError, ChangeEvent, ChangeEventOperation};
@@ -26,8 +27,8 @@ pub struct DebeziumChangeEvent<A> {
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
-const TRANSACTION_STATUS: &str = "status";
-const TRANSACTION_ID: &str = "id";
+pub const TRANSACTION_STATUS: &str = "status";
+pub const TRANSACTION_ID: &str = "id";
 
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
@@ -36,6 +37,31 @@ pub const DEBEZIUM_DELETE_OP: &str = "d";
 
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
+
+pub fn parse_transaction_meta(
+    accessor: &impl Access,
+) -> std::result::Result<TransactionControl, AccessError> {
+    if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
+        accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
+        accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
+    ) {
+        let (tx_id, _) = id.split_once(':').unwrap();
+        match status.as_ref() {
+            DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
+                return Ok(TransactionControl::Begin { id: tx_id.into() })
+            }
+            DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
+                return Ok(TransactionControl::Commit { id: tx_id.into() })
+            }
+            _ => {}
+        }
+    }
+
+    Err(AccessError::Undefined {
+        name: "transaction status".into(),
+        path: TRANSACTION_STATUS.into(),
+    })
+}
 
 impl<A> DebeziumChangeEvent<A>
 where
@@ -62,28 +88,12 @@ where
     ///
     /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
     pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
-        if let Some(accessor) = &self.value_accessor {
-            if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
-                accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
-                accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
-            ) {
-                let (tx_id, _) = id.split_once(':').unwrap();
-                match status.as_ref() {
-                    DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
-                        return Ok(TransactionControl::Begin { id: tx_id.into() })
-                    }
-                    DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
-                        return Ok(TransactionControl::Commit { id: tx_id.into() })
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Err(AccessError::Undefined {
-            name: "transaction status".into(),
-            path: Default::default(),
-        })
+        let Some(accessor) = &self.value_accessor else {
+            return Err(AccessError::Other(anyhow!(
+                "value_accessor must be provided to parse transaction metadata"
+            )));
+        };
+        parse_transaction_meta(accessor)
     }
 }
 

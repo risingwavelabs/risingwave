@@ -23,8 +23,6 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
-import org.slf4j.helpers.FormattingTuple;
-import org.slf4j.helpers.MessageFormatter;
 
 public class TracingSlf4jAdapter implements Logger {
 
@@ -54,13 +52,8 @@ public class TracingSlf4jAdapter implements Logger {
 
     private void logIfEnabled(int level, String format, Object... arguments) {
         if (TracingSlf4jImpl.isEnabled(level)) {
-            FormattingTuple ft = MessageFormatter.arrayFormat(format, arguments);
-            if (ft.getThrowable() != null) {
-                this.error(ft.getMessage(), ft.getThrowable());
-            } else {
-                var pm = new ParameterizedMessage(ft.getMessage(), ft.getArgArray());
-                TracingSlf4jImpl.event(name, TracingSlf4jImpl.ERROR, pm.getFormattedMessage());
-            }
+            TracingSlf4jImpl.event(
+                    name, level, new ParameterizedMessage(format, arguments).getFormattedMessage());
         }
     }
 
