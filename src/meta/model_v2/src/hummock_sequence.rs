@@ -12,23 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
-use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::{build_sink, Sink, SinkParam};
-use risingwave_pb::catalog::PbSink;
+use sea_orm::entity::prelude::*;
 
-use crate::MetaResult;
-
-pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
-    let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let param = SinkParam::from(sink_catalog);
-
-    let sink = build_sink(param)?;
-
-    dispatch_sink!(
-        sink,
-        sink,
-        Ok(sink.validate().await.context("failed to validate sink")?)
-    )
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
+#[sea_orm(table_name = "hummock_sequence")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub name: String,
+    pub seq: i64,
 }
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}

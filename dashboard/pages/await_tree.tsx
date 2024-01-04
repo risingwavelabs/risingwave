@@ -81,7 +81,7 @@ export default function AwaitTreeDump() {
 
       result = `${title}\n\n${actorTraces}\n${rpcTraces}`
     } catch (e: any) {
-      result = `${title}\n\nError: ${e.message}`
+      result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }
 
     setDump(result)

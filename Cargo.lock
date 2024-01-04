@@ -4732,7 +4732,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opendal 0.43.0",
  "ordered-float 3.9.1",
  "parquet 49.0.0",
  "prometheus",
@@ -6234,8 +6234,9 @@ dependencies = [
 
 [[package]]
 name = "opendal"
-version = "0.43.0"
-source = "git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69#9a222e4d72b328a24d5775b1565292f4636bbe69"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c32736a48ef08a5d2212864e2295c8e54f4d6b352b7f49aa0c29a12fc410ff66"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -6246,6 +6247,7 @@ dependencies = [
  "chrono",
  "flagset",
  "futures",
+ "getrandom",
  "http 0.2.9",
  "log",
  "md-5",
@@ -7864,15 +7866,16 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f52b6eef6975eb2decff7d7e95744c8a6b6bb8558bc9b4230c0a3431a74f59c"
+checksum = "dce87f66ba6c6acef277a729f989a0eca946cb9ce6a15bcc036bda0f72d4b9fd"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.4",
  "chrono",
  "form_urlencoded",
+ "getrandom",
  "hex",
  "hmac",
  "home",
@@ -8509,7 +8512,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.43.0 (git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69)",
+ "opendal 0.44.0",
  "parking_lot 0.12.1",
  "paste",
  "pretty_assertions",
@@ -9079,7 +9082,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opendal 0.44.0",
  "prometheus",
  "risingwave_common",
  "rustls",
@@ -12539,7 +12542,6 @@ dependencies = [
  "futures-task",
  "futures-util",
  "generic-array",
- "getrandom",
  "governor",
  "hashbrown 0.12.3",
  "hashbrown 0.13.2",
