@@ -76,7 +76,7 @@ done
 
 # test additional columns: produce messages with headers
 ADDI_COLUMN_TOPIC="kafka_additional_columns"
-for i in {0..100}; do echo "key$i:{\"a\": $i}" | kcat -P -b message_queue:29092 -t ${ADDI_COLUMN_TOPIC} -K : -H "header1=v1" -H "header2=v2"; done
+for i in {0..100}; do echo "key$i:{\"a\": $i}" | ${KCAT_BIN} -P -b message_queue:29092 -t ${ADDI_COLUMN_TOPIC} -K : -H "header1=v1" -H "header2=v2"; done
 
 # write schema with name strategy
 
