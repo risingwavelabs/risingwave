@@ -19,14 +19,12 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -333,7 +331,7 @@ impl MaterializeBuffer {
     }
 
     pub fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
-        let entry = self.buffer.entry(pk);
+        let entry: Entry<'_, Vec<u8>, KeyOp> = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(KeyOp::Delete(old_value));
@@ -498,8 +496,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::IgnoreConflict => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
-                                    fixed_changes.delete(key.clone(), old_row.clone());
-                                    update_cache = true;
+                                    if old_row.row == value {
+                                        fixed_changes.delete(key.clone(), old_row.row.clone());
+                                        update_cache = true;
+                                    }
                                 }
                                 None => (), // delete a nonexistent value
                             };
@@ -547,10 +547,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
             match conflict_behavior {
-                ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
-                ConflictBehavior::IgnoreConflict => {
-                    self.data.push(key, CacheValue::Ignore(value?.map(|_| ())))
-                }
+                ConflictBehavior::Overwrite => self.data.push(key, value?),
+                ConflictBehavior::IgnoreConflict => self.data.push(key, value?),
                 _ => unreachable!(),
             };
         }
