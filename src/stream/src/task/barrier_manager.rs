@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use prometheus::HistogramTimer;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{StreamError, StreamResult};
-use crate::executor::*;
 use crate::task::ActorId;
 
 mod managed_state;
@@ -34,6 +34,11 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_storage::StateStoreImpl;
+
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::Barrier;
+use crate::task::barrier_manager::progress::BackfillState;
+use crate::task::barrier_manager::LocalBarrierEvent::{ReportActorCollected, ReportActorFailure};
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -49,29 +54,53 @@ pub struct CollectResult {
     pub kind: BarrierKind,
 }
 
-enum BarrierState {
-    /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
-    /// collected, and there's no way to know whether or when a barrier is finished.
+enum LocalBarrierEvent {
+    RegisterSender {
+        actor_id: ActorId,
+        sender: UnboundedSender<Barrier>,
+    },
+    InjectBarrier {
+        barrier: Barrier,
+        actor_ids_to_send: Vec<ActorId>,
+        actor_ids_to_collect: Vec<ActorId>,
+        result_sender: oneshot::Sender<StreamResult<()>>,
+    },
+    Reset,
+    ReportActorCollected {
+        actor_id: ActorId,
+        barrier: Barrier,
+    },
+    ReportActorFailure {
+        actor_id: ActorId,
+        err: StreamError,
+    },
+    CollectEpoch {
+        epoch: u64,
+        result_sender: oneshot::Sender<StreamResult<CompleteReceiver>>,
+    },
+    ReportCreateProgress {
+        current_epoch: u64,
+        actor: ActorId,
+        state: BackfillState,
+    },
     #[cfg(test)]
-    Local,
-
-    /// In `Managed` mode, barriers are sent and collected according to the request from meta
-    /// service. When the barrier is finished, the caller can be notified about this.
-    Managed(ManagedBarrierState),
+    Flush(oneshot::Sender<()>),
 }
 
-/// [`LocalBarrierManager`] manages barrier control flow, used by local stream manager.
-/// Specifically, [`LocalBarrierManager`] serve barrier injection from meta server, send the
+/// [`LocalBarrierWorker`] manages barrier control flow, used by local stream manager.
+/// Specifically, [`LocalBarrierWorker`] serve barrier injection from meta server, send the
 /// barriers to and collect them from all actors, and finally report the progress.
-pub struct LocalBarrierManager {
+struct LocalBarrierWorker {
     /// Stores all streaming job source sender.
     senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
     /// Current barrier collection state.
-    state: BarrierState,
+    state: ManagedBarrierState,
 
     /// Save collect `CompleteReceiver`.
     collect_complete_receiver: HashMap<u64, CompleteReceiver>,
+
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 /// Information used after collection.
@@ -79,27 +108,77 @@ pub struct CompleteReceiver {
     /// Notify all actors of completion of collection.
     pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
-    pub barrier_inflight_timer: Option<HistogramTimer>,
+    pub barrier_inflight_timer: HistogramTimer,
     /// The kind of barrier.
     pub kind: BarrierKind,
 }
 
-impl LocalBarrierManager {
-    fn with_state(state: BarrierState) -> Self {
+impl LocalBarrierWorker {
+    fn new(state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
         Self {
             senders: HashMap::new(),
-            state,
+            state: ManagedBarrierState::new(state_store),
             collect_complete_receiver: HashMap::default(),
+            streaming_metrics,
         }
     }
 
-    /// Create a [`LocalBarrierManager`] with managed mode.
-    pub fn new(state_store: StateStoreImpl) -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::new(state_store)))
+    async fn run(mut self, mut event_rx: UnboundedReceiver<LocalBarrierEvent>) {
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                LocalBarrierEvent::RegisterSender { actor_id, sender } => {
+                    self.register_sender(actor_id, sender);
+                }
+                LocalBarrierEvent::InjectBarrier {
+                    barrier,
+                    actor_ids_to_send,
+                    actor_ids_to_collect,
+                    result_sender,
+                } => {
+                    let timer = self
+                        .streaming_metrics
+                        .barrier_inflight_latency
+                        .start_timer();
+                    let result =
+                        self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, timer);
+                    let _ = result_sender.send(result).inspect_err(|e| {
+                        warn!(err=?e, "fail to send inject barrier result");
+                    });
+                }
+                LocalBarrierEvent::Reset => {
+                    self.reset();
+                }
+                ReportActorCollected { actor_id, barrier } => self.collect(actor_id, &barrier),
+                ReportActorFailure { actor_id, err } => {
+                    self.notify_failure(actor_id, err);
+                }
+                LocalBarrierEvent::CollectEpoch {
+                    epoch,
+                    result_sender,
+                } => {
+                    let result = self.remove_collect_rx(epoch);
+                    let _ = result_sender.send(result).inspect_err(|e| {
+                        warn!(err=?e.as_ref().map(|_|()), "fail to send collect epoch result");
+                    });
+                }
+                LocalBarrierEvent::ReportCreateProgress {
+                    current_epoch,
+                    actor,
+                    state,
+                } => {
+                    self.update_create_mview_progress(current_epoch, actor, state);
+                }
+                #[cfg(test)]
+                LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
+            }
+        }
     }
+}
 
+// event handler
+impl LocalBarrierWorker {
     /// Register sender for source actors, used to send barriers.
-    pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
+    fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         tracing::debug!(
             target: "events::stream::barrier::manager",
             actor_id = actor_id,
@@ -108,28 +187,16 @@ impl LocalBarrierManager {
         self.senders.entry(actor_id).or_default().push(sender);
     }
 
-    /// Return all senders.
-    pub fn all_senders(&self) -> HashSet<ActorId> {
-        self.senders.keys().cloned().collect()
-    }
-
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
-    pub fn send_barrier(
+    fn send_barrier(
         &mut self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        timer: Option<HistogramTimer>,
+        timer: HistogramTimer,
     ) -> StreamResult<()> {
-        let to_send = {
-            let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
-            match &self.state {
-                #[cfg(test)]
-                BarrierState::Local if to_send.is_empty() => self.senders.keys().cloned().collect(),
-                _ => to_send,
-            }
-        };
+        let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
         let to_collect: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
         debug!(
             target: "events::stream::barrier::manager::send",
@@ -139,19 +206,11 @@ impl LocalBarrierManager {
             to_collect
         );
 
-        let rx = match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => None,
+        // There must be some actors to collect from.
+        assert!(!to_collect.is_empty());
 
-            BarrierState::Managed(state) => {
-                // There must be some actors to collect from.
-                assert!(!to_collect.is_empty());
-
-                let (tx, rx) = oneshot::channel();
-                state.transform_to_issued(barrier, to_collect, tx)?;
-                Some(rx)
-            }
-        };
+        let (tx, rx) = oneshot::channel();
+        self.state.transform_to_issued(barrier, to_collect, tx)?;
 
         for actor_id in to_send {
             match self.senders.get(&actor_id) {
@@ -192,7 +251,7 @@ impl LocalBarrierManager {
         self.collect_complete_receiver.insert(
             barrier.epoch.prev,
             CompleteReceiver {
-                complete_receiver: rx,
+                complete_receiver: Some(rx),
                 barrier_inflight_timer: timer,
                 kind: barrier.kind,
             },
@@ -201,7 +260,7 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
+    fn remove_collect_rx(&mut self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
         // It's still possible that `collect_complete_receiver` does not contain the target epoch
         // when receiving collect_barrier request. Because `collect_complete_receiver` could
         // be cleared when CN is under recovering. We should return error rather than panic.
@@ -217,55 +276,116 @@ impl LocalBarrierManager {
     }
 
     /// Reset all internal states.
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.senders.clear();
         self.collect_complete_receiver.clear();
 
-        match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => {}
-
-            BarrierState::Managed(managed_state) => {
-                managed_state.clear_all_states();
-            }
-        }
+        self.state.clear_all_states();
     }
 
-    /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
+    /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => {}
-
-            BarrierState::Managed(managed_state) => {
-                managed_state.collect(actor_id, barrier);
-            }
-        }
+    fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
+        self.state.collect(actor_id, barrier)
     }
 
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
-    pub fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
-        match &mut self.state {
-            #[cfg(test)]
-            BarrierState::Local => {}
+    fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+        self.state.notify_failure(actor_id, err)
+    }
+}
 
-            BarrierState::Managed(managed_state) => {
-                managed_state.notify_failure(actor_id, err);
-            }
+#[derive(Clone)]
+pub struct LocalBarrierManager {
+    barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
+}
+
+impl LocalBarrierManager {
+    /// Create a [`LocalBarrierWorker`] with managed mode.
+    pub fn new(state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
+        let (tx, rx) = unbounded_channel();
+        let worker = LocalBarrierWorker::new(state_store, streaming_metrics);
+        let _join_handle = tokio::spawn(worker.run(rx));
+        Self {
+            barrier_event_sender: tx,
         }
+    }
+
+    fn send_event(&self, event: LocalBarrierEvent) {
+        self.barrier_event_sender
+            .send(event)
+            .expect("should be able to send event")
+    }
+}
+
+impl LocalBarrierManager {
+    /// Register sender for source actors, used to send barriers.
+    pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
+        self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
+    }
+
+    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
+    /// barrier is finished, in managed mode.
+    pub async fn send_barrier(
+        &self,
+        barrier: Barrier,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+    ) -> StreamResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::InjectBarrier {
+            barrier,
+            actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
+            actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
+            result_sender: tx,
+        });
+        rx.await.expect("should receive response")
+    }
+
+    /// Use `prev_epoch` to remove collect rx and return rx.
+    pub async fn remove_collect_rx(&self, prev_epoch: u64) -> StreamResult<CompleteReceiver> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::CollectEpoch {
+            epoch: prev_epoch,
+            result_sender: tx,
+        });
+        rx.await.expect("should receive response")
+    }
+
+    /// Reset all internal states.
+    pub fn reset(&self) {
+        self.send_event(LocalBarrierEvent::Reset)
+    }
+
+    /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
+    /// and collect this barrier with its own `actor_id` using this function.
+    pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
+        self.send_event(ReportActorCollected {
+            actor_id,
+            barrier: barrier.clone(),
+        })
+    }
+
+    /// When a actor exit unexpectedly, it should report this event using this function, so meta
+    /// will notice actor's exit while collecting.
+    pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
+        self.send_event(ReportActorFailure { actor_id, err })
     }
 }
 
 #[cfg(test)]
 impl LocalBarrierManager {
     pub fn for_test() -> Self {
-        Self::with_state(BarrierState::Local)
+        Self::new(
+            StateStoreImpl::for_test(),
+            Arc::new(StreamingMetrics::unused()),
+        )
     }
 
-    /// Returns whether [`BarrierState`] is `Local`.
-    pub fn is_local_mode(&self) -> bool {
-        !matches!(self.state, BarrierState::Managed(_))
+    pub async fn flush_all_events(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::Flush(tx));
+        rx.await.unwrap()
     }
 }
