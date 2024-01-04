@@ -185,7 +185,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> anyhow::Res
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if (sink_name==ElasticSearchSink::SINK_NAME) | matches!(list.as_list(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if (sink_name==ElasticSearchSink::SINK_NAME) | matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow_error!(
