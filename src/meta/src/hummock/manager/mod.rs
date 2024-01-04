@@ -638,11 +638,23 @@ impl HummockManager {
         Ok(())
     }
 
+    /// Caller should hold `versioning` lock, to sync with `HummockManager::release_contexts`.
+    async fn check_context_with_meta_node(&self, context_id: HummockContextId) -> Result<()> {
+        if context_id == META_NODE_ID {
+            // Using the preserved meta id is allowed.
+        } else if !self.check_context(context_id).await? {
+            // The worker is not found in cluster.
+            return Err(Error::InvalidContext(context_id));
+        }
+        Ok(())
+    }
+
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     #[named]
     pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = match self.sql_meta_store() {
@@ -693,6 +705,7 @@ impl HummockManager {
         unpin_before: HummockVersionId,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = match self.sql_meta_store() {
@@ -741,6 +754,7 @@ impl HummockManager {
     ) -> Result<HummockSnapshot> {
         let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let mut pinned_snapshots = match self.sql_meta_store() {
             None => BTreeMapTransactionWrapper::V1(BTreeMapTransaction::new(
                 &mut guard.pinned_snapshots,
@@ -773,6 +787,7 @@ impl HummockManager {
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = match self.sql_meta_store() {
             None => BTreeMapTransactionWrapper::V1(BTreeMapTransaction::new(
@@ -809,6 +824,7 @@ impl HummockManager {
     #[named]
     pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = match self.sql_meta_store() {
             None => BTreeMapTransactionWrapper::V1(BTreeMapTransaction::new(
@@ -845,6 +861,7 @@ impl HummockManager {
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
+        self.check_context_with_meta_node(context_id).await?;
         let _timer = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
