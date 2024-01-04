@@ -18,6 +18,7 @@
 class Api {
   async get(url: string) {
     try {
+      url = `http://localhost:5691/api${url}`
       const res = await fetch(url)
       const data = await res.json()
       return data

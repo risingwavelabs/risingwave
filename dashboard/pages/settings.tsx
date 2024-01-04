@@ -33,14 +33,6 @@ export default function Settings() {
             <FormLabel>RisingWave Meta Node HTTP API</FormLabel>
             <Input value="/api" />
           </FormControl>
-          <FormControl>
-            <FormLabel>Grafana HTTP API</FormLabel>
-            <Input value="/api" />
-          </FormControl>
-          <FormControl>
-            <FormLabel>Prometheus HTTP API</FormLabel>
-            <Input value="/api" />
-          </FormControl>
         </VStack>
       </Box>
     </Fragment>

@@ -23,11 +23,11 @@ import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import api from "./api"
 
 export async function getActors(): Promise<ActorLocation[]> {
-  return (await api.get("/api/actors")).map(ActorLocation.fromJSON)
+  return (await api.get("/actors")).map(ActorLocation.fromJSON)
 }
 
 export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/api/fragments2")).map(
+  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
     TableFragments.fromJSON
   )
   fragmentList = sortBy(fragmentList, (x) => x.tableId)
@@ -75,7 +75,7 @@ export async function getRelations() {
 async function getTableCatalogsInner(
   path: "tables" | "materialized_views" | "indexes" | "internal_tables"
 ) {
-  let list: Table[] = (await api.get(`/api/${path}`)).map(Table.fromJSON)
+  let list: Table[] = (await api.get(`/${path}`)).map(Table.fromJSON)
   list = sortBy(list, (x) => x.id)
   return list
 }
@@ -97,13 +97,13 @@ export async function getInternalTables() {
 }
 
 export async function getSinks() {
-  let sinkList: Sink[] = (await api.get("/api/sinks")).map(Sink.fromJSON)
+  let sinkList: Sink[] = (await api.get("/sinks")).map(Sink.fromJSON)
   sinkList = sortBy(sinkList, (x) => x.id)
   return sinkList
 }
 
 export async function getSources() {
-  let sourceList: Source[] = (await api.get("/api/sources")).map(
+  let sourceList: Source[] = (await api.get("/sources")).map(
     Source.fromJSON
   )
   sourceList = sortBy(sourceList, (x) => x.id)
@@ -111,7 +111,7 @@ export async function getSources() {
 }
 
 export async function getViews() {
-  let views: View[] = (await api.get("/api/views")).map(View.fromJSON)
+  let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
 }
