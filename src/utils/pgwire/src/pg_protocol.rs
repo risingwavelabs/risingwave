@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1139,8 +1139,9 @@ pub mod truncated_fmt {
             }
 
             if self.remaining < s.len() {
-                self.f.write_str(&s[0..self.remaining])?;
-                self.remaining = 0;
+                let actual = s.floor_char_boundary(self.remaining);
+                self.f.write_str(&s[0..actual])?;
+                self.remaining -= actual;
                 self.f.write_str("...(truncated)")?;
                 self.finished = true; // so that ...(truncated) is printed exactly once
             } else {
@@ -1178,6 +1179,19 @@ pub mod truncated_fmt {
                 f,
             }
             .write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_trunc_utf8() {
+            assert_eq!(
+                format!("{}", TruncatedFmt(&"select '🌊';", 10)),
+                "select '...(truncated)",
+            );
         }
     }
 }

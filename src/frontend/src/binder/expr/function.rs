@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
+use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -1189,11 +1189,7 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
-                ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 9.5-RisingWave-{} ({})",
-                    RW_VERSION,
-                    GIT_SHA
-                )))),
+                ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,7 +79,8 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
         // `{}`, `{:?}` in format macros.
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
-                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn) {
+                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
+            {
                 for piece in &format_args.template {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece
                         && let Ok(index) = placeholder.argument.index

@@ -62,8 +62,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hmac = { version = "0.12", default-features = false, features = ["reset"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["serde", "std"] }
-itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
-itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
+itertools = { version = "0.11" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -95,8 +94,7 @@ phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 prometheus = { version = "0.13", features = ["process"] }
-prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
-prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-types = { version = "0.12" }
 quote = { version = "1" }
 rand = { version = "0.8", features = ["small_rng"] }
@@ -109,7 +107,6 @@ regex-syntax = { version = "0.8" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls", "rustls-tls-native-roots", "stream"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-rustls = { version = "0.21" }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -136,8 +133,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19", features = ["serde"] }
-tonic-274715c4dabd11b0 = { package = "tonic", version = "0.9", features = ["gzip", "tls-webpki-roots"] }
-tonic-93f6ce9d446188ac = { package = "tonic", version = "0.10" }
+tonic = { version = "0.10", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-core = { version = "0.1" }
@@ -162,8 +158,7 @@ fixedbitset = { version = "0.4" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
-itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
-itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
+itertools = { version = "0.11" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
@@ -175,8 +170,7 @@ petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
-prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-types = { version = "0.12" }
 quote = { version = "1" }
 rand = { version = "0.8", features = ["small_rng"] }

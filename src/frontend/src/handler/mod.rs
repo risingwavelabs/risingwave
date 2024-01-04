@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -528,6 +528,18 @@ pub async fn handle(
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterIndex {
+            name,
+            operation: AlterIndexOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_INDEX,
+            )
+            .await
+        }
         Statement::AlterView {
             materialized,
             name,

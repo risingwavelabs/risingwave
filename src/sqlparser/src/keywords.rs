@@ -601,7 +601,6 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::SET,
     Keyword::RETURNING,
     Keyword::EMIT,
-    Keyword::FORMAT,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`
