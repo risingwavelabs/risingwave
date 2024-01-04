@@ -181,69 +181,6 @@ mod tests {
     use crate::source::cdc::DebeziumCdcMeta;
     use crate::source::{DataType, SourceMessage, SplitId};
 
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn source_message_stream(transactional: bool) {
-        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
-        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
-        let data_batches = vec![
-            vec![
-                r#"{ "schema": null, "payload": {"after": {"customer_name": "a1", "order_date": "2020-01-30", "order_id": 10021, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35392, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
-                r#"{ "schema": null, "payload": {"after": {"customer_name": "a2", "order_date": "2020-02-30", "order_id": 10022, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35392, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
-                r#"{ "schema": null, "payload": {"after": {"customer_name": "a3", "order_date": "2020-03-30", "order_id": 10023, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35392, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
-            ],
-            vec![
-                r#"{ "schema": null, "payload": {"after": {"customer_name": "a4", "order_date": "2020-04-30", "order_id": 10024, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35392, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
-                r#"{ "schema": null, "payload": {"after": {"customer_name": "a5", "order_date": "2020-05-30", "order_id": 10025, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35392, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
-            ],
-        ];
-        for (i, batch) in data_batches.iter().enumerate() {
-            let mut source_msg_batch = vec![];
-            if i == 0 {
-                // put begin message at first
-                source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
-                    split_id: SplitId::from("1001"),
-                    offset: "0".into(),
-                    key: None,
-                    payload: Some(begin_msg.as_bytes().to_vec()),
-                });
-            }
-            // put data messages
-            for data_msg in batch {
-                source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: false,
-                    }),
-                    split_id: SplitId::from("1001"),
-                    offset: "0".into(),
-                    key: None,
-                    payload: Some(data_msg.as_bytes().to_vec()),
-                });
-            }
-            if i == data_batches.len() - 1 {
-                // put commit message at last
-                source_msg_batch.push(SourceMessage {
-                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
-                        full_table_name: "orders".to_string(),
-                        source_ts_ms: 0,
-                        is_transaction_meta: transactional,
-                    }),
-                    split_id: SplitId::from("1001"),
-                    offset: "0".into(),
-                    key: None,
-                    payload: Some(commit_msg.as_bytes().to_vec()),
-                });
-            }
-            yield source_msg_batch;
-        }
-    }
-
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
         let schema = vec![
@@ -326,6 +263,69 @@ mod tests {
 
         // a single transactional chunk
         assert_eq!(1, output.len());
+    }
+
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn source_message_stream(transactional: bool) {
+        let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
+        let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
+        let data_batches = vec![
+            vec![
+                r#"{ "schema": null, "payload": {"after": {"customer_name": "a1", "order_date": "2020-01-30", "order_id": 10021, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+                r#"{ "schema": null, "payload": {"after": {"customer_name": "a2", "order_date": "2020-02-30", "order_id": 10022, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+                r#"{ "schema": null, "payload": {"after": {"customer_name": "a3", "order_date": "2020-03-30", "order_id": 10023, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+            ],
+            vec![
+                r#"{ "schema": null, "payload": {"after": {"customer_name": "a4", "order_date": "2020-04-30", "order_id": 10024, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+                r#"{ "schema": null, "payload": {"after": {"customer_name": "a5", "order_date": "2020-05-30", "order_id": 10025, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+            ],
+        ];
+        for (i, batch) in data_batches.iter().enumerate() {
+            let mut source_msg_batch = vec![];
+            if i == 0 {
+                // put begin message at first
+                source_msg_batch.push(SourceMessage {
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                        full_table_name: "orders".to_string(),
+                        source_ts_ms: 0,
+                        is_transaction_meta: transactional,
+                    }),
+                    split_id: SplitId::from("1001"),
+                    offset: "0".into(),
+                    key: None,
+                    payload: Some(begin_msg.as_bytes().to_vec()),
+                });
+            }
+            // put data messages
+            for data_msg in batch {
+                source_msg_batch.push(SourceMessage {
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                        full_table_name: "orders".to_string(),
+                        source_ts_ms: 0,
+                        is_transaction_meta: false,
+                    }),
+                    split_id: SplitId::from("1001"),
+                    offset: "0".into(),
+                    key: None,
+                    payload: Some(data_msg.as_bytes().to_vec()),
+                });
+            }
+            if i == data_batches.len() - 1 {
+                // put commit message at last
+                source_msg_batch.push(SourceMessage {
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                        full_table_name: "orders".to_string(),
+                        source_ts_ms: 0,
+                        is_transaction_meta: transactional,
+                    }),
+                    split_id: SplitId::from("1001"),
+                    offset: "0".into(),
+                    key: None,
+                    payload: Some(commit_msg.as_bytes().to_vec()),
+                });
+            }
+            yield source_msg_batch;
+        }
     }
 
     #[tokio::test]

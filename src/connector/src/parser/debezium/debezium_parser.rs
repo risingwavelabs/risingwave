@@ -184,7 +184,6 @@ mod tests {
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
-
         let res = parser
             .parse_one_with_txn(
                 None,
@@ -198,7 +197,6 @@ mod tests {
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }
-
         let res = parser
             .parse_one_with_txn(
                 None,

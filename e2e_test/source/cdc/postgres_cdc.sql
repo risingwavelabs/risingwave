@@ -14,28 +14,6 @@ VALUES (default,10001,'Beijing','Shanghai',false),
        (default,10003,'Shanghai','Hangzhou',false);
 
 
-CREATE TABLE orders_tx (
-    order_id SERIAL NOT NULL PRIMARY KEY,
-    order_date DATE NOT NULL,
-    customer_name VARCHAR(255) NOT NULL,
-    price DECIMAL NOT NULL,
-    product_id INTEGER NOT NULL,
-    order_status BOOLEAN NOT NULL
-);
-ALTER SEQUENCE public.orders_tx_order_id_seq RESTART WITH 10001;
-
-INSERT INTO orders_tx
-VALUES (default, '2020-07-30 10:08:22', 'Jark', 50.50, 102, false),
-       (default, '2020-07-30 10:11:09', 'Sally', 15.00, 105, false);
-
-INSERT INTO orders_tx
-VALUES (default, '2023-12-30 19:11:09', '张三', 15.00, 105, true),
-       (default, '2020-07-30 12:00:30', '李四', 25.25, 106, false);
-
-INSERT INTO orders_tx
-VALUES (default, '2024-01-01 17:00:00', 'Sam', 1000.20, 110, false);
-
-
 CREATE TABLE person (
     "id" int,
     "name" varchar(64),
@@ -51,17 +29,6 @@ ALTER TABLE
 INSERT INTO person VALUES (1000, 'vicky noris', 'yplkvgz@qbxfg.com', '7878 5821 1864 2539', 'cheyenne');
 INSERT INTO person VALUES (1001, 'peter white', 'myckhsp@xpmpe.com', '1781 2313 8157 6974', 'boise');
 INSERT INTO person VALUES (1002, 'sarah spencer', 'wipvdbm@dkaap.com', '3453 4987 9481 6270', 'los angeles');
-
-INSERT INTO person VALUES (1003, 'Kafka', 'ypl@qbxfg.com', '1864 2539', 'Shanghai');
-INSERT INTO person VALUES (1100, 'noris', 'ypl@qbxfg.com', '1864 2539', 'enne');
-INSERT INTO person VALUES (1101, 'white', 'myc@xpmpe.com', '8157 6974', 'se');
-
-
-SELECT COUNT(*) AS person_count
-FROM person_tx
-UNION ALL
-SELECT COUNT(*) AS order_count
-FROM orders_tx;
 
 create schema abs;
 create table abs.t1 (v1 int primary key, v2 double precision, v3 varchar, v4 numeric);

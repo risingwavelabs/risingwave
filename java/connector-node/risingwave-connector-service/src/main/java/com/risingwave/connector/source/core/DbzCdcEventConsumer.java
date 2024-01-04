@@ -75,7 +75,6 @@ public class DbzCdcEventConsumer
     }
 
     private EventType getEventType(SourceRecord record) {
-        LOG.info("event topic: {}", record.topic());
         if (isHeartbeatEvent(record)) {
             return EventType.HEARTBEAT;
         } else if (isTransactionMetaEvent(record)) {
@@ -103,7 +102,6 @@ public class DbzCdcEventConsumer
             DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
             throws InterruptedException {
         var respBuilder = GetEventStreamResponse.newBuilder();
-        LOG.info("event batch size => {}", events.size());
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
             EventType eventType = getEventType(record);
@@ -133,7 +131,6 @@ public class DbzCdcEventConsumer
                         var message = msgBuilder.build();
                         LOG.debug("heartbeat => {}", message.getOffset());
                         respBuilder.addEvents(message);
-
                         break;
                     }
                 case TRANSACTION:
@@ -150,7 +147,6 @@ public class DbzCdcEventConsumer
                                         .build();
                         LOG.debug("transaction => {}", message);
                         respBuilder.addEvents(message);
-
                         break;
                     }
                 case DATA:

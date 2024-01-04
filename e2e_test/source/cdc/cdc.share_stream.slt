@@ -193,7 +193,7 @@ CREATE TABLE person_new (
 ) FROM pg_source TABLE 'person';
 
 statement ok
-CREATE TABLE person_tx (
+CREATE TABLE person_new (
     id int,
     name varchar,
     email_address varchar,
@@ -201,19 +201,6 @@ CREATE TABLE person_tx (
     city varchar,
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.person';
-
-CREATE TABLE orders_tx (
-    order_id INTEGER,
-    order_date DATE,
-    customer_name VARCHAR,
-    price DECIMAL,
-    product_id INTEGER,
-    order_status BOOLEAN,
-    PRIMARY KEY (order_id)
-) FROM pg_source TABLE 'public.orders_tx';
-
-create materialized view mv1 as select 'person' as table_name, count(*) as count from person_tx union all select 'orders' as table_name, count(*) as count from orders_tx;
-
 
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
