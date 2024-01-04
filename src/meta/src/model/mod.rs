@@ -771,27 +771,27 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
     pub fn into_v1(self) -> BTreeMapTransaction<'a, K, V, Transaction> {
         match self {
             BTreeMapTransactionWrapper::V1(v) => v,
-            BTreeMapTransactionWrapper::V2(_) => panic!(""),
+            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
         }
     }
 
     pub fn as_v1_ref(&self) -> &BTreeMapTransaction<'a, K, V, Transaction> {
         match self {
             BTreeMapTransactionWrapper::V1(v) => v,
-            BTreeMapTransactionWrapper::V2(_) => panic!(""),
+            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
         }
     }
 
     pub fn into_v2(self) -> BTreeMapTransaction<'a, K, V, TransactionV2> {
         match self {
-            BTreeMapTransactionWrapper::V1(_) => panic!(""),
+            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
             BTreeMapTransactionWrapper::V2(v) => v,
         }
     }
 
     pub fn as_v2_ref(&self) -> &BTreeMapTransaction<'a, K, V, TransactionV2> {
         match self {
-            BTreeMapTransactionWrapper::V1(_) => panic!(""),
+            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
             BTreeMapTransactionWrapper::V2(v) => v,
         }
     }
@@ -827,7 +827,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
         match self {
             BTreeMapEntryTransactionWrapper::V1(v) => v,
             BTreeMapEntryTransactionWrapper::V2(_) => {
-                panic!("")
+                panic!("expect V1, found V2")
             }
         }
     }
@@ -836,7 +836,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
         match self {
             BTreeMapEntryTransactionWrapper::V1(v) => v,
             BTreeMapEntryTransactionWrapper::V2(_) => {
-                panic!("")
+                panic!("expect V1, found V2")
             }
         }
     }
@@ -844,7 +844,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
     pub fn as_v2_ref(&self) -> &BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
         match self {
             BTreeMapEntryTransactionWrapper::V1(_) => {
-                panic!("")
+                panic!("expect V2, found V1")
             }
             BTreeMapEntryTransactionWrapper::V2(v) => v,
         }
@@ -853,7 +853,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
     pub fn into_v2(self) -> BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
         match self {
             BTreeMapEntryTransactionWrapper::V1(_) => {
-                panic!("")
+                panic!("expect V2, found V1")
             }
             BTreeMapEntryTransactionWrapper::V2(v) => v,
         }
@@ -872,7 +872,7 @@ impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
         match self {
             VarTransactionWrapper::V1(v) => v,
             VarTransactionWrapper::V2(_) => {
-                panic!("")
+                panic!("expect V1, found V2")
             }
         }
     }
@@ -881,7 +881,7 @@ impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
         match self {
             VarTransactionWrapper::V1(v) => v,
             VarTransactionWrapper::V2(_) => {
-                panic!("")
+                panic!("expect V1, found V2")
             }
         }
     }
@@ -889,7 +889,7 @@ impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
     pub fn as_v2_ref(&self) -> &VarTransaction<'a, TransactionV2, T> {
         match self {
             VarTransactionWrapper::V1(_) => {
-                panic!("")
+                panic!("expect V2, found V1")
             }
             VarTransactionWrapper::V2(v) => v,
         }
@@ -898,7 +898,7 @@ impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
     pub fn into_v2(self) -> VarTransaction<'a, TransactionV2, T> {
         match self {
             VarTransactionWrapper::V1(_) => {
-                panic!("")
+                panic!("expect V2, found V1")
             }
             VarTransactionWrapper::V2(v) => v,
         }
