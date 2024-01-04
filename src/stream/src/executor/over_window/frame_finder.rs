@@ -18,8 +18,12 @@
 use std::ops::Bound;
 
 use delta_btree_map::DeltaBTreeMap;
+use itertools::Itertools;
 use risingwave_common::row::OwnedRow;
-use risingwave_expr::window_function::{FrameBound, RowsFrameBounds};
+use risingwave_common::types::{Datum, Sentinelled, ToDatumRef};
+use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::sort_util::cmp_datum;
+use risingwave_expr::window_function::{FrameBound, RangeFrameBounds, RowsFrameBounds, StateKey};
 
 use super::over_partition::CacheKey;
 
@@ -127,6 +131,73 @@ pub(super) fn find_frame_end_for_rows_frame<'cache>(
     curr_key: &'cache CacheKey,
 ) -> &'cache CacheKey {
     find_boundary_for_rows_frame::<false>(frame_bounds, part_with_delta, curr_key)
+}
+
+/// Given the first and last key in delta, calculate the order values of the first
+/// and the last frames logically affected by some `RANGE` frames.
+pub(super) fn calc_logical_curr_for_range_frames(
+    range_frames: &[&RangeFrameBounds],
+    delta_first_key: &StateKey,
+    delta_last_key: &StateKey,
+) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
+    calc_logical_ord_for_range_frames(
+        range_frames,
+        delta_first_key,
+        delta_last_key,
+        |bounds, v| bounds.first_curr_of(v),
+        |bounds, v| bounds.last_curr_of(v),
+    )
+}
+
+/// Given the curr keys of the first and the last affected frames, calculate the order
+/// values of the logical start row of the first frame and the logical end row of the
+/// last frame.
+pub(super) fn calc_logical_boundary_for_range_frames(
+    range_frames: &[&RangeFrameBounds],
+    first_curr_key: &StateKey,
+    last_curr_key: &StateKey,
+) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
+    calc_logical_ord_for_range_frames(
+        range_frames,
+        first_curr_key,
+        last_curr_key,
+        |bounds, v| bounds.frame_start_of(v),
+        |bounds, v| bounds.frame_end_of(v),
+    )
+}
+
+/// Given a left logical order value (e.g. first curr order value, first delta order value),
+/// find the most closed cache key in `part_with_delta`. Ideally this function returns
+/// the smallest key that is larger than or equal to the given logical order (using `lower_bound`).
+pub(super) fn find_left_for_range_frames<'cache>(
+    range_frames: &[&RangeFrameBounds],
+    part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    logical_order_value: impl ToDatumRef,
+    cache_key_pk_len: usize, // this is dirty but we have no better choice
+) -> &'cache CacheKey {
+    find_for_range_frames::<true>(
+        range_frames,
+        part_with_delta,
+        logical_order_value,
+        cache_key_pk_len,
+    )
+}
+
+/// Given a right logical order value (e.g. last curr order value, last delta order value),
+/// find the most closed cache key in `part_with_delta`. Ideally this function returns
+/// the largest key that is smaller than or equal to the given logical order (using `lower_bound`).
+pub(super) fn find_right_for_range_frames<'cache>(
+    range_frames: &[&RangeFrameBounds],
+    part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    logical_order_value: impl ToDatumRef,
+    cache_key_pk_len: usize, // this is dirty but we have no better choice
+) -> &'cache CacheKey {
+    find_for_range_frames::<false>(
+        range_frames,
+        part_with_delta,
+        logical_order_value,
+        cache_key_pk_len,
+    )
 }
 
 // -------------------------- ↑ PUBLIC INTERFACE ↑ --------------------------
@@ -294,6 +365,143 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
             }
         })
         .unwrap()
+}
+
+/// Given a pair of left and right state keys, calculate the leftmost (smallest) and rightmost
+/// (largest) order values after the two given `offset_fn`s are applied, for all range frames.
+///
+/// A more vivid description may be: Given a pair of left and right keys, this function pushes
+/// the keys leftward and rightward respectively according to the given `offset_fn`s.
+///
+/// This is not very understandable but we have to extract the code to a function to avoid
+/// repeating. Check [`calc_logical_curr_for_range_frames`] and [`calc_logical_boundary_for_range_frames`]
+/// if you cannot understand the purpose of this function.
+fn calc_logical_ord_for_range_frames(
+    range_frames: &[&RangeFrameBounds],
+    left_key: &StateKey,
+    right_key: &StateKey,
+    left_offset_fn: impl Fn(&RangeFrameBounds, &Datum) -> Sentinelled<Datum>,
+    right_offset_fn: impl Fn(&RangeFrameBounds, &Datum) -> Sentinelled<Datum>,
+) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
+    if range_frames.is_empty() {
+        return None;
+    }
+
+    let (data_type, order_type) = range_frames
+        .iter()
+        .map(|bounds| (&bounds.order_data_type, bounds.order_type))
+        .all_equal_value()
+        .unwrap();
+
+    let datum_cmp = |a: &Datum, b: &Datum| cmp_datum(a, b, order_type);
+
+    let left_given_ord = memcmp_encoding::decode_value(data_type, &left_key.order_key, order_type)
+        .expect("no reason to fail because we just encoded it in memory");
+    let right_given_ord =
+        memcmp_encoding::decode_value(data_type, &right_key.order_key, order_type)
+            .expect("no reason to fail because we just encoded it in memory");
+
+    let logical_left_offset_ord = {
+        let mut order_value = None;
+        for bounds in range_frames {
+            let new_order_value = left_offset_fn(bounds, &left_given_ord);
+            order_value = match (order_value, new_order_value) {
+                (None, any_new) => Some(any_new),
+                (Some(old), new) => Some(std::cmp::min_by(old, new, |x, y| x.cmp_by(y, datum_cmp))),
+            };
+            if !order_value.as_ref().unwrap().is_normal() {
+                // already unbounded
+                assert!(
+                    order_value.as_ref().unwrap().is_smallest(),
+                    "left order value should never be `Largest`"
+                );
+                break;
+            }
+        }
+        order_value.expect("# of range frames > 0")
+    };
+
+    let logical_right_offset_ord = {
+        let mut order_value = None;
+        for bounds in range_frames {
+            let new_order_value = right_offset_fn(bounds, &right_given_ord);
+            order_value = match (order_value, new_order_value) {
+                (None, any_new) => Some(any_new),
+                (Some(old), new) => Some(std::cmp::max_by(old, new, |x, y| x.cmp_by(y, datum_cmp))),
+            };
+            if !order_value.as_ref().unwrap().is_normal() {
+                // already unbounded
+                assert!(
+                    order_value.as_ref().unwrap().is_largest(),
+                    "right order value should never be `Smallest`"
+                );
+                break;
+            }
+        }
+        order_value.expect("# of range frames > 0")
+    };
+
+    Some((logical_left_offset_ord, logical_right_offset_ord))
+}
+
+fn find_for_range_frames<'cache, const LEFT: bool>(
+    range_frames: &[&RangeFrameBounds],
+    part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    logical_order_value: impl ToDatumRef,
+    cache_key_pk_len: usize,
+) -> &'cache CacheKey {
+    debug_assert!(
+        part_with_delta.first_key().is_some(),
+        "must have something in the range cache after applying delta"
+    );
+
+    let order_type = range_frames
+        .iter()
+        .map(|bounds| bounds.order_type)
+        .all_equal_value()
+        .unwrap();
+
+    let search_key = Sentinelled::Normal(StateKey {
+        order_key: memcmp_encoding::encode_value(logical_order_value, order_type)
+            .expect("the data type is simple, should succeed"),
+        pk: if LEFT {
+            OwnedRow::empty() // empty row is minimal
+        } else {
+            OwnedRow::new(vec![None; cache_key_pk_len]) // all-NULL row is maximal in default order
+        }
+        .into(),
+    });
+
+    if LEFT {
+        let cursor = part_with_delta.lower_bound(Bound::Included(&search_key));
+        if let Some((prev_key, _)) = cursor.peek_prev()
+            && prev_key.is_smallest()
+        {
+            // If the found lower bound of search key is right behind a smallest sentinel,
+            // we don't know if there's any other rows with the same order key in the state
+            // table but not in cache. We should conservatively return the sentinel key as
+            // the curr key.
+            prev_key
+        } else {
+            // If cursor is in ghost position, it simply means that the search key is larger
+            // than any existing key. Returning the last key in this case does no harm. Especially,
+            // if the last key is largest sentinel, the caller should extend the cache rightward
+            // to get possible entries with the same order value into the cache.
+            cursor.key().or_else(|| part_with_delta.last_key()).unwrap()
+        }
+    } else {
+        let cursor = part_with_delta.upper_bound(Bound::Included(&search_key));
+        if let Some((next_key, _)) = cursor.peek_next()
+            && next_key.is_largest()
+        {
+            next_key
+        } else {
+            cursor
+                .key()
+                .or_else(|| part_with_delta.first_key())
+                .unwrap()
+        }
+    }
 }
 
 #[cfg(test)]

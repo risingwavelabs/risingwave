@@ -25,8 +25,10 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
-use risingwave_common::types::Sentinelled;
-use risingwave_expr::window_function::{RowsFrameBounds, StateKey, WindowFuncCall};
+use risingwave_common::types::{Datum, Sentinelled};
+use risingwave_expr::window_function::{
+    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall,
+};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -231,6 +233,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     cache_policy: CachePolicy,
 
     super_rows_frame_bounds: RowsFrameBounds,
+    range_frames: Vec<&'a RangeFrameBounds>,
     start_is_unbounded: bool,
     end_is_unbounded: bool,
     row_conv: RowConverter<'a>,
@@ -257,6 +260,10 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .collect::<Vec<_>>();
         // TODO(rc): maybe should avoid repeated merging
         let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
+        let range_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_range())
+            .collect::<Vec<_>>();
 
         let start_is_unbounded = calls
             .iter()
@@ -271,6 +278,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             cache_policy,
 
             super_rows_frame_bounds,
+            range_frames,
             start_is_unbounded,
             end_is_unbounded,
             row_conv,
@@ -391,10 +399,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
+        let range_frame_logical_curr =
+            calc_logical_curr_for_range_frames(&self.range_frames, delta_first, delta_last);
+
         if self.cache_policy.is_full() {
             // ensure everything is in the cache
             self.extend_cache_to_boundary(table).await?;
         } else {
+            // TODO(rc): later we should extend cache using `self.super_rows_frame_bounds` and
+            // `range_frame_logical_curr` as hints.
+
             // ensure the cache covers all delta (if possible)
             self.extend_cache_by_range(table, delta_first..=delta_last)
                 .await?;
@@ -413,7 +427,8 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             let part_with_delta = DeltaBTreeMap::new(cache_inner, delta);
 
             self.stats.lookup_count += 1;
-            let res = self.find_affected_ranges_readonly(part_with_delta);
+            let res = self
+                .find_affected_ranges_readonly(part_with_delta, range_frame_logical_curr.as_ref());
 
             let (need_extend_leftward, need_extend_rightward) = match res {
                 Ok(ranges) => return Ok((part_with_delta, ranges)),
@@ -448,6 +463,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     fn find_affected_ranges_readonly<'cache>(
         &'_ self,
         part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+        range_frame_logical_curr: Option<&(Sentinelled<Datum>, Sentinelled<Datum>)>,
     ) -> std::result::Result<
         Vec<(
             &'cache CacheKey,
@@ -464,6 +480,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let delta_first_key = part_with_delta.delta().first_key_value().unwrap().0;
         let delta_last_key = part_with_delta.delta().last_key_value().unwrap().0;
+        let cache_key_pk_len = delta_first_key.as_normal_expect().pk.len();
 
         if part_with_delta.snapshot().is_empty() {
             // all existing keys are inserted in the delta
@@ -483,22 +500,48 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // to the first key is always affected.
             first_key
         } else {
-            find_first_curr_for_rows_frame(
+            let mut key = find_first_curr_for_rows_frame(
                 &self.super_rows_frame_bounds,
                 part_with_delta,
                 delta_first_key,
-            )
+            );
+
+            if let Some((logical_first_curr, _)) = range_frame_logical_curr {
+                let logical_curr = logical_first_curr.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
+                let new_key = find_left_for_range_frames(
+                    &self.range_frames,
+                    part_with_delta,
+                    logical_curr,
+                    cache_key_pk_len,
+                );
+                key = std::cmp::min(key, new_key);
+            }
+
+            key
         };
 
         let last_curr_key = if self.start_is_unbounded || delta_last_key == last_key {
             // similar to `first_curr_key`
             last_key
         } else {
-            find_last_curr_for_rows_frame(
+            let mut key = find_last_curr_for_rows_frame(
                 &self.super_rows_frame_bounds,
                 part_with_delta,
                 delta_last_key,
-            )
+            );
+
+            if let Some((_, logical_last_curr)) = range_frame_logical_curr {
+                let logical_curr = logical_last_curr.as_normal_expect(); // otherwise should go `start_is_unbounded` branch
+                let new_key = find_right_for_range_frames(
+                    &self.range_frames,
+                    part_with_delta,
+                    logical_curr,
+                    cache_key_pk_len,
+                );
+                key = std::cmp::max(key, new_key);
+            }
+
+            key
         };
 
         {
@@ -530,16 +573,35 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             return Ok(vec![]);
         }
 
+        let range_frame_logical_boundary = calc_logical_boundary_for_range_frames(
+            &self.range_frames,
+            first_curr_key.as_normal_expect(),
+            last_curr_key.as_normal_expect(),
+        );
+
         let first_frame_start = if self.start_is_unbounded || first_curr_key == first_key {
             // If the frame start is unbounded, or, the first curr key is the first key, then the first key
             // always need to be included in the affected range.
             first_key
         } else {
-            find_frame_start_for_rows_frame(
+            let mut key = find_frame_start_for_rows_frame(
                 &self.super_rows_frame_bounds,
                 part_with_delta,
                 first_curr_key,
-            )
+            );
+
+            if let Some((logical_first_start, _)) = range_frame_logical_boundary.as_ref() {
+                let logical_boundary = logical_first_start.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
+                let new_key = find_left_for_range_frames(
+                    &self.range_frames,
+                    part_with_delta,
+                    logical_boundary,
+                    cache_key_pk_len,
+                );
+                key = std::cmp::min(key, new_key);
+            }
+
+            key
         };
         assert!(first_frame_start <= first_curr_key);
 
@@ -547,11 +609,24 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // similar to `first_frame_start`
             last_key
         } else {
-            find_frame_end_for_rows_frame(
+            let mut key = find_frame_end_for_rows_frame(
                 &self.super_rows_frame_bounds,
                 part_with_delta,
                 last_curr_key,
-            )
+            );
+
+            if let Some((_, logical_last_end)) = range_frame_logical_boundary.as_ref() {
+                let logical_boundary = logical_last_end.as_normal_expect(); // otherwise should go `end_is_unbounded` branch
+                let new_key = find_right_for_range_frames(
+                    &self.range_frames,
+                    part_with_delta,
+                    logical_boundary,
+                    cache_key_pk_len,
+                );
+                key = std::cmp::max(key, new_key);
+            }
+
+            key
         };
         assert!(last_frame_end >= last_curr_key);
 

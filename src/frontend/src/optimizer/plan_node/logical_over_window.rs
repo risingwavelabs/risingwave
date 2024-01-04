@@ -718,14 +718,6 @@ impl ToBatch for LogicalOverWindow {
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        if self
-            .window_functions()
-            .iter()
-            .any(|wf| wf.frame.bounds.is_range())
-        {
-            bail_not_implemented!("Window function with `RANGE` frame is not supported yet");
-        }
-
         // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
         // empty PARTITION BY by simply removing the following check.
         let partition_key_indices = self.window_functions()[0]
@@ -754,14 +746,6 @@ impl ToStream for LogicalOverWindow {
             self.core.funcs_have_same_partition_and_order(),
             "must apply OverWindowSplitRule before generating physical plan"
         );
-
-        if self
-            .window_functions()
-            .iter()
-            .any(|wf| wf.frame.bounds.is_range())
-        {
-            bail_not_implemented!("Window function with `RANGE` frame is not supported yet");
-        }
 
         let stream_input = self.core.input.to_stream(ctx)?;
 
