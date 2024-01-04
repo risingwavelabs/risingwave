@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ use risingwave_pb::catalog::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Operation as NotificationOperation,
+    Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
+use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments, Relation, RelationGroup};
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -75,6 +75,7 @@ pub struct CatalogController {
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
     pub(crate) streaming_jobs: Vec<ObjectId>,
+    #[allow(dead_code)]
     pub(crate) state_table_ids: Vec<TableId>,
     pub(crate) source_ids: Vec<SourceId>,
     pub(crate) connections: Vec<PrivateLinkService>,
@@ -144,6 +145,8 @@ impl CatalogController {
             database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
+            initialized_at_cluster_version: Default::default(),
+            created_at_cluster_version: Default::default(),
         };
         Ok(active_db.insert(txn).await?)
     }
@@ -640,7 +643,7 @@ impl CatalogController {
             let ret = src_manager.register_source(&pb_source).await;
             if let Err(e) = ret {
                 txn.rollback().await?;
-                return Err(e);
+                return Err(e.into());
             }
         }
         txn.commit().await?;
@@ -981,37 +984,43 @@ impl CatalogController {
                     .await?;
                 table_ids.extend(internal_tables);
 
-                Object::update_many()
-                    .col_expr(
-                        object::Column::OwnerId,
-                        SimpleExpr::Value(Value::Int(Some(new_owner))),
-                    )
-                    .filter(
-                        object::Column::Oid
-                            .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
-                    )
-                    .exec(&txn)
-                    .await?;
-
-                let index_objs = Index::find()
-                    .find_also_related(Object)
-                    .filter(index::Column::IndexId.is_in(index_ids))
-                    .all(&txn)
-                    .await?;
-                for (index, index_obj) in index_objs {
-                    relations.push(PbRelationInfo::Index(
-                        ObjectModel(index, index_obj.unwrap()).into(),
-                    ));
+                if !index_ids.is_empty() || !table_ids.is_empty() {
+                    Object::update_many()
+                        .col_expr(
+                            object::Column::OwnerId,
+                            SimpleExpr::Value(Value::Int(Some(new_owner))),
+                        )
+                        .filter(
+                            object::Column::Oid
+                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                        )
+                        .exec(&txn)
+                        .await?;
                 }
-                let table_objs = Table::find()
-                    .find_also_related(Object)
-                    .filter(table::Column::TableId.is_in(table_ids))
-                    .all(&txn)
-                    .await?;
-                for (table, table_obj) in table_objs {
-                    relations.push(PbRelationInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
-                    ));
+
+                if !index_ids.is_empty() {
+                    let index_objs = Index::find()
+                        .find_also_related(Object)
+                        .filter(index::Column::IndexId.is_in(index_ids))
+                        .all(&txn)
+                        .await?;
+                    for (index, index_obj) in index_objs {
+                        relations.push(PbRelationInfo::Index(
+                            ObjectModel(index, index_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+                if !table_ids.is_empty() {
+                    let table_objs = Table::find()
+                        .find_also_related(Object)
+                        .filter(table::Column::TableId.is_in(table_ids))
+                        .all(&txn)
+                        .await?;
+                    for (table, table_obj) in table_objs {
+                        relations.push(PbRelationInfo::Table(
+                            ObjectModel(table, table_obj.unwrap()).into(),
+                        ));
+                    }
                 }
             }
             ObjectType::Source => {
@@ -1079,6 +1088,245 @@ impl CatalogController {
                             relation_info: Some(relation),
                         })
                         .collect(),
+                }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn alter_schema(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        new_schema: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        ensure_object_id(ObjectType::Schema, new_schema, &txn).await?;
+
+        let obj = Object::find_by_id(object_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
+        if obj.schema_id == Some(new_schema) {
+            return Ok(IGNORED_NOTIFICATION_VERSION);
+        }
+
+        let mut obj = obj.into_active_model();
+        obj.schema_id = Set(Some(new_schema));
+        let obj = obj.update(&txn).await?;
+        let database_id = obj.database_id.unwrap();
+
+        let mut relations = vec![];
+        match object_type {
+            ObjectType::Table => {
+                let table = Table::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+                check_relation_name_duplicate(&table.name, database_id, new_schema, &txn).await?;
+
+                // associated source.
+                if let Some(associated_source_id) = table.optional_associated_source_id {
+                    let src_obj = object::ActiveModel {
+                        oid: Set(associated_source_id as _),
+                        schema_id: Set(Some(new_schema)),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let source = Source::find_by_id(associated_source_id)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("source", associated_source_id)
+                        })?;
+                    relations.push(PbRelationInfo::Source(ObjectModel(source, src_obj).into()));
+                }
+
+                // indexes.
+                let (index_ids, (index_names, mut table_ids)): (
+                    Vec<IndexId>,
+                    (Vec<String>, Vec<TableId>),
+                ) = if table.table_type == TableType::Table {
+                    Index::find()
+                        .select_only()
+                        .columns([
+                            index::Column::IndexId,
+                            index::Column::Name,
+                            index::Column::IndexTableId,
+                        ])
+                        .filter(index::Column::PrimaryTableId.eq(object_id))
+                        .into_tuple::<(IndexId, String, TableId)>()
+                        .all(&txn)
+                        .await?
+                        .into_iter()
+                        .map(|(id, name, t_id)| (id, (name, t_id)))
+                        .unzip()
+                } else {
+                    (vec![], (vec![], vec![]))
+                };
+                relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(
+                        table::Column::BelongsToJobId
+                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                    )
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+                table_ids.extend(internal_tables);
+
+                if !index_ids.is_empty() || !table_ids.is_empty() {
+                    for index_name in index_names {
+                        check_relation_name_duplicate(&index_name, database_id, new_schema, &txn)
+                            .await?;
+                    }
+
+                    Object::update_many()
+                        .col_expr(
+                            object::Column::SchemaId,
+                            SimpleExpr::Value(Value::Int(Some(new_schema))),
+                        )
+                        .filter(
+                            object::Column::Oid
+                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                        )
+                        .exec(&txn)
+                        .await?;
+                }
+
+                if !index_ids.is_empty() {
+                    let index_objs = Index::find()
+                        .find_also_related(Object)
+                        .filter(index::Column::IndexId.is_in(index_ids))
+                        .all(&txn)
+                        .await?;
+                    for (index, index_obj) in index_objs {
+                        relations.push(PbRelationInfo::Index(
+                            ObjectModel(index, index_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+                if !table_ids.is_empty() {
+                    let table_objs = Table::find()
+                        .find_also_related(Object)
+                        .filter(table::Column::TableId.is_in(table_ids))
+                        .all(&txn)
+                        .await?;
+                    for (table, table_obj) in table_objs {
+                        relations.push(PbRelationInfo::Table(
+                            ObjectModel(table, table_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+            }
+            ObjectType::Source => {
+                let source = Source::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
+                check_relation_name_duplicate(&source.name, database_id, new_schema, &txn).await?;
+                relations.push(PbRelationInfo::Source(ObjectModel(source, obj).into()));
+            }
+            ObjectType::Sink => {
+                let sink = Sink::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
+                check_relation_name_duplicate(&sink.name, database_id, new_schema, &txn).await?;
+                relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(table::Column::BelongsToJobId.eq(object_id))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                if !internal_tables.is_empty() {
+                    Object::update_many()
+                        .col_expr(
+                            object::Column::SchemaId,
+                            SimpleExpr::Value(Value::Int(Some(new_schema))),
+                        )
+                        .filter(object::Column::Oid.is_in(internal_tables.clone()))
+                        .exec(&txn)
+                        .await?;
+
+                    let table_objs = Table::find()
+                        .find_also_related(Object)
+                        .filter(table::Column::TableId.is_in(internal_tables))
+                        .all(&txn)
+                        .await?;
+                    for (table, table_obj) in table_objs {
+                        relations.push(PbRelationInfo::Table(
+                            ObjectModel(table, table_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+            }
+            ObjectType::View => {
+                let view = View::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
+                check_relation_name_duplicate(&view.name, database_id, new_schema, &txn).await?;
+                relations.push(PbRelationInfo::View(ObjectModel(view, obj).into()));
+            }
+            ObjectType::Function => {
+                let function = Function::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
+                let pb_function: PbFunction = ObjectModel(function, obj).into();
+                check_function_signature_duplicate(&pb_function, &txn).await?;
+
+                txn.commit().await?;
+                let version = self
+                    .notify_frontend(
+                        NotificationOperation::Update,
+                        NotificationInfo::Function(pb_function),
+                    )
+                    .await;
+                return Ok(version);
+            }
+            ObjectType::Connection => {
+                let connection = Connection::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
+                let pb_connection: PbConnection = ObjectModel(connection, obj).into();
+                check_connection_name_duplicate(&pb_connection, &txn).await?;
+
+                txn.commit().await?;
+                let version = self
+                    .notify_frontend(
+                        NotificationOperation::Update,
+                        NotificationInfo::Connection(pb_connection),
+                    )
+                    .await;
+                return Ok(version);
+            }
+            _ => unreachable!("not supported object type: {:?}", object_type),
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: relations
+                        .into_iter()
+                        .map(|relation_info| Relation {
+                            relation_info: Some(relation_info),
+                        })
+                        .collect_vec(),
                 }),
             )
             .await;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1118,7 +1118,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            1.5000
+            2.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {

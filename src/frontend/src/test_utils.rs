@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, SystemParams};
+use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -587,6 +587,14 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_database_name(&self, _database_id: u32, _database_name: &str) -> Result<()> {
         unreachable!()
+    }
+
+    async fn alter_parallelism(
+        &self,
+        _table_id: u32,
+        _parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        todo!()
     }
 }
 

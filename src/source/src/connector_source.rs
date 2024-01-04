@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,8 +64,8 @@ impl ConnectorSource {
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
-        let config =
-            ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
+        let config = ConnectorProperties::extract(properties, false)
+            .map_err(|e| ConnectorError(e.into()))?;
 
         Ok(Self {
             config,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -290,21 +290,21 @@ enum TableCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ScaleHorizonCommands {
-    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "worker_id or worker_host:worker_port, ..."
     )]
     exclude_workers: Option<Vec<String>>,
 
-    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// The worker that needs to be included during scheduling, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "all or worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host:worker_port, ..."
     )]
     include_workers: Option<Vec<String>>,
 
@@ -344,13 +344,13 @@ pub struct ScaleVerticalCommands {
     #[command(flatten)]
     common: ScaleCommon,
 
-    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// The worker that needs to be scheduled, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         required = true,
         value_delimiter = ',',
-        value_name = "all or worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host:worker_port, ..."
     )]
     workers: Option<Vec<String>>,
 
@@ -465,12 +465,12 @@ enum MetaCommands {
 
     /// Unregister workers from the cluster
     UnregisterWorkers {
-        /// The workers that needs to be unregistered, worker_id and worker_host are both supported
+        /// The workers that needs to be unregistered, worker_id and worker_host:worker_port are both supported
         #[clap(
             long,
             required = true,
             value_delimiter = ',',
-            value_name = "worker_id or worker_host, ..."
+            value_name = "worker_id or worker_host:worker_port, ..."
         )]
         workers: Vec<String>,
 

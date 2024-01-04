@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
-use crate::manager::{IdGeneratorManagerRef, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::FragmentId;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -284,13 +284,15 @@ impl StreamFragmentGraph {
     /// Create a new [`StreamFragmentGraph`] from the given [`StreamFragmentGraphProto`], with all
     /// global IDs correctly filled.
     pub async fn new(
+        env: &MetaSrvEnv,
         proto: StreamFragmentGraphProto,
-        id_gen: IdGeneratorManagerRef,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
+        // TODO: use sql_id_gen that is not implemented yet.
         let fragment_id_gen =
-            GlobalFragmentIdGen::new(&id_gen, proto.fragments.len() as u64).await?;
-        let table_id_gen = GlobalTableIdGen::new(&id_gen, proto.table_ids_cnt as u64).await?;
+            GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64).await?;
+        let table_id_gen =
+            GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64).await?;
 
         // Create nodes.
         let fragments: HashMap<_, _> = proto
@@ -367,6 +369,18 @@ impl StreamFragmentGraph {
             }
         }
         tables
+    }
+
+    pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<u32, u32>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    let target = table_id_map.get(&table.id).cloned().unwrap();
+                    table.id = target;
+                },
+            );
+        }
     }
 
     /// Set internal tables' `table_id`s according to a list of internal tables

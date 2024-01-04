@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -28,9 +27,9 @@ use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F
 use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDesc, ColumnDescVersion};
 
 use super::schema_resolver::*;
-use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
+use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -112,33 +111,7 @@ impl ProtobufParserConfig {
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
             let url = url.first().unwrap();
-            match url.scheme() {
-                // TODO(Tao): support local file only when it's compiled in debug mode.
-                "file" => {
-                    let path = url.to_file_path().map_err(|_| {
-                        RwError::from(InternalError(format!("illegal path: {}", location)))
-                    })?;
-
-                    if path.is_dir() {
-                        return Err(RwError::from(ProtocolError(
-                            "schema file location must not be a directory".to_string(),
-                        )));
-                    }
-                    Self::local_read_to_bytes(&path)
-                }
-                "s3" => {
-                    load_file_descriptor_from_s3(
-                        url,
-                        protobuf_config.aws_auth_props.as_ref().unwrap(),
-                    )
-                    .await
-                }
-                "https" | "http" => load_file_descriptor_from_http(url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?
+            bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
         };
 
         let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
@@ -159,17 +132,6 @@ impl ProtobufParserConfig {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
             descriptor_pool: Arc::new(pool),
-        })
-    }
-
-    /// read binary schema from a local file
-    fn local_read_to_bytes(path: &Path) -> Result<Vec<u8>> {
-        std::fs::read(path).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to read file {}: {}",
-                path.display(),
-                e
-            )))
         })
     }
 

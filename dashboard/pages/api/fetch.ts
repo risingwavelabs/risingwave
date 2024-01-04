@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  *
  */
 
-import { useToast } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
+import useErrorToast from "../../hook/useErrorToast"
 
 export default function useFetch<T>(fetchFn: () => Promise<T>) {
   const [response, setResponse] = useState<T>()
-  const toast = useToast()
+  const toast = useErrorToast()
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,14 +28,7 @@ export default function useFetch<T>(fetchFn: () => Promise<T>) {
         const res = await fetchFn()
         setResponse(res)
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     fetchData()

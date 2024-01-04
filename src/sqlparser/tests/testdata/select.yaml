@@ -77,6 +77,8 @@
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT 0c6
+  error_msg: 'sql parser error: trailing junk after numeric literal at Line: 1, Column 8'
 - input: SELECT 1e6
   formatted_sql: SELECT 1e6
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -89,6 +91,34 @@
 - input: SELECT -1e6
   formatted_sql: SELECT -1e6
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT 0x42e3
+  formatted_sql: SELECT 0x42e3
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("0x42e3")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT -0X40
+  formatted_sql: SELECT -0x40
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-0x40")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT 0B1101
+  formatted_sql: SELECT 0b1101
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("0b1101")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT -0b101
+  formatted_sql: SELECT -0b101
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-0b101")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT 0o664
+  formatted_sql: SELECT 0o664
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("0o664")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT -0O755
+  formatted_sql: SELECT -0o755
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-0o755")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: SELECT 0o129
+  error_msg: |-
+    sql parser error: Expected end of statement, found: 9 at line:1, column:13
+    Near "SELECT 0o12"
+- input: SELECT 0o3.5
+  error_msg: |-
+    sql parser error: Expected end of statement, found: .5 at line:1, column:13
+    Near "SELECT 0o3"
+- input: SELECT 0x
+  error_msg: 'sql parser error: incomplete integer literal at Line: 1, Column 8'
 - input: SELECT 1::float(0)
   error_msg: 'sql parser error: precision for type float must be at least 1 bit'
 - input: SELECT 1::float(54)

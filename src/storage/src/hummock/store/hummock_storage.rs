@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
-use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -529,6 +528,9 @@ impl StateStore for HummockStorage {
         Ok(())
     }
 }
+
+#[cfg(any(test, feature = "test"))]
+use risingwave_hummock_sdk::version::HummockVersion;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {

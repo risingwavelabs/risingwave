@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::path::Path;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use rdkafka::message::Headers;
 use reqwest::Url;
-use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, InvalidParameterValue, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
 
-use crate::aws_utils::{default_conn_config, s3_client};
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::common::AwsAuthProps;
 use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::SourceMeta;
-
-const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
@@ -99,54 +94,25 @@ macro_rules! extract_key_config {
     };
 }
 
-/// Read schema from local file. For on-premise or testing.
-pub(super) fn read_schema_from_local(path: impl AsRef<Path>) -> Result<String> {
-    std::fs::read_to_string(path.as_ref()).map_err(|e| e.into())
-}
-
-/// Read schema from http/https. For common usage.
-pub(super) async fn read_schema_from_http(location: &Url) -> Result<String> {
-    let schema_bytes = download_from_http(location).await?;
-
-    String::from_utf8(schema_bytes.into()).map_err(|e| {
-        RwError::from(InternalError(format!(
-            "read schema string from https failed {}",
-            e
-        )))
-    })
-}
-
-/// Read schema from s3 bucket.
-/// S3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn read_schema_from_s3(url: &Url, config: &AwsAuthProps) -> Result<String> {
-    let bucket = url
-        .domain()
-        .ok_or_else(|| RwError::from(InternalError(format!("Illegal s3 path {}", url))))?;
-    if config.region.is_none() {
-        return Err(RwError::from(InvalidConfigValue {
-            config_entry: AVRO_SCHEMA_LOCATION_S3_REGION.to_string(),
-            config_value: "NONE".to_string(),
-        }));
+/// Load raw bytes from:
+/// * local file, for on-premise or testing.
+/// * http/https, for common usage.
+/// * s3 file location format: <s3://bucket_name/file_name>
+pub(super) async fn bytes_from_url(url: &Url, config: Option<&AwsAuthProps>) -> Result<Vec<u8>> {
+    match (url.scheme(), config) {
+        // TODO(Tao): support local file only when it's compiled in debug mode.
+        ("file", _) => {
+            let path = url
+                .to_file_path()
+                .map_err(|()| InvalidParameterValue(format!("illegal path: {url}")))?;
+            Ok(std::fs::read(path)?)
+        }
+        ("https" | "http", _) => Ok(download_from_http(url).await?.into()),
+        ("s3", Some(config)) => load_file_descriptor_from_s3(url, config).await,
+        (scheme, _) => Err(RwError::from(InvalidParameterValue(format!(
+            "path scheme {scheme} is not supported",
+        )))),
     }
-    let key = url.path().replace('/', "");
-    let sdk_config = config.build_config().await?;
-    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let response = s3_client
-        .get_object()
-        .bucket(bucket.to_string())
-        .key(key)
-        .send()
-        .await
-        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-    let body_bytes = response.body.collect().await.map_err(|e| {
-        RwError::from(InternalError(format!(
-            "Read Avro schema file from s3 {}",
-            e
-        )))
-    })?;
-    let schema_bytes = body_bytes.into_bytes().to_vec();
-    String::from_utf8(schema_bytes)
-        .map_err(|e| RwError::from(InternalError(format!("Avro schema not valid utf8 {}", e))))
 }
 
 pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> Option<Datum> {

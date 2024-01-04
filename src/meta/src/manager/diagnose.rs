@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -222,7 +222,9 @@ impl DiagnoseCommand {
                     .and_then(|ts| Timestamptz::from_secs(ts as _).map(|t| t.to_string())),
             );
             let actor_count = {
-                if let Ok(t) = worker_node.get_type() && t != WorkerType::ComputeNode {
+                if let Ok(t) = worker_node.get_type()
+                    && t != WorkerType::ComputeNode
+                {
                     None
                 } else {
                     match worker_actor_count.get(&worker_node.id) {
@@ -357,7 +359,9 @@ impl DiagnoseCommand {
             let Some(ref inner) = event_log.event else {
                 continue;
             };
-            if let Some(limit) = limit && row_count >= limit {
+            if let Some(limit) = limit
+                && row_count >= limit
+            {
                 break;
             }
             let mut row = Row::new();
@@ -647,7 +651,9 @@ impl DiagnoseCommand {
 
         let compute_clients = ComputeClientPool::default();
         for worker_node in &worker_nodes {
-            if let Ok(client) = compute_clients.get(worker_node).await && let Ok(result) = client.stack_trace().await {
+            if let Ok(client) = compute_clients.get(worker_node).await
+                && let Ok(result) = client.stack_trace().await
+            {
                 merge(&mut all, result);
             }
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ pub mod source;
 pub mod split;
 pub mod topic;
 
+use std::collections::HashMap;
+
 pub use enumerator::*;
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -24,7 +26,7 @@ pub use split::*;
 use with_options::WithOptions;
 
 use self::source::reader::PulsarSplitReader;
-use crate::common::PulsarCommon;
+use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
@@ -35,6 +37,12 @@ impl SourceProperties for PulsarProperties {
     type SplitReader = PulsarSplitReader;
 
     const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for PulsarProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -53,10 +61,19 @@ pub struct PulsarProperties {
     #[serde(flatten)]
     pub common: PulsarCommon,
 
+    #[serde(flatten)]
+    pub oauth: Option<PulsarOauthCommon>,
+
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+
     #[serde(rename = "iceberg.enabled")]
     #[serde_as(as = "DisplayFromStr")]
     pub iceberg_loader_enabled: Option<bool>,
 
     #[serde(rename = "iceberg.bucket", default)]
     pub iceberg_bucket: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,7 +155,6 @@ impl Executor for ValuesExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::{
@@ -174,8 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_values() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);

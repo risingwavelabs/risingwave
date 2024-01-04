@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1207,9 +1207,7 @@ where
         let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
 
         // Compute Delete Ranges
-        if should_clean_watermark
-            && let Some(watermark_suffix) = watermark_suffix
-        {
+        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
@@ -1225,16 +1223,16 @@ where
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes.clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref())
-                    )
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
                 ));
             } else {
                 seal_watermark = Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
                         self.vnodes.clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref())
-                    )
+                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
+                    ),
                 ));
             }
         }

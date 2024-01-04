@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
-use crate::common::KafkaCommon;
+use crate::common::{KafkaCommon, RdKafkaPropertiesCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -67,7 +67,7 @@ const fn _default_max_in_flight_requests_per_connection() -> usize {
 
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
-enum CompressionCodec {
+pub enum CompressionCodec {
     None,
     Gzip,
     Snappy,
@@ -228,7 +228,10 @@ pub struct KafkaConfig {
     pub primary_key: Option<String>,
 
     #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaPropertiesProducer,
+    pub rdkafka_properties_common: RdKafkaPropertiesCommon,
+
+    #[serde(flatten)]
+    pub rdkafka_properties_producer: RdKafkaPropertiesProducer,
 }
 
 impl KafkaConfig {
@@ -240,8 +243,8 @@ impl KafkaConfig {
     }
 
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
-        self.common.set_client(c);
-        self.rdkafka_properties.set_client(c);
+        self.rdkafka_properties_common.set_client(c);
+        self.rdkafka_properties_producer.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
     }
@@ -256,7 +259,9 @@ impl From<KafkaConfig> for KafkaProperties {
             time_offset: None,
             upsert: None,
             common: val.common,
-            rdkafka_properties: Default::default(),
+            rdkafka_properties_common: val.rdkafka_properties_common,
+            rdkafka_properties_consumer: Default::default(),
+            unknown_fields: Default::default(),
         }
     }
 }
@@ -312,7 +317,7 @@ impl Sink for KafkaSink {
         .await?;
         let max_delivery_buffer_size = (self
             .config
-            .rdkafka_properties
+            .rdkafka_properties_producer
             .queue_buffering_max_messages
             .as_ref()
             .cloned()
@@ -560,7 +565,8 @@ mod test {
 
     use super::*;
     use crate::sink::encoder::{
-        DateHandlingMode, JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+        DateHandlingMode, JsonEncoder, TimeHandlingMode, TimestampHandlingMode,
+        TimestamptzHandlingMode,
     };
     use crate::sink::formatter::AppendOnlyFormatter;
 
@@ -568,10 +574,10 @@ mod test {
     fn parse_rdkafka_props() {
         let props: HashMap<String, String> = hashmap! {
             // basic
-            "connector".to_string() => "kafka".to_string(),
+            // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
-            "type".to_string() => "append-only".to_string(),
+            // "type".to_string() => "append-only".to_string(),
             // RdKafkaPropertiesCommon
             "properties.message.max.bytes".to_string() => "12345".to_string(),
             "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
@@ -590,16 +596,17 @@ mod test {
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
-            c.rdkafka_properties.queue_buffering_max_ms,
+            c.rdkafka_properties_producer.queue_buffering_max_ms,
             Some(114.514f64)
         );
         assert_eq!(
-            c.rdkafka_properties.compression_codec,
+            c.rdkafka_properties_producer.compression_codec,
             Some(CompressionCodec::Zstd)
         );
-        assert_eq!(c.rdkafka_properties.message_timeout_ms, 114514);
+        assert_eq!(c.rdkafka_properties_producer.message_timeout_ms, 114514);
         assert_eq!(
-            c.rdkafka_properties.max_in_flight_requests_per_connection,
+            c.rdkafka_properties_producer
+                .max_in_flight_requests_per_connection,
             114514
         );
 
@@ -638,11 +645,11 @@ mod test {
     #[test]
     fn parse_kafka_config() {
         let properties: HashMap<String, String> = hashmap! {
-            "connector".to_string() => "kafka".to_string(),
+            // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "force_append_only".to_string() => "true".to_string(),
+            // "type".to_string() => "append-only".to_string(),
+            // "force_append_only".to_string() => "true".to_string(),
             "properties.security.protocol".to_string() => "SASL".to_string(),
             "properties.sasl.mechanism".to_string() => "SASL".to_string(),
             "properties.sasl.username".to_string() => "test".to_string(),
@@ -658,10 +665,10 @@ mod test {
 
         // Optional fields eliminated.
         let properties: HashMap<String, String> = hashmap! {
-            "connector".to_string() => "kafka".to_string(),
+            // "connector".to_string() => "kafka".to_string(),
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
-            "type".to_string() => "upsert".to_string(),
+            // "type".to_string() => "upsert".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert_eq!(config.max_retry_num, 3);
@@ -732,6 +739,7 @@ mod test {
                     DateHandlingMode::FromCe,
                     TimestampHandlingMode::Milli,
                     TimestamptzHandlingMode::UtcString,
+                    TimeHandlingMode::Milli,
                 ),
             )),
         )

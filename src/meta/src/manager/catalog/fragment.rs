@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    ValTransaction,
+    TableParallelism, ValTransaction,
 };
 use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
@@ -182,9 +182,10 @@ impl FragmentManager {
         // TODO(kwannoel): Can this be unified with `PlanVisitor`?
         fn has_backfill(stream_node: &StreamNode) -> bool {
             let is_backfill = if let Some(node) = &stream_node.node_body
-            && let Some(node) = node.as_stream_scan() {
+                && let Some(node) = node.as_stream_scan()
+            {
                 node.stream_scan_type == StreamScanType::Backfill as i32
-                || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+                    || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
             } else {
                 false
             };
@@ -430,6 +431,7 @@ impl FragmentManager {
         new_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let table_id = old_table_fragments.table_id();
         let dummy_table_id = new_table_fragments.table_id();
@@ -457,6 +459,7 @@ impl FragmentManager {
         // Directly set to `Created` and `Running` state.
         table_fragment.set_state(State::Created);
         table_fragment.update_actors_state(ActorState::Running);
+        table_fragment.set_actor_splits_by_split_assignment(split_assignment);
 
         table_fragments.insert(table_id, table_fragment.clone());
 
@@ -613,14 +616,16 @@ impl FragmentManager {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }
-                let mut dependent_table = table_fragments
-                    .get_mut(dependent_table_id)
-                    .with_context(|| {
-                        format!(
+                let mut dependent_table =
+                    if let Some(dependent_table) = table_fragments.get_mut(dependent_table_id) {
+                        dependent_table
+                    } else {
+                        tracing::error!(
                             "dependent table_fragment not exist: id={}",
                             dependent_table_id
-                        )
-                    })?;
+                        );
+                        continue;
+                    };
 
                 dependent_table
                     .fragments
@@ -713,8 +718,12 @@ impl FragmentManager {
                     visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             for input in &mut node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {
-                                    dirty_downstream_table_ids.insert(*table_id, fragment.fragment_id);
+                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                                    && dirty_sink_into_table_upstream_fragment_id
+                                        .contains(&merge_node.upstream_fragment_id)
+                                {
+                                    dirty_downstream_table_ids
+                                        .insert(*table_id, fragment.fragment_id);
                                     return false;
                                 }
                             }
@@ -745,7 +754,10 @@ impl FragmentManager {
                 visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && dirty_sink_into_table_upstream_fragment_id.contains(&merge_node.upstream_fragment_id) {
+                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                                && dirty_sink_into_table_upstream_fragment_id
+                                    .contains(&merge_node.upstream_fragment_id)
+                            {
                                 false
                             } else {
                                 true
@@ -932,7 +944,9 @@ impl FragmentManager {
                     if let Some(node) = actor.nodes.as_mut() {
                         visit_stream_node(node, |node_body| {
                             if let NodeBody::Source(ref mut node) = node_body {
-                                if let Some(ref mut node_inner) = node.source_inner && node_inner.source_id == source_id as u32 {
+                                if let Some(ref mut node_inner) = node.source_inner
+                                    && node_inner.source_id == source_id as u32
+                                {
                                     node_inner.rate_limit = rate_limit;
                                     actor_to_apply.push(actor.actor_id);
                                 }
@@ -1101,6 +1115,7 @@ impl FragmentManager {
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
     ) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_version = guard.table_revision;
@@ -1168,6 +1183,8 @@ impl FragmentManager {
                 })
                 .collect_vec();
 
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+
             for (fragment_id, reschedule) in reschedules {
                 let Reschedule {
                     added_actors,
@@ -1178,8 +1195,6 @@ impl FragmentManager {
                     downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
-
-                let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
 
                 // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
@@ -1315,6 +1330,12 @@ impl FragmentManager {
                         }
                     }
                 }
+            }
+        }
+
+        for (table_id, parallelism) in table_parallelism_assignment {
+            if let Some(mut table) = table_fragments.get_mut(table_id) {
+                table.assigned_parallelism = parallelism;
             }
         }
 

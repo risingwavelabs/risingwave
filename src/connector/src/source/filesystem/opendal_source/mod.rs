@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod gcs_source;
+use std::collections::HashMap;
 
-pub use gcs_source::*;
+pub mod gcs_source;
 pub mod s3_source;
-pub use s3_source::*;
+
 use serde::Deserialize;
+use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
-use super::{OpendalFsSplit, S3Properties};
-use crate::source::SourceProperties;
+use super::s3::S3PropertiesCommon;
+use super::OpendalFsSplit;
+use crate::source::{SourceProperties, UnknownFields};
 
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
@@ -40,6 +42,15 @@ pub struct GcsProperties {
     pub service_account: Option<String>,
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for GcsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for GcsProperties {
@@ -78,11 +89,23 @@ impl OpendalSource for OpendalGcs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct OpendalS3Properties {
-    pub s3_properties: S3Properties,
+    #[serde(flatten)]
+    pub s3_properties: S3PropertiesCommon,
+
+    // The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for OpendalS3Properties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for OpendalS3Properties {
