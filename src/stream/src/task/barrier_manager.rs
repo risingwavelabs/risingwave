@@ -101,7 +101,6 @@ struct LocalBarrierWorker {
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
 
-    completed_epochs: HashMap<u64, StreamResult<CollectResult>>,
     epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<CollectResult>>>,
 }
 
@@ -111,7 +110,6 @@ impl LocalBarrierWorker {
             barrier_senders: HashMap::new(),
             failure_actors: HashMap::default(),
             state: ManagedBarrierState::new(state_store, streaming_metrics),
-            completed_epochs: HashMap::default(),
             epoch_result_sender: HashMap::default(),
         }
     }
@@ -126,8 +124,8 @@ impl LocalBarrierWorker {
                 .await,
             );
             match item {
-                Either::Left((epoch, result)) => {
-                    self.on_epoch_completed(epoch, result);
+                Either::Left(epoch) => {
+                    self.on_epoch_completed(epoch);
                 }
                 Either::Right(Some(event)) => match event {
                     LocalBarrierEvent::RegisterSender { actor_id, sender } => {
@@ -178,13 +176,16 @@ impl LocalBarrierWorker {
 
 // event handler
 impl LocalBarrierWorker {
-    fn on_epoch_completed(&mut self, epoch: u64, result: StreamResult<CollectResult>) {
+    fn on_epoch_completed(&mut self, epoch: u64) {
         if let Some(sender) = self.epoch_result_sender.remove(&epoch) {
+            let result = self
+                .state
+                .pop_completed_epoch(epoch)
+                .expect("should exist")
+                .expect("should have completed");
             if sender.send(result).is_err() {
                 warn!(epoch, "fail to send epoch complete result");
             }
-        } else {
-            assert!(self.completed_epochs.insert(epoch, result).is_none());
         }
     }
 
@@ -275,29 +276,26 @@ impl LocalBarrierWorker {
         prev_epoch: u64,
         result_sender: oneshot::Sender<StreamResult<CollectResult>>,
     ) {
-        if let Some(result) = self.completed_epochs.remove(&prev_epoch) {
-            if result_sender.send(result).is_err() {
-                warn!(prev_epoch, "failed to send completed epoch result");
+        match self.state.pop_completed_epoch(prev_epoch) {
+            Err(e) => {
+                let _ = result_sender.send(Err(e));
             }
-        } else {
-            // It's still possible that `collect_complete_receiver` does not contain the target epoch
-            // when receiving collect_barrier request. Because `collect_complete_receiver` could
-            // be cleared when CN is under recovering. We should return error rather than panic.
-            if !self.state.has_epoch(prev_epoch) {
-                let _ = result_sender.send(Err(anyhow!(
-                    "barrier collect complete receiver for prev epoch {} not exists",
-                    prev_epoch
-                )
-                .into()));
-            } else if let Some(prev_sender) =
-                self.epoch_result_sender.insert(prev_epoch, result_sender)
-            {
-                warn!(?prev_epoch, "duplicate await_collect_barrier on epoch");
-                let _ = prev_sender.send(Err(anyhow!(
-                    "duplicate await_collect_barrier on epoch {}",
-                    prev_epoch
-                )
-                .into()));
+            Ok(Some(result)) => {
+                if result_sender.send(result).is_err() {
+                    warn!(prev_epoch, "failed to send completed epoch result");
+                }
+            }
+            Ok(None) => {
+                if let Some(prev_sender) =
+                    self.epoch_result_sender.insert(prev_epoch, result_sender)
+                {
+                    warn!(?prev_epoch, "duplicate await_collect_barrier on epoch");
+                    let _ = prev_sender.send(Err(anyhow!(
+                        "duplicate await_collect_barrier on epoch {}",
+                        prev_epoch
+                    )
+                    .into()));
+                }
             }
         }
     }

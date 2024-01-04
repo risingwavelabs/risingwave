@@ -19,6 +19,7 @@ use std::mem::replace;
 use std::ops::Sub;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
 use futures::StreamExt;
@@ -56,6 +57,8 @@ enum ManagedBarrierStateInner {
     },
 
     AllCollected,
+
+    Completed(StreamResult<CollectResult>),
 }
 
 #[derive(Debug)]
@@ -119,7 +122,7 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::Issued {
                     remaining_actors, ..
                 } if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected => {
+                ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
                 ManagedBarrierStateInner::Stashed { .. }
@@ -237,10 +240,6 @@ impl ManagedBarrierState {
                 )
             });
         }
-    }
-
-    pub(crate) fn has_epoch(&self, prev_epoch: u64) -> bool {
-        self.epoch_barrier_state_map.contains_key(&prev_epoch)
     }
 
     /// Returns an iterator on epochs that is awaiting on `actor_id`.
@@ -381,16 +380,57 @@ impl ManagedBarrierState {
         self.may_notify(barrier.epoch.prev);
     }
 
-    pub(crate) async fn next_complete_epoch(&mut self) -> (u64, StreamResult<CollectResult>) {
+    pub(crate) async fn next_complete_epoch(&mut self) -> u64 {
         let (prev_epoch, result) = pending_on_none(self.syncing_epoch_futures.next()).await;
-        match self.epoch_barrier_state_map.remove(&prev_epoch) {
-            Some(BarrierState {
-                inner: ManagedBarrierStateInner::AllCollected,
-                ..
-            }) => {}
+        let state = self
+            .epoch_barrier_state_map
+            .get_mut(&prev_epoch)
+            .expect("should exist");
+        match &state.inner {
+            ManagedBarrierStateInner::AllCollected => {}
             _ => unreachable!(),
+        };
+        state.inner = ManagedBarrierStateInner::Completed(result);
+        prev_epoch
+    }
+
+    pub(crate) fn pop_completed_epoch(
+        &mut self,
+        prev_epoch: u64,
+    ) -> StreamResult<Option<StreamResult<CollectResult>>> {
+        let state = self
+            .epoch_barrier_state_map
+            .get(&prev_epoch)
+            .ok_or_else(|| {
+                // It's still possible that `collect_complete_receiver` does not contain the target epoch
+                // when receiving collect_barrier request. Because `collect_complete_receiver` could
+                // be cleared when CN is under recovering. We should return error rather than panic.
+                anyhow!(
+                    "barrier collect complete receiver for prev epoch {} not exists",
+                    prev_epoch
+                )
+            })?;
+        match &state.inner {
+            ManagedBarrierStateInner::Completed(_) => {
+                match self
+                    .epoch_barrier_state_map
+                    .remove(&prev_epoch)
+                    .expect("should exists")
+                    .inner
+                {
+                    ManagedBarrierStateInner::Completed(result) => Ok(Some(result)),
+                    _ => unreachable!(),
+                }
+            }
+            _ => Ok(None),
         }
-        (prev_epoch, result)
+    }
+
+    #[cfg(test)]
+    async fn pop_next_completed_epoch(&mut self) -> u64 {
+        let epoch = self.next_complete_epoch().await;
+        let _ = self.pop_completed_epoch(epoch).unwrap().unwrap();
+        epoch
     }
 }
 
@@ -415,7 +455,7 @@ mod tests {
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(2, &barrier1);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 0);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -427,7 +467,7 @@ mod tests {
         managed_barrier_state.collect(1, &barrier2);
         managed_barrier_state.collect(1, &barrier3);
         managed_barrier_state.collect(2, &barrier2);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 1);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -438,7 +478,7 @@ mod tests {
         );
         managed_barrier_state.collect(2, &barrier3);
         managed_barrier_state.collect(3, &barrier3);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 2);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
@@ -480,9 +520,9 @@ mod tests {
             &0
         );
         managed_barrier_state.collect(4, &barrier1);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 0);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 1);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 2);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
@@ -527,7 +567,7 @@ mod tests {
         managed_barrier_state.collect(2, &barrier2);
         managed_barrier_state.collect(2, &barrier3);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 0);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -538,7 +578,7 @@ mod tests {
         );
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
         managed_barrier_state.collect(3, &barrier2);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 1);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -557,7 +597,7 @@ mod tests {
             &2
         );
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
-        assert_eq!(managed_barrier_state.next_complete_epoch().await.0, 2);
+        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 }
