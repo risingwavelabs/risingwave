@@ -166,31 +166,6 @@ impl SinkFormatDesc {
         }))
     }
 
-    #[cfg(feature = "sink_bench")]
-    pub fn mock_from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
-        use crate::sink::redis::RedisSink;
-        use crate::sink::Sink as _;
-        if connector.eq(RedisSink::SINK_NAME) {
-            let format = match r#type {
-                SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
-                SINK_TYPE_UPSERT => SinkFormat::Upsert,
-                _ => {
-                    return Err(SinkError::Config(anyhow!(
-                        "sink type unsupported: {}",
-                        r#type
-                    )))
-                }
-            };
-            Ok(Some(Self {
-                format,
-                encode: SinkEncode::Json,
-                options: Default::default(),
-            }))
-        } else {
-            Self::from_legacy_type(connector, r#type)
-        }
-    }
-
     pub fn to_proto(&self) -> PbSinkFormatDesc {
         use risingwave_pb::plan_common::{EncodeType as E, FormatType as F};
 

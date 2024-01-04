@@ -162,9 +162,6 @@ walkdir = "2"
 prost-build = "0.12"
 protobuf-src = "1"
 
-[features]
-sink_bench = []
-
 [[bench]]
 name = "parser"
 harness = false

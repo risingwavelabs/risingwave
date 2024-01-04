@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,12 +34,16 @@ use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{
     EncodingProperties, ParserConfig, ProtocolProperties, SpecificParserConfig,
 };
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::catalog::{
+    SinkEncode, SinkFormat, SinkFormatDesc, SinkId, SinkType,
+};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
+use risingwave_connector::sink::mock_coordination_client::MockMetaClient;
 use risingwave_connector::sink::{
-    build_sink, LogSinker, MetaClientForSink, MockMetaClient, Sink, SinkParam, SinkWriterParam,
+    build_sink, LogSinker, MetaClientForSink, Sink, SinkError, SinkParam, SinkWriterParam,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_UPSERT,
 };
 use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
@@ -154,13 +158,15 @@ impl ThroughputMetric {
         }
     }
 
-    pub fn get_throughput(&self) -> Vec<u64> {
+    pub fn get_throughput(&self) -> Vec<String> {
         #[allow(clippy::disallowed_methods)]
         self.chunk_size_list
             .iter()
             .zip(self.chunk_size_list.iter().skip(1))
             .map(|(current, next)| {
-                (next.0 - current.0) * 1000 / (next.1.duration_since(current.1).as_millis() as u64)
+                let throughput = (next.0 - current.0) * 1000
+                    / (next.1.duration_since(current.1).as_millis() as u64);
+                format!("{} rows/s", throughput)
             })
             .collect()
     }
@@ -272,10 +278,12 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
-    sink_writer_param.meta_client = Some(MetaClientForSink::MockMetaClient(MockMetaClient::new(
-        Box::new(sink.new_coordinator().await.unwrap()),
-    )));
-    sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
+    if let Ok(coordinator) = sink.new_coordinator().await {
+        sink_writer_param.meta_client = Some(MetaClientForSink::MockMetaClient(
+            MockMetaClient::new(Box::new(coordinator)),
+        ));
+        sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
+    }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
     if let Err(e) = log_sinker.consume_log_and_sink(&mut log_reader).await {
         return Err(e.to_string());
@@ -358,6 +366,33 @@ pub struct Config {
     split_num: String,
 }
 
+fn mock_from_legacy_type(
+    connector: &str,
+    r#type: &str,
+) -> Result<Option<SinkFormatDesc>, SinkError> {
+    use risingwave_connector::sink::redis::RedisSink;
+    use risingwave_connector::sink::Sink as _;
+    if connector.eq(RedisSink::SINK_NAME) {
+        let format = match r#type {
+            SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
+            SINK_TYPE_UPSERT => SinkFormat::Upsert,
+            _ => {
+                return Err(SinkError::Config(risingwave_common::array::error::anyhow!(
+                    "sink type unsupported: {}",
+                    r#type
+                )))
+            }
+        };
+        Ok(Some(SinkFormatDesc {
+            format,
+            encode: SinkEncode::Json,
+            options: Default::default(),
+        }))
+    } else {
+        SinkFormatDesc::from_legacy_type(connector, r#type)
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cfg = Config::parse();
@@ -390,7 +425,7 @@ async fn main() {
             .clone();
 
         let connector = properties.get("connector").unwrap().clone();
-        let format_desc = SinkFormatDesc::mock_from_legacy_type(
+        let format_desc = mock_from_legacy_type(
             &connector.clone(),
             properties.get("type").unwrap_or(&"append-only".to_string()),
         )
@@ -407,6 +442,7 @@ async fn main() {
         };
         let sink = build_sink(sink_param).unwrap();
         let mut sink_writer_param = SinkWriterParam::for_test();
+        println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
         sink_writer_param.connector_params.sink_payload_format = SinkPayloadFormat::StreamChunk;
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
@@ -416,9 +452,12 @@ async fn main() {
             .unwrap();
         });
         sleep(tokio::time::Duration::from_secs(BENCH_TIME)).await;
-        println!(
-            "Throughput Sink: {:?}",
-            throughput_metric.read().await.get_throughput()
-        );
+        println!("Bench Over!");
+        let throughput_result = throughput_metric.read().await.get_throughput();
+        if throughput_result.is_empty() {
+            println!("Throughput Sink: Don't get Throughput, please check");
+        } else {
+            println!("Throughput Sink: {:?}", throughput_result);
+        }
     }
 }
