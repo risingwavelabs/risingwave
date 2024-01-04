@@ -52,6 +52,7 @@ impl SequenceGenerator {
     ///
     /// Despite being a serial function, its infrequent invocation allows for acceptable performance.
     pub async fn next_interval(&self, ident: &str, num: NonZeroU32) -> MetaResult<u64> {
+        // TODO: add pre-allocation if necessary
         let guard = self.db.lock().await;
         let txn = guard.begin().await?;
         let model: Option<hummock_sequence::Model> =
