@@ -200,6 +200,14 @@ impl Transactional<Transaction> for HummockVersionStats {
             )
             .exec(trx)
             .await?;
+
+        // keep latest one.
+        use sea_orm::{ColumnTrait, QueryFilter};
+        hummock_version_stats::Entity::delete_many()
+            .filter(hummock_version_stats::Column::Id.lt(self.hummock_version_id as i64))
+            .exec(trx)
+            .await?;
+
         Ok(())
     }
 

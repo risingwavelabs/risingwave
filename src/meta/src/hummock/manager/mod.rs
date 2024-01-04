@@ -84,10 +84,11 @@ use crate::hummock::metrics_utils::{
     trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
     trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
+use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::manager::{IdCategory, MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
+use crate::manager::{MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
@@ -106,7 +107,7 @@ pub use versioning::HummockVersionSafePoint;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod compaction;
-mod sequence;
+pub mod sequence;
 mod worker;
 
 use compaction::*;
@@ -556,9 +557,24 @@ impl HummockManager {
             let checkpoint_version = create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             // This write to meta store is idempotent. So if `write_checkpoint` fails, restarting meta node is fine.
-            HummockVersionStats::default()
-                .insert(self.env.meta_store())
-                .await?;
+            match self.env.sql_meta_store() {
+                None => {
+                    HummockVersionStats::default()
+                        .insert(self.env.meta_store())
+                        .await?;
+                }
+                Some(sql_meta_store) => {
+                    use sea_orm::ActiveModelTrait;
+                    hummock_version_stats::ActiveModel {
+                        id: sea_orm::ActiveValue::Set(checkpoint_version.id.try_into().unwrap()),
+                        stats: sea_orm::ActiveValue::Set(hummock_version_stats::TableStats(
+                            HashMap::default(),
+                        )),
+                    }
+                    .insert(&sql_meta_store.conn)
+                    .await?;
+                }
+            }
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
@@ -942,11 +958,7 @@ impl HummockManager {
 
         let start_time = Instant::now();
         // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-        let task_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::HummockCompactionTask }>()
-            .await?;
+        let task_id = next_compaction_task_id(&self.env).await?;
 
         // When the last table of a compaction group is deleted, the compaction group (and its
         // config) is destroyed as well. Then a compaction task for this group may come later and
@@ -1476,6 +1488,7 @@ impl HummockManager {
                 if let Some(table_stats_change) = &table_stats_change {
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
+                version_stats.hummock_version_id = version_delta.id;
 
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
@@ -1670,11 +1683,7 @@ impl HummockManager {
                 }
             }
         }
-        let mut new_sst_id = self
-            .env
-            .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(new_sst_id_number as u64)
-            .await?;
+        let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
         // `branched_ssts` only commit in memory, so `TXN` make no difference.
         let mut branched_ssts =
             BTreeMapTransaction::<'_, _, _, Transaction>::new(&mut versioning.branched_ssts);
@@ -1767,6 +1776,7 @@ impl HummockManager {
                 .with_label_values(&[table_id_str.as_str()])
                 .inc_by(stats_value as u64);
         }
+        version_stats.hummock_version_id = new_version_delta.id;
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
@@ -1856,11 +1866,7 @@ impl HummockManager {
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
-        let start_id = self
-            .env
-            .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(number as u64)
-            .await?;
+        let start_id = next_sstable_object_id(&self.env, number).await?;
         Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
     }
 
@@ -3424,6 +3430,7 @@ use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::sequence::next_sstable_object_id;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {

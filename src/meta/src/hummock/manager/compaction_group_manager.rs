@@ -46,7 +46,8 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{commit_multi_var, drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::manager::MetaSrvEnv;
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, TableFragments, ValTransaction,
@@ -211,9 +212,7 @@ impl HummockManager {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::CompactionGroup }>()
+                        next_compaction_group_id(&self.env)
                             .await
                             .map(|new_group_id| {
                                 is_group_init = true;
@@ -536,16 +535,14 @@ impl HummockManager {
                 build_version_delta_after_version(current_version),
             )),
         };
-        let new_sst_start_id = self
-            .env
-            .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(
-                current_version.count_new_ssts_in_group_split(
-                    parent_group_id,
-                    HashSet::from_iter(table_ids.clone()),
-                ),
-            )
-            .await?;
+        let new_sst_start_id = next_sstable_object_id(
+            &self.env,
+            current_version.count_new_ssts_in_group_split(
+                parent_group_id,
+                HashSet::from_iter(table_ids.clone()),
+            ),
+        )
+        .await?;
         let mut new_group = None;
         let target_compaction_group_id = match target_group_id {
             Some(compaction_group_id) => {
@@ -585,11 +582,7 @@ impl HummockManager {
             }
             None => {
                 // All NewCompactionGroup pairs are mapped to one new compaction group.
-                let new_compaction_group_id = self
-                    .env
-                    .id_gen_manager()
-                    .generate::<{ IdCategory::CompactionGroup }>()
-                    .await?;
+                let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
                 // The new config will be persisted later.
                 let mut config = self
                     .compaction_group_manager
