@@ -2275,22 +2275,12 @@ impl HummockManager {
                                         hummock_manager.compactor_manager.clone();
 
                                     // TODO: add metrics to track expired tasks
-                                    const INTERVAL_SEC: u64 = 30;
                                     // The cancel task has two paths
                                     // 1. compactor heartbeat cancels the expired task based on task
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-
-                                    // So the reason for setting Interval is to let compactor be
-                                    // responsible for canceling the corresponding task as much as
-                                    // possible by relaxing the conditions for detection on the meta
-                                    // side, and meta is just used as a last resort to clean up the
-                                    // tasks that compactor has expired.
-
-                                    for task in
-                                        compactor_manager.get_expired_tasks(Some(INTERVAL_SEC))
-                                    {
+                                    for task in compactor_manager.get_expired_tasks() {
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
                                                 task.task_id,
