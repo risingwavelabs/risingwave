@@ -83,7 +83,7 @@ export default function StreamingGraph() {
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Streaming Graph</Title>
+      <Title>Dependency Graph</Title>
       <Flex flexDirection="row" height="full">
         <Flex
           width={SIDEBAR_WIDTH}
@@ -94,10 +94,10 @@ export default function StreamingGraph() {
           flexDirection="column"
         >
           <Text fontWeight="semibold" mb={3}>
-            All Nodes
+            Relations
           </Text>
           <Box flex={1} overflowY="scroll">
-            <VStack width="full" spacing={1}>
+            <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
               {streamingJobList?.map((r) => {
                 const match = router.query.id === r.id.toString()
                 return (

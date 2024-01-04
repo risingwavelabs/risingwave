@@ -265,7 +265,7 @@ export default function Streaming() {
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Streaming Plan</Title>
+      <Title>Fragment Graph</Title>
       <Flex flexDirection="row" height="full" width="full">
         <VStack
           mr={3}
@@ -332,12 +332,7 @@ export default function Streaming() {
             </VStack>
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
-            <Text fontWeight="semibold">Plan</Text>
-            {relationInfo && (
-              <Text>
-                {relationInfo.id} - {relationInfo.name}
-              </Text>
-            )}
+            <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
                 <DependencyGraph
