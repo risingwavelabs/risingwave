@@ -346,7 +346,7 @@ impl SourceStreamChunkRowWriter<'_> {
                         self.row_meta
                             .as_ref()
                             .and_then(|ele| extreact_timestamp_from_meta(ele.meta))
-                            .unwrap(),
+                            .unwrap_or(None),
                     ))
                 }
                 (_, &AdditionalColumnType::Partition) => {
@@ -370,7 +370,7 @@ impl SourceStreamChunkRowWriter<'_> {
                         self.row_meta
                             .as_ref()
                             .and_then(|ele| extract_headers_from_meta(ele.meta))
-                            .unwrap(),
+                            .unwrap_or(None),
                     ))
                 }
                 (

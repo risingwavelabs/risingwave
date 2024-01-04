@@ -17,7 +17,8 @@ use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::plan_common::AdditionalColumnType;
 
 use crate::source::{
-    KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
+    S3_CONNECTOR,
 };
 
 pub type CompatibleAdditionalColumnsFn =
@@ -30,7 +31,7 @@ pub fn get_connector_compatible_additional_columns(
         KAFKA_CONNECTOR => kafka_compatible_column_vec(),
         PULSAR_CONNECTOR => pulsar_compatible_column_vec(),
         KINESIS_CONNECTOR => kinesis_compatible_column_vec(),
-        OPENDAL_S3_CONNECTOR | S3_CONNECTOR => s3_compatible_column_column_vec(),
+        OPENDAL_S3_CONNECTOR | S3_CONNECTOR | GCS_CONNECTOR => s3_compatible_column_column_vec(),
         _ => return None,
     };
     Some(compatible_columns)
