@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::{poll_fn, Future};
 use std::iter::once;
+use std::task::Poll;
 
 use itertools::Itertools;
 use tokio::sync::mpsc::unbounded_channel;
@@ -45,7 +47,6 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
         .await
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev).await?;
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -56,16 +57,15 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         })
         .collect_vec();
 
+    let manager_clone = manager.clone();
+    let mut await_epoch_future = pin!(manager_clone.await_complete_epoch(epoch));
+
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
         manager.flush_all_events().await;
-        let notified = complete_receiver
-            .complete_receiver
-            .as_mut()
-            .unwrap()
-            .try_recv()
-            .is_ok();
+        let notified =
+            poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);
     }
 
@@ -110,7 +110,6 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .send_barrier(barrier.clone(), actor_ids_to_send, actor_ids_to_collect)
         .await
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev).await?;
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -122,16 +121,15 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         })
         .collect_vec();
 
+    let manager_clone = manager.clone();
+    let mut await_epoch_future = pin!(manager_clone.await_complete_epoch(epoch));
+
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
         manager.flush_all_events().await;
-        let notified = complete_receiver
-            .complete_receiver
-            .as_mut()
-            .unwrap()
-            .try_recv()
-            .is_ok();
+        let notified =
+            poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);
     }
 

@@ -12,15 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -30,7 +27,6 @@ use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
-use tracing::Instrument;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -182,7 +178,7 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
         let CollectResult {
             create_mview_progress,
-            kind,
+            sync_result,
         } = self
             .mgr
             .collect_barrier(req.prev_epoch)
@@ -192,45 +188,12 @@ impl StreamService for StreamServiceImpl {
                 |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
             )?;
 
-        let (synced_sstables, table_watermarks) = match kind {
-            BarrierKind::Unspecified => unreachable!(),
-            BarrierKind::Initial => {
-                if let Some(hummock) = self.env.state_store().as_hummock() {
-                    let mce = hummock.get_pinned_version().max_committed_epoch();
-                    assert_eq!(
-                        mce, req.prev_epoch,
-                        "first epoch should match with the current version",
-                    );
-                }
-                tracing::info!(
-                    epoch = req.prev_epoch,
-                    "ignored syncing data for the first barrier"
-                );
-                (Vec::new(), HashMap::new())
-            }
-            BarrierKind::Barrier => (Vec::new(), HashMap::new()),
-            BarrierKind::Checkpoint => {
-                let span = TracingContext::from_protobuf(&req.tracing_context).attach(
-                    tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
-                );
-
-                // Must finish syncing data written in the epoch before respond back to ensure
-                // persistence of the state.
-                let sync_result = self
-                    .mgr
-                    .sync_epoch(req.prev_epoch)
-                    .instrument(span)
-                    .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
-                    .await?;
-                (sync_result.uncommitted_ssts, sync_result.table_watermarks)
-            }
-        };
-
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
             create_mview_progress,
-            synced_sstables: synced_sstables
+            synced_sstables: sync_result
+                .uncommitted_ssts
                 .into_iter()
                 .map(
                     |LocalSstableInfo {
@@ -245,7 +208,8 @@ impl StreamService for StreamServiceImpl {
                 )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
-            table_watermarks: table_watermarks
+            table_watermarks: sync_result
+                .table_watermarks
                 .into_iter()
                 .map(|(key, value)| (key.table_id, value.to_protobuf()))
                 .collect(),
