@@ -229,7 +229,7 @@ pub struct DorisSinkWriter {
     pub config: DorisConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    inseter_inner_builder: InserterInnerBuilder,
+    inserter_inner_builder: InserterInnerBuilder,
     is_append_only: bool,
     client: Option<DorisClient>,
     row_encoder: JsonEncoder,
@@ -290,7 +290,7 @@ impl DorisSinkWriter {
             config,
             schema: schema.clone(),
             pk_indices,
-            inseter_inner_builder: doris_insert_builder,
+            inserter_inner_builder: doris_insert_builder,
             is_append_only,
             client: None,
             row_encoder: JsonEncoder::new_with_doris(
@@ -379,7 +379,7 @@ impl DorisSinkWriter {
 impl SinkWriter for DorisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.client.is_none() {
-            self.client = Some(DorisClient::new(self.inseter_inner_builder.build().await?));
+            self.client = Some(DorisClient::new(self.inserter_inner_builder.build().await?));
         }
         if self.is_append_only {
             self.append_only(chunk).await

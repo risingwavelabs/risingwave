@@ -29,6 +29,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -105,17 +106,26 @@ impl StreamSink {
             format_desc,
         )?;
 
+        let unsupported_sink =
+            |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
+
         // check and ensure that the sink connector is specified and supported
         match sink.properties.get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => match_sink_name_str!(
-                connector.to_lowercase().as_str(),
-                SinkType,
-                Ok(()),
-                |other| Err(SinkError::Config(anyhow!(
-                    "unsupported sink type {}",
-                    other
-                )))
-            )?,
+            Some(connector) => {
+                match_sink_name_str!(
+                    connector.to_lowercase().as_str(),
+                    SinkType,
+                    {
+                        // the table sink is created by with properties
+                        if connector == TABLE_SINK && sink.target_table.is_none() {
+                            unsupported_sink(TABLE_SINK)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |other: &str| unsupported_sink(other)
+                )?;
+            }
             None => {
                 return Err(
                     SinkError::Config(anyhow!("connector not specified when create sink")).into(),

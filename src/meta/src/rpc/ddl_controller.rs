@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
@@ -461,7 +461,7 @@ impl DdlController {
                     mgr.catalog_manager
                         .cancel_create_source_procedure(&source)
                         .await?;
-                    return Err(e);
+                    return Err(e.into());
                 }
 
                 mgr.catalog_manager
@@ -707,7 +707,9 @@ impl DdlController {
             // Do some type-specific work for each type of stream job.
             match stream_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
-                    Self::validate_cdc_table(table, &table_fragments).await?;
+                    Self::validate_cdc_table(table, &table_fragments)
+                        .await
+                        .context("failed to validate CDC table")?;
                 }
                 StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
@@ -789,17 +791,18 @@ impl DdlController {
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &TableFragments,
-    ) -> MetaResult<()> {
+    ) -> anyhow::Result<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
             .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
             .exactly_one()
-            .map_err(|err| {
-                anyhow!(format!(
-                    "expect exactly one stream scan fragment, got {}",
-                    err
-                ))
+            .ok()
+            .with_context(|| {
+                format!(
+                    "expect exactly one stream scan fragment, got: {:?}",
+                    table_fragments.fragments
+                )
             })?;
 
         async fn new_enumerator_for_validate<P: SourceProperties>(
@@ -1178,6 +1181,11 @@ impl DdlController {
                     Some(sink_id),
                     replace_table_info,
                 )
+                .await?;
+
+            // Add table fragments to meta store with state: `State::Initial`.
+            mgr.fragment_manager
+                .start_create_table_fragments(table_fragments.clone())
                 .await?;
 
             self.stream_manager
