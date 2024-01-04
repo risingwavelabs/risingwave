@@ -234,6 +234,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             ui_path: opts.dashboard_ui_path,
         };
 
+        const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
             config
                 .storage
@@ -253,7 +254,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                         .object_store_streaming_upload_timeout_ms,
                 )
                 .max(config.meta.compaction_task_max_progress_interval_secs)
-        };
+        } + MIN_TIMEOUT_INTERVAL_SEC;
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
