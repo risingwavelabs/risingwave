@@ -573,14 +573,15 @@ impl HummockManager {
                 .await?
                 .into_iter()
                 .next(),
-            Some(sql_meta_store) => hummock_version_stats::Entity::find_by_id(redo_state.id as i64)
+            Some(sql_meta_store) => hummock_version_stats::Entity::find()
                 .one(&sql_meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?
                 .map(HummockVersionStats::from),
         }
         .unwrap_or_else(|| HummockVersionStats {
-            hummock_version_id: redo_state.id,
+            // version_stats.hummock_version_id is always 0 in meta store.
+            hummock_version_id: 0,
             ..Default::default()
         });
 
@@ -1468,7 +1469,6 @@ impl HummockManager {
                 if let Some(table_stats_change) = &table_stats_change {
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
-                version_stats.hummock_version_id = version_delta.id;
 
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
@@ -1756,7 +1756,6 @@ impl HummockManager {
                 .with_label_values(&[table_id_str.as_str()])
                 .inc_by(stats_value as u64);
         }
-        version_stats.hummock_version_id = new_version_delta.id;
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
@@ -1855,7 +1854,6 @@ impl HummockManager {
         read_lock!(self, versioning).await.min_pinned_version_id()
     }
 
-    // TODO: use proc macro to call check_state_consistency
     #[named]
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {

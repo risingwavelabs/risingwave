@@ -299,7 +299,8 @@ impl HummockManager {
                 VarTransactionWrapper::V2(VarTransaction::new(&mut versioning.version_stats))
             }
         };
-        *version_stats = new_stats;
+        // version_stats.hummock_version_id is always 0 in meta store.
+        version_stats.table_stats = new_stats.table_stats;
         commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
         Ok(())
     }
