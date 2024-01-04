@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,9 @@ impl MonitoredStorageMetrics {
         buckets.push(16.0); // 16s
 
         // 1ms - 100s
-        let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+        let mut state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+        state_store_read_time_buckets.push(40.0);
+        state_store_read_time_buckets.push(100.0);
 
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",

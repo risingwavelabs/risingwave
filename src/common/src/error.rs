@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,6 +154,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     // TODO: use a new type for bind error
+    // TODO(error-handling): should prefer use error types than strings.
     #[error("Bind error: {0}")]
     BindError(String),
     // TODO: only keep this one

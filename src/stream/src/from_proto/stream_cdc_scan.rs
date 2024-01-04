@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,13 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
+use risingwave_connector::source::cdc::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::external::ExternalStorageTable;
-use crate::executor::CdcBackfillExecutor;
+use crate::executor::{CdcBackfillExecutor, ExternalStorageTable};
 
 pub struct StreamCdcScanExecutorBuilder;
 

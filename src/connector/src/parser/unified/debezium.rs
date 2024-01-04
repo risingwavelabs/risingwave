@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, AccessError, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
+use crate::source::SourceColumnDesc;
 
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
@@ -89,20 +90,16 @@ impl<A> ChangeEvent for DebeziumChangeEvent<A>
 where
     A: Access,
 {
-    fn access_field(
-        &self,
-        name: &str,
-        type_expected: &risingwave_common::types::DataType,
-    ) -> super::AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         match self.op()? {
             ChangeEventOperation::Delete => {
                 if let Some(va) = self.value_accessor.as_ref() {
-                    va.access(&[BEFORE, name], Some(type_expected))
+                    va.access(&[BEFORE, &desc.name], Some(&desc.data_type))
                 } else {
                     self.key_accessor
                         .as_ref()
                         .unwrap()
-                        .access(&[name], Some(type_expected))
+                        .access(&[&desc.name], Some(&desc.data_type))
                 }
             }
 
@@ -111,7 +108,7 @@ where
                 .value_accessor
                 .as_ref()
                 .unwrap()
-                .access(&[AFTER, name], Some(type_expected)),
+                .access(&[AFTER, &desc.name], Some(&desc.data_type)),
         }
     }
 

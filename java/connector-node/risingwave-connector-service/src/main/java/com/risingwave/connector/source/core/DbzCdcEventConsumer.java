@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -114,13 +115,19 @@ public class DbzCdcEventConsumer
                     committer.markProcessed(event);
                     continue;
                 }
+                // get upstream event time from the "source" field
+                var sourceStruct = ((Struct) record.value()).getStruct("source");
+                long sourceTsMs =
+                        sourceStruct == null
+                                ? System.currentTimeMillis()
+                                : sourceStruct.getInt64("ts_ms");
                 byte[] payload =
                         converter.fromConnectData(
                                 record.topic(), record.valueSchema(), record.value());
-
                 msgBuilder
                         .setFullTableName(fullTableName)
                         .setPayload(new String(payload, StandardCharsets.UTF_8))
+                        .setSourceTsMs(sourceTsMs)
                         .build();
                 var message = msgBuilder.build();
                 LOG.debug("record => {}", message.getPayload());

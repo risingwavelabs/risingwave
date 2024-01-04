@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::stream::BoxStream;
@@ -66,6 +67,7 @@ pub struct LocalQueryExecution {
     snapshot: ReadSnapshot,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
+    timeout: Option<Duration>,
 }
 
 impl LocalQueryExecution {
@@ -75,6 +77,7 @@ impl LocalQueryExecution {
         sql: S,
         snapshot: ReadSnapshot,
         session: Arc<SessionImpl>,
+        timeout: Option<Duration>,
     ) -> Self {
         let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
@@ -89,6 +92,7 @@ impl LocalQueryExecution {
             snapshot,
             session,
             worker_node_manager,
+            timeout,
         }
     }
 
@@ -149,15 +153,19 @@ impl LocalQueryExecution {
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let timeout = self.timeout;
 
+        let sender1 = sender.clone();
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
-                    r = Err(Box::new(SchedulerError::QueryCancelled) as BoxedError);
+                    r = Err(Box::new(SchedulerError::QueryCancelled(
+                        "Cancelled by user".to_string(),
+                    )) as BoxedError);
                 }
-                if sender.send(r).await.is_err() {
+                if sender1.send(r).await.is_err() {
                     tracing::info!("Receiver closed.");
                     return;
                 }
@@ -176,7 +184,29 @@ impl LocalQueryExecution {
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await };
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await };
 
-        compute_runtime.spawn(exec);
+        if let Some(timeout) = timeout {
+            let exec = async move {
+                if let Err(_e) = tokio::time::timeout(timeout, exec).await {
+                    tracing::error!(
+                        "Local query execution timeout after {} seconds",
+                        timeout.as_secs()
+                    );
+                    if sender
+                        .send(Err(Box::new(SchedulerError::QueryCancelled(format!(
+                            "timeout after {} seconds",
+                            timeout.as_secs(),
+                        ))) as BoxedError))
+                        .await
+                        .is_err()
+                    {
+                        tracing::info!("Receiver closed.");
+                    }
+                }
+            };
+            compute_runtime.spawn(exec);
+        } else {
+            compute_runtime.spawn(exec);
+        }
 
         ReceiverStream::new(receiver)
     }

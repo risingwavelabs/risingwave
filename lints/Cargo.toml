@@ -12,7 +12,7 @@ name = "format_error"
 path = "ui/format_error.rs"
 
 [dependencies]
-clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "a585cda701581a16894858dc088eacd5a02fc78b" } # should match the toolchain version
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "e4c626dd9a17a23270bf8e7158e59cf2b9c04840" } # should match the toolchain version (rustc -vV)
 dylint_linting = "2.5.0"
 itertools = "0.12"
 

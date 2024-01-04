@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -249,6 +249,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
         Ok(())
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        let core = &mut self.stream_source_core;
+
+        core.split_state_store.state_store.try_flush().await?;
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
@@ -277,11 +285,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {
             match mutation {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
+                Mutation::Add(AddMutation { splits, .. })
+                | Mutation::Update(UpdateMutation {
                     actor_splits: splits,
                     ..
-                } => {
+                }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
                         boot_state = splits.clone();
                     }
@@ -321,7 +329,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // init in-memory split states with persisted state if any
         self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -368,7 +376,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 }
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Update { actor_splits, .. } => {
+                                Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                     self.apply_split_change(
                                         &source_desc,
                                         &mut stream,
@@ -443,6 +451,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
+                    self.try_flush_data().await?;
                 }
             }
         }

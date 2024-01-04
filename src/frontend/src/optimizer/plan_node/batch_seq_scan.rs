@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::RowSeqScanNode;
 
 use super::batch::prelude::*;
@@ -247,10 +246,6 @@ impl ToBatchPb for BatchSeqScan {
             // To be filled by the scheduler.
             vnode_bitmap: None,
             ordered: !self.order().is_any(),
-            chunk_size: self
-                .core
-                .chunk_size
-                .map(|chunk_size| ChunkSize { chunk_size }),
             limit: *self.limit(),
         })
     }

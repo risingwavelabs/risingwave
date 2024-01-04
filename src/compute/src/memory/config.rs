@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,9 +33,6 @@ const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
-
-/// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
-const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 2 * 1024;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
@@ -88,9 +85,11 @@ pub fn storage_memory_config(
             default_meta_cache_capacity >> 20,
             STORAGE_META_CACHE_MAX_MEMORY_MB,
         ));
-    let large_query_memory_usage_mb = storage_config
-        .large_query_memory_usage_mb
-        .unwrap_or(STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB);
+
+    let prefetch_buffer_capacity_mb = storage_config
+        .prefetch_buffer_capacity_mb
+        .unwrap_or(block_cache_capacity_mb);
+
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
     }
@@ -118,7 +117,6 @@ pub fn storage_memory_config(
     );
 
     let total_calculated_mb = block_cache_capacity_mb
-        + large_query_memory_usage_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
         + data_file_cache_ring_buffer_capacity_mb
@@ -144,7 +142,7 @@ pub fn storage_memory_config(
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
-        large_query_memory_usage_mb,
+        prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
     }
 }

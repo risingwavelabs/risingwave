@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -417,6 +417,10 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
 
+    /// Timeout for a batch query in seconds.
+    #[serde(default = "default::batch::statement_timeout_in_sec")]
+    pub statement_timeout_in_sec: u32,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -527,7 +531,7 @@ pub struct StorageConfig {
 
     /// max memory usage for large query
     #[serde(default)]
-    pub large_query_memory_usage_mb: Option<usize>,
+    pub prefetch_buffer_capacity_mb: Option<usize>,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
@@ -1114,7 +1118,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            1.5000
+            2.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1358,6 +1362,11 @@ pub mod default {
         pub fn enable_barrier_read() -> bool {
             false
         }
+
+        pub fn statement_timeout_in_sec() -> u32 {
+            // 1 hour
+            60 * 60
+        }
     }
 
     pub mod compaction_config {
@@ -1491,7 +1500,7 @@ pub struct StorageMemoryConfig {
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
-    pub large_query_memory_usage_mb: usize,
+    pub prefetch_buffer_capacity_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
 
@@ -1518,7 +1527,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .high_priority_ratio_in_percent
         .unwrap_or(default::storage::high_priority_ratio_in_percent());
-    let large_query_memory_usage_mb = s
+    let prefetch_buffer_capacity_mb = s
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
@@ -1530,7 +1539,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
-        large_query_memory_usage_mb,
+        prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
     }
 }

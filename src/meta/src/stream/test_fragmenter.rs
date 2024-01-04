@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
@@ -413,7 +413,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
-        env: Some(StreamEnvironment::default()),
+        ctx: Some(StreamContext::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
@@ -457,18 +457,19 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let graph = make_stream_graph();
     let expr_context = ExprContext {
-        time_zone: graph.env.as_ref().unwrap().timezone.clone(),
+        time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job, expr_context)
+        .generate_graph(&env, &job, expr_context)
         .await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);

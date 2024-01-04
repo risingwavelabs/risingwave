@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -156,6 +156,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         .map(|(column_id, field)| ColumnDesc::named(field.name, *column_id, field.data_type))
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
+    let barrier_tx = Arc::new(barrier_tx);
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::create(0x3f3f3f);
@@ -189,6 +190,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
+        1024,
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(
@@ -245,12 +247,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         false,
     ));
 
-    tokio::spawn(async move {
-        let mut stream = insert.execute();
-        let _ = stream.next().await.unwrap()?;
-        Ok::<_, RwError>(())
-    });
-
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = StorageTable::for_test(
@@ -277,7 +273,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let curr_epoch = 1919;
+    let mut curr_epoch = 1919;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -290,6 +286,18 @@ async fn test_table_materialize() -> StreamResult<()> {
             ..
         }) if epoch.curr == curr_epoch
     ));
+
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
+    tokio::spawn(async move {
+        let mut stream = insert.execute();
+        let _ = stream.next().await.unwrap()?;
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
+        Ok::<_, RwError>(())
+    });
 
     // Poll `Materialize`, should output the same insertion stream chunk.
     let message = materialize.next().await.unwrap()?;
@@ -309,12 +317,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         }
         Message::Barrier(_) => panic!(),
     }
-
-    // Send a barrier and poll again, should write changes to storage.
-    let curr_epoch = 1920;
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch))
-        .unwrap();
 
     assert!(matches!(
         materialize.next().await.unwrap()?,
@@ -366,9 +368,15 @@ async fn test_table_materialize() -> StreamResult<()> {
         false,
     ));
 
+    curr_epoch += 1;
+    let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
         let _ = stream.next().await.unwrap()?;
+        // Send a barrier and poll again, should write changes to storage.
+        barrier_tx_clone
+            .send(Barrier::new_test_barrier(curr_epoch))
+            .unwrap();
         Ok::<_, RwError>(())
     });
 
@@ -388,18 +396,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         Message::Barrier(_) => panic!(),
     }
 
-    // Send a barrier and poll again, should write changes to storage.
-    barrier_tx
-        .send(Barrier::new_test_barrier(curr_epoch + 1))
-        .unwrap();
-
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
             ..
-        }) if epoch.curr == curr_epoch + 1
+        }) if epoch.curr == curr_epoch
     ));
 
     // Scan the table again, we are able to see the deletion now!

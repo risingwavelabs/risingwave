@@ -1,4 +1,4 @@
-# Copyright 2023 RisingWave Labs
+# Copyright 2024 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/udf/python")  # noqa
+sys.path.append("src/expr/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 

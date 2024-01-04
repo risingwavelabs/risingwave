@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,15 +28,18 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_hummock_sdk::table_watermark::merge_multiple_new_table_watermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    merge_multiple_new_table_watermarks, TableWatermarks,
+};
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_plan::Barrier;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -57,10 +60,7 @@ use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
-    WorkerId,
-};
+use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
@@ -74,7 +74,7 @@ mod recovery;
 mod schedule;
 mod trace;
 
-pub use self::command::{Command, Reschedule};
+pub use self::command::{Command, ReplaceTablePlan, Reschedule};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -153,6 +153,12 @@ pub enum CommandChanges {
         to_add: HashSet<ActorId>,
         to_remove: HashSet<ActorId>,
     },
+    /// This is used for sinking into the table, featuring both `CreateTable` and `Actor` changes.
+    CreateSinkIntoTable {
+        sink_id: TableId,
+        to_add: HashSet<ActorId>,
+        to_remove: HashSet<ActorId>,
+    },
     /// No changes.
     None,
 }
@@ -177,17 +183,13 @@ pub struct GlobalBarrierManager {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    cluster_manager: ClusterManagerRef,
-
-    pub catalog_manager: CatalogManagerRef,
-
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 
     sink_manager: SinkCoordinatorManager,
 
@@ -279,7 +281,11 @@ impl CheckpointControl {
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
     fn pre_resolve(&mut self, command: &Command) {
-        match command.changes() {
+        self.pre_resolve_helper(command.changes());
+    }
+
+    fn pre_resolve_helper(&mut self, changes: CommandChanges) {
+        match changes {
             CommandChanges::CreateTable(table) => {
                 assert!(
                     !self.dropping_tables.contains(&table),
@@ -299,6 +305,15 @@ impl CheckpointControl {
                 self.adding_actors.extend(to_add);
             }
 
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.pre_resolve_helper(CommandChanges::CreateTable(sink_id));
+                self.pre_resolve_helper(CommandChanges::Actor { to_add, to_remove });
+            }
+
             _ => {}
         }
     }
@@ -307,7 +322,11 @@ impl CheckpointControl {
     /// removed actors from checkpoint control, so that `can_actor_send_or_collect` will return
     /// `false`.
     fn post_resolve(&mut self, command: &Command) {
-        match command.changes() {
+        self.post_resolve_helper(command.changes());
+    }
+
+    fn post_resolve_helper(&mut self, change: CommandChanges) {
+        match change {
             CommandChanges::DropTables(tables) => {
                 assert!(
                     self.dropping_tables.is_disjoint(&tables),
@@ -316,14 +335,14 @@ impl CheckpointControl {
                 self.dropping_tables.extend(tables);
             }
 
-            CommandChanges::Actor { to_remove, .. } => {
+            CommandChanges::Actor { to_remove, .. }
+            | CommandChanges::CreateSinkIntoTable { to_remove, .. } => {
                 assert!(
                     self.removing_actors.is_disjoint(&to_remove),
                     "duplicated actor in concurrent checkpoint"
                 );
                 self.removing_actors.extend(to_remove);
             }
-
             _ => {}
         }
     }
@@ -468,6 +487,14 @@ impl CheckpointControl {
                 self.removing_actors.retain(|a| !to_remove.contains(a));
             }
             CommandChanges::None => {}
+            CommandChanges::CreateSinkIntoTable {
+                sink_id,
+                to_add,
+                to_remove,
+            } => {
+                self.remove_changes(CommandChanges::CreateTable(sink_id));
+                self.remove_changes(CommandChanges::Actor { to_add, to_remove });
+            }
         }
     }
 
@@ -530,9 +557,7 @@ impl GlobalBarrierManager {
     pub fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
@@ -542,20 +567,21 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let tracker = CreateMviewProgressTracker::new();
-        let scale_controller = Arc::new(ScaleController::new(
-            fragment_manager.clone(),
-            cluster_manager.clone(),
-            source_manager.clone(),
-            env.clone(),
-        ));
+
+        let scale_controller = match &metadata_manager {
+            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                env.clone(),
+            ))),
+            MetadataManager::V2(_) => None,
+        };
         Self {
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
             in_flight_barrier_nums,
-            cluster_manager,
-            catalog_manager,
-            fragment_manager,
+            metadata_manager,
             hummock_manager,
             source_manager,
             scale_controller,
@@ -598,8 +624,11 @@ impl GlobalBarrierManager {
 
     /// Check whether we should pause on bootstrap from the system parameter and reset it.
     async fn take_pause_on_bootstrap(&self) -> MetaResult<bool> {
-        let pm = self.env.system_params_manager();
-        let paused = pm.get_params().await.pause_on_next_bootstrap();
+        let paused = self
+            .env
+            .system_params_reader()
+            .await
+            .pause_on_next_bootstrap();
         if paused {
             tracing::warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
@@ -607,8 +636,16 @@ impl GlobalBarrierManager {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            pm.set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                .await?;
+            if let Some(system_ctl) = self.env.system_params_controller() {
+                system_ctl
+                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                    .await?;
+            } else {
+                self.env
+                    .system_params_manager()
+                    .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
+                    .await?;
+            }
         }
         Ok(paused)
     }
@@ -617,11 +654,7 @@ impl GlobalBarrierManager {
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         // Initialize the barrier manager.
         let interval = Duration::from_millis(
-            self.env
-                .system_params_manager()
-                .get_params()
-                .await
-                .barrier_interval_ms() as u64,
+            self.env.system_params_reader().await.barrier_interval_ms() as u64,
         );
         tracing::info!(
             "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
@@ -630,11 +663,21 @@ impl GlobalBarrierManager {
             self.in_flight_barrier_nums,
         );
 
-        if !self.enable_recovery && self.fragment_manager.has_any_table_fragments().await {
-            panic!(
-                "Some streaming jobs already exist in meta, please start with recovery enabled \
+        if !self.enable_recovery {
+            let job_exist = match &self.metadata_manager {
+                MetadataManager::V1(mgr) => mgr.fragment_manager.has_any_table_fragments().await,
+                MetadataManager::V2(mgr) => mgr
+                    .catalog_controller
+                    .has_any_streaming_jobs()
+                    .await
+                    .unwrap(),
+            };
+            if job_exist {
+                panic!(
+                    "Some streaming jobs already exist in meta, please start with recovery enabled \
                 or clean up the metadata using `./risedev clean-data`"
-            );
+                );
+            }
         }
 
         let mut state = {
@@ -752,8 +795,7 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            self.fragment_manager.clone(),
-            self.catalog_manager.clone(),
+            self.metadata_manager.clone(),
             self.hummock_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
@@ -845,7 +887,7 @@ impl GlobalBarrierManager {
                         curr: command_context.curr_epoch.value().0,
                         prev: command_context.prev_epoch.value().0,
                     }),
-                    mutation,
+                    mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
                     tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
                         .to_protobuf(),
                     kind: command_context.kind as i32,
@@ -1135,7 +1177,9 @@ impl GlobalBarrierManager {
                     // Update the progress of all commands.
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
                         // Those with actors complete can be finished immediately.
-                        if let Some(command) = tracker.update(progress, &version_stats) && !command.tracks_sink() {
+                        if let Some(command) = tracker.update(progress, &version_stats)
+                            && !command.tracks_sink()
+                        {
                             tracing::trace!(?progress, "finish progress");
                             commands.push(command);
                         } else {
@@ -1199,16 +1243,45 @@ impl GlobalBarrierManager {
     ) -> BarrierActorInfo {
         checkpoint_control.pre_resolve(command);
 
-        let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
-            checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
-        };
-        let all_nodes = self
-            .cluster_manager
-            .list_active_streaming_compute_nodes()
-            .await;
-        let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
+        let info = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
+                    checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
+                };
+                let all_nodes = mgr
+                    .cluster_manager
+                    .list_active_streaming_compute_nodes()
+                    .await;
+                let all_actor_infos = mgr.fragment_manager.load_all_actors(check_state).await;
 
-        let info = BarrierActorInfo::resolve(all_nodes, all_actor_infos);
+                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+            }
+            MetadataManager::V2(mgr) => {
+                let check_state = |s: ActorState, table_id: ObjectId, actor_id: i32| {
+                    checkpoint_control.can_actor_send_or_collect(
+                        s,
+                        TableId::new(table_id as _),
+                        actor_id as _,
+                    )
+                };
+                let all_nodes = mgr
+                    .cluster_controller
+                    .list_active_streaming_workers()
+                    .await
+                    .unwrap();
+                let pu_mappings = all_nodes
+                    .iter()
+                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
+                    .collect();
+                let all_actor_infos = mgr
+                    .catalog_controller
+                    .load_all_actors(&pu_mappings, check_state)
+                    .await
+                    .unwrap();
+
+                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+            }
+        };
 
         checkpoint_control.post_resolve(command);
 
@@ -1219,18 +1292,39 @@ impl GlobalBarrierManager {
         let mut ddl_progress = self.tracker.lock().await.gen_ddl_progress();
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
-        for table in self.catalog_manager.list_persisted_creating_tables().await {
-            if table.table_type != TableType::MaterializedView as i32 {
-                continue;
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                for table in mgr.catalog_manager.list_persisted_creating_tables().await {
+                    if table.table_type != TableType::MaterializedView as i32 {
+                        continue;
+                    }
+                    if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
+                        e.insert(DdlProgress {
+                            id: table.id as u64,
+                            statement: table.definition,
+                            progress: "0.0%".into(),
+                        });
+                    }
+                }
             }
-            if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
-                e.insert(DdlProgress {
-                    id: table.id as u64,
-                    statement: table.definition,
-                    progress: "0.0%".into(),
-                });
+            MetadataManager::V2(mgr) => {
+                let mviews = mgr
+                    .catalog_controller
+                    .list_background_creating_mviews()
+                    .await
+                    .unwrap();
+                for mview in mviews {
+                    if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
+                        e.insert(DdlProgress {
+                            id: mview.table_id as u64,
+                            statement: mview.definition,
+                            progress: "0.0%".into(),
+                        });
+                    }
+                }
             }
         }
+
         ddl_progress.into_values().collect()
     }
 }
@@ -1258,7 +1352,22 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
     }
     CommitEpochInfo::new(
         synced_ssts,
-        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
+        merge_multiple_new_table_watermarks(
+            resps
+                .iter()
+                .map(|resp| {
+                    resp.table_watermarks
+                        .iter()
+                        .map(|(table_id, watermarks)| {
+                            (
+                                TableId::new(*table_id),
+                                TableWatermarks::from_protobuf(watermarks),
+                            )
+                        })
+                        .collect()
+                })
+                .collect_vec(),
+        ),
         sst_to_worker,
     )
 }

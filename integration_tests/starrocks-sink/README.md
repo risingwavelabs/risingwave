@@ -38,9 +38,9 @@ GRANT ALL ON *.* TO 'users'@'%';
 3. Execute the SQL queries in sequence:
 
 - append-only sql:
-    - append-only/create_source.sql
-    - append-only/create_mv.sql
-    - append-only/create_sink.sql
+    - create_source.sql
+    - create_mv.sql
+    - create_sink.sql
 
 - upsert sql:
     - upsert/create_table.sql

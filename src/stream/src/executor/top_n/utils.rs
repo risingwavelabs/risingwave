@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,9 @@ pub trait TopNExecutorBase: Send + 'static {
         &mut self,
         epoch: EpochPair,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
+
+    /// Flush the buffered chunk to the storage backend.
+    fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     fn info(&self) -> &ExecutorInfo;
 
@@ -125,7 +128,10 @@ where
                         yield Message::Watermark(output_watermark);
                     }
                 }
-                Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    self.inner.try_flush_data().await?;
+                }
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
 

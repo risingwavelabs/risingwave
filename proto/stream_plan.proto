@@ -90,19 +90,11 @@ message ThrottleMutation {
   map<uint32, RateLimit> actor_throttle = 1;
 }
 
-message Barrier {
-  enum BarrierKind {
-    BARRIER_KIND_UNSPECIFIED = 0;
-    // The first barrier after a fresh start or recovery.
-    // There will be no data associated with the previous epoch of the barrier.
-    BARRIER_KIND_INITIAL = 1;
-    // A normal barrier. Data should be flushed locally.
-    BARRIER_KIND_BARRIER = 2;
-    // A checkpoint barrier. Data should be synchorized to the shared storage.
-    BARRIER_KIND_CHECKPOINT = 3;
-  }
+message CombinedMutation {
+  repeated BarrierMutation mutations = 1;
+}
 
-  data.Epoch epoch = 1;
+message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
     AddMutation add = 3;
@@ -119,7 +111,27 @@ message Barrier {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
+    // Combined mutation.
+    CombinedMutation combined = 100;
   }
+}
+
+message Barrier {
+  enum BarrierKind {
+    BARRIER_KIND_UNSPECIFIED = 0;
+    // The first barrier after a fresh start or recovery.
+    // There will be no data associated with the previous epoch of the barrier.
+    BARRIER_KIND_INITIAL = 1;
+    // A normal barrier. Data should be flushed locally.
+    BARRIER_KIND_BARRIER = 2;
+    // A checkpoint barrier. Data should be synchorized to the shared storage.
+    BARRIER_KIND_CHECKPOINT = 3;
+  }
+
+  data.Epoch epoch = 1;
+
+  BarrierMutation mutation = 3;
+
   // Used for tracing.
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
@@ -157,7 +169,7 @@ message StreamSource {
   repeated plan_common.ColumnCatalog columns = 4;
   reserved "pk_column_ids";
   reserved 5;
-  map<string, string> properties = 6;
+  map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
   // Streaming rate limit
@@ -172,7 +184,7 @@ message StreamFsFetch {
   repeated plan_common.ColumnCatalog columns = 4;
   reserved "pk_column_ids";
   reserved 5;
-  map<string, string> properties = 6;
+  map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
   // Streaming rate limit
@@ -210,6 +222,7 @@ message SinkDesc {
   // it is the name of the sink itself.
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
+  optional uint32 target_table = 14;
 }
 
 enum SinkLogStoreType {
@@ -416,11 +429,13 @@ message DynamicFilterNode {
   catalog.Table left_table = 3;
   // Right table stores single value from RHS of predicate.
   catalog.Table right_table = 4;
-  // It is true when the right side of the inequality predicate is monotonically:
-  // - decreasing for <, <=, increasing for >, >=
-  // bool is_monotonic = 10;
-  // the output indices of current node
-  // repeated uint32 output_indices = 11;
+  // If the right side's change always make the condition more relaxed.
+  // In other words, make more record in the left side satisfy the condition.
+  // If this is true, we need to store LHS records which do not match the condition in the internal table.
+  // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
+  // If this is false, we need to store RHS records which match the condition in the internal table.
+  // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
+  bool condition_always_relax = 5;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -482,6 +497,9 @@ enum StreamScanType {
 
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
+
+  // ArrangementBackfillExecutor
+  STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -511,6 +529,7 @@ message StreamScanNode {
   catalog.Table state_table = 5;
 
   // The upstream materialized view info used by backfill.
+  // Used iff `ChainType::Backfill`.
   plan_common.StorageTableDesc table_desc = 7;
 
   // The rate limit for the stream scan node.
@@ -518,6 +537,10 @@ message StreamScanNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+
+  // The state table used by ArrangementBackfill to replicate upstream mview's state table.
+  // Used iff `ChainType::ArrangementBackfill`.
+  catalog.Table arrangement_table = 10;
 }
 
 message StreamCdcScanNode {
@@ -827,8 +850,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
 }
 
-// The environment associated with a stream plan
-message StreamEnvironment {
+// The streaming context associated with a stream plan
+message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
 }
@@ -876,7 +899,7 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
-  StreamEnvironment env = 5;
+  StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::mem;
 
 use either::Either;
 use futures::StreamExt;
@@ -28,6 +29,7 @@ use super::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
     Mutation, PkIndicesRef,
 };
+use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
@@ -48,6 +50,8 @@ pub struct DmlExecutor {
 
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
+
+    chunk_size: usize,
 }
 
 /// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
@@ -75,6 +79,7 @@ impl DmlExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
+        chunk_size: usize,
     ) -> Self {
         Self {
             info,
@@ -83,6 +88,7 @@ impl DmlExecutor {
             table_id,
             table_version_id,
             column_descs,
+            chunk_size,
         }
     }
 
@@ -120,6 +126,16 @@ impl DmlExecutor {
 
         // Active transactions: txn_id -> TxnBuffer with transaction chunks.
         let mut active_txn_map: BTreeMap<TxnId, TxnBuffer> = Default::default();
+        // A batch group of small chunks.
+        let mut batch_group: Vec<StreamChunk> = vec![];
+
+        let mut builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            self.column_descs
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect(),
+        );
 
         while let Some(input_msg) = stream.next().await {
             match input_msg? {
@@ -133,6 +149,21 @@ impl DmlExecutor {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 _ => {}
+                            }
+                        }
+
+                        // Flush the remaining batch group
+                        if !batch_group.is_empty() {
+                            let vec = mem::take(&mut batch_group);
+                            for chunk in vec {
+                                for (op, row) in chunk.rows() {
+                                    if let Some(chunk) = builder.append_row(op, row) {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+                            }
+                            if let Some(chunk) = builder.take() {
+                                yield Message::Chunk(chunk);
                             }
                         }
                     }
@@ -151,8 +182,41 @@ impl DmlExecutor {
                         TxnMsg::End(txn_id) => {
                             let mut txn_buffer = active_txn_map.remove(&txn_id)
                                 .unwrap_or_else(|| panic!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
-                            for chunk in txn_buffer.vec.drain(..) {
-                                yield Message::Chunk(chunk);
+
+                            let txn_buffer_cardinality = txn_buffer
+                                .vec
+                                .iter()
+                                .map(|c| c.cardinality())
+                                .sum::<usize>();
+                            let batch_group_cardinality =
+                                batch_group.iter().map(|c| c.cardinality()).sum::<usize>();
+
+                            if txn_buffer_cardinality >= self.chunk_size {
+                                // txn buffer isn't small, so yield.
+                                for chunk in txn_buffer.vec {
+                                    yield Message::Chunk(chunk);
+                                }
+                            } else if txn_buffer_cardinality + batch_group_cardinality
+                                <= self.chunk_size
+                            {
+                                // txn buffer is small and batch group has space.
+                                batch_group.extend(txn_buffer.vec);
+                            } else {
+                                // txn buffer is small and batch group has no space, so yield the large one.
+                                if txn_buffer_cardinality < batch_group_cardinality {
+                                    mem::swap(&mut txn_buffer.vec, &mut batch_group);
+                                }
+
+                                for chunk in txn_buffer.vec {
+                                    for (op, row) in chunk.rows() {
+                                        if let Some(chunk) = builder.append_row(op, row) {
+                                            yield Message::Chunk(chunk);
+                                        }
+                                    }
+                                }
+                                if let Some(chunk) = builder.take() {
+                                    yield Message::Chunk(chunk);
+                                }
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
@@ -253,6 +317,7 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
+            1024,
         ));
         let mut dml_executor = dml_executor.execute();
 
@@ -281,7 +346,8 @@ mod tests {
 
         // The first barrier
         tx.push_barrier(1, false);
-        dml_executor.next().await.unwrap().unwrap();
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
 
         // Messages from upstream streaming executor
         tx.push_chunk(stream_chunk1);
@@ -300,6 +366,8 @@ mod tests {
         // we need to spawn a task here to avoid dead lock.
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
+            // a barrier to trigger batch group flush
+            tx.push_barrier(2, false);
         });
 
         // Consume the 1st message from upstream executor
@@ -354,5 +422,8 @@ mod tests {
                 U+ 2 22",
             )
         );
+
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Barrier(_)));
     }
 }

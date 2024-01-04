@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,3 +15,4 @@
 mod cast_regclass;
 mod col_description;
 pub mod context;
+mod pg_get_indexdef;

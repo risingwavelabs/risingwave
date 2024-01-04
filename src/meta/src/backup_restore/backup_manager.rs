@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -184,7 +184,10 @@ impl BackupManager {
 
     /// Starts a backup job in background. It's non-blocking.
     /// Returns job id.
-    pub async fn start_backup_job(self: &Arc<Self>) -> MetaResult<MetaBackupJobId> {
+    pub async fn start_backup_job(
+        self: &Arc<Self>,
+        remarks: Option<String>,
+    ) -> MetaResult<MetaBackupJobId> {
         let mut guard = self.running_job_handle.lock().await;
         if let Some(job) = (*guard).as_ref() {
             bail!(format!(
@@ -226,7 +229,7 @@ impl BackupManager {
         // - It's likely meta store is deployed in the same node with meta node.
         // - IO volume of metadata snapshot is not expected to be large.
         // - Backup job is not expected to be frequent.
-        BackupWorker::new(self.clone()).start(job_id);
+        BackupWorker::new(self.clone()).start(job_id, remarks);
         let job_handle = BackupJobHandle::new(job_id, hummock_version_safe_point);
         *guard = Some(job_handle);
         self.metrics.job_count.inc();
@@ -332,7 +335,7 @@ impl BackupWorker {
         Self { backup_manager }
     }
 
-    fn start(self, job_id: u64) -> JoinHandle<()> {
+    fn start(self, job_id: u64, remarks: Option<String>) -> JoinHandle<()> {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let mut snapshot_builder = meta_snapshot_builder::MetaSnapshotV1Builder::new(
@@ -350,7 +353,7 @@ impl BackupWorker {
                 .backup_store
                 .load()
                 .0
-                .create(&snapshot)
+                .create(&snapshot, remarks)
                 .await?;
             Ok(BackupJobResult::Succeeded)
         };

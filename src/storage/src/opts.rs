@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ pub struct StorageOpts {
     /// Percent of the ratio of high priority data in block-cache
     pub high_priority_ratio: usize,
     /// max memory usage for large query.
-    pub large_query_memory_usage_mb: usize,
+    pub prefetch_buffer_capacity_mb: usize,
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
@@ -163,7 +163,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
-            large_query_memory_usage_mb: s.large_query_memory_usage_mb,
+            prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,

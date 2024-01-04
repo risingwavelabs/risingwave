@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ pub const RW_RELATION_INFO: BuiltinTable = BuiltinTable {
         (DataType::Varchar, "fragments"), // fragments is json encoded fragment infos.
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ],
     pk: &[0, 1],
 };
@@ -86,13 +88,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("MATERIALIZED VIEW".into())),
                         Some(ScalarImpl::Int32(t.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
                         t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        t.created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ]));
                 }
             });
@@ -107,13 +115,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("TABLE".into())),
                         Some(ScalarImpl::Int32(t.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
                         t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        t.created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ]));
                 }
             });
@@ -128,13 +142,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("SINK".into())),
                         Some(ScalarImpl::Int32(t.id.sink_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
                         t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        t.created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ]));
                 }
             });
@@ -149,13 +169,19 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("INDEX".into())),
                         Some(ScalarImpl::Int32(t.index_table.id.table_id as i32)),
                         Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
+                            fragments.get_ctx().unwrap().get_timezone().clone().into(),
                         )),
                         Some(ScalarImpl::Utf8(
                             json!(fragments.get_fragments()).to_string().into(),
                         )),
                         t.initialized_at_epoch.map(|e| e.as_scalar()),
                         t.created_at_epoch.map(|e| e.as_scalar()),
+                        t.initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        t.created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ]));
                 }
             });
@@ -173,6 +199,12 @@ impl SysCatalogReaderImpl {
                     None,
                     t.initialized_at_epoch.map(|e| e.as_scalar()),
                     t.created_at_epoch.map(|e| e.as_scalar()),
+                    t.initialized_at_cluster_version
+                        .clone()
+                        .map(|v| ScalarImpl::Utf8(v.into())),
+                    t.created_at_cluster_version
+                        .clone()
+                        .map(|v| ScalarImpl::Utf8(v.into())),
                 ]));
             });
         }

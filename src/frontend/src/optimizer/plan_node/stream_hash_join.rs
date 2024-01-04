@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,37 +136,45 @@ impl StreamHashJoin {
                     continue;
                 }
 
-                let (internal, do_state_cleaning) = if key_required_larger < key_required_smaller {
-                    (
-                        l2i.try_map(key_required_larger),
-                        if !equal_condition_clean_state
-                            && clean_left_state_conjunction_idx.is_none()
-                        {
-                            clean_left_state_conjunction_idx = Some(conjunction_idx);
-                            true
-                        } else {
-                            false
-                        },
-                    )
-                } else {
-                    (
-                        r2i.try_map(key_required_larger - left_cols_num),
-                        if !equal_condition_clean_state
-                            && clean_right_state_conjunction_idx.is_none()
-                        {
-                            clean_right_state_conjunction_idx = Some(conjunction_idx);
-                            true
-                        } else {
-                            false
-                        },
-                    )
-                };
+                let (internal_col1, internal_col2, do_state_cleaning) =
+                    if key_required_larger < key_required_smaller {
+                        (
+                            l2i.try_map(key_required_larger),
+                            r2i.try_map(key_required_smaller - left_cols_num),
+                            if !equal_condition_clean_state
+                                && clean_left_state_conjunction_idx.is_none()
+                            {
+                                clean_left_state_conjunction_idx = Some(conjunction_idx);
+                                true
+                            } else {
+                                false
+                            },
+                        )
+                    } else {
+                        (
+                            r2i.try_map(key_required_larger - left_cols_num),
+                            l2i.try_map(key_required_smaller),
+                            if !equal_condition_clean_state
+                                && clean_right_state_conjunction_idx.is_none()
+                            {
+                                clean_right_state_conjunction_idx = Some(conjunction_idx);
+                                true
+                            } else {
+                                false
+                            },
+                        )
+                    };
                 let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal
+                if let Some(internal) = internal_col1
                     && !watermark_columns.contains(internal)
                 {
                     watermark_columns.insert(internal);
                     is_valuable_inequality = true;
+                }
+                if let Some(internal) = internal_col2
+                    && !watermark_columns.contains(internal)
+                {
+                    watermark_columns.insert(internal);
                 }
                 if is_valuable_inequality {
                     inequality_pairs.push((

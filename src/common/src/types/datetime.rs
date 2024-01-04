@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 //! Date, time, and timestamp types.
 
+use std::error::Error;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::io::Write;
@@ -21,7 +22,7 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
-use postgres_types::{ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
@@ -69,6 +70,57 @@ macro_rules! impl_chrono_wrapper {
 impl_chrono_wrapper!(Date, NaiveDate);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime);
 impl_chrono_wrapper!(Time, NaiveTime);
+
+impl ToSql for Date {
+    accepts!(DATE);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl ToSql for Time {
+    accepts!(TIME);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl ToSql for Timestamp {
+    accepts!(TIMESTAMP);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
 
 /// Parse a date from varchar.
 ///

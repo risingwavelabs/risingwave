@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::stream::Fuse;
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
@@ -46,6 +46,7 @@ use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
@@ -314,8 +315,10 @@ impl StageRunner {
     async fn run(mut self, shutdown_rx: ShutdownToken) {
         if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
-                "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
-                self.stage.query_id, self.stage.id, e
+                error = %e.as_report(),
+                query_id = ?self.stage.query_id,
+                stage_id = ?self.stage.id,
+                "Failed to schedule tasks"
             );
             self.send_event(QueryMessage::Stage(Failed {
                 id: self.stage.id,
@@ -367,7 +370,12 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    Some(worker),
+                    expr_context.clone(),
+                ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -380,7 +388,12 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -391,16 +404,18 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker,  expr_context.clone()));
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
             }
         }
 
         // Await each future and convert them into a set of streams.
-        let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
-        let mut buffered_streams = vec![];
-        while let Some(result) = buffered.next().await {
-            buffered_streams.push(result?);
-        }
+        let buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        let buffered_streams = buffered.try_collect::<Vec<_>>().await?;
 
         // Merge different task streams into a single stream.
         let cancelled = pin!(shutdown_rx.cancelled());
@@ -592,7 +607,7 @@ impl StageRunner {
                     if shutdown_rx0.is_cancelled() {
                         break;
                     }
-                    let err_str = e.to_string();
+                    let err_str = e.to_report_string();
                     // This is possible if The Query Runner drop early before schedule the root
                     // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
                     // The error format is just channel closed so no care.
@@ -824,8 +839,11 @@ impl StageRunner {
                     .await
                 {
                     error!(
-                        "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
-                        task_id, stage_id, query_id, e
+                        error = %e.as_report(),
+                        ?task_id,
+                        ?query_id,
+                        ?stage_id,
+                        "Abort task failed",
                     );
                 };
             });

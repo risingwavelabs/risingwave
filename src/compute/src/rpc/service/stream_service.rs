@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -165,7 +165,7 @@ impl StreamService for StreamServiceImpl {
         }
 
         self.mgr
-            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
+            .send_barrier(barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .await?;
 
         Ok(Response::new(InjectBarrierResponse {
@@ -247,7 +247,7 @@ impl StreamService for StreamServiceImpl {
             worker_id: self.env.worker_id(),
             table_watermarks: table_watermarks
                 .into_iter()
-                .map(|(key, value)| (key.table_id as u64, value.to_protobuf()))
+                .map(|(key, value)| (key.table_id, value.to_protobuf()))
                 .collect(),
         }))
     }

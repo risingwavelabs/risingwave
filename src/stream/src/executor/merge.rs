@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -109,17 +110,20 @@ impl MergeExecutor {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
-        let actor_id_str = actor_id.to_string();
-        let fragment_id_str = self.fragment_id.to_string();
-        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let mut metrics = ActorInputMetrics::new(
+            &self.metrics,
+            actor_id,
+            self.fragment_id,
+            self.upstream_fragment_id,
+        );
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
-            self.metrics
+            metrics
                 .actor_input_buffer_blocking_duration_ns
-                .with_label_values(&[&actor_id_str, &fragment_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let mut msg: Message = msg?;
 
@@ -128,10 +132,7 @@ impl MergeExecutor {
                     // Do nothing.
                 }
                 Message::Chunk(chunk) => {
-                    self.metrics
-                        .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str, &fragment_id_str])
-                        .inc_by(chunk.cardinality() as _);
+                    metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
                     tracing::debug!(
@@ -142,7 +143,8 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
+                        barrier.mutation.as_deref()
                     {
                         if select_all
                             .upstream_actor_ids()
@@ -225,7 +227,12 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+                        metrics = ActorInputMetrics::new(
+                            &self.metrics,
+                            actor_id,
+                            self.fragment_id,
+                            self.upstream_fragment_id,
+                        );
 
                         select_all.update_actor_ids();
                     }
@@ -639,14 +646,14 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
             dispatchers: Default::default(),
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
-        });
+        }));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -273,7 +273,8 @@ fn try_update_failure_metric<T>(
     result: &ObjectResult<T>,
     operation_type: &'static str,
 ) {
-    if result.is_err() {
+    if let Err(e) = &result {
+        tracing::error!("{:?} failed because of: {:?}", operation_type, e);
         metrics
             .failure_count
             .with_label_values(&[operation_type])
@@ -620,7 +621,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
         };
 
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        if let Err(e) = &res
+            && e.is_object_not_found_error()
+            && !path.ends_with(".data")
+        {
+            // Some not_found_error is expected, e.g. metadata backup's manifest.json.
+            // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
+        } else {
+            try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        }
 
         let data = res?;
         self.object_store_metrics
@@ -648,12 +657,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async {
-            self.inner
-                .streaming_read(path, range)
-                .verbose_instrument_await("object_store_streaming_read")
-                .await
-        };
+        let future = self
+            .inner
+            .streaming_read(path, range)
+            .verbose_instrument_await("object_store_streaming_read");
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
@@ -847,12 +854,14 @@ pub async fn build_remote_object_store(
                     .monitored(metrics),
             )
         }
-        fs if fs.starts_with("fs://") => ObjectStoreImpl::Opendal(
-            // Now fs engine is only used in CI, so we can hardcode root.
-            OpendalObjectStore::new_fs_engine("/tmp/rw_ci".to_string())
-                .unwrap()
-                .monitored(metrics),
-        ),
+        fs if fs.starts_with("fs://") => {
+            let fs = fs.strip_prefix("fs://").unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_fs_engine(fs.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
 
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             tracing::error!("The s3 compatible mode has been unified with s3.");

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{Excluded, Included};
+use std::future::Future;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
+use std::time::Duration;
 
 use anyhow::anyhow;
-use bytes::Bytes;
 use futures::future::{try_join_all, BoxFuture};
 use futures::stream::select_all;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
-use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use tokio::sync::watch;
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
 use crate::common::log_store_impl::kv_log_store::buffer::{
@@ -42,6 +46,58 @@ use crate::common::log_store_impl::kv_log_store::serde::{
     merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
+
+type RewindBackoffPolicy = impl Iterator<Item = Duration>;
+pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
+pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
+pub(crate) const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
+
+fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
+    tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
+        .factor(REWIND_BACKOFF_FACTOR)
+        .max_delay(REWIND_MAX_DELAY)
+        .map(tokio_retry::strategy::jitter)
+}
+
+struct RewindDelay {
+    last_rewind_truncate_offset: Option<TruncateOffset>,
+    backoff_policy: RewindBackoffPolicy,
+    rewind_count: LabelGuardedIntCounter<3>,
+    rewind_delay: LabelGuardedHistogram<3>,
+}
+
+impl RewindDelay {
+    fn new(metrics: &KvLogStoreMetrics) -> Self {
+        Self {
+            last_rewind_truncate_offset: None,
+            backoff_policy: initial_rewind_backoff_policy(),
+            rewind_count: metrics.rewind_count.clone(),
+            rewind_delay: metrics.rewind_delay.clone(),
+        }
+    }
+
+    async fn rewind_delay(&mut self, truncate_offset: Option<TruncateOffset>) {
+        match (&self.last_rewind_truncate_offset, &truncate_offset) {
+            (Some(prev_rewind_truncate_offset), Some(truncate_offset)) => {
+                if truncate_offset > prev_rewind_truncate_offset {
+                    self.last_rewind_truncate_offset = Some(*truncate_offset);
+                    // Have new truncate progress before this round of rewind.
+                    // Reset rewind backoff
+                    self.backoff_policy = initial_rewind_backoff_policy();
+                }
+            }
+            (None, _) => {
+                self.last_rewind_truncate_offset = truncate_offset;
+            }
+            _ => {}
+        };
+        self.rewind_count.inc();
+        if let Some(delay) = self.backoff_policy.next() {
+            self.rewind_delay.observe(delay.as_secs_f64());
+            sleep(delay).await;
+        }
+    }
+}
 
 pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
@@ -66,15 +122,17 @@ pub struct KvLogStoreReader<S: StateStore> {
     read_flushed_chunk_future:
         Option<BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>>,
 
-    latest_offset: TruncateOffset,
+    latest_offset: Option<TruncateOffset>,
 
-    truncate_offset: TruncateOffset,
+    truncate_offset: Option<TruncateOffset>,
 
     metrics: KvLogStoreMetrics,
 
     is_paused: watch::Receiver<bool>,
 
     identity: String,
+
+    rewind_delay: RewindDelay,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -87,6 +145,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         is_paused: watch::Receiver<bool>,
         identity: String,
     ) -> Self {
+        let rewind_delay = RewindDelay::new(&metrics);
         Self {
             table_id,
             state_store,
@@ -95,11 +154,12 @@ impl<S: StateStore> KvLogStoreReader<S> {
             read_flushed_chunk_future: None,
             first_write_epoch: None,
             state_store_stream: None,
-            latest_offset: TruncateOffset::Barrier { epoch: 0 },
-            truncate_offset: TruncateOffset::Barrier { epoch: 0 },
+            latest_offset: None,
+            truncate_offset: None,
             metrics,
             is_paused,
             identity,
+            rewind_delay,
         }
     }
 
@@ -108,7 +168,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
             let result = future.await;
-            self.read_flushed_chunk_future
+            let _fut = self
+                .read_flushed_chunk_future
                 .take()
                 .expect("future not None");
             Ok(Some(result?))
@@ -118,21 +179,40 @@ impl<S: StateStore> KvLogStoreReader<S> {
     }
 }
 
-impl<S: StateStore> LogReader for KvLogStoreReader<S> {
-    async fn init(&mut self) -> LogStoreResult<()> {
-        let first_write_epoch = self.rx.init().await;
-        let streams = try_join_all(self.serde.vnodes().iter_vnodes().map(|vnode| {
-            let range_start = TableKey(Bytes::from(Vec::from(vnode.to_be_bytes())));
-            let range_end = self.serde.serialize_epoch(vnode, first_write_epoch);
-            let table_id = self.table_id;
+impl<S: StateStore> KvLogStoreReader<S> {
+    fn read_persisted_log_store(
+        &self,
+        last_persisted_epoch: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
+    {
+        let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
+            // start from the next epoch of last_persisted_epoch
+            Included(self.serde.serialize_epoch(last_persisted_epoch + 1))
+        } else {
+            Unbounded
+        };
+        let range_end = self.serde.serialize_epoch(
+            self.first_write_epoch
+                .expect("should have set first write epoch"),
+        );
+
+        let serde = self.serde.clone();
+        let table_id = self.table_id;
+        let read_metrics = self.metrics.persistent_log_read_metrics.clone();
+        let streams_future = try_join_all(serde.vnodes().iter_vnodes().map(|vnode| {
+            let key_range = prefixed_range_with_vnode(
+                (range_start.clone(), Excluded(range_end.clone())),
+                vnode,
+            );
             let state_store = self.state_store.clone();
             async move {
                 state_store
                     .iter(
-                        (Included(range_start), Excluded(range_end)),
+                        key_range,
                         HummockEpoch::MAX,
                         ReadOptions {
-                            prefetch_options: PrefetchOptions::default(),
+                            // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
+                            prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
                             table_id,
                             ..Default::default()
@@ -140,20 +220,31 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     )
                     .await
             }
-        }))
-        .await?;
+        }));
+
+        streams_future.map_err(Into::into).map_ok(|streams| {
+            // TODO: set chunk size by config
+            Box::pin(merge_log_store_item_stream(
+                streams,
+                serde,
+                1024,
+                read_metrics,
+            ))
+        })
+    }
+}
+
+impl<S: StateStore> LogReader for KvLogStoreReader<S> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        let first_write_epoch = self.rx.init().await;
 
         assert!(
             self.first_write_epoch.replace(first_write_epoch).is_none(),
             "should not init twice"
         );
-        // TODO: set chunk size by config
-        self.state_store_stream = Some(Box::pin(merge_log_store_item_stream(
-            streams,
-            self.serde.clone(),
-            1024,
-            self.metrics.persistent_log_read_metrics.clone(),
-        )));
+
+        self.state_store_stream = Some(self.read_persisted_log_store(None).await?);
+
         Ok(())
     }
 
@@ -168,15 +259,21 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         if let Some(state_store_stream) = &mut self.state_store_stream {
             match state_store_stream.try_next().await? {
                 Some((epoch, item)) => {
-                    self.latest_offset.check_next_item_epoch(epoch)?;
+                    if let Some(latest_offset) = &self.latest_offset {
+                        latest_offset.check_next_item_epoch(epoch)?;
+                    }
                     let item = match item {
                         KvLogStoreItem::StreamChunk(chunk) => {
-                            let chunk_id = self.latest_offset.next_chunk_id();
-                            self.latest_offset = TruncateOffset::Chunk { epoch, chunk_id };
+                            let chunk_id = if let Some(latest_offset) = self.latest_offset {
+                                latest_offset.next_chunk_id()
+                            } else {
+                                0
+                            };
+                            self.latest_offset = Some(TruncateOffset::Chunk { epoch, chunk_id });
                             LogStoreReadItem::StreamChunk { chunk, chunk_id }
                         }
                         KvLogStoreItem::Barrier { is_checkpoint } => {
-                            self.latest_offset = TruncateOffset::Barrier { epoch };
+                            self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                             LogStoreReadItem::Barrier { is_checkpoint }
                         }
                     };
@@ -196,8 +293,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 epoch: item_epoch,
                 chunk_id,
             };
-            assert!(offset > self.latest_offset);
-            self.latest_offset = offset;
+            if let Some(latest_offset) = &self.latest_offset {
+                assert!(offset > *latest_offset);
+            }
+            self.latest_offset = Some(offset);
             return Ok((
                 item_epoch,
                 LogStoreReadItem::StreamChunk { chunk, chunk_id },
@@ -206,7 +305,9 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
         // Now the historical state store has been consumed.
         let (item_epoch, item) = self.rx.next_item().await;
-        self.latest_offset.check_next_item_epoch(item_epoch)?;
+        if let Some(latest_offset) = &self.latest_offset {
+            latest_offset.check_next_item_epoch(item_epoch)?;
+        }
         Ok(match item {
             LogStoreBufferItem::StreamChunk {
                 chunk, chunk_id, ..
@@ -215,8 +316,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     epoch: item_epoch,
                     chunk_id,
                 };
-                assert!(offset > self.latest_offset);
-                self.latest_offset = offset;
+                if let Some(latest_offset) = &self.latest_offset {
+                    assert!(offset > *latest_offset);
+                }
+                self.latest_offset = Some(offset);
                 (
                     item_epoch,
                     LogStoreReadItem::StreamChunk { chunk, chunk_id },
@@ -250,7 +353,8 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             (Included(range_start), Included(range_end)),
                                             HummockEpoch::MAX,
                                             ReadOptions {
-                                                prefetch_options: PrefetchOptions::default(),
+                                                prefetch_options:
+                                                    PrefetchOptions::prefetch_for_large_range_scan(),
                                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
                                                 table_id,
                                                 ..Default::default()
@@ -288,9 +392,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 // for cancellation test
                 #[cfg(test)]
                 {
-                    use std::time::Duration;
-
-                    use tokio::time::sleep;
                     sleep(Duration::from_secs(1)).await;
                 }
 
@@ -303,8 +404,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     epoch: item_epoch,
                     chunk_id,
                 };
-                assert!(offset > self.latest_offset);
-                self.latest_offset = offset;
+                if let Some(latest_offset) = &self.latest_offset {
+                    assert!(offset > *latest_offset);
+                }
+                self.latest_offset = Some(offset);
                 (
                     item_epoch,
                     LogStoreReadItem::StreamChunk { chunk, chunk_id },
@@ -320,7 +423,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     next_epoch,
                     item_epoch
                 );
-                self.latest_offset = TruncateOffset::Barrier { epoch: item_epoch };
+                self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
                 (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
             }
             LogStoreBufferItem::UpdateVnodes(bitmap) => {
@@ -331,19 +434,21 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     }
 
     async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        if offset > self.latest_offset {
+        if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",
                 offset,
                 self.latest_offset
             ));
         }
-        if offset <= self.truncate_offset {
-            return Err(anyhow!(
-                "truncate offset {:?} earlier than prev truncate offset {:?}",
-                offset,
-                self.truncate_offset
-            ));
+        if let Some(truncate_offset) = &self.truncate_offset {
+            if offset <= *truncate_offset {
+                return Err(anyhow!(
+                    "truncate offset {:?} earlier than prev truncate offset {:?}",
+                    offset,
+                    truncate_offset
+                ));
+            }
         }
         if offset.epoch() >= self.first_write_epoch.expect("should have init") {
             self.rx.truncate(offset);
@@ -353,7 +458,31 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 self.rx.truncate(offset);
             }
         }
-        self.truncate_offset = offset;
+        self.truncate_offset = Some(offset);
         Ok(())
+    }
+
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        self.rewind_delay.rewind_delay(self.truncate_offset).await;
+        self.latest_offset = None;
+        self.read_flushed_chunk_future = None;
+        if self.truncate_offset.is_none()
+            || self.truncate_offset.expect("not none").epoch()
+                < self.first_write_epoch.expect("should have init")
+        {
+            // still consuming persisted state store data
+            let persisted_epoch =
+                self.truncate_offset
+                    .map(|truncate_offset| match truncate_offset {
+                        TruncateOffset::Chunk { epoch, .. } => epoch - 1,
+                        TruncateOffset::Barrier { epoch } => epoch,
+                    });
+            self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);
+        } else {
+            assert!(self.state_store_stream.is_none());
+        }
+        self.rx.rewind();
+
+        Ok((true, Some((**self.serde.vnodes()).clone())))
     }
 }

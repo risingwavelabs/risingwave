@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
-use risingwave_common::util::epoch::EPOCH_MASK;
+use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -44,6 +44,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 pub mod table_watermark;
+pub mod version;
 
 pub use compact::*;
 
@@ -288,11 +289,12 @@ impl EpochWithGap {
         //  So for compatibility, we must skip checking it for u64::MAX. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            debug_assert!(
-                ((epoch & EPOCH_MASK) == 0) || risingwave_common::util::epoch::is_max_epoch(epoch)
-            );
-            let epoch_with_gap = epoch + spill_offset as u64;
-            EpochWithGap(epoch_with_gap)
+            if risingwave_common::util::epoch::is_max_epoch(epoch) {
+                EpochWithGap::new_max_epoch()
+            } else {
+                debug_assert!((epoch & EPOCH_SPILL_TIME_MASK) == 0);
+                EpochWithGap(epoch + spill_offset as u64)
+            }
         }
         #[cfg(feature = "enable_test_epoch")]
         {
@@ -326,7 +328,7 @@ impl EpochWithGap {
     pub fn pure_epoch(&self) -> HummockEpoch {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            self.0 & !EPOCH_MASK
+            self.0 & !EPOCH_SPILL_TIME_MASK
         }
         #[cfg(feature = "enable_test_epoch")]
         {
@@ -335,6 +337,6 @@ impl EpochWithGap {
     }
 
     pub fn offset(&self) -> u64 {
-        self.0 & EPOCH_MASK
+        self.0 & EPOCH_SPILL_TIME_MASK
     }
 }

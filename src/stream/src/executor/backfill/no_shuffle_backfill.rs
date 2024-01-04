@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,18 +35,15 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter,
+    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, iter_chunks,
+    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Message, Mutation, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
-
-/// vnode, `is_finished`, `row_count`, all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 3;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -101,6 +98,11 @@ pub struct BackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    /// Rate limit, just used to initialize the chunk size for
+    /// snapshot read side.
+    /// If smaller than chunk_size, it will take precedence.
+    rate_limit: Option<usize>,
 }
 
 impl<S> BackfillExecutor<S>
@@ -117,6 +119,7 @@ where
         progress: CreateMviewProgress,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        rate_limit: Option<usize>,
     ) -> Self {
         let actor_id = progress.actor_id();
         Self {
@@ -129,6 +132,7 @@ where
             actor_id,
             metrics,
             chunk_size,
+            rate_limit,
         }
     }
 
@@ -136,6 +140,8 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+
+        let mut rate_limit = self.rate_limit;
 
         let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
 
@@ -161,8 +167,11 @@ where
             .await?;
         tracing::trace!(is_finished, row_count, "backfill state recovered");
 
-        let mut builder =
-            DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
+        let mut builder = create_builder(
+            rate_limit,
+            self.chunk_size,
+            self.upstream_table.schema().data_types(),
+        );
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -433,6 +442,27 @@ where
                     "Backfill state persisted"
                 );
 
+                // Update snapshot read chunk builder.
+                if let Some(mutation) = barrier.mutation.as_ref() {
+                    if let Mutation::Throttle(actor_to_apply) = mutation.as_ref() {
+                        let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                        if let Some(new_rate_limit) = new_rate_limit_entry {
+                            rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
+                            tracing::info!(
+                                id = self.actor_id,
+                                new_rate_limit = ?self.rate_limit,
+                                "actor rate limit changed",
+                            );
+                            assert!(builder.is_empty());
+                            builder = create_builder(
+                                rate_limit,
+                                self.chunk_size,
+                                self.upstream_table.schema().data_types(),
+                            );
+                        }
+                    }
+                }
+
                 yield Message::Barrier(barrier);
 
                 if snapshot_read_complete {
@@ -609,17 +639,18 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                PrefetchOptions::new_for_large_range_scan(),
+                // Here we only use small range prefetch because every barrier change, the executor will recreate a new iterator. So we do not need prefetch too much data.
+                PrefetchOptions::prefetch_for_small_range_scan(),
             )
             .await?;
-
         let row_iter = owned_row_iter(iter);
         pin_mut!(row_iter);
 
         #[for_await]
         for chunk in iter_chunks(row_iter, builder) {
-            yield chunk?;
+            yield Some(chunk?);
         }
+        yield None;
     }
 
     async fn persist_state(

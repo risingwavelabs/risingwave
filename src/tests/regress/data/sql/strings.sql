@@ -173,17 +173,17 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 --@ SELECT SUBSTRING('abcdefg' FROM 'b(.*)f') AS "cde";
 
 -- Check behavior of SIMILAR TO, which uses largely the same regexp variant
---@ SELECT 'abcdefg' SIMILAR TO '_bcd%' AS true;
---@ SELECT 'abcdefg' SIMILAR TO 'bcd%' AS false;
---@ SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '#' AS false;
---@ SELECT 'abcd%' SIMILAR TO '_bcd#%' ESCAPE '#' AS true;
---@ -- Postgres uses '\' as the default escape character, which is not per spec
---@ SELECT 'abcdefg' SIMILAR TO '_bcd\%' AS false;
---@ -- and an empty string to mean "no escape", which is also not per spec
---@ SELECT 'abcd\efg' SIMILAR TO '_bcd\%' ESCAPE '' AS true;
---@ -- these behaviors are per spec, though:
---@ SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
---@ SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
+SELECT 'abcdefg' SIMILAR TO '_bcd%' AS true;
+SELECT 'abcdefg' SIMILAR TO 'bcd%' AS false;
+SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '#' AS false;
+SELECT 'abcd%' SIMILAR TO '_bcd#%' ESCAPE '#' AS true;
+-- Postgres uses '\' as the default escape character, which is not per spec
+SELECT 'abcdefg' SIMILAR TO '_bcd\%' AS false;
+-- and an empty string to mean "no escape", which is also not per spec
+SELECT 'abcd\efg' SIMILAR TO '_bcd\%' ESCAPE '' AS true;
+-- these behaviors are per spec, though:
+SELECT 'abcdefg' SIMILAR TO '_bcd%' ESCAPE NULL AS null;
+SELECT 'abcdefg' SIMILAR TO '_bcd#%' ESCAPE '##' AS error;
 
 -- Test backslash escapes in regexp_replace's replacement string
 --@ SELECT regexp_replace('1112223333', E'(\\d{3})(\\d{3})(\\d{4})', E'(\\1) \\2-\\3');

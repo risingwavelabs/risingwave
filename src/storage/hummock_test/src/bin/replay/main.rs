@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,7 +114,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             storage_opts.block_cache_capacity_mb * (1 << 20),
             storage_opts.meta_cache_capacity_mb * (1 << 20),
             storage_opts.high_priority_ratio,
-            storage_opts.large_query_memory_usage_mb * (1 << 20),
+            storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
             FileCache::none(),
             FileCache::none(),
             None,

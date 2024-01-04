@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use std::time::Duration;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::PbHummockSnapshot;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
 
@@ -360,7 +361,9 @@ impl UnpinWorker {
                     // Remove all snapshots before this one.
                     self.states = self.states.split_off(&min_snapshot);
                 }
-                Err(e) => tracing::error!(%e, min_epoch, "unpin snapshot failed"),
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), min_epoch, "unpin snapshot failed")
+                }
             }
         }
     }

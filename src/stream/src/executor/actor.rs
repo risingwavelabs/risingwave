@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -21,6 +21,7 @@ use futures::future::join_all;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::expr_context_scope;
@@ -84,7 +85,10 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!(identity, error = %err.as_report(), "failed to evaluate expression");
+        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
+        }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         let mut err_str = err.to_report_string();
@@ -215,7 +219,7 @@ where
             .into()));
 
             // Collect barriers to local barrier manager
-            self.context.lock_barrier_manager().collect(id, &barrier);
+            self.context.barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {

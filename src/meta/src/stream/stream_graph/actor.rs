@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ use risingwave_pb::stream_plan::{
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -174,6 +174,7 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
+                // FIXME(kwannoel): This may not hold for Arrangement Backfill.
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
@@ -649,6 +650,7 @@ impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
     pub fn new(
+        streaming_job_id: u32,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
@@ -656,11 +658,12 @@ impl ActorGraphBuilder {
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
-        let distributions = schedule::Scheduler::new(
+        let scheduler = schedule::Scheduler::new(
+            streaming_job_id,
             cluster_info.parallel_units.values().cloned(),
             default_parallelism,
-        )
-        .schedule(&fragment_graph)?;
+        )?;
+        let distributions = scheduler.schedule(&fragment_graph)?;
 
         Ok(Self {
             distributions,
@@ -703,7 +706,7 @@ impl ActorGraphBuilder {
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
     pub async fn generate_graph(
         self,
-        id_gen_manager: IdGeneratorManagerRef,
+        env: &MetaSrvEnv,
         job: &StreamingJob,
         expr_context: ExprContext,
     ) -> MetaResult<ActorGraphBuildResult> {
@@ -713,7 +716,9 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
+
+        // TODO: use sql_id_gen that is not implemented yet.
+        let id_gen = GlobalActorIdGen::new(env.id_gen_manager(), actor_len).await?;
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {

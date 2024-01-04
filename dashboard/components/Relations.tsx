@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,11 @@ import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation, StreamingJob } from "../pages/api/streaming"
-import { Table as RwTable } from "../proto/gen/catalog"
+import {
+  Sink as RwSink,
+  Source as RwSource,
+  Table as RwTable,
+} from "../proto/gen/catalog"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -98,7 +102,13 @@ export const primaryKeyColumn: Column<RwTable> = {
       .join(", "),
 }
 
-export const connectorColumn: Column<Relation> = {
+export const connectorColumnSource: Column<RwSource> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.withProperties.connector ?? "unknown",
+}
+
+export const connectorColumnSink: Column<RwSink> = {
   name: "Connector",
   width: 3,
   content: (r) => r.properties.connector ?? "unknown",

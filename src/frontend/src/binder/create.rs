@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ impl Binder {
     pub fn bind_columns_to_context(
         &mut self,
         name: String,
-        column_catalogs: Vec<ColumnCatalog>,
+        column_catalogs: &[ColumnCatalog],
     ) -> Result<()> {
         let columns = column_catalogs
             .iter()
