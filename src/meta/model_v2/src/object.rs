@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,6 +66,8 @@ pub struct Model {
     pub database_id: Option<DatabaseId>,
     pub initialized_at: DateTime,
     pub created_at: DateTime,
+    pub initialized_at_cluster_version: Option<String>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

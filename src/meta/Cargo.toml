@@ -36,6 +36,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.12"
+maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
@@ -94,7 +95,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-maplit = "1.0.2"
+expect-test = "1.4"
 rand = "0.8"
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }

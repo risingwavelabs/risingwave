@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -444,6 +444,8 @@ macro_rules! for_all_plain_native_methods {
             {
                 public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
 
+                public static native boolean tracingSlf4jEventEnabled(int level);
+
                 public static native int vnodeCount();
 
                 // hummock iterator method
@@ -538,8 +540,8 @@ macro_rules! for_all_plain_native_methods {
 /// }
 /// assert_eq!([
 ///     ("f", "int", "(int param1, boolean param2)"),
-///     ("f2", "boolean []", "()"),
-///     ("f3", "java.lang.String", "(byte [] param)")
+///     ("f2", "boolean[]", "()"),
+///     ("f3", "java.lang.String", "(byte[] param)")
 /// ], call_split_extract_plain_native_methods!(
 ///     int f(int param1, boolean param2);
 ///     boolean[] f2();
@@ -883,6 +885,7 @@ mod tests {
         let expected = expect_test::expect![[r#"
             [
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEventEnabled                 (I)Z,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,

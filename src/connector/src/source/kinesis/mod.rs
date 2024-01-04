@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 pub mod enumerator;
 pub mod source;
 pub mod split;
+
+use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -42,6 +44,9 @@ pub struct KinesisProperties {
 
     #[serde(flatten)]
     pub common: KinesisCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for KinesisProperties {
@@ -50,6 +55,12 @@ impl SourceProperties for KinesisProperties {
     type SplitReader = KinesisSplitReader;
 
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for KinesisProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 #[cfg(test)]

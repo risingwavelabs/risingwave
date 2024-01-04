@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,17 +16,20 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::Bound::{Included, Unbounded};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
-use tracing::warn;
+use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
@@ -576,16 +579,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 }
             }
         }
-        self.inner
-            .ingest_batch(
-                kv_pairs,
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            )
-            .await
+        self.inner.ingest_batch(
+            kv_pairs,
+            delete_ranges,
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
     }
 
     fn epoch(&self) -> u64 {
@@ -618,8 +619,38 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
-        if opts.table_watermarks.is_some() {
-            warn!("table watermark only supported in hummock state store");
+        if let Some((direction, watermarks)) = opts.table_watermarks {
+            let delete_ranges = watermarks
+                .iter()
+                .flat_map(|vnode_watermark| {
+                    let inner_range = match direction {
+                        WatermarkDirection::Ascending => {
+                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                        }
+                        WatermarkDirection::Descending => {
+                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                        }
+                    };
+                    vnode_watermark
+                        .vnode_bitmap()
+                        .iter_vnodes()
+                        .map(move |vnode| {
+                            let (start, end) =
+                                prefixed_range_with_vnode(inner_range.clone(), vnode);
+                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                        })
+                })
+                .collect_vec();
+            if let Err(e) = self.inner.ingest_batch(
+                Vec::new(),
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            ) {
+                error!(err = ?e, "failed to write delete ranges of table watermark");
+            }
         }
     }
 

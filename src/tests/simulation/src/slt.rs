@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,8 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                         let next = *tokens.peek()?;
                         if "if" == next
                             && let Some("not") = tokens.peek().cloned()
-                            && let Some("exists") = tokens.peek().cloned() {
+                            && let Some("exists") = tokens.peek().cloned()
+                        {
                             tokens.next();
                             tokens.next();
                             tokens.next();
@@ -245,7 +246,8 @@ pub async fn run_slt_task(
                 connection,
                 ..
             } = &record
-                && matches!(cmd, SqlCmd::CreateMaterializedView { .. }) {
+                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+            {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
@@ -317,17 +319,35 @@ pub async fn run_slt_task(
                 {
                     Ok(_) => {
                         // For background ddl
-                        if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
-                            && matches!(record, Record::Statement { expected_error: None, .. } | Record::Query { expected_error: None, ..})
+                        if let SqlCmd::CreateMaterializedView { ref name } = cmd
+                            && background_ddl_enabled
+                            && matches!(
+                                record,
+                                Record::Statement {
+                                    expected_error: None,
+                                    ..
+                                } | Record::Query {
+                                    expected_error: None,
+                                    ..
+                                }
+                            )
                         {
-                            tracing::debug!(iteration=i, "Retry for background ddl");
+                            tracing::debug!(iteration = i, "Retry for background ddl");
                             match wait_background_mv_finished(name).await {
                                 Ok(_) => {
-                                    tracing::debug!(iteration=i, "Record with background_ddl {:?} finished", record);
+                                    tracing::debug!(
+                                        iteration = i,
+                                        "Record with background_ddl {:?} finished",
+                                        record
+                                    );
                                     break;
                                 }
                                 Err(err) => {
-                                    tracing::error!(iteration=i, ?err, "failed to wait for background mv to finish creating");
+                                    tracing::error!(
+                                        iteration = i,
+                                        ?err,
+                                        "failed to wait for background mv to finish creating"
+                                    );
                                     if i >= max_retry {
                                         panic!("failed to run test after retry {i} times, error={err:#?}");
                                     }

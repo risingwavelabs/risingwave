@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::source::external::{CdcOffset, ExternalTableReader};
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
 
 use super::external::ExternalStorageTable;
 use crate::executor::backfill::utils::iter_chunks;

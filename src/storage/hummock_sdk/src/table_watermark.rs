@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -331,6 +331,10 @@ impl VnodeWatermark {
     pub fn vnode_bitmap(&self) -> &Bitmap {
         &self.vnode_bitmap
     }
+
+    pub fn watermark(&self) -> &Bytes {
+        &self.watermark
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -487,7 +491,8 @@ impl TableWatermarks {
             .is_sorted());
         // ensure that the newly added watermarks have a later epoch than the previous latest epoch.
         if let Some((prev_last_epoch, _)) = self.watermarks.last()
-            && let Some((new_first_epoch, _)) = newly_added_watermarks.watermarks.first() {
+            && let Some((new_first_epoch, _)) = newly_added_watermarks.watermarks.first()
+        {
             assert!(prev_last_epoch < new_first_epoch);
         }
         self.watermarks.extend(
@@ -529,7 +534,9 @@ impl TableWatermarks {
                 break;
             }
         }
-        while !unset_vnode.is_empty() && let Some((_, watermarks)) = self.watermarks.pop() {
+        while !unset_vnode.is_empty()
+            && let Some((_, watermarks)) = self.watermarks.pop()
+        {
             let mut new_vnode_watermarks = Vec::new();
             for vnode_watermark in watermarks {
                 let mut set_vnode = Vec::new();
@@ -551,7 +558,9 @@ impl TableWatermarks {
                 }
             }
             if !new_vnode_watermarks.is_empty() {
-                if let Some((last_epoch, last_watermarks)) = result_epoch_watermark.last_mut() && *last_epoch == safe_epoch {
+                if let Some((last_epoch, last_watermarks)) = result_epoch_watermark.last_mut()
+                    && *last_epoch == safe_epoch
+                {
                     last_watermarks.extend(new_vnode_watermarks);
                 } else {
                     result_epoch_watermark.push((safe_epoch, new_vnode_watermarks));

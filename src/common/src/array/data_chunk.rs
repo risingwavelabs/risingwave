@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -760,8 +760,6 @@ impl DataChunkTestExt for DataChunk {
             {
                 let datum = match val_str {
                     "." => None,
-                    "t" => Some(true.into()),
-                    "f" => Some(false.into()),
                     "(empty)" => Some("".into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };

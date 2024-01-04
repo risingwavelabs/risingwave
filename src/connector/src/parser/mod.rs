@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,8 +40,9 @@ use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
-pub use self::mysql::mysql_row_to_datums;
+pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
+pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
@@ -68,6 +69,7 @@ mod json_parser;
 mod maxwell;
 mod mysql;
 pub mod plain_parser;
+mod postgres;
 mod protobuf;
 mod unified;
 mod upsert_parser;

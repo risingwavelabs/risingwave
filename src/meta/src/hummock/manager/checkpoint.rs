@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,6 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::trigger_gc_stat;
 use crate::hummock::HummockManager;
-use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
-
-const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
 
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
@@ -63,9 +60,8 @@ impl HummockVersionCheckpoint {
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
 impl HummockManager {
-    /// # Panics
-    /// if checkpoint is not found.
-    pub async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
+    /// Returns Ok(None) if not found.
+    pub async fn try_read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
         use prost::Message;
         let data = match self
             .object_store
@@ -75,16 +71,13 @@ impl HummockManager {
             Ok(data) => data,
             Err(e) => {
                 if e.is_object_not_found_error() {
-                    panic!(
-                        "Hummock version checkpoints do not exist in object store, path: {}",
-                        self.version_checkpoint_path
-                    );
+                    return Ok(None);
                 }
                 return Err(e.into());
             }
         };
         let ckpt = PbHummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(HummockVersionCheckpoint::from_protobuf(&ckpt))
+        Ok(Some(HummockVersionCheckpoint::from_protobuf(&ckpt)))
     }
 
     pub(super) async fn write_checkpoint(
@@ -171,31 +164,6 @@ impl HummockManager {
             .set(new_checkpoint_id as i64);
 
         Ok(new_checkpoint_id - old_checkpoint_id)
-    }
-
-    pub(super) async fn need_init(&self) -> Result<bool> {
-        match self
-            .env
-            .meta_store()
-            .get_cf(DEFAULT_COLUMN_FAMILY, HUMMOCK_INIT_FLAG_KEY)
-            .await
-        {
-            Ok(_) => Ok(false),
-            Err(MetaStoreError::ItemNotFound(_)) => Ok(true),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    pub(super) async fn mark_init(&self) -> Result<()> {
-        self.env
-            .meta_store()
-            .put_cf(
-                DEFAULT_COLUMN_FAMILY,
-                HUMMOCK_INIT_FLAG_KEY.to_vec(),
-                memcomparable::to_vec(&0).unwrap(),
-            )
-            .await
-            .map_err(Into::into)
     }
 
     pub fn pause_version_checkpoint(&self) {

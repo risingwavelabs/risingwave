@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use serde::Deserialize;
 
 pub mod enumerator;
 pub mod source;
@@ -29,7 +31,7 @@ use crate::source::SourceProperties;
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash, WithOptions)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "pubsub.split_count")]
@@ -71,6 +73,9 @@ pub struct PubsubProperties {
     /// more details.
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for PubsubProperties {
@@ -79,6 +84,12 @@ impl SourceProperties for PubsubProperties {
     type SplitReader = PubsubSplitReader;
 
     const SOURCE_NAME: &'static str = GOOGLE_PUBSUB_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for PubsubProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl PubsubProperties {
@@ -120,6 +131,8 @@ mod tests {
             start_offset: None,
             start_snapshot: None,
             subscription: String::from("test-subscription"),
+
+            unknown_fields: Default::default(),
         };
 
         let properties = PubsubProperties {
