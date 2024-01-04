@@ -479,7 +479,11 @@ impl HummockManager {
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        let mut redo_state = if self.need_init().await? {
+        let checkpoint = self.try_read_checkpoint().await?;
+        let mut redo_state = if let Some(c) = checkpoint {
+            versioning_guard.checkpoint = c;
+            versioning_guard.checkpoint.version.clone()
+        } else {
             let default_compaction_config = self
                 .compaction_group_manager
                 .read()
@@ -487,6 +491,7 @@ impl HummockManager {
                 .default_compaction_config();
             let checkpoint_version = create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
+            // This write to meta store is idempotent. So if `write_checkpoint` fails, restarting meta node is fine.
             HummockVersionStats::default()
                 .insert(self.env.meta_store())
                 .await?;
@@ -495,13 +500,9 @@ impl HummockManager {
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
-            self.mark_init().await?;
             checkpoint_version
-        } else {
-            // Read checkpoint from object store.
-            versioning_guard.checkpoint = self.read_checkpoint().await?;
-            versioning_guard.checkpoint.version.clone()
         };
+
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
             .into_iter()
