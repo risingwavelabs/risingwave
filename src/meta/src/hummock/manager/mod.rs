@@ -556,25 +556,6 @@ impl HummockManager {
                 .default_compaction_config();
             let checkpoint_version = create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
-            // This write to meta store is idempotent. So if `write_checkpoint` fails, restarting meta node is fine.
-            match self.env.sql_meta_store() {
-                None => {
-                    HummockVersionStats::default()
-                        .insert(self.env.meta_store())
-                        .await?;
-                }
-                Some(sql_meta_store) => {
-                    use sea_orm::ActiveModelTrait;
-                    hummock_version_stats::ActiveModel {
-                        id: sea_orm::ActiveValue::Set(checkpoint_version.id.try_into().unwrap()),
-                        stats: sea_orm::ActiveValue::Set(hummock_version_stats::TableStats(
-                            HashMap::default(),
-                        )),
-                    }
-                    .insert(&sql_meta_store.conn)
-                    .await?;
-                }
-            }
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
@@ -582,7 +563,6 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
-
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
@@ -592,17 +572,17 @@ impl HummockManager {
             None => HummockVersionStats::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .next()
-                .expect("should contain exact one item"),
+                .next(),
             Some(sql_meta_store) => hummock_version_stats::Entity::find_by_id(redo_state.id as i64)
                 .one(&sql_meta_store.conn)
                 .await
                 .map_err(MetadataModelError::from)?
-                .map(|m| m.into())
-                .unwrap_or_else(|| {
-                    panic!("version stats not found");
-                }),
-        };
+                .map(HummockVersionStats::from),
+        }
+        .unwrap_or_else(|| HummockVersionStats {
+            hummock_version_id: redo_state.id,
+            ..Default::default()
+        });
 
         self.latest_snapshot.store(
             HummockSnapshot {

@@ -136,7 +136,7 @@ pub async fn next_sstable_object_id(
     match env.hummock_seq.clone() {
         None => env
             .id_gen_manager()
-            .generate::<{ IdCategory::HummockSstableId }>()
+            .generate_interval::<{ IdCategory::HummockSstableId }>(num as u64)
             .await
             .map_err(Into::into),
         Some(seq) => seq.next_interval(SSTABLE_OBJECT_ID, num).await,
