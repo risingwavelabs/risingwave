@@ -248,7 +248,8 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
         TaskStatus::InvalidGroupCanceled,
-        TaskStatus::NoAvailResourceCanceled,
+        TaskStatus::NoAvailMemoryResourceCanceled,
+        TaskStatus::NoAvailCpuResourceCanceled,
     ]
     .into_iter()
     .collect()

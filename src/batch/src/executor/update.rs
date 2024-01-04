@@ -32,7 +32,7 @@ use crate::executor::{
 };
 use crate::task::BatchTaskContext;
 
-/// [`UpdateExecutor`] implements table updation with values from its child executor and given
+/// [`UpdateExecutor`] implements table update with values from its child executor and given
 /// expressions.
 // Note: multiple `UPDATE`s in a single epoch, or concurrent `UPDATE`s may lead to conflicting
 // records. This is validated and filtered on the first `Materialize`.
