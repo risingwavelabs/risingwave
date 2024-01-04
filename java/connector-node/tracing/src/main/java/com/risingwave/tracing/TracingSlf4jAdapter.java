@@ -28,6 +28,42 @@ public class TracingSlf4jAdapter implements Logger {
 
     private final String name;
 
+    private void logIfEnabled(int level, String msg) {
+        if (TracingSlf4jImpl.isEnabled(level)) {
+            TracingSlf4jImpl.event(name, level, msg);
+        }
+    }
+
+    private void logIfEnabled(int level, String format, Object arg) {
+        if (TracingSlf4jImpl.isEnabled(level)) {
+            TracingSlf4jImpl.event(
+                    name, level, new ParameterizedMessage(format, arg).getFormattedMessage());
+        }
+    }
+
+    private void logIfEnabled(int level, String format, Object arg1, Object arg2) {
+        if (TracingSlf4jImpl.isEnabled(level)) {
+            TracingSlf4jImpl.event(
+                    name,
+                    level,
+                    new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        }
+    }
+
+    private void logIfEnabled(int level, String format, Object... arguments) {
+        if (TracingSlf4jImpl.isEnabled(level)) {
+            TracingSlf4jImpl.event(
+                    name, level, new ParameterizedMessage(format, arguments).getFormattedMessage());
+        }
+    }
+
+    private void logIfEnabled(int level, String msg, Throwable t) {
+        if (TracingSlf4jImpl.isEnabled(level)) {
+            String sStackTrace = ExceptionUtils.getStackTrace(t);
+            TracingSlf4jImpl.event(name, level, String.format("%s: %s", msg, sStackTrace));
+        }
+    }
+
     public TracingSlf4jAdapter(String name) {
         this.name = name;
     }
@@ -39,412 +75,301 @@ public class TracingSlf4jAdapter implements Logger {
 
     @Override
     public boolean isTraceEnabled() {
-        return true;
+        return TracingSlf4jImpl.isEnabled(TracingSlf4jImpl.TRACE);
     }
 
     @Override
     public void trace(String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.TRACE, msg);
+        logIfEnabled(TracingSlf4jImpl.TRACE, msg);
     }
 
     @Override
     public void trace(String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.TRACE, format, arg);
     }
 
     @Override
     public void trace(String format, Object arg1, Object arg2) {
-        new ParameterizedMessage(format, arg1, arg2).getFormattedMessage();
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.TRACE, format, arg1, arg2);
     }
 
     @Override
     public void trace(String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.TRACE, format, arguments);
     }
 
     @Override
     public void trace(String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, sStackTrace));
+        logIfEnabled(TracingSlf4jImpl.TRACE, msg, t);
     }
 
     @Override
     public boolean isTraceEnabled(Marker marker) {
-        return true;
+        return isTraceEnabled();
     }
 
     @Override
     public void trace(Marker marker, String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.TRACE, msg);
+        trace(msg);
     }
 
     @Override
     public void trace(Marker marker, String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        trace(format, arg);
     }
 
     @Override
     public void trace(Marker marker, String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        trace(format, arg1, arg2);
     }
 
     @Override
     public void trace(Marker marker, String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.TRACE,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        trace(format, arguments);
     }
 
     @Override
     public void trace(Marker marker, String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.TRACE, String.format("%s: %s", msg, sStackTrace));
+        trace(msg, t);
     }
 
     @Override
     public boolean isDebugEnabled() {
-        return true;
+        return TracingSlf4jImpl.isEnabled(TracingSlf4jImpl.DEBUG);
     }
 
     @Override
     public void debug(String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.DEBUG, msg);
+        logIfEnabled(TracingSlf4jImpl.DEBUG, msg);
     }
 
     @Override
     public void debug(String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.DEBUG, format, arg);
     }
 
     @Override
     public void debug(String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.DEBUG, format, arg1, arg2);
     }
 
     @Override
     public void debug(String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.DEBUG, format, arguments);
     }
 
     @Override
     public void debug(String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, sStackTrace));
+        logIfEnabled(TracingSlf4jImpl.DEBUG, msg, t);
     }
 
     @Override
     public boolean isDebugEnabled(Marker marker) {
-        return true;
+        return isDebugEnabled();
     }
 
     @Override
     public void debug(Marker marker, String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.DEBUG, msg);
+        debug(msg);
     }
 
     @Override
     public void debug(Marker marker, String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        debug(format, arg);
     }
 
     @Override
     public void debug(Marker marker, String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        debug(format, arg1, arg2);
     }
 
     @Override
     public void debug(Marker marker, String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.DEBUG,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        debug(format, arguments);
     }
 
     @Override
     public void debug(Marker marker, String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.DEBUG, String.format("%s: %s", msg, sStackTrace));
+        debug(msg, t);
     }
 
     @Override
     public boolean isInfoEnabled() {
-        return true;
+        return TracingSlf4jImpl.isEnabled(TracingSlf4jImpl.INFO);
     }
 
     @Override
     public void info(String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.INFO, msg);
+        logIfEnabled(TracingSlf4jImpl.INFO, msg);
     }
 
     @Override
     public void info(String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.INFO, format, arg);
     }
 
     @Override
     public void info(String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.INFO, format, arg1, arg2);
     }
 
     @Override
     public void info(String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.INFO, format, arguments);
     }
 
     @Override
     public void info(String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, sStackTrace));
+        logIfEnabled(TracingSlf4jImpl.INFO, msg, t);
     }
 
     @Override
     public boolean isInfoEnabled(Marker marker) {
-        return true;
+        return isInfoEnabled();
     }
 
     @Override
     public void info(Marker marker, String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.INFO, msg);
+        info(msg);
     }
 
     @Override
     public void info(Marker marker, String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        info(format, arg);
     }
 
     @Override
     public void info(Marker marker, String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        info(format, arg1, arg2);
     }
 
     @Override
     public void info(Marker marker, String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.INFO,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        info(format, arguments);
     }
 
     @Override
     public void info(Marker marker, String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.INFO, String.format("%s: %s", msg, sStackTrace));
+        info(msg, t);
     }
 
     @Override
     public boolean isWarnEnabled() {
-        return true;
+        return TracingSlf4jImpl.isEnabled(TracingSlf4jImpl.WARN);
     }
 
     @Override
     public void warn(String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.WARN, msg);
+        logIfEnabled(TracingSlf4jImpl.WARN, msg);
     }
 
     @Override
     public void warn(String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
-    }
-
-    @Override
-    public void warn(String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.WARN, format, arg);
     }
 
     @Override
     public void warn(String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.WARN, format, arg1, arg2);
+    }
+
+    @Override
+    public void warn(String format, Object... arguments) {
+        logIfEnabled(TracingSlf4jImpl.WARN, format, arguments);
     }
 
     @Override
     public void warn(String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, sStackTrace));
+        logIfEnabled(TracingSlf4jImpl.WARN, msg, t);
     }
 
     @Override
     public boolean isWarnEnabled(Marker marker) {
-        return true;
+        return isWarnEnabled();
     }
 
     @Override
     public void warn(Marker marker, String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.WARN, msg);
+        warn(msg);
     }
 
     @Override
     public void warn(Marker marker, String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        warn(format, arg);
     }
 
     @Override
     public void warn(Marker marker, String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        warn(format, arg1, arg2);
     }
 
     @Override
     public void warn(Marker marker, String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.WARN,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        warn(format, arguments);
     }
 
     @Override
     public void warn(Marker marker, String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.WARN, String.format("%s: %s", msg, sStackTrace));
+        warn(msg, t);
     }
 
     @Override
     public boolean isErrorEnabled() {
-        return true;
+        return TracingSlf4jImpl.isEnabled(TracingSlf4jImpl.ERROR);
     }
 
     @Override
     public void error(String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.ERROR, msg);
+        logIfEnabled(TracingSlf4jImpl.ERROR, msg);
     }
 
     @Override
     public void error(String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.ERROR, format, arg);
     }
 
     @Override
     public void error(String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.ERROR, format, arg1, arg2);
     }
 
     @Override
     public void error(String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        logIfEnabled(TracingSlf4jImpl.ERROR, format, arguments);
     }
 
     @Override
     public void error(String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, sStackTrace));
+        logIfEnabled(TracingSlf4jImpl.ERROR, msg, t);
     }
 
     @Override
     public boolean isErrorEnabled(Marker marker) {
-        return true;
+        return isErrorEnabled();
     }
 
     @Override
     public void error(Marker marker, String msg) {
-        TracingSlf4jImpl.event(name, TracingSlf4jImpl.ERROR, msg);
+        error(msg);
     }
 
     @Override
     public void error(Marker marker, String format, Object arg) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arg).getFormattedMessage());
+        error(format, arg);
     }
 
     @Override
     public void error(Marker marker, String format, Object arg1, Object arg2) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arg1, arg2).getFormattedMessage());
+        error(format, arg1, arg2);
     }
 
     @Override
     public void error(Marker marker, String format, Object... arguments) {
-        TracingSlf4jImpl.event(
-                name,
-                TracingSlf4jImpl.ERROR,
-                new ParameterizedMessage(format, arguments).getFormattedMessage());
+        error(format, arguments);
     }
 
     @Override
     public void error(Marker marker, String msg, Throwable t) {
-        String sStackTrace = ExceptionUtils.getStackTrace(t);
-        TracingSlf4jImpl.event(
-                name, TracingSlf4jImpl.ERROR, String.format("%s: %s", msg, sStackTrace));
+        error(msg, t);
     }
 }

@@ -125,7 +125,6 @@ impl Executor for ChainExecutor {
 #[cfg(test)]
 mod test {
     use std::default::Default;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -144,8 +143,7 @@ mod test {
     #[tokio::test]
     async fn test_basic() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
 
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);

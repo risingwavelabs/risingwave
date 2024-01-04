@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use async_trait::async_trait;
 
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -20,32 +22,50 @@ use crate::sink::{
     SinkWriterParam,
 };
 
+pub const BLACKHOLE_SINK: &str = "blackhole";
 pub const TABLE_SINK: &str = "table";
 
-/// A table sink outputs stream into another RisingWave's table.
-///
-/// Different from a materialized view, table sinks do not enforce strong consistency between upstream and downstream in principle. As a result, the `create sink` statement returns immediately, which is similar to any other `create sink`. It also allows users to execute DMLs on these target tables.
-///
-/// See also [RFC: Create Sink into Table](https://github.com/risingwavelabs/rfcs/pull/52).
-#[derive(Debug)]
-pub struct TableSink;
+pub trait TrivialSinkName: Send + 'static {
+    const SINK_NAME: &'static str;
+}
 
-impl TryFrom<SinkParam> for TableSink {
+#[derive(Debug)]
+pub struct BlackHoleSinkName;
+
+impl TrivialSinkName for BlackHoleSinkName {
+    const SINK_NAME: &'static str = BLACKHOLE_SINK;
+}
+
+pub type BlackHoleSink = TrivialSink<BlackHoleSinkName>;
+
+#[derive(Debug)]
+pub struct TableSinkName;
+
+impl TrivialSinkName for TableSinkName {
+    const SINK_NAME: &'static str = TABLE_SINK;
+}
+
+pub type TableSink = TrivialSink<TableSinkName>;
+
+#[derive(Debug)]
+pub struct TrivialSink<T: TrivialSinkName>(PhantomData<T>);
+
+impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
     type Error = SinkError;
 
     fn try_from(_value: SinkParam) -> std::result::Result<Self, Self::Error> {
-        Ok(Self)
+        Ok(Self(PhantomData))
     }
 }
 
-impl Sink for TableSink {
+impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = Self;
 
-    const SINK_NAME: &'static str = TABLE_SINK;
+    const SINK_NAME: &'static str = T::SINK_NAME;
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(Self)
+        Ok(Self(PhantomData))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -54,7 +74,7 @@ impl Sink for TableSink {
 }
 
 #[async_trait]
-impl LogSinker for TableSink {
+impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;

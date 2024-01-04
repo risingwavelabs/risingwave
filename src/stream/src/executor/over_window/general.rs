@@ -657,6 +657,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             this.state_table.update_vnode_bitmap(vnode_bitmap);
                         if cache_may_stale {
                             vars.cached_partitions.clear();
+                            vars.recently_accessed_ranges.clear();
                         }
                     }
 

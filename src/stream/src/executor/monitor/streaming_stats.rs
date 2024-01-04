@@ -19,7 +19,7 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
     register_int_counter_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
+    register_int_gauge_with_registry, Histogram, IntCounter, IntCounterVec, IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -68,8 +68,8 @@ pub struct StreamingMetrics {
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Sink & materialized view
-    pub sink_input_row_count: GenericCounterVec<AtomicU64>,
-    pub mview_input_row_count: GenericCounterVec<AtomicU64>,
+    pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
+    pub mview_input_row_count: IntCounterVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -232,7 +232,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let sink_input_row_count = register_int_counter_vec_with_registry!(
+        let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
             "Total number of rows streamed into sink executors",
             &["sink_id", "actor_id", "fragment_id"],
