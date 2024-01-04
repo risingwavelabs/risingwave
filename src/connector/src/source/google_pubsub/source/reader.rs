@@ -126,10 +126,8 @@ impl SplitReader for PubsubSplitReader {
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
-        let config = ClientConfig::default().with_auth()?;
-        let client = Client::new(config)
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let config = ClientConfig::default().with_auth().await?;
+        let client = Client::new(config).await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
         if let Some(ref offset) = split.start_offset {
