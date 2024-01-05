@@ -545,14 +545,16 @@ impl FragmentManager {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }
-                let mut dependent_table = table_fragments
-                    .get_mut(dependent_table_id)
-                    .with_context(|| {
-                        format!(
+                let mut dependent_table =
+                    if let Some(dependent_table) = table_fragments.get_mut(dependent_table_id) {
+                        dependent_table
+                    } else {
+                        tracing::error!(
                             "dependent table_fragment not exist: id={}",
                             dependent_table_id
-                        )
-                    })?;
+                        );
+                        continue;
+                    };
 
                 dependent_table
                     .fragments
