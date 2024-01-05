@@ -716,10 +716,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.approximate_len() >= self.options.capacity
     }
 
-    pub fn reach_max_sst_size(&self) -> bool {
-        self.approximate_len() as u64 >= self.options.max_sst_size
-    }
-
     fn finalize_last_table_stats(&mut self) {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
