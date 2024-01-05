@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -279,6 +279,18 @@ impl QueryRewriter<'_> {
                 self.visit_expr(expr);
                 self.visit_expr(low);
                 self.visit_expr(high);
+            }
+            Expr::SimilarTo {
+                expr,
+                pat,
+                esc_text,
+                ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+                if let Some(e) = esc_text {
+                    self.visit_expr(e);
+                }
             }
 
             Expr::IsDistinctFrom(expr1, expr2)

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,14 +44,12 @@ impl Rule for FilterWithNowToJoinRule {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
 
-                // as a sanity check, ensure that this expression will derive a watermark
-                // on the output of the now executor
-                debug_assert_eq!(
-                    try_derive_watermark(&now_expr),
-                    WatermarkDerivation::Watermark(lhs_len)
-                );
-
-                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                // ensure that this expression will derive a watermark
+                if try_derive_watermark(&now_expr) != WatermarkDerivation::Watermark(lhs_len) {
+                    remainder.push(expr.clone());
+                } else {
+                    now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
+                }
             } else {
                 remainder.push(expr.clone());
             }

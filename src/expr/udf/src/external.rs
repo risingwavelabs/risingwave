@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,12 +26,14 @@ use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use thiserror_ext::AsReport;
 use tonic::transport::Channel;
 
+use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
 pub struct ArrowFlightUdfClient {
     client: FlightServiceClient<Channel>,
+    addr: String,
 }
 
 // TODO: support UDF in simulation
@@ -45,7 +47,10 @@ impl ArrowFlightUdfClient {
             .connect()
             .await?;
         let client = FlightServiceClient::new(conn);
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            addr: addr.into(),
+        })
     }
 
     /// Connect to a UDF service lazily (i.e. only when the first request is sent).
@@ -55,7 +60,10 @@ impl ArrowFlightUdfClient {
             .connect_timeout(Duration::from_secs(5))
             .connect_lazy();
         let client = FlightServiceClient::new(conn);
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            addr: addr.into(),
+        })
     }
 
     /// Check if the function is available and the schema is match.
@@ -101,6 +109,36 @@ impl ArrowFlightUdfClient {
 
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+        let metrics = &*GLOBAL_METRICS;
+        let labels = &[self.addr.as_str(), id];
+        metrics
+            .udf_input_chunk_rows
+            .with_label_values(labels)
+            .observe(input.num_rows() as f64);
+        metrics
+            .udf_input_rows
+            .with_label_values(labels)
+            .inc_by(input.num_rows() as u64);
+        metrics
+            .udf_input_bytes
+            .with_label_values(labels)
+            .inc_by(input.get_array_memory_size() as u64);
+        let timer = metrics.udf_latency.with_label_values(labels).start_timer();
+
+        let result = self.call_internal(id, input).await;
+
+        timer.stop_and_record();
+        if result.is_ok() {
+            &metrics.udf_success_count
+        } else {
+            &metrics.udf_failure_count
+        }
+        .with_label_values(labels)
+        .inc();
+        result
+    }
+
+    async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
         // TODO: support no output
         let head = output_stream

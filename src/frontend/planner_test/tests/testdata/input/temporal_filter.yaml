@@ -23,6 +23,13 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- name: Temporal filter with equal condition
+  sql: |-
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where date_trunc('week', now())  = date_trunc('week',ts);
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
 - name: Temporal filter with `now()` in upper bound on append only table
   sql: |-
     create table t1 (ts timestamp with time zone) APPEND ONLY;
@@ -86,3 +93,21 @@
     select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2 where v1 > now();
   expected_outputs:
   - stream_plan
+- name: Temporal filter with or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00';
+  expected_outputs:
+    - stream_plan
+- name: Temporal filter with or is null
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts is null;
+  expected_outputs:
+    - stream_plan
+- name: Temporal filter with or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00' or ts is null;
+  expected_outputs:
+    - stream_plan

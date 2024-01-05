@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,18 @@
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{try_join_all, BoxFuture};
 use futures::stream::select_all;
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -33,6 +36,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use tokio::sync::watch;
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
 use crate::common::log_store_impl::kv_log_store::buffer::{
@@ -42,6 +46,58 @@ use crate::common::log_store_impl::kv_log_store::serde::{
     merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
+
+type RewindBackoffPolicy = impl Iterator<Item = Duration>;
+pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
+pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
+pub(crate) const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
+
+fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
+    tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
+        .factor(REWIND_BACKOFF_FACTOR)
+        .max_delay(REWIND_MAX_DELAY)
+        .map(tokio_retry::strategy::jitter)
+}
+
+struct RewindDelay {
+    last_rewind_truncate_offset: Option<TruncateOffset>,
+    backoff_policy: RewindBackoffPolicy,
+    rewind_count: LabelGuardedIntCounter<3>,
+    rewind_delay: LabelGuardedHistogram<3>,
+}
+
+impl RewindDelay {
+    fn new(metrics: &KvLogStoreMetrics) -> Self {
+        Self {
+            last_rewind_truncate_offset: None,
+            backoff_policy: initial_rewind_backoff_policy(),
+            rewind_count: metrics.rewind_count.clone(),
+            rewind_delay: metrics.rewind_delay.clone(),
+        }
+    }
+
+    async fn rewind_delay(&mut self, truncate_offset: Option<TruncateOffset>) {
+        match (&self.last_rewind_truncate_offset, &truncate_offset) {
+            (Some(prev_rewind_truncate_offset), Some(truncate_offset)) => {
+                if truncate_offset > prev_rewind_truncate_offset {
+                    self.last_rewind_truncate_offset = Some(*truncate_offset);
+                    // Have new truncate progress before this round of rewind.
+                    // Reset rewind backoff
+                    self.backoff_policy = initial_rewind_backoff_policy();
+                }
+            }
+            (None, _) => {
+                self.last_rewind_truncate_offset = truncate_offset;
+            }
+            _ => {}
+        };
+        self.rewind_count.inc();
+        if let Some(delay) = self.backoff_policy.next() {
+            self.rewind_delay.observe(delay.as_secs_f64());
+            sleep(delay).await;
+        }
+    }
+}
 
 pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
@@ -75,6 +131,8 @@ pub struct KvLogStoreReader<S: StateStore> {
     is_paused: watch::Receiver<bool>,
 
     identity: String,
+
+    rewind_delay: RewindDelay,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -87,6 +145,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         is_paused: watch::Receiver<bool>,
         identity: String,
     ) -> Self {
+        let rewind_delay = RewindDelay::new(&metrics);
         Self {
             table_id,
             state_store,
@@ -100,6 +159,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             metrics,
             is_paused,
             identity,
+            rewind_delay,
         }
     }
 
@@ -108,7 +168,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
             let result = future.await;
-            self.read_flushed_chunk_future
+            let _fut = self
+                .read_flushed_chunk_future
                 .take()
                 .expect("future not None");
             Ok(Some(result?))
@@ -331,9 +392,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 // for cancellation test
                 #[cfg(test)]
                 {
-                    use std::time::Duration;
-
-                    use tokio::time::sleep;
                     sleep(Duration::from_secs(1)).await;
                 }
 
@@ -404,7 +462,8 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<bool> {
+    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+        self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
         self.read_flushed_chunk_future = None;
         if self.truncate_offset.is_none()
@@ -424,6 +483,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }
         self.rx.rewind();
 
-        Ok(true)
+        Ok((true, Some((**self.serde.vnodes()).clone())))
     }
 }

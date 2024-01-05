@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 use risingwave_hummock_sdk::HummockReadEpoch;
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::HummockVersion;
-use risingwave_pb::hummock::{version_update_payload, SstableInfo};
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
@@ -44,7 +42,9 @@ use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::refiller::CacheRefillConfig;
-use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, ReadVersionMappingType};
+use crate::hummock::event_handler::{
+    HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadVersionMappingType,
+};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::store::version::read_filter_for_batch;
@@ -168,7 +168,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
-            Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(version))) => version,
+            Some(HummockEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -530,6 +530,9 @@ impl StateStore for HummockStorage {
 }
 
 #[cfg(any(test, feature = "test"))]
+use risingwave_hummock_sdk::version::HummockVersion;
+
+#[cfg(any(test, feature = "test"))]
 impl HummockStorage {
     pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
@@ -542,7 +545,7 @@ impl HummockStorage {
         let version_id = version.id;
         self.hummock_event_sender
             .send(HummockEvent::VersionUpdate(
-                version_update_payload::Payload::PinnedVersion(version),
+                HummockVersionUpdate::PinnedVersion(version),
             ))
             .unwrap();
         loop {

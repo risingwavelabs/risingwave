@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,8 +99,8 @@ impl UdfExpression {
                     .expect("failed covert ArrayRef to arrow_array::ArrayRef")
             })
             .collect();
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.count_ones()));
+        let opts = arrow_array::RecordBatchOptions::default()
+            .with_row_count(Some(compacted_chunk.capacity()));
         let input = arrow_array::RecordBatch::try_new_with_options(
             self.arg_schema.clone(),
             compacted_columns,

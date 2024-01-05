@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod gcs_source;
+use std::collections::HashMap;
 
-pub use gcs_source::*;
+pub mod gcs_source;
+pub mod posix_fs_source;
 pub mod s3_source;
-pub use s3_source::*;
+
 use serde::Deserialize;
+use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
-use super::{OpendalFsSplit, S3Properties};
-use crate::source::SourceProperties;
+use super::s3::S3PropertiesCommon;
+use super::OpendalFsSplit;
+use crate::source::{SourceProperties, UnknownFields};
 
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
+pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
@@ -40,6 +44,15 @@ pub struct GcsProperties {
     pub service_account: Option<String>,
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for GcsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for GcsProperties {
@@ -78,11 +91,34 @@ impl OpendalSource for OpendalGcs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalPosixFs;
+
+impl OpendalSource for OpendalPosixFs {
+    type Properties = PosixFsProperties;
+
+    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_posix_fs_source(properties)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct OpendalS3Properties {
-    pub s3_properties: S3Properties,
+    #[serde(flatten)]
+    pub s3_properties: S3PropertiesCommon,
+
+    // The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for OpendalS3Properties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 impl SourceProperties for OpendalS3Properties {
@@ -91,4 +127,32 @@ impl SourceProperties for OpendalS3Properties {
     type SplitReader = OpendalReader<OpendalS3>;
 
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct PosixFsProperties {
+    // The root directly of the files to search. The files will be searched recursively.
+    #[serde(rename = "posix_fs.root")]
+    pub root: String,
+
+    // The regex pattern to match files under root directory.
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for PosixFsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for PosixFsProperties {
+    type Split = OpendalFsSplit<OpendalPosixFs>;
+    type SplitEnumerator = OpendalEnumerator<OpendalPosixFs>;
+    type SplitReader = OpendalReader<OpendalPosixFs>;
+
+    const SOURCE_NAME: &'static str = POSIX_FS_CONNECTOR;
 }

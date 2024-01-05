@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,8 +37,9 @@ use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
+    BranchedSstInfo, HummockLevelsExt,
 };
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
     version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId,
     HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
@@ -54,12 +55,12 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableWatermarks,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLockWriteGuard;
@@ -80,10 +81,9 @@ use crate::hummock::metrics_utils::{
     trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, TableId,
-    META_NODE_ID,
-};
+#[cfg(any(test, feature = "test"))]
+use crate::manager::{ClusterManagerRef, FragmentManagerRef};
+use crate::manager::{IdCategory, MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
     VarTransaction,
@@ -99,8 +99,9 @@ mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
 use versioning::*;
-mod checkpoint;
+pub(crate) mod checkpoint;
 mod compaction;
+mod sequence;
 mod worker;
 
 use compaction::*;
@@ -115,10 +116,8 @@ const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager {
     pub env: MetaSrvEnv,
-    pub cluster_manager: ClusterManagerRef,
-    catalog_manager: CatalogManagerRef,
 
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
     /// Lock order: compaction, versioning, compaction_group_manager.
     /// - Lock compaction first, then versioning, and finally compaction_group_manager.
     /// - This order should be strictly followed to prevent deadlock.
@@ -211,8 +210,6 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
-use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -252,7 +249,8 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
         TaskStatus::InvalidGroupCanceled,
-        TaskStatus::NoAvailResourceCanceled,
+        TaskStatus::NoAvailMemoryResourceCanceled,
+        TaskStatus::NoAvailCpuResourceCanceled,
     ]
     .into_iter()
     .collect()
@@ -268,14 +266,14 @@ pub enum CompactionResumeTrigger {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<u32, TableWatermarks>,
+    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<u32, TableWatermarks>,
+        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Self {
         Self {
@@ -301,11 +299,9 @@ impl CommitEpochInfo {
 impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
@@ -314,12 +310,10 @@ impl HummockManager {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
-            cluster_manager,
-            fragment_manager,
+            metadata_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
-            catalog_manager,
             compactor_streams_change_tx,
         )
         .await
@@ -344,14 +338,14 @@ impl HummockManager {
                 .await
                 .unwrap();
         let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+        let metadata_manager =
+            MetadataManager::new_v1(cluster_manager, catalog_manager, fragment_manager);
         Self::new_impl(
             env,
-            cluster_manager,
-            fragment_manager,
+            metadata_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
-            catalog_manager,
             compactor_streams_change_tx,
         )
         .await
@@ -360,19 +354,16 @@ impl HummockManager {
 
     async fn new_impl(
         env: MetaSrvEnv,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
-        let sys_params_manager = env.system_params_manager();
-        let sys_params = sys_params_manager.get_params().await;
+        let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
@@ -411,6 +402,7 @@ impl HummockManager {
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -422,9 +414,7 @@ impl HummockManager {
                 Default::default(),
             ),
             metrics,
-            cluster_manager,
-            catalog_manager,
-            fragment_manager,
+            metadata_manager,
             compaction_group_manager,
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
@@ -490,7 +480,11 @@ impl HummockManager {
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        let mut redo_state = if self.need_init().await? {
+        let checkpoint = self.try_read_checkpoint().await?;
+        let mut redo_state = if let Some(c) = checkpoint {
+            versioning_guard.checkpoint = c;
+            versioning_guard.checkpoint.version.clone()
+        } else {
             let default_compaction_config = self
                 .compaction_group_manager
                 .read()
@@ -498,26 +492,18 @@ impl HummockManager {
                 .default_compaction_config();
             let checkpoint_version = create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
+            // This write to meta store is idempotent. So if `write_checkpoint` fails, restarting meta node is fine.
             HummockVersionStats::default()
                 .insert(self.env.meta_store())
                 .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: Some(checkpoint_version.clone()),
+                version: checkpoint_version.clone(),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
-            self.mark_init().await?;
             checkpoint_version
-        } else {
-            // Read checkpoint from object store.
-            versioning_guard.checkpoint = self.read_checkpoint().await?;
-            versioning_guard
-                .checkpoint
-                .version
-                .as_ref()
-                .cloned()
-                .unwrap()
         };
+
         versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
             .await?
             .into_iter()
@@ -573,7 +559,7 @@ impl HummockManager {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if !self.check_context(context_id).await {
+            } else if !self.check_context(context_id).await? {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
@@ -585,10 +571,7 @@ impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     #[named]
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<version_update_payload::Payload> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -601,7 +584,7 @@ impl HummockManager {
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(versioning.current_version.clone());
+        let ret = versioning.current_version.clone();
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -816,7 +799,11 @@ impl HummockManager {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
-        let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+        let all_table_id_to_option = self
+            .metadata_manager
+            .get_all_table_options()
+            .await
+            .map_err(|err| Error::MetaStore(err.into()))?;
         let mut table_to_vnode_partition = match self
             .group_to_table_vnode_partition
             .read()
@@ -1786,7 +1773,7 @@ impl HummockManager {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-    ) -> Result<HummockVersionDeltas> {
+    ) -> Result<Vec<HummockVersionDelta>> {
         let versioning = read_lock!(self, versioning).await;
         let version_deltas = versioning
             .hummock_version_deltas
@@ -1796,7 +1783,7 @@ impl HummockManager {
             .take(num_limit as _)
             .cloned()
             .collect();
-        Ok(HummockVersionDeltas { version_deltas })
+        Ok(version_deltas)
     }
 
     pub async fn init_metadata_for_version_replay(
@@ -2032,8 +2019,8 @@ impl HummockManager {
         .await
     }
 
-    pub fn cluster_manager(&self) -> &ClusterManagerRef {
-        &self.cluster_manager
+    pub fn metadata_manager(&self) -> &MetadataManager {
+        &self.metadata_manager
     }
 
     fn notify_last_version_delta(&self, versioning: &Versioning) {
@@ -2047,7 +2034,7 @@ impl HummockManager {
                         .last_key_value()
                         .unwrap()
                         .1
-                        .clone()],
+                        .to_protobuf()],
                 }),
             );
     }
@@ -2245,8 +2232,9 @@ impl HummockManager {
                                     };
 
                                     if let Some(mv_id_to_all_table_ids) = hummock_manager
-                                        .fragment_manager
-                                        .get_mv_id_to_internal_table_ids_mapping()
+                                        .metadata_manager
+                                        .get_job_id_to_internal_table_ids_mapping()
+                                        .await
                                     {
                                         trigger_mv_stat(
                                             &hummock_manager.metrics,
@@ -2485,13 +2473,19 @@ impl HummockManager {
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
-        let params = self.env.system_params_manager().get_params().await;
+        let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
-        let created_tables = self.catalog_manager.get_created_table_ids().await;
+        let created_tables = match self.metadata_manager.get_created_table_ids().await {
+            Ok(created_tables) => created_tables,
+            Err(err) => {
+                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                return;
+            }
+        };
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
@@ -2990,7 +2984,7 @@ impl HummockManager {
                 rewrite_cg_ids.push(*cg_id);
             }
 
-            if let Some(levels) = current_version.get_levels().get(cg_id) {
+            if let Some(levels) = current_version.levels.get(cg_id) {
                 if levels.member_table_ids.len() == 1 {
                     restore_cg_to_partition_vnode.insert(
                         *cg_id,
@@ -3180,12 +3174,18 @@ async fn write_exclusive_cluster_id(
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
     match object_store.read(&cluster_id_full_path, ..).await {
-        Ok(cluster_id) => Err(ObjectError::internal(format!(
-            "Data directory is already used by another cluster with id {:?}, path {}.",
-            String::from_utf8(cluster_id.to_vec()).unwrap(),
-            cluster_id_full_path,
-        ))
-        .into()),
+        Ok(stored_cluster_id) => {
+            let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
+            if cluster_id.deref() == stored_cluster_id {
+                return Ok(());
+            }
+
+            Err(ObjectError::internal(format!(
+                "Data directory is already used by another cluster with id {:?}, path {}.",
+                stored_cluster_id, cluster_id_full_path,
+            ))
+            .into())
+        }
         Err(e) => {
             if e.is_object_not_found_error() {
                 object_store
@@ -3225,10 +3225,13 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 }
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersion;
 use tokio::sync::mpsc::error::SendError;
 
 use super::compaction::selector::EmergencySelector;
 use super::compaction::CompactionSelector;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {

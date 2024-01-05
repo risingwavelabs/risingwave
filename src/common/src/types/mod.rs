@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,11 +60,13 @@ mod ordered;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
+mod sentinel;
 mod serial;
 mod struct_type;
 mod successor;
 mod timestamptz;
 mod to_binary;
+mod to_sql;
 mod to_text;
 mod with_data_type;
 
@@ -81,6 +83,7 @@ pub use self::ops::{CheckedAdd, IsNegative};
 pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
+pub use self::sentinel::Sentinelled;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
 pub use self::successor::Successor;
@@ -101,9 +104,10 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 #[derive(
     Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
-#[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
+#[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
+#[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
 pub enum DataType {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]
@@ -871,7 +875,7 @@ impl ScalarImpl {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(str.to_string().into()),
             DataType::Boolean => {
-                Self::Bool(bool::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
+                Self::Bool(str_to_bool(str).map_err(|_| FromSqlError::from_text(str))?)
             }
             DataType::Int16 => {
                 Self::Int16(i16::from_str(str).map_err(|_| FromSqlError::from_text(str))?)
@@ -928,7 +932,13 @@ impl ScalarImpl {
                 }
                 let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    if s.is_empty() {
+                        continue;
+                    } else if s.eq_ignore_ascii_case("null") {
+                        builder.append_null();
+                    } else {
+                        builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
+                    }
                 }
                 Self::List(ListValue::new(builder.finish()))
             }

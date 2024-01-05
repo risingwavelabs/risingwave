@@ -11,6 +11,7 @@ members = [
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
+  "src/connector/with_options",
   "src/ctl",
   "src/error",
   "src/expr/core",
@@ -49,12 +50,12 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
+  "src/utils/delta_btree_map",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
   "src/utils/variables",
-  "src/utils/with_options",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
@@ -136,7 +137,9 @@ arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
 arrow-schema-deltalake = { package = "arrow-schema", version = "48.0.1" }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = ["s3-no-concurrent-write"] }
+deltalake = { git = "https://github.com/risingwavelabs/delta-rs", rev = "5c2dccd4640490202ffe98adbd13b09cef8e007b", features = [
+  "s3-no-concurrent-write",
+] }
 parquet = "49"
 thiserror-ext = "0.0.10"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
@@ -204,8 +207,14 @@ explicit_iter_loop = "warn"
 inconsistent_struct_constructor = "warn"
 unused_async = "warn"
 map_flatten = "warn"
-no_effect_underscore_binding = "warn"
 await_holding_lock = "warn"
+# For private code, this is a little pedantic and not worth fixing.
+# &Vec or &String is acceptable
+ptr_arg = "allow"
+# a little pedantic
+get_first = "allow"
+# https://github.com/rust-lang/rust-clippy/issues/12016
+blocks_in_conditions = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

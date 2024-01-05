@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,6 +73,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Length
             | expr_node::Type::Like
             | expr_node::Type::ILike
+            | expr_node::Type::SimilarToEscape
             | expr_node::Type::Upper
             | expr_node::Type::Lower
             | expr_node::Type::Trim
@@ -238,8 +239,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
-            | expr_node::Type::ColDescription
             | expr_node::Type::CastRegclass
+            | expr_node::Type::PgGetIndexdef
+            | expr_node::Type::ColDescription
+            | expr_node::Type::PgGetViewdef
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }

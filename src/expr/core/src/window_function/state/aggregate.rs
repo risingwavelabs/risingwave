@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ pub struct AggregateState {
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> Result<Self> {
-        if !call.frame.bounds.is_valid() {
+        if call.frame.bounds.validate().is_err() {
             bail!("the window frame must be valid");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);

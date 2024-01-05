@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,13 +24,17 @@ use risingwave_common::types::{
 };
 use rust_decimal::Decimal as RustDecimal;
 
+static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
         let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                tracing::error!("parse column `{}` fail: {}", $name, err);
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
                 None
             }
         }
@@ -40,14 +44,16 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                tracing::error!("parse column `{}` fail: {}", $name, err);
+                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                }
                 None
             }
         }
     }};
 }
 
-pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
+pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
@@ -96,7 +102,14 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRo
                             ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
                         }),
                         Err(err) => {
-                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    "parse column `{}` fail: {} ({} suppressed)",
+                                    name,
+                                    err,
+                                    suppressed
+                                );
+                            }
                             None
                         }
                     }
@@ -108,7 +121,14 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRo
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            tracing::error!("parse column `{}` fail: {}", name, err);
+                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                                tracing::error!(
+                                    "parse column `{}` fail: {} ({} suppressed)",
+                                    name,
+                                    err,
+                                    suppressed
+                                );
+                            }
                             None
                         }
                     }
@@ -122,8 +142,6 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRo
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
                     }
@@ -147,7 +165,7 @@ mod tests {
     use risingwave_common::types::{DataType, ToText};
     use tokio_stream::StreamExt;
 
-    use crate::parser::mysql_row_to_datums;
+    use crate::parser::mysql_row_to_owned_row;
 
     // manual test case
     #[ignore]
@@ -171,7 +189,7 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            Ok::<_, anyhow::Error>(Some(mysql_row_to_datums(&mut mysql_row, &t1schema)))
+            Ok::<_, anyhow::Error>(Some(mysql_row_to_owned_row(&mut mysql_row, &t1schema)))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {

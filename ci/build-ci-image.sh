@@ -9,7 +9,8 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 
-export BUILD_ENV_VERSION=v20231109
+# REMEMBER TO ALSO UPDATE ci/docker-compose.yml
+export BUILD_ENV_VERSION=v20240104_1
 
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,24 +16,100 @@ package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.lang.management.ManagementFactory;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.management.JMException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class DbzSourceUtils {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceUtils.class);
 
+    /**
+     * This method is used to create a publication for the cdc source job or cdc table if it doesn't
+     * exist.
+     */
+    public static void createPostgresPublicationIfNeeded(
+            Map<String, String> properties, long sourceId) throws SQLException {
+        boolean pubAutoCreate =
+                properties.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+        if (!pubAutoCreate) {
+            LOG.info(
+                    "Postgres publication auto creation is disabled, skip creation for source {}.",
+                    sourceId);
+            return;
+        }
+
+        var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
+        var dbHost = properties.get(DbzConnectorConfig.HOST);
+        var dbPort = properties.get(DbzConnectorConfig.PORT);
+        var dbName = properties.get(DbzConnectorConfig.DB_NAME);
+        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
+        var user = properties.get(DbzConnectorConfig.USER);
+        var password = properties.get(DbzConnectorConfig.PASSWORD);
+        try (var jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password)) {
+            boolean isPubExist = false;
+            try (var stmt =
+                    jdbcConnection.prepareStatement(
+                            ValidatorUtils.getSql("postgres.publication_exist"))) {
+                stmt.setString(1, pubName);
+                var res = stmt.executeQuery();
+                if (res.next()) {
+                    isPubExist = res.getBoolean(1);
+                }
+            }
+
+            if (!isPubExist) {
+                var schemaName = properties.get(DbzConnectorConfig.PG_SCHEMA_NAME);
+                var tableName = properties.get(DbzConnectorConfig.TABLE_NAME);
+                Optional<String> schemaTableName;
+                if (StringUtils.isBlank(schemaName) || StringUtils.isBlank(tableName)) {
+                    schemaTableName = Optional.empty();
+                } else {
+                    schemaTableName =
+                            Optional.of(quotePostgres(schemaName) + "." + quotePostgres(tableName));
+                }
+
+                // create the publication if it doesn't exist
+                String createPublicationSql;
+                if (schemaTableName.isPresent()) {
+                    createPublicationSql =
+                            String.format(
+                                    "CREATE PUBLICATION %s FOR TABLE %s;",
+                                    quotePostgres(pubName), schemaTableName.get());
+                } else {
+                    createPublicationSql =
+                            String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
+                }
+                try (var stmt = jdbcConnection.createStatement()) {
+                    LOG.info(
+                            "Publication '{}' doesn't exist, created publication with statement: {}",
+                            pubName,
+                            createPublicationSql);
+                    stmt.execute(createPublicationSql);
+                }
+            }
+        }
+    }
+
+    private static String quotePostgres(String identifier) {
+        return "\"" + identifier + "\"";
+    }
+
     public static boolean waitForStreamingRunning(SourceTypeE sourceType, String dbServerName) {
-        // Right now, we only needs to wait for MySQL source, as it's the only source that support
-        // backfill. After we support backfill for other sources, we need to wait for all sources
-        // too
+        // Wait for streaming source of source that supported backfill
+        LOG.info("Waiting for streaming source of {} to start", dbServerName);
         if (sourceType == SourceTypeE.MYSQL) {
-            LOG.info("Waiting for streaming source of {} to start", dbServerName);
             return waitForStreamingRunningInner("mysql", dbServerName);
+        } else if (sourceType == SourceTypeE.POSTGRES) {
+            return waitForStreamingRunningInner("postgres", dbServerName);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;
@@ -41,7 +117,7 @@ public class DbzSourceUtils {
     }
 
     private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
-        int maxPollCount = 10;
+        int maxPollCount = 11; // max poll 10 seconds
         while (!isStreamingRunning(connector, dbServerName, "streaming")) {
             maxPollCount--;
             if (maxPollCount == 0) {

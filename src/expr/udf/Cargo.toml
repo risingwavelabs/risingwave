@@ -17,6 +17,8 @@ arrow-schema = { workspace = true }
 arrow-select = { workspace = true }
 cfg-or-panic = "0.2"
 futures-util = "0.3.28"
+prometheus = "0.13"
+risingwave_common = { workspace = true }
 static_assertions = "1"
 thiserror = "1"
 thiserror-ext = { workspace = true }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -718,6 +718,16 @@ impl ExprImpl {
                         && op1.count_nows() > 0
                         && op1.is_now_offset()
                     {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                ty @ ExprType::Equal => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
                         Some((op2, Self::reverse_comparison(ty), op1))
                     } else {
                         None

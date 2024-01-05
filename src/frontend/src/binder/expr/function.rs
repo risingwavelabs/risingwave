@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
@@ -24,19 +24,21 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, not_implemented, GIT_SHA, RW_VERSION};
+use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
-    WindowFrameUnits, WindowSpec,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident, SelectItem, SetExpr,
+    Statement, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
+use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
     Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
@@ -117,6 +119,9 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
+        // Used later in sql udf expression evaluation
+        let args = f.args.clone();
+
         let inputs = f
             .args
             .into_iter()
@@ -149,6 +154,73 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
+        /// TODO: add name related logic
+        /// NOTE: need to think of a way to prevent naming conflict
+        /// e.g., when existing column names conflict with parameter names in sql udf
+        fn create_udf_context(
+            args: &[FunctionArg],
+            _catalog: &Arc<FunctionCatalog>,
+        ) -> Result<HashMap<String, AstExpr>> {
+            let mut ret: HashMap<String, AstExpr> = HashMap::new();
+            for (i, current_arg) in args.iter().enumerate() {
+                if let FunctionArg::Unnamed(arg) = current_arg {
+                    let FunctionArgExpr::Expr(e) = arg else {
+                        return Err(
+                            ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into()
+                        );
+                    };
+                    // if catalog.arg_names.is_some() {
+                    //      todo!()
+                    // }
+                    ret.insert(format!("${}", i + 1), e.clone());
+                    continue;
+                }
+                return Err(ErrorCode::InvalidInputSyntax("invalid syntax".to_string()).into());
+            }
+            Ok(ret)
+        }
+
+        fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
+            if ast.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "the query for sql udf should contain only one statement".to_string(),
+                )
+                .into());
+            }
+
+            // Extract the expression out
+            let Statement::Query(query) = ast[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "invalid function definition, please recheck the syntax".to_string(),
+                )
+                .into());
+            };
+
+            let SetExpr::Select(select) = query.body else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "missing `select` body for sql udf expression, please recheck the syntax"
+                        .to_string(),
+                )
+                .into());
+            };
+
+            if select.projection.len() != 1 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`projection` should contain only one `SelectItem`".to_string(),
+                )
+                .into());
+            }
+
+            let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "expect `UnnamedExpr` for `projection`".to_string(),
+                )
+                .into());
+            };
+
+            Ok(expr)
+        }
+
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
@@ -158,13 +230,89 @@ impl Binder {
             )
         {
             use crate::catalog::function_catalog::FunctionKind::*;
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+            if func.language == "sql" {
+                if func.body.is_none() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "`body` must exist for sql udf".to_string(),
+                    )
+                    .into());
                 }
-                Aggregate => todo!("support UDAF"),
+                // This represents the current user defined function is `language sql`
+                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
+                    func.body.as_ref().unwrap().as_str(),
+                );
+                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+                    parse_result
+                {
+                    // Here we just return the original parse error message
+                    return Err(ErrorCode::InvalidInputSyntax(err).into());
+                }
+                debug_assert!(parse_result.is_ok());
+
+                // We can safely unwrap here
+                let ast = parse_result.unwrap();
+
+                let mut clean_flag = true;
+
+                // We need to check if the `udf_context` is empty first, consider the following example:
+                // - create function add(INT, INT) returns int language sql as 'select $1 + $2';
+                // - create function add_wrapper(INT, INT) returns int language sql as 'select add($1, $2)';
+                // - select add_wrapper(1, 1);
+                // When binding `add($1, $2)` in `add_wrapper`, the input args are [$1, $2] instead of
+                // the original [1, 1], thus we need to check `udf_context` to see if the input
+                // args already exist in the context. If so, we do NOT need to create the context again.
+                // Otherwise the current `udf_context` will be corrupted.
+                if self.udf_context.is_empty() {
+                    // The actual inline logic for sql udf
+                    if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
+                        self.udf_context = context;
+                    } else {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                        )
+                        .into());
+                    }
+                } else {
+                    // If the `udf_context` is not empty, this means the current binding
+                    // function is not the root binding sql udf, thus we should NOT
+                    // clean the context after binding.
+                    clean_flag = false;
+                }
+
+                if let Ok(expr) = extract_udf_expression(ast) {
+                    let bind_result = self.bind_expr(expr);
+                    // Clean the `udf_context` after inlining,
+                    // which makes sure the subsequent binding will not be affected
+                    if clean_flag {
+                        self.udf_context.clear();
+                    }
+                    return bind_result;
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to parse the input query and extract the udf expression,
+                        please recheck the syntax"
+                            .to_string(),
+                    )
+                    .into());
+                }
+            } else {
+                // Note that `language` may be empty for external udf
+                if !func.language.is_empty() {
+                    debug_assert!(
+                        func.language == "python" || func.language == "java",
+                        "only `python` and `java` are currently supported for general udf"
+                    );
+                }
+                match &func.kind {
+                    Scalar { .. } => {
+                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
+                    }
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                    }
+                    Aggregate => todo!("support UDAF"),
+                }
             }
         }
 
@@ -351,7 +499,9 @@ impl Binder {
                     );
                 };
 
-                if let Some(ref fraction_value) = fraction_datum && !(0.0..=1.0).contains(&fraction_value.as_float64().0) {
+                if let Some(ref fraction_value) = fraction_datum
+                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+                {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must between 0.0 and 1.0",
                         kind
@@ -532,12 +682,7 @@ impl Binder {
                     );
                 }
             };
-            if !bounds.is_valid() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame bounds `{bounds}` is not valid",
-                ))
-                .into());
-            }
+            bounds.validate()?;
             Some(Frame { bounds, exclusion })
         } else {
             None
@@ -999,6 +1144,8 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
+                ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_relation_size", dispatch_by_len(vec![
                     (1, raw(|binder, inputs|{
                         let table_name = &inputs[0];
@@ -1191,11 +1338,7 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
-                ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 9.5-RisingWave-{} ({})",
-                    RW_VERSION,
-                    GIT_SHA
-                )))),
+                ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
@@ -1218,7 +1361,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            // TODO: Also hint other functinos, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
