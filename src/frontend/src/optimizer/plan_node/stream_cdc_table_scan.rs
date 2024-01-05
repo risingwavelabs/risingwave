@@ -350,12 +350,6 @@ mod tests {
             filter_expr.eval_row(&row2).await.unwrap(),
             Some(ScalarImpl::Bool(false))
         );
-        assert_eq!(
-            filter_expr
-                .eval_row(&row3)
-                .await
-                .unwrap_or(Some(ScalarImpl::Bool(false))),
-            Some(ScalarImpl::Bool(false))
-        )
+        assert_eq!(filter_expr.eval_row(&row3).await.unwrap(), None)
     }
 }
