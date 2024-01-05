@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
 use crate::manager::{MetaSrvEnv, StreamingJob};
@@ -468,6 +468,31 @@ impl StreamFragmentGraph {
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
+
+    pub fn has_arrangement_backfill(&self) -> bool {
+        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill
+                || stream_node
+                    .get_input()
+                    .iter()
+                    .any(has_arrangement_backfill_node)
+        }
+        for (_id, fragment) in &self.fragments {
+            let fragment = &**fragment;
+            let node = fragment.node.as_ref().unwrap();
+            if has_arrangement_backfill_node(node) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
@@ -536,6 +561,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         table_job_type: Option<TableJobType>,
+        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -544,6 +570,7 @@ impl CompleteStreamFragmentGraph {
             }),
             None,
             table_job_type,
+            uses_arrangement_backfill,
         )
     }
 
@@ -553,6 +580,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -562,6 +590,7 @@ impl CompleteStreamFragmentGraph {
                 downstream_fragments,
             }),
             None,
+            uses_arrangement_backfill,
         )
     }
 
@@ -570,6 +599,7 @@ impl CompleteStreamFragmentGraph {
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
         table_job_type: Option<TableJobType>,
+        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
@@ -651,19 +681,26 @@ impl CompleteStreamFragmentGraph {
                                     .collect::<Option<Vec<_>>>()
                                     .context("column not found in the upstream materialized view")?
                             };
+                            let dispatch_strategy = if uses_arrangement_backfill {
+                                DispatchStrategy {
+                                    r#type: DispatcherType::Hash as _,
+                                    dist_key_indices: vec![], // not used for `Exchange`
+                                    output_indices,
+                                }
+                            } else {
+                                DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices,
+                                }
+                            };
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
-                                // We always use `NoShuffle` for the exchange between the upstream
-                                // `Materialize` and the downstream `StreamScan` of the
-                                // new materialized view.
-                                dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices,
-                                },
+                                dispatch_strategy,
+
                             };
 
                             (mview_id, edge)
