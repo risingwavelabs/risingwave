@@ -18,25 +18,7 @@ use aws_smithy_types_convert::date_time::DateTimeExt;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
-pub struct KinesisMessage {
-    pub shard_id: SplitId,
-    pub sequence_number: String,
-    pub partition_key: String,
-    pub payload: Vec<u8>,
-}
-
-impl From<KinesisMessage> for SourceMessage {
-    // not in use
-    fn from(msg: KinesisMessage) -> Self {
-        SourceMessage {
-            key: Some(msg.partition_key.into_bytes()),
-            payload: Some(msg.payload),
-            offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id,
-            meta: SourceMeta::Empty,
-        }
-    }
-}
+pub struct KinesisMessage {}
 
 #[derive(Clone, Debug)]
 pub struct KinesisMeta {
@@ -55,16 +37,5 @@ pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
                 .approximate_arrival_timestamp
                 .map(|dt| dt.to_chrono_utc().unwrap().timestamp_millis()),
         }),
-    }
-}
-
-impl KinesisMessage {
-    pub fn new(shard_id: SplitId, message: Record) -> Self {
-        KinesisMessage {
-            shard_id,
-            sequence_number: message.sequence_number,
-            partition_key: message.partition_key,
-            payload: message.data.into_inner(),
-        }
     }
 }
