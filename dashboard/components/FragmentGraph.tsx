@@ -34,7 +34,7 @@ interface ActorLayout {
   layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
   width: number
   height: number
-  actorIds: string
+  actorIds: string[]
 }
 
 type PlanNodeDesc = ActorLayout & Point & { id: string }
@@ -140,7 +140,7 @@ export default function FragmentGraph({
         layoutRoot,
         width,
         height,
-        actorIds: `Actor ${fragmentRoot.data.actorIds?.join(", ")}` || "",
+        actorIds: fragmentRoot.data.actorIds ?? [],
       })
       includedFragmentIds.add(fragmentId)
     }
@@ -228,7 +228,7 @@ export default function FragmentGraph({
 
         text2
           .attr("fill", "black")
-          .text(({ actorIds }) => actorIds)
+          .text(({ actorIds }) => `Actor ${actorIds.join(", ")}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
           .attr("dy", ({ height }) => height - actorMarginY + 24)
