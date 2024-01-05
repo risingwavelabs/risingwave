@@ -305,6 +305,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_SESSION_ID: u32 = 0;
 
     #[tokio::test]
     async fn test_dml_executor() {
@@ -374,7 +375,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
 
         // Message from batch
         write_handle.begin().unwrap();
