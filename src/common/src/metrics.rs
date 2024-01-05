@@ -28,10 +28,12 @@ use crate::monitor::GLOBAL_METRICS_REGISTRY;
 mod error_metrics;
 mod guarded_metrics;
 mod relabeled_metric;
+mod slow_op_histogram;
 
 pub use error_metrics::*;
 pub use guarded_metrics::*;
 pub use relabeled_metric::*;
+pub use slow_op_histogram::*;
 
 #[derive(Debug)]
 pub struct TrAdderAtomic(TrAdder<i64>);
