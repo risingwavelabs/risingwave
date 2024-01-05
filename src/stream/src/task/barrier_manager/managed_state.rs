@@ -114,7 +114,7 @@ impl ManagedBarrierState {
     }
 
     /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
-    fn may_notify(&mut self, prev_epoch: u64) {
+    fn may_have_collected_all(&mut self, prev_epoch: u64) {
         // Report if there's progress on the earliest in-flight barrier.
         if self.epoch_barrier_state_map.keys().next() == Some(&prev_epoch) {
             self.streaming_metrics.barrier_manager_progress.inc();
@@ -307,7 +307,7 @@ impl ManagedBarrierState {
                     actor_id, barrier.epoch.curr
                 );
                 assert_eq!(curr_epoch, barrier.epoch.curr);
-                self.may_notify(barrier.epoch.prev);
+                self.may_have_collected_all(barrier.epoch.prev);
             }
             Some(BarrierState { inner, .. }) => {
                 panic!(
@@ -380,7 +380,7 @@ impl ManagedBarrierState {
                 kind: barrier.kind,
             },
         );
-        self.may_notify(barrier.epoch.prev);
+        self.may_have_collected_all(barrier.epoch.prev);
     }
 
     pub(crate) async fn next_completed_epoch(&mut self) -> u64 {
