@@ -830,10 +830,10 @@ fn find_affected_ranges<'cache>(
         calls
             .iter()
             .map(|call| match &call.frame.bounds {
-                FrameBounds::Rows(_start, end) => {
+                FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta
                         .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
-                    for _ in 0..end.n_following_rows().unwrap() {
+                    for _ in 0..bounds.end.n_following_rows().unwrap() {
                         // Note that we have to move before check, to handle situation where the
                         // cursor is at ghost position at first.
                         cursor.move_prev();
@@ -856,9 +856,9 @@ fn find_affected_ranges<'cache>(
         calls
             .iter()
             .map(|call| match &call.frame.bounds {
-                FrameBounds::Rows(start, _end) => {
+                FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta.find(first_curr_key).unwrap();
-                    for _ in 0..start.n_preceding_rows().unwrap() {
+                    for _ in 0..bounds.start.n_preceding_rows().unwrap() {
                         cursor.move_prev();
                         if cursor.position().is_ghost() {
                             break;
@@ -877,10 +877,10 @@ fn find_affected_ranges<'cache>(
         calls
             .iter()
             .map(|call| match &call.frame.bounds {
-                FrameBounds::Rows(start, _end) => {
+                FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta
                         .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
-                    for _ in 0..start.n_preceding_rows().unwrap() {
+                    for _ in 0..bounds.start.n_preceding_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
                             break;
@@ -899,9 +899,9 @@ fn find_affected_ranges<'cache>(
         calls
             .iter()
             .map(|call| match &call.frame.bounds {
-                FrameBounds::Rows(_start, end) => {
+                FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta.find(last_curr_key).unwrap();
-                    for _ in 0..end.n_following_rows().unwrap() {
+                    for _ in 0..bounds.end.n_following_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
                             break;
