@@ -179,6 +179,29 @@ metrics_level = "Disabled"
         }
     }
 
+    pub fn for_arrangement_backfill() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("arrangement_backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
     pub fn for_background_ddl() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
         // automatically when it's dropped.

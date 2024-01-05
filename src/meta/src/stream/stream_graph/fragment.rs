@@ -484,7 +484,7 @@ impl StreamFragmentGraph {
                     .iter()
                     .any(has_arrangement_backfill_node)
         }
-        for (_id, fragment) in &self.fragments {
+        for fragment in self.fragments.values() {
             let fragment = &**fragment;
             let node = fragment.node.as_ref().unwrap();
             if has_arrangement_backfill_node(node) {
@@ -658,7 +658,7 @@ impl CompleteStreamFragmentGraph {
                             let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
                             // Resolve the required output columns from the upstream materialized view.
-                            let output_indices = {
+                            let (dist_key_indices, output_indices) = {
                                 let nodes = mview_fragment.actors[0].get_nodes().unwrap();
                                 let mview_node =
                                     nodes.get_node_body().unwrap().as_materialize().unwrap();
@@ -669,8 +669,16 @@ impl CompleteStreamFragmentGraph {
                                     .iter()
                                     .map(|c| c.column_desc.as_ref().unwrap().column_id)
                                     .collect_vec();
+                                let dist_key_indices = mview_node
+                                    .table
+                                    .as_ref()
+                                    .unwrap()
+                                    .distribution_key
+                                    .iter()
+                                    .map(|i| *i as u32)
+                                    .collect();
 
-                                output_columns
+                                let output_indices = output_columns
                                     .iter()
                                     .map(|c| {
                                         all_column_ids
@@ -679,12 +687,15 @@ impl CompleteStreamFragmentGraph {
                                             .map(|i| i as u32)
                                     })
                                     .collect::<Option<Vec<_>>>()
-                                    .context("column not found in the upstream materialized view")?
+                                    .context(
+                                        "column not found in the upstream materialized view",
+                                    )?;
+                                (dist_key_indices, output_indices)
                             };
                             let dispatch_strategy = if uses_arrangement_backfill {
                                 DispatchStrategy {
                                     r#type: DispatcherType::Hash as _,
-                                    dist_key_indices: vec![], // not used for `Exchange`
+                                    dist_key_indices, // not used for `Exchange`
                                     output_indices,
                                 }
                             } else {
@@ -700,7 +711,6 @@ impl CompleteStreamFragmentGraph {
                                     downstream_fragment_id: id,
                                 },
                                 dispatch_strategy,
-
                             };
 
                             (mview_id, edge)

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::thread::sleep;
+use std::time::Duration;
+
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
@@ -102,3 +105,79 @@ async fn test_backfill_with_upstream_and_snapshot_read() -> Result<()> {
     }
     Ok(())
 }
+
+/// The replication scenario is tested:
+/// 1. Upstream yields some chunk downstream. The chunk values are in the range 301-400.
+/// 2. Backfill snapshot read is until 300.
+/// 3. Receive barrier, 301-400 must be replicated, if not these records are discarded.
+/// 4. Next epoch is not a checkpoint epoch.
+/// 5. Next Snapshot Read occurs, checkpointed data is from 400-500.
+///
+/// In order to reproduce this scenario, we rely on a few things:
+/// 1. Large checkpoint period, so checkpoint takes a long time to occur.
+/// 2. We insert 2 partitions of records for the snapshot,
+///    one at the lower bound, one at the upper bound.
+/// 3. We insert a chunk of records in between.
+#[tokio::test]
+async fn test_arrangement_backfill_replication() -> Result<()> {
+    // Initialize cluster with config which has larger checkpoint interval,
+    // so it will rely on replication.
+    let mut cluster = Cluster::start(Configuration::for_arrangement_backfill()).await?;
+    let mut session = cluster.start_session();
+
+    // Create a table with parallelism = 1;
+    session.run("SET STREAMING_PARALLELISM=1;").await?;
+    session.run("CREATE TABLE t (v1 int primary key)").await?;
+    // TODO(kwannoel): test the parallelism of the table.
+
+    // Ingest snapshot data
+    session
+        .run("INSERT INTO t select * from generate_series(1, 100)")
+        .await?;
+    session.run("FLUSH;").await?;
+    session
+        .run("INSERT INTO t select * from generate_series(201, 300)")
+        .await?;
+    session.run("FLUSH;").await?;
+
+    // Start update data thread
+    let mut session2 = cluster.start_session();
+    let upstream_task = tokio::spawn(async move {
+        // The initial 100 records will take approx 3s
+        // After that we start ingesting upstream records.
+        sleep(Duration::from_secs(3));
+        for i in 101..=200 {
+            session2
+                .run(format!("insert into t values ({})", i))
+                .await
+                .unwrap();
+        }
+        session2.run("FLUSH;").await.unwrap();
+    });
+
+    // Create a materialized view with parallelism = 3;
+    session.run("SET STREAMING_PARALLELISM=3").await?;
+    session
+        .run("SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=true")
+        .await?;
+    session.run("SET STREAMING_RATE_LIMIT=30").await?;
+    session
+        .run("create materialized view m1 as select * from t")
+        .await?;
+
+    upstream_task.await?;
+
+    // Verify its parallelism
+    // TODO(kwannoel): test the parallelism of the table.
+
+    // Verify all data has been ingested, with no extra data in m1.
+    let result = session
+        .run("select t.v1 from t where t.v1 not in (select v1 from m1)")
+        .await?;
+    assert_eq!(result, "");
+    let result = session.run("select count(*) from m1").await?;
+    assert_eq!(result.parse::<usize>().unwrap(), 300);
+    Ok(())
+}
+
+// TODO(kwannoel): Test arrangement backfill background recovery.
