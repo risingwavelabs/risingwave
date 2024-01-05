@@ -667,9 +667,6 @@ impl CompleteStreamFragmentGraph {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
-                                // We always use `NoShuffle` for the exchange between the upstream
-                                // `Materialize` and the downstream `StreamScan` of the
-                                // new materialized view.
                                 dispatch_strategy: DispatchStrategy {
                                     r#type: DispatcherType::Hash as _,
                                     dist_key_indices,
@@ -789,6 +786,10 @@ impl CompleteStreamFragmentGraph {
                     .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
         }
+
+        tracing::debug!(?existing_fragments);
+        tracing::debug!(?extra_downstreams);
+        tracing::debug!(?extra_upstreams);
 
         Ok(Self {
             building_graph: graph,
