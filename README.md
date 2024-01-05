@@ -124,7 +124,7 @@ Compared to existing stream processing systems like [Apache Flink](https://flink
   * RisingWave's state management mechanism also allows it to recover from failure in seconds, not minutes or hours.
 
 ### RisingWave as a database
-RisingWave is fundamentally a database that enables users to do **more than just process streaming data**: it also **manages streaming data effectively**. RisingWave is a trusted choice for persisting your data and serving online applications. It offers an extensive array of database capabilities, which include, but are not limited to:
+RisingWave is fundamentally a database that **extends beyond basic streaming data processing capabilities**.  It excels in **the effective management of streaming data**, making it a trusted choice for data persistence and powering online applications. RisingWave offers an extensive range of database capabilities, which include:
 
 * High availability
 * Serving highly concurrent queries
