@@ -7,14 +7,15 @@ insert into t select i from generate_series(1, 100, 1) i;
 statement ok
 flush
 
-# we don't use flush and test in the same session whether delete and insert overlap.
+# we don't use flush between delete and insert to test in the same session whether delete and insert overlap.
 statement ok
 delete from t;
 
 statement ok
 insert into t select i from generate_series(1, 100, 1) i;
 
-sleep 2s
+statement ok
+flush
 
 # Should be no overlap
 query I
