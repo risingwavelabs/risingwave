@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
     all_pb_types = {
         'user': (get_user, user_pb2.User),
-        'user_more': (get_user_more, user_pb2.User),
+        'user_more': (get_user_more, user_pb2.UserMore),
         'user_new_type': (get_user_new_type, user_pb2.UserNewType),
     }
 
