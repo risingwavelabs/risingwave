@@ -25,8 +25,8 @@ def get_user(i):
         sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
     )
 
-def get_user_more(i):
-    return user_pb2.UserMore(
+def get_user_with_more_fields(i):
+    return user_pb2.UserWithMoreFields(
         id=i,
         name="User_{}".format(i),
         address="Address_{}".format(i),
@@ -36,8 +36,8 @@ def get_user_more(i):
         age=i,
     )
 
-def get_user_new_type(i):
-    return user_pb2.UserNewType(
+def get_user_with_new_type(i):
+    return user_pb2.UserWithNewType(
         id=i,
         name="User_{}".format(i),
         address="Address_{}".format(i),
@@ -46,10 +46,10 @@ def get_user_new_type(i):
         sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
     )
 
-def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_user_fn, pb_type):
+def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_user_fn, pb_message):
     schema_registry_client = SchemaRegistryClient(schema_registry_conf)
     serializer = ProtobufSerializer(
-        pb_type,
+        pb_message,
         schema_registry_client,
         {"use.deprecated.format": False, 'skip.known.types': True},
     )
@@ -70,28 +70,28 @@ def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_u
 
 if __name__ == "__main__":
     if len(sys.argv) < 5:
-        print("pb.py <brokerlist> <schema-registry-url> <topic> <num-records> <pb_type>")
+        print("pb.py <brokerlist> <schema-registry-url> <topic> <num-records> <pb_message>")
         exit(1)
 
     broker_list = sys.argv[1]
     schema_registry_url = sys.argv[2]
     topic = sys.argv[3]
     num_records = int(sys.argv[4])
-    pb_type = sys.argv[5]
+    pb_message = sys.argv[5]
 
-    all_pb_types = {
+    all_pb_messages = {
         'user': (get_user, user_pb2.User),
-        'user_more': (get_user_more, user_pb2.UserMore),
-        'user_new_type': (get_user_new_type, user_pb2.UserNewType),
+        'user_more': (get_user_with_more_fields, user_pb2.UserWithMoreFields),
+        'user_new_type': (get_user_with_new_type, user_pb2.UserWithNewType),
     }
 
-    assert pb_type in all_pb_types, f'pb_type must be one of {list(all_pb_types.keys())}'
+    assert pb_message in all_pb_messages, f'pb_message must be one of {list(all_pb_messages.keys())}'
 
     schema_registry_conf = {"url": schema_registry_url}
     producer_conf = {"bootstrap.servers": broker_list}
 
     try:
-        send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, *all_pb_types[pb_type])
+        send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, *all_pb_messages[pb_message])
     except Exception as e:
         print("Send Protobuf data to schema registry and kafka failed {}", e)
         exit(1)

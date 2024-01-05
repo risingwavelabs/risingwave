@@ -18,21 +18,21 @@ enum Gender {
   FEMALE = 1;
 }
 
-message UserMore {
+message UserWithMoreFields {
   int32 id = 1;
   string name = 2;
   string address = 3;
   string city = 4;
   Gender gender = 5;
   google.protobuf.SourceContext sc = 6;
-  int32 age = 7;
+  int32 age = 7; // new field here
 }
 
-message UserNewType {
+message UserWithNewType {
   int32 id = 1;
   string name = 2;
   string address = 3;
   string city = 4;
-  string gender = 5;
+  string gender = 5; // change the type from Gender to string
   google.protobuf.SourceContext sc = 6;
 }
