@@ -580,6 +580,9 @@ impl LocalQueryExecution {
                     .worker_node_manager
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                if candidates.is_empty() {
+                    return Err(SchedulerError::EmptyWorkerNodes);
+                }
                 candidates
                     .get(stage.session_id.0 as usize % candidates.len())
                     .context("no available worker node for dml")?

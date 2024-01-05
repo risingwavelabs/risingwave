@@ -705,7 +705,9 @@ impl StageRunner {
                 .worker_node_manager
                 .manager
                 .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-
+            if candidates.is_empty() {
+                return Err(SchedulerError::EmptyWorkerNodes);
+            }
             return Ok(Some(
                 candidates
                     .get(self.stage.session_id.0 as usize % candidates.len())
@@ -736,6 +738,9 @@ impl StageRunner {
                 .worker_node_manager
                 .manager
                 .get_workers_by_parallel_unit_ids(&[pu])?;
+            if candidates.is_empty() {
+                return Err(SchedulerError::EmptyWorkerNodes);
+            }
             Ok(Some(candidates[0].clone()))
         } else {
             Ok(None)
