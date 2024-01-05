@@ -44,7 +44,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{MetadataManager, WorkerId};
-use crate::model::{ActorId, BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
+use crate::model::{BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
@@ -149,48 +149,44 @@ impl GlobalBarrierManager {
             unreachable!()
         };
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
-        let creating_mview_ids = mviews.iter().map(|m| TableId::new(m.id)).collect_vec();
-        let mview_definitions = mviews
-            .into_iter()
-            .map(|m| (TableId::new(m.id), m.definition))
-            .collect::<HashMap<_, _>>();
 
+        let mut mview_definitions = HashMap::new();
+        let mut table_map = HashMap::new();
+        let mut table_fragment_map = HashMap::new();
+        let mut upstream_mv_counts = HashMap::new();
         let mut senders = HashMap::new();
         let mut receivers = Vec::new();
-        for table_id in creating_mview_ids.iter().copied() {
-            let (finished_tx, finished_rx) = oneshot::channel();
-            senders.insert(
-                table_id,
-                Notifier {
-                    finished: Some(finished_tx),
-                    ..Default::default()
-                },
-            );
-
+        for mview in mviews {
+            let table_id = TableId::new(mview.id);
             let fragments = mgr
                 .fragment_manager
                 .select_table_fragments_by_table_id(&table_id)
                 .await?;
             let internal_table_ids = fragments.internal_table_ids();
             let internal_tables = mgr.catalog_manager.get_tables(&internal_table_ids).await;
-            let table = mgr.catalog_manager.get_tables(&[table_id.table_id]).await;
-            assert_eq!(table.len(), 1, "should only have 1 materialized table");
-            let table = table.into_iter().next().unwrap();
-            receivers.push((table, internal_tables, finished_rx));
+            if fragments.is_created() {
+                // If the mview is already created, we don't need to recover it.
+                mgr.catalog_manager
+                    .finish_create_table_procedure(internal_tables, mview)
+                    .await?;
+                tracing::debug!("notified frontend for stream job {}", table_id.table_id);
+            } else {
+                table_map.insert(table_id, fragments.backfill_actor_ids());
+                mview_definitions.insert(table_id, mview.definition.clone());
+                upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
+                table_fragment_map.insert(table_id, fragments);
+                let (finished_tx, finished_rx) = oneshot::channel();
+                senders.insert(
+                    table_id,
+                    Notifier {
+                        finished: Some(finished_tx),
+                        ..Default::default()
+                    },
+                );
+                receivers.push((mview, internal_tables, finished_rx));
+            }
         }
 
-        let table_map = mgr
-            .fragment_manager
-            .get_table_id_stream_scan_actor_mapping(&creating_mview_ids)
-            .await;
-        let table_fragment_map = mgr
-            .fragment_manager
-            .get_table_id_table_fragment_map(&creating_mview_ids)
-            .await?;
-        let upstream_mv_counts = mgr
-            .fragment_manager
-            .get_upstream_relation_counts(&creating_mview_ids)
-            .await;
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
@@ -252,6 +248,7 @@ impl GlobalBarrierManager {
         let mut receivers = Vec::new();
         let mut table_fragment_map = HashMap::new();
         let mut mview_definitions = HashMap::new();
+        let mut table_map = HashMap::new();
         let mut upstream_mv_counts = HashMap::new();
         for mview in &mviews {
             let (finished_tx, finished_rx) = oneshot::channel();
@@ -270,15 +267,12 @@ impl GlobalBarrierManager {
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
             upstream_mv_counts.insert(table_id, table_fragments.dependent_table_ids());
+            table_map.insert(table_id, table_fragments.backfill_actor_ids());
             table_fragment_map.insert(table_id, table_fragments);
             mview_definitions.insert(table_id, mview.definition.clone());
             receivers.push((mview.table_id, finished_rx));
         }
 
-        let table_map: HashMap<TableId, HashSet<ActorId>> = table_fragment_map
-            .iter()
-            .map(|(id, tf)| (*id, tf.actor_ids().into_iter().collect()))
-            .collect();
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
