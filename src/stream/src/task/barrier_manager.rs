@@ -48,7 +48,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
-pub struct CollectResult {
+pub struct BarrierCompleteResult {
     pub sync_result: SyncResult,
 
     /// The updated creation progress of materialized view after this barrier.
@@ -75,9 +75,9 @@ enum LocalBarrierEvent {
         actor_id: ActorId,
         err: StreamError,
     },
-    AwaitCompleteEpoch {
+    AwaitEpochCompleted {
         epoch: u64,
-        result_sender: oneshot::Sender<StreamResult<CollectResult>>,
+        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
     },
     ReportCreateProgress {
         current_epoch: u64,
@@ -101,7 +101,7 @@ struct LocalBarrierWorker {
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
 
-    epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<CollectResult>>>,
+    epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<BarrierCompleteResult>>>,
 }
 
 impl LocalBarrierWorker {
@@ -118,7 +118,7 @@ impl LocalBarrierWorker {
         loop {
             let item = drop_either_future(
                 select(
-                    pin!(self.state.next_complete_epoch()),
+                    pin!(self.state.next_completed_epoch()),
                     pin!(event_rx.recv()),
                 )
                 .await,
@@ -150,11 +150,11 @@ impl LocalBarrierWorker {
                     ReportActorFailure { actor_id, err } => {
                         self.notify_failure(actor_id, err);
                     }
-                    LocalBarrierEvent::AwaitCompleteEpoch {
+                    LocalBarrierEvent::AwaitEpochCompleted {
                         epoch,
                         result_sender,
                     } => {
-                        self.await_collect_barrier(epoch, result_sender);
+                        self.await_epoch_completed(epoch, result_sender);
                     }
                     LocalBarrierEvent::ReportCreateProgress {
                         current_epoch,
@@ -271,10 +271,10 @@ impl LocalBarrierWorker {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    fn await_collect_barrier(
+    fn await_epoch_completed(
         &mut self,
         prev_epoch: u64,
-        result_sender: oneshot::Sender<StreamResult<CollectResult>>,
+        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
     ) {
         match self.state.pop_completed_epoch(prev_epoch) {
             Err(e) => {
@@ -375,17 +375,22 @@ impl LocalBarrierManager {
             actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
             result_sender: tx,
         });
-        rx.await.expect("should receive response")
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset"))?
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub async fn await_complete_epoch(&self, prev_epoch: u64) -> StreamResult<CollectResult> {
+    pub async fn await_epoch_completed(
+        &self,
+        prev_epoch: u64,
+    ) -> StreamResult<BarrierCompleteResult> {
         let (tx, rx) = oneshot::channel();
-        self.send_event(LocalBarrierEvent::AwaitCompleteEpoch {
+        self.send_event(LocalBarrierEvent::AwaitEpochCompleted {
             epoch: prev_epoch,
             result_sender: tx,
         });
-        rx.await.expect("should receive response")
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset"))?
     }
 
     /// Reset all internal states.

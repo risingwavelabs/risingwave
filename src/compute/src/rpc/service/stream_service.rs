@@ -24,7 +24,7 @@ use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
+use risingwave_stream::task::{BarrierCompleteResult, LocalStreamManager, StreamEnvironment};
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
@@ -176,7 +176,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let CollectResult {
+        let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
         } = self

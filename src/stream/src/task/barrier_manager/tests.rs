@@ -60,7 +60,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .collect_vec();
 
     let manager_clone = manager.clone();
-    let mut await_epoch_future = pin!(manager_clone.await_complete_epoch(epoch));
+    let mut await_epoch_future = pin!(manager_clone.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
@@ -125,7 +125,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .collect_vec();
 
     let manager_clone = manager.clone();
-    let mut await_epoch_future = pin!(manager_clone.await_complete_epoch(epoch));
+    let mut await_epoch_future = pin!(manager_clone.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {

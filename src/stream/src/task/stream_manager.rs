@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use super::{unique_executor_id, unique_operator_id, CollectResult};
+use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
@@ -258,10 +258,10 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<BarrierCompleteResult> {
         self.context
             .barrier_manager()
-            .await_complete_epoch(epoch)
+            .await_epoch_completed(epoch)
             .await
     }
 

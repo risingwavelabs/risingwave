@@ -32,7 +32,7 @@ use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 
 use super::progress::BackfillState;
-use super::CollectResult;
+use super::BarrierCompleteResult;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
@@ -56,9 +56,12 @@ enum ManagedBarrierStateInner {
         barrier_inflight_latency: HistogramTimer,
     },
 
+    /// The barrier has been collected by all remaining actors
     AllCollected,
 
-    Completed(StreamResult<CollectResult>),
+    /// The barrier has been completed, which means the barrier has been collected by all actors and
+    /// synced in state store
+    Completed(StreamResult<BarrierCompleteResult>),
 }
 
 #[derive(Debug)]
@@ -68,7 +71,7 @@ pub(super) struct BarrierState {
     kind: BarrierKind,
 }
 
-type EpochCompletedFuture = impl Future<Output = (u64, StreamResult<CollectResult>)>;
+type AwaitEpochCompletedFuture = impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)>;
 
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
@@ -83,7 +86,8 @@ pub(super) struct ManagedBarrierState {
 
     pub(super) streaming_metrics: Arc<StreamingMetrics>,
 
-    syncing_epoch_futures: FuturesOrdered<EpochCompletedFuture>,
+    /// Futures will be finished in the order of epoch in ascending order.
+    await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
 }
 
 impl ManagedBarrierState {
@@ -105,7 +109,7 @@ impl ManagedBarrierState {
             create_mview_progress: Default::default(),
             state_store,
             streaming_metrics,
-            syncing_epoch_futures: FuturesOrdered::new(),
+            await_epoch_completed_futures: FuturesOrdered::new(),
         }
     }
 
@@ -148,7 +152,7 @@ impl ManagedBarrierState {
 
             let create_mview_progress = self
                 .create_mview_progress
-                .remove(&prev_epoch)
+                .remove(&barrier_state.curr_epoch)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
@@ -156,7 +160,6 @@ impl ManagedBarrierState {
                     done: matches!(state, BackfillState::Done(_)),
                     consumed_epoch: match state {
                         BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        // Q: previously we actually use `epoch.curr`. Does it matter to use `epoch.prev`?
                         BackfillState::Done(_) => barrier_state.curr_epoch,
                     },
                     consumed_rows: match state {
@@ -183,7 +186,7 @@ impl ManagedBarrierState {
             let barrier_sync_latency = self.streaming_metrics.barrier_sync_latency.clone();
             let state_store = self.state_store.clone();
 
-            self.syncing_epoch_futures.push_back(async move {
+            self.await_epoch_completed_futures.push_back(async move {
                 let sync_result = match kind {
                     BarrierKind::Unspecified => unreachable!(),
                     BarrierKind::Initial => {
@@ -233,7 +236,7 @@ impl ManagedBarrierState {
                 };
                 (
                     prev_epoch,
-                    Ok(CollectResult {
+                    Ok(BarrierCompleteResult {
                         sync_result,
                         create_mview_progress,
                     }),
@@ -380,8 +383,8 @@ impl ManagedBarrierState {
         self.may_notify(barrier.epoch.prev);
     }
 
-    pub(crate) async fn next_complete_epoch(&mut self) -> u64 {
-        let (prev_epoch, result) = pending_on_none(self.syncing_epoch_futures.next()).await;
+    pub(crate) async fn next_completed_epoch(&mut self) -> u64 {
+        let (prev_epoch, result) = pending_on_none(self.await_epoch_completed_futures.next()).await;
         let state = self
             .epoch_barrier_state_map
             .get_mut(&prev_epoch)
@@ -397,7 +400,7 @@ impl ManagedBarrierState {
     pub(crate) fn pop_completed_epoch(
         &mut self,
         prev_epoch: u64,
-    ) -> StreamResult<Option<StreamResult<CollectResult>>> {
+    ) -> StreamResult<Option<StreamResult<BarrierCompleteResult>>> {
         let state = self
             .epoch_barrier_state_map
             .get(&prev_epoch)
@@ -428,7 +431,7 @@ impl ManagedBarrierState {
 
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
-        let epoch = self.next_complete_epoch().await;
+        let epoch = self.next_completed_epoch().await;
         let _ = self.pop_completed_epoch(epoch).unwrap().unwrap();
         epoch
     }
