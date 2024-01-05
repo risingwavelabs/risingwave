@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -565,7 +565,8 @@ mod test {
 
     use super::*;
     use crate::sink::encoder::{
-        DateHandlingMode, JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+        DateHandlingMode, JsonEncoder, TimeHandlingMode, TimestampHandlingMode,
+        TimestamptzHandlingMode,
     };
     use crate::sink::formatter::AppendOnlyFormatter;
 
@@ -738,6 +739,7 @@ mod test {
                     DateHandlingMode::FromCe,
                     TimestampHandlingMode::Milli,
                     TimestamptzHandlingMode::UtcString,
+                    TimeHandlingMode::Milli,
                 ),
             )),
         )

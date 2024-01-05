@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,10 @@ use url::Url;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{
+    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -309,10 +312,13 @@ impl BigQuerySinkWriter {
             client,
             is_append_only,
             insert_request: TableDataInsertAllRequest::new(),
-            row_encoder: JsonEncoder::new_with_big_query(
+            row_encoder: JsonEncoder::new(
                 schema,
                 None,
+                DateHandlingMode::String,
                 TimestampHandlingMode::String,
+                TimestamptzHandlingMode::UtcString,
+                TimeHandlingMode::Milli,
             ),
         })
     }

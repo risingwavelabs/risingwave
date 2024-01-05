@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,8 @@ pub static RW_INDEXES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Varchar, "acl"),
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ]
 });
 
@@ -77,6 +79,14 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8("".into())),
                         index.initialized_at_epoch.map(|e| e.as_scalar()),
                         index.created_at_epoch.map(|e| e.as_scalar()),
+                        index
+                            .initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        index
+                            .created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ])
                 })
             })

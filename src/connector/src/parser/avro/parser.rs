@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::schema_resolver::*;
+use super::schema_resolver::ConfluentSchemaResolver;
 use super::util::avro_schema_to_column_descs;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
+use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -156,18 +156,8 @@ impl AvroParserConfig {
                 )));
             }
             let url = url.first().unwrap();
-            let schema_content = match url.scheme() {
-                "file" => read_schema_from_local(url.path()),
-                "s3" => {
-                    read_schema_from_s3(url, avro_config.aws_auth_props.as_ref().unwrap()).await
-                }
-                "https" | "http" => read_schema_from_http(url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?;
-            let schema = Schema::parse_str(&schema_content).map_err(|e| {
+            let schema_content = bytes_from_url(url, avro_config.aws_auth_props.as_ref()).await?;
+            let schema = Schema::parse_reader(&mut schema_content.as_slice()).map_err(|e| {
                 RwError::from(InternalError(format!("Avro schema parse error {}", e)))
             })?;
             Ok(Self {
@@ -208,15 +198,11 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
-    use risingwave_common::{error, try_match_expand};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
-    use super::{
-        read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroAccessBuilder,
-        AvroParserConfig,
-    };
+    use super::*;
     use crate::common::AwsAuthProps;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
@@ -242,32 +228,25 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_read_schema_from_local() {
-        let schema_path = test_data_path("complex-schema.avsc");
-        let content_rs = read_schema_from_local(schema_path);
-        assert!(content_rs.is_ok());
-    }
-
-    #[tokio::test]
     #[ignore]
     async fn test_load_schema_from_s3() {
         let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
         let url = Url::parse(&schema_location).unwrap();
         let aws_auth_config: AwsAuthProps =
             serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
-        let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
+        let schema_content = bytes_from_url(&url, Some(&aws_auth_config)).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
 
     #[tokio::test]
     async fn test_load_schema_from_local() {
-        let schema_location = test_data_path("complex-schema.avsc");
-        let schema_content = read_schema_from_local(schema_location);
+        let schema_location = Url::from_file_path(test_data_path("complex-schema.avsc")).unwrap();
+        let schema_content = bytes_from_url(&schema_location, None).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
@@ -278,14 +257,14 @@ mod test {
         let schema_location =
             "https://mingchao-schemas.s3.ap-southeast-1.amazonaws.com/complex-schema.avsc";
         let url = Url::parse(schema_location).unwrap();
-        let schema_content = read_schema_from_http(&url).await;
+        let schema_content = bytes_from_url(&url, None).await;
         assert!(schema_content.is_ok());
-        let schema = Schema::parse_str(&schema_content.unwrap());
+        let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
     }
 
-    async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
+    async fn new_avro_conf_from_local(file_name: &str) -> Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
@@ -298,7 +277,7 @@ mod test {
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 
-    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<PlainParser> {
+    async fn new_avro_parser_from_local(file_name: &str) -> Result<PlainParser> {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,10 @@ use risingwave_sqlparser::keywords::Keyword;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
+use crate::catalog::CatalogError;
 use crate::Binder;
+
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
@@ -41,9 +44,33 @@ pub async fn handle_alter_parallelism(
         let reader = session.env().catalog_reader().read_guard();
 
         match stmt_type {
-            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
+            StatementType::ALTER_TABLE
+            | StatementType::ALTER_MATERIALIZED_VIEW
+            | StatementType::ALTER_INDEX => {
                 let (table, schema_name) =
                     reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+
+                match (table.table_type(), stmt_type) {
+                    (TableType::Internal, _) => {
+                        // we treat internal table as NOT FOUND
+                        return Err(
+                            CatalogError::NotFound("table", table.name().to_string()).into()
+                        );
+                    }
+                    (TableType::Table, StatementType::ALTER_TABLE)
+                    | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
+                    | (TableType::Index, StatementType::ALTER_INDEX) => {}
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "cannot alter parallelism of {} {} by {}",
+                            table.table_type().to_prost().as_str_name(),
+                            table.name(),
+                            stmt_type,
+                        ))
+                        .into());
+                    }
+                }
+
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
                 table.id.table_id()
             }

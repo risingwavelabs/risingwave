@@ -1,10 +1,11 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# currently, we only support single sink into table
-
 statement ok
 create table t_simple (v1 int, v2 int);
+
+statement error unsupported sink type table
+create sink table_sink from t_simple with (connector = 'table');
 
 statement ok
 create table m_simple (v1 int primary key, v2 int);
@@ -453,3 +454,6 @@ drop table t_b;
 
 statement ok
 drop table t_c;
+
+statement ok
+drop table t_m;

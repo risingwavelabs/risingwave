@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,8 @@ use uuid::Uuid;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv, WorkerId,
+    ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
+    MetadataManager, WorkerId,
 };
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
@@ -378,16 +379,18 @@ pub struct ScaleController {
 
 impl ScaleController {
     pub fn new(
-        fragment_manager: FragmentManagerRef,
-        cluster_manager: ClusterManagerRef,
+        metadata_manager: &MetadataManager,
         source_manager: SourceManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
-        Self {
-            fragment_manager,
-            cluster_manager,
-            source_manager,
-            env,
+        match metadata_manager {
+            MetadataManager::V1(mgr) => Self {
+                fragment_manager: mgr.fragment_manager.clone(),
+                cluster_manager: mgr.cluster_manager.clone(),
+                source_manager,
+                env,
+            },
+            MetadataManager::V2(_) => unimplemented!("support v2 in scale controller"),
         }
     }
 
@@ -1651,7 +1654,7 @@ impl ScaleController {
 
         for worker_id in &worker_ids {
             if unschedulable_worker_ids.contains(worker_id) {
-                bail!("Cannot include unscheduable worker {}", worker_id)
+                bail!("Cannot include unschedulable worker {}", worker_id)
             }
         }
 
@@ -2393,10 +2396,16 @@ impl GlobalStreamManager {
         options: RescheduleOptions,
         table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("support reschedule in v2");
+        };
+
         let mut table_parallelism = table_parallelism;
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
             .await?;
 
@@ -2407,7 +2416,7 @@ impl GlobalStreamManager {
             table_parallelism: table_parallelism.unwrap_or_default(),
         };
 
-        let fragment_manager_ref = self.fragment_manager.clone();
+        let fragment_manager_ref = mgr.fragment_manager.clone();
 
         revert_funcs.push(Box::pin(async move {
             fragment_manager_ref
@@ -2427,8 +2436,12 @@ impl GlobalStreamManager {
     async fn trigger_parallelism_control(&self) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock.write().await;
 
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
+            unimplemented!("support reschedule in v2");
+        };
+
         let table_parallelisms = {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             guard
                 .table_fragments()
@@ -2437,7 +2450,7 @@ impl GlobalStreamManager {
                 .collect()
         };
 
-        let workers = self
+        let workers = mgr
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
@@ -2456,6 +2469,8 @@ impl GlobalStreamManager {
 
         let reschedules = self
             .scale_controller
+            .as_ref()
+            .unwrap()
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
                 table_parallelisms,
@@ -2493,9 +2508,10 @@ impl GlobalStreamManager {
         ticker.reset();
 
         let worker_nodes = self
-            .cluster_manager
+            .metadata_manager
             .list_active_streaming_compute_nodes()
-            .await;
+            .await
+            .expect("list active streaming compute nodes");
 
         let mut worker_cache: BTreeMap<_, _> = worker_nodes
             .into_iter()

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -120,7 +120,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -877,8 +876,8 @@ impl CatalogManager {
                     let fragment: TableFragments = fragment;
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
-                    if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                    if fragment.is_initial() {
+                        tracing::debug!("cleaning table_id with initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -3176,6 +3175,18 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|table| table.table_type == table_type as i32)
+            .cloned()
+            .collect_vec()
+    }
+
     /// Lists table catalogs for mviews, without their internal tables.
     pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.core
@@ -3216,6 +3227,14 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn list_sinks(&self) -> Vec<Sink> {
+        self.core.lock().await.database.list_sinks()
+    }
+
+    pub async fn list_views(&self) -> Vec<View> {
+        self.core.lock().await.database.list_views()
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {

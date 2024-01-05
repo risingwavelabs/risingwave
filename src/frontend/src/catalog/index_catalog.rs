@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,6 +62,10 @@ pub struct IndexCatalog {
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
+
+    pub created_at_cluster_version: Option<String>,
+
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl IndexCatalog {
@@ -116,6 +120,8 @@ impl IndexCatalog {
             index_columns_len: index_prost.index_columns_len,
             created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
+            created_at_cluster_version: index_prost.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: index_prost.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -177,6 +183,8 @@ impl IndexCatalog {
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
         }
     }
 

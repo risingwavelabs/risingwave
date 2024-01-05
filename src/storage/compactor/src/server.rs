@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -237,19 +237,27 @@ pub async fn compactor_serve(
     let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
         filter_key_extractor_manager.clone(),
     );
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
+
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store: sstable_store.clone(),
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
+        compaction_executor,
         memory_limiter,
 
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -366,18 +374,24 @@ pub async fn shared_compactor_serve(
     heap_profiler.start();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
+        compaction_executor,
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg,
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()

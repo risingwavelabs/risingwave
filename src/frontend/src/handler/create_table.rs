@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -478,13 +478,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        context.session_ctx(),
-        &source_schema,
-        &with_properties,
-        false,
-    )
-    .await?;
+    let (columns_from_resolve_source, source_info) =
+        bind_columns_from_source(context.session_ctx(), &source_schema, &with_properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -684,6 +679,8 @@ fn gen_table_plan_inner(
             TableId::placeholder().table_id,
         )),
         version: INITIAL_SOURCE_VERSION_ID,
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));

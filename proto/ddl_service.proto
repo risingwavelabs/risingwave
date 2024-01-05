@@ -16,8 +16,7 @@ message CreateDatabaseRequest {
 
 message CreateDatabaseResponse {
   common.Status status = 1;
-  uint32 database_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropDatabaseRequest {
@@ -35,8 +34,7 @@ message CreateSchemaRequest {
 
 message CreateSchemaResponse {
   common.Status status = 1;
-  uint32 schema_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSchemaRequest {
@@ -55,8 +53,7 @@ message CreateSourceRequest {
 
 message CreateSourceResponse {
   common.Status status = 1;
-  uint32 source_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSourceRequest {
@@ -87,8 +84,7 @@ message CreateSinkRequest {
 
 message CreateSinkResponse {
   common.Status status = 1;
-  uint32 sink_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSinkRequest {
@@ -109,8 +105,7 @@ message CreateMaterializedViewRequest {
 
 message CreateMaterializedViewResponse {
   common.Status status = 1;
-  uint32 table_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropMaterializedViewRequest {
@@ -129,8 +124,7 @@ message CreateViewRequest {
 
 message CreateViewResponse {
   common.Status status = 1;
-  uint32 view_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropViewRequest {
@@ -166,8 +160,7 @@ message CreateTableRequest {
 
 message CreateTableResponse {
   common.Status status = 1;
-  uint32 table_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message AlterNameRequest {
@@ -235,8 +228,7 @@ message CreateFunctionRequest {
 
 message CreateFunctionResponse {
   common.Status status = 1;
-  uint32 function_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropFunctionRequest {
@@ -277,8 +269,7 @@ message CreateIndexRequest {
 
 message CreateIndexResponse {
   common.Status status = 1;
-  uint32 index_id = 2;
-  uint64 version = 4;
+  uint64 version = 2;
 }
 
 message DropIndexRequest {
@@ -352,9 +343,8 @@ message CreateConnectionRequest {
 }
 
 message CreateConnectionResponse {
-  uint32 connection_id = 1;
   // global catalog version
-  uint64 version = 2;
+  uint64 version = 1;
 }
 
 message ListConnectionsRequest {}
