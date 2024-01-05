@@ -300,8 +300,13 @@ export interface ActorPointPosition {
   data: ActorPoint
 }
 
-export interface Link {
-  points: Array<{ x: number; y: number }>
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface Edge {
+  points: Array<Point>
   source: string
   target: string
 }
@@ -463,7 +468,7 @@ export function flipLayoutPoint(
   }))
 }
 
-export function generatePointLinks(layoutMap: ActorPointPosition[]): Link[] {
+export function generatePointLinks(layoutMap: ActorPointPosition[]): Edge[] {
   const links = []
   const fragmentMap = new Map<string, ActorPointPosition>()
   for (const x of layoutMap) {
@@ -485,7 +490,7 @@ export function generatePointLinks(layoutMap: ActorPointPosition[]): Link[] {
   return links
 }
 
-export function generateBoxLinks(layoutMap: ActorBoxPosition[]): Link[] {
+export function generateBoxLinks(layoutMap: ActorBoxPosition[]): Edge[] {
   const links = []
   const fragmentMap = new Map<string, ActorBoxPosition>()
   for (const x of layoutMap) {

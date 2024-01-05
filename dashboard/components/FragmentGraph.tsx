@@ -15,8 +15,9 @@ import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
-  ActorBox,
-  ActorBoxPosition,
+  ActorBox as FragmentBox,
+  ActorBoxPosition as FragmentBoxPosition,
+  Point,
   generateBoxLinks,
   layout,
 } from "../lib/layout"
@@ -25,19 +26,13 @@ import BackPressureTable from "./BackPressureTable"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
-interface Point {
-  x: number
-  y: number
-}
-
-interface ActorLayout {
+type FragmentLayout = {
+  id: string
   layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
   width: number
   height: number
   actorIds: string[]
-}
-
-type PlanNodeDesc = ActorLayout & Point & { id: string }
+} & Point
 
 type Enter<Type> = Type extends d3.Selection<any, infer B, infer C, infer D>
   ? d3.Selection<d3.EnterElement, B, C, D>
@@ -91,10 +86,10 @@ function boundBox<Datum>(
 const nodeRadius = 12
 const nodeMarginX = nodeRadius * 6
 const nodeMarginY = nodeRadius * 4
-const actorMarginX = nodeRadius
-const actorMarginY = nodeRadius
-const actorDistanceX = nodeRadius * 5
-const actorDistanceY = nodeRadius * 5
+const fragmentMarginX = nodeRadius
+const fragmentMarginY = nodeRadius
+const fragmentDistanceX = nodeRadius * 5
+const fragmentDistanceY = nodeRadius * 5
 
 export default function FragmentGraph({
   planNodeDependencies,
@@ -102,7 +97,7 @@ export default function FragmentGraph({
   selectedFragmentId,
 }: {
   planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
-  fragmentDependency: ActorBox[]
+  fragmentDependency: FragmentBox[]
   selectedFragmentId: string | undefined
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -121,7 +116,8 @@ export default function FragmentGraph({
   const planNodeDependencyDagCallback = useCallback(() => {
     const deps = cloneDeep(planNodeDependencies)
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
-    const layoutActorResult = new Map<string, ActorLayout>()
+
+    const layoutFragmentResult = new Map<string, any>()
     const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
@@ -130,13 +126,13 @@ export default function FragmentGraph({
       })
       let { width, height } = boundBox(layoutRoot, {
         margin: {
-          left: nodeRadius * 4 + actorMarginX,
-          right: nodeRadius * 4 + actorMarginX,
-          top: nodeRadius * 3 + actorMarginY,
-          bottom: nodeRadius * 4 + actorMarginY,
+          left: nodeRadius * 4 + fragmentMarginX,
+          right: nodeRadius * 4 + fragmentMarginX,
+          top: nodeRadius * 3 + fragmentMarginY,
+          bottom: nodeRadius * 4 + fragmentMarginY,
         },
       })
-      layoutActorResult.set(fragmentId, {
+      layoutFragmentResult.set(fragmentId, {
         layoutRoot,
         width,
         height,
@@ -144,36 +140,39 @@ export default function FragmentGraph({
       })
       includedFragmentIds.add(fragmentId)
     }
+
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        const { width, height } = layoutActorResult.get(id)!
+        const { width, height } = layoutFragmentResult.get(id)!
         return { width, height, id, ...data }
       }),
-      actorDistanceX,
-      actorDistanceY
+      fragmentDistanceX,
+      fragmentDistanceY
     )
-    const fragmentLayoutPosition = new Map<string, { x: number; y: number }>()
-    fragmentLayout.forEach(({ id, x, y }: ActorBoxPosition) => {
+    const fragmentLayoutPosition = new Map<string, Point>()
+    fragmentLayout.forEach(({ id, x, y }: FragmentBoxPosition) => {
       fragmentLayoutPosition.set(id, { x, y })
     })
-    const layoutResult: PlanNodeDesc[] = []
-    for (const [fragmentId, result] of layoutActorResult) {
+
+    const layoutResult: FragmentLayout[] = []
+    for (const [fragmentId, result] of layoutFragmentResult) {
       const { x, y } = fragmentLayoutPosition.get(fragmentId)!
       layoutResult.push({ id: fragmentId, x, y, ...result })
     }
+
     let svgWidth = 0
     let svgHeight = 0
     layoutResult.forEach(({ x, y, width, height }) => {
       svgHeight = Math.max(svgHeight, y + height + 50)
       svgWidth = Math.max(svgWidth, x + width)
     })
-    const links = generateBoxLinks(fragmentLayout)
+    const edges = generateBoxLinks(fragmentLayout)
+
     return {
       layoutResult,
-      fragmentLayout,
       svgWidth,
       svgHeight,
-      links,
+      edges,
       includedFragmentIds,
     }
   }, [planNodeDependencies, fragmentDependency])
@@ -181,14 +180,13 @@ export default function FragmentGraph({
   const {
     svgWidth,
     svgHeight,
-    links,
-    fragmentLayout: fragmentDependencyDag,
-    layoutResult: planNodeDependencyDag,
+    edges: fragmentEdgeLayout,
+    layoutResult: fragmentLayout,
     includedFragmentIds,
   } = planNodeDependencyDagCallback()
 
   useEffect(() => {
-    if (planNodeDependencyDag) {
+    if (fragmentLayout) {
       const svgNode = svgRef.current
       const svgSelection = d3.select(svgNode)
 
@@ -215,8 +213,8 @@ export default function FragmentGraph({
           .text(({ id }) => `Fragment ${id}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - actorMarginY + 12)
-          .attr("dx", ({ width }) => width - actorMarginX)
+          .attr("dy", ({ height }) => height - fragmentMarginY + 12)
+          .attr("dx", ({ width }) => width - fragmentMarginX)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -231,8 +229,8 @@ export default function FragmentGraph({
           .text(({ actorIds }) => `Actor ${actorIds.join(", ")}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - actorMarginY + 24)
-          .attr("dx", ({ width }) => width - actorMarginX)
+          .attr("dy", ({ height }) => height - fragmentMarginY + 24)
+          .attr("dx", ({ width }) => width - fragmentMarginX)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -243,10 +241,10 @@ export default function FragmentGraph({
         }
 
         boundingBox
-          .attr("width", ({ width }) => width - actorMarginX * 2)
-          .attr("height", ({ height }) => height - actorMarginY * 2)
-          .attr("x", actorMarginX)
-          .attr("y", actorMarginY)
+          .attr("width", ({ width }) => width - fragmentMarginX * 2)
+          .attr("height", ({ height }) => height - fragmentMarginY * 2)
+          .attr("x", fragmentMarginX)
+          .attr("y", fragmentMarginY)
           .attr("fill", "white")
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
@@ -333,14 +331,17 @@ export default function FragmentGraph({
       }
 
       const createFragment = (sel: Enter<FragmentSelection>) => {
-        const gSel = sel.append("g").attr("class", "fragment").call(applyFragment)
+        const gSel = sel
+          .append("g")
+          .attr("class", "fragment")
+          .call(applyFragment)
         return gSel
       }
 
       const fragmentSelection = svgSelection
         .select<SVGGElement>(".fragments")
         .selectAll<SVGGElement, null>(".fragment")
-        .data(planNodeDependencyDag)
+        .data(fragmentLayout)
       type FragmentSelection = typeof fragmentSelection
 
       fragmentSelection.enter().call(createFragment)
@@ -351,13 +352,13 @@ export default function FragmentGraph({
       const edgeSelection = svgSelection
         .select<SVGGElement>(".fragment-edges")
         .selectAll<SVGPathElement, null>(".fragment-edge")
-        .data(links)
+        .data(fragmentEdgeLayout)
       type EdgeSelection = typeof edgeSelection
 
       const curveStyle = d3.curveMonotoneX
 
       const line = d3
-        .line<{ x: number; y: number }>()
+        .line<Point>()
         .curve(curveStyle)
         .x(({ x }) => x)
         .y(({ y }) => y)
@@ -381,7 +382,12 @@ export default function FragmentGraph({
       edgeSelection.call(applyEdge)
       edgeSelection.exit().remove()
     }
-  }, [planNodeDependencyDag, links, selectedFragmentId, openPlanNodeDetail])
+  }, [
+    fragmentLayout,
+    fragmentEdgeLayout,
+    selectedFragmentId,
+    openPlanNodeDetail,
+  ])
 
   return (
     <Fragment>
