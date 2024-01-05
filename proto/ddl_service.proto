@@ -147,8 +147,6 @@ enum TableJobType {
   TABLE_JOB_TYPE_GENERAL = 1;
   // table streaming job sharing a CDC source job
   TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
-  // arrangement backfill
-  TABLE_JOB_TYPE_ARRANGEMENT_BACKFILL = 3;
 }
 
 message CreateTableRequest {
