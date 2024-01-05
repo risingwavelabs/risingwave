@@ -57,16 +57,12 @@ impl Rule for SplitNowAndRule {
         {
             return None;
         }
-        dbg!(plan.explain_to_string());
 
         let [with_now, others] =
             filter
                 .predicate()
                 .clone()
                 .group_by::<_, 2>(|e| if e.count_nows() > 0 { 0 } else { 1 });
-
-        dbg!(with_now.to_string());
-        dbg!(others.to_string());
 
         let mut plan = LogicalFilter::create(input, others).into();
         for e in with_now.into_iter() {
@@ -78,7 +74,6 @@ impl Rule for SplitNowAndRule {
             )
             .into();
         }
-        dbg!(plan.explain_to_string());
         Some(plan)
     }
 }
