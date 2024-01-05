@@ -55,11 +55,6 @@ impl Rule for FilterWithNowToJoinRule {
             }
         });
 
-        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
-        // will introduce a watermark that can reduce state (since `now_expr` is monotonically
-        // increasing)
-        now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
-
         // Ignore no now filter
         if now_filters.is_empty() {
             return None;
