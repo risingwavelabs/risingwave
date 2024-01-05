@@ -1,6 +1,12 @@
 statement ok
 create table t (id int primary key);
 
+statement ok
+insert into t select i from generate_series(1, 100, 1) i;
+
+statement ok
+flush
+
 # we don't use flush and test in the same session whether delete and insert overlap.
 statement ok
 delete from t;
