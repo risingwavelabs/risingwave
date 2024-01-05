@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef } from "react"
 import {
   FragmentPoint,
   FragmentPointPosition,
+  Position,
   flipLayoutPoint,
   generatePointEdges,
 } from "../lib/layout"
@@ -88,7 +89,7 @@ export default function RelationDependencyGraph({
     const curveStyle = d3.curveMonotoneY
 
     const line = d3
-      .line<{ x: number; y: number }>()
+      .line<Position>()
       .curve(curveStyle)
       .x(({ x }) => x)
       .y(({ y }) => y)
