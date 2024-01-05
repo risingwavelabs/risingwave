@@ -75,7 +75,7 @@ fn columns_diff(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec
         .collect()
 }
 
-pub async fn handle_alter_source_format_encode(
+pub async fn handle_alter_source_with_sr(
     handler_args: HandlerArgs,
     name: ObjectName,
     connector_schema: ConnectorSchema,
