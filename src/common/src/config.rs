@@ -592,6 +592,8 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
+    #[serde(default = "default::storage::check_fast_compaction_result")]
+    pub check_fast_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
 
@@ -1163,6 +1165,10 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
+            true
+        }
+
+        pub fn check_fast_compaction_result() -> bool {
             true
         }
 

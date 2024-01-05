@@ -310,9 +310,6 @@ pub async fn compact(
     compact_table_ids.sort();
     compact_table_ids.dedup();
     let single_table = compact_table_ids.len() == 1;
-    let no_watermark_table = compact_table_ids
-        .iter()
-        .all(|table_id| !compact_task.table_watermarks.contains_key(table_id));
 
     let existing_table_ids: HashSet<u32> =
         HashSet::from_iter(compact_task.existing_table_ids.clone());
@@ -391,7 +388,6 @@ pub async fn compact(
         && !has_tombstone
         && !has_ttl
         && single_table
-        && no_watermark_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
@@ -512,7 +508,9 @@ pub async fn compact(
             compact_task_to_string(&compact_task)
         );
         // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
-        if let Err(e) = check_compaction_result(&compact_task, context.clone()).await {
+        if context.storage_opts.check_fast_compaction_result
+            && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
+        {
             tracing::error!(
                 "Failed to check fast compaction task {} because: {:?}",
                 compact_task.task_id,
