@@ -39,3 +39,6 @@ ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
 );
+
+statement ok
+DROP SOURCE src_user;
