@@ -23,7 +23,15 @@ include ../tpch/q22.slt.part
 
 # Test deletes and updates should work as per normal.
 include ./delete.slt.part
+
+statement ok
+flush;
+
 include ./insert.slt.part
+
+statement ok
+flush;
+
 include ../tpch/q1.slt.part
 include ../tpch/q2.slt.part
 include ../tpch/q3.slt.part

@@ -218,6 +218,7 @@ message Function {
   string language = 7;
   string link = 8;
   string identifier = 10;
+  optional string body = 14;
 
   oneof kind {
     ScalarFunction scalar = 11;

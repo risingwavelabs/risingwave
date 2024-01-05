@@ -266,6 +266,11 @@ enum HummockCommands {
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
+
+    CancelCompactTask {
+        #[clap(short, long)]
+        task_id: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -290,21 +295,21 @@ enum TableCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ScaleHorizonCommands {
-    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "worker_id or worker_host:worker_port, ..."
     )]
     exclude_workers: Option<Vec<String>>,
 
-    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// The worker that needs to be included during scheduling, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "all or worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host:worker_port, ..."
     )]
     include_workers: Option<Vec<String>>,
 
@@ -344,13 +349,13 @@ pub struct ScaleVerticalCommands {
     #[command(flatten)]
     common: ScaleCommon,
 
-    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// The worker that needs to be scheduled, worker_id and worker_host:worker_port are both
     /// supported
     #[clap(
         long,
         required = true,
         value_delimiter = ',',
-        value_name = "all or worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host:worker_port, ..."
     )]
     workers: Option<Vec<String>>,
 
@@ -465,12 +470,12 @@ enum MetaCommands {
 
     /// Unregister workers from the cluster
     UnregisterWorkers {
-        /// The workers that needs to be unregistered, worker_id and worker_host are both supported
+        /// The workers that needs to be unregistered, worker_id and worker_host:worker_port are both supported
         #[clap(
             long,
             required = true,
             value_delimiter = ',',
-            value_name = "worker_id or worker_host, ..."
+            value_name = "worker_id or worker_host:worker_port, ..."
         )]
         workers: Vec<String>,
 
@@ -654,6 +659,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::RebuildTableStats) => {
             cmd_impl::hummock::rebuild_table_stats(context).await?;
+        }
+        Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
+            cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

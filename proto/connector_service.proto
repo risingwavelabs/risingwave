@@ -39,6 +39,7 @@ message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
+    TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
