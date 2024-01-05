@@ -394,6 +394,17 @@ impl FragmentManager {
 
         table_fragments.insert(table_id, table_fragment.clone());
 
+        // Fragment replace map.
+        let fragment_replace_map: HashMap<_, _> = merge_updates
+            .iter()
+            .map(|update| {
+                (
+                    update.upstream_fragment_id,
+                    update.new_upstream_fragment_id.unwrap(),
+                )
+            })
+            .collect();
+
         // Update downstream `Merge`s.
         let mut merge_updates: HashMap<_, _> = merge_updates
             .iter()
@@ -416,24 +427,30 @@ impl FragmentManager {
                 .get_mut(table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
-            for actor in table_fragment
-                .fragments
-                .values_mut()
-                .flat_map(|f| &mut f.actors)
-            {
-                if let Some(merge_update) = merge_updates.remove(&actor.actor_id) {
-                    assert!(merge_update.removed_upstream_actor_id.is_empty());
-                    assert!(merge_update.new_upstream_fragment_id.is_some());
+            for fragment in table_fragment.fragments.values_mut() {
+                for actor in &mut fragment.actors {
+                    if let Some(merge_update) = merge_updates.remove(&actor.actor_id) {
+                        assert!(merge_update.removed_upstream_actor_id.is_empty());
+                        assert!(merge_update.new_upstream_fragment_id.is_some());
 
-                    let stream_node = actor.nodes.as_mut().unwrap();
-                    visit_stream_node(stream_node, |body| {
-                        if let NodeBody::Merge(m) = body
-                            && m.upstream_fragment_id == merge_update.upstream_fragment_id
-                        {
-                            m.upstream_fragment_id = merge_update.new_upstream_fragment_id.unwrap();
-                            m.upstream_actor_id = merge_update.added_upstream_actor_id.clone();
-                        }
-                    });
+                        let stream_node = actor.nodes.as_mut().unwrap();
+                        visit_stream_node(stream_node, |body| {
+                            if let NodeBody::Merge(m) = body
+                                && m.upstream_fragment_id == merge_update.upstream_fragment_id
+                            {
+                                m.upstream_fragment_id =
+                                    merge_update.new_upstream_fragment_id.unwrap();
+                                m.upstream_actor_id = merge_update.added_upstream_actor_id.clone();
+                            }
+                        });
+                    }
+                }
+                for upstream_fragment_id in &mut fragment.upstream_fragment_ids {
+                    if let Some(new_upstream_fragment_id) =
+                        fragment_replace_map.get(upstream_fragment_id)
+                    {
+                        *upstream_fragment_id = *new_upstream_fragment_id;
+                    }
                 }
             }
         }
