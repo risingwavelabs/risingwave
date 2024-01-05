@@ -101,7 +101,7 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
                 sinkId = sinkTask.getStart().getSinkParam().getSinkId();
-                bindSink(sinkTask.getStart().getSinkParam(), sinkTask.getStart().getFormat());
+                bindSink(sinkTask.getStart());
                 currentEpoch = null;
                 currentBatchId = null;
                 epochStarted = false;
@@ -200,14 +200,13 @@ public class SinkWriterStreamObserver
         ConnectorNodeMetrics.decActiveSinkConnections(connectorName, "node1");
     }
 
-    private void bindSink(
-            ConnectorServiceProto.SinkParam sinkParam,
-            ConnectorServiceProto.SinkPayloadFormat format) {
-        tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
+    private void bindSink(ConnectorServiceProto.SinkWriterStreamRequest.StartSink startSink) {
+        var sinkParam = startSink.getSinkParam();
+        tableSchema = TableSchema.fromProto(startSink.getPayloadSchema());
         String connectorName = getConnectorName(sinkParam);
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
         sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
-        switch (format) {
+        switch (startSink.getFormat()) {
             case FORMAT_UNSPECIFIED:
             case UNRECOGNIZED:
                 throw INVALID_ARGUMENT

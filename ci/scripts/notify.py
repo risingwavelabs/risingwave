@@ -19,7 +19,8 @@ MAIN_CRON_TEST_MAP = {
     "e2e-java-binding-tests": ["yiming"],
     "e2e-clickhouse-sink-tests": ["bohan"],
     "e2e-pulsar-sink-tests": ["renjie"],
-    "s3-source-test-for-opendal-fs-engine": ["congyi"],
+    "s3-source-test-for-opendal-fs-engine": ["congyi", "kexiang"],
+    "s3-source-tests": ["congyi", "kexiang"],
     "pulsar-source-tests": ["renjie"],
     "connector-node-integration-test": ["siyuan"],
 }

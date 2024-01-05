@@ -33,7 +33,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
-    StreamScanType,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -168,74 +167,6 @@ impl FragmentManager {
     pub async fn list_table_fragments(&self) -> Vec<TableFragments> {
         let map = &self.core.read().await.table_fragments;
         map.values().cloned().collect()
-    }
-
-    /// The `table_ids` here should correspond to stream jobs.
-    /// We get their corresponding table fragment, and from there,
-    /// we get the actors that are in the table fragment.
-    pub async fn get_table_id_stream_scan_actor_mapping(
-        &self,
-        table_ids: &[TableId],
-    ) -> HashMap<TableId, HashSet<ActorId>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut table_map = HashMap::new();
-        // TODO(kwannoel): Can this be unified with `PlanVisitor`?
-        fn has_backfill(stream_node: &StreamNode) -> bool {
-            let is_backfill = if let Some(node) = &stream_node.node_body
-                && let Some(node) = node.as_stream_scan()
-            {
-                node.stream_scan_type == StreamScanType::Backfill as i32
-                    || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
-            } else {
-                false
-            };
-            is_backfill || stream_node.get_input().iter().any(has_backfill)
-        }
-        for table_id in table_ids {
-            if let Some(table_fragment) = map.get(table_id) {
-                let mut actors = HashSet::new();
-                for fragment in table_fragment.fragments.values() {
-                    for actor in &fragment.actors {
-                        if let Some(node) = &actor.nodes
-                            && has_backfill(node)
-                        {
-                            actors.insert(actor.actor_id);
-                        } else {
-                            tracing::trace!("ignoring actor: {:?}", actor);
-                        }
-                    }
-                }
-                table_map.insert(*table_id, actors);
-            }
-        }
-        table_map
-    }
-
-    /// Gets the counts for each upstream relation that each stream job
-    /// indicated by `table_ids` depends on.
-    /// For example in the following query:
-    /// ```sql
-    /// CREATE MATERIALIZED VIEW m1 AS
-    ///   SELECT * FROM t1 JOIN t2 ON t1.a = t2.a JOIN t3 ON t2.b = t3.b
-    /// ```
-    ///
-    /// We have t1 occurring once, and t2 occurring once.
-    pub async fn get_upstream_relation_counts(
-        &self,
-        table_ids: &[TableId],
-    ) -> HashMap<TableId, HashMap<TableId, usize>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut upstream_relation_counts = HashMap::new();
-        for table_id in table_ids {
-            if let Some(table_fragments) = map.get(table_id) {
-                let dependent_ids = table_fragments.dependent_table_ids();
-                let r = upstream_relation_counts.insert(*table_id, dependent_ids);
-                assert!(r.is_none(), "Each table_id should be unique!")
-            } else {
-                upstream_relation_counts.insert(*table_id, HashMap::new());
-            }
-        }
-        upstream_relation_counts
     }
 
     pub fn get_mv_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
@@ -431,6 +362,7 @@ impl FragmentManager {
         new_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let table_id = old_table_fragments.table_id();
         let dummy_table_id = new_table_fragments.table_id();
@@ -458,6 +390,7 @@ impl FragmentManager {
         // Directly set to `Created` and `Running` state.
         table_fragment.set_state(State::Created);
         table_fragment.update_actors_state(ActorState::Running);
+        table_fragment.set_actor_splits_by_split_assignment(split_assignment);
 
         table_fragments.insert(table_id, table_fragment.clone());
 
@@ -614,14 +547,16 @@ impl FragmentManager {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }
-                let mut dependent_table = table_fragments
-                    .get_mut(dependent_table_id)
-                    .with_context(|| {
-                        format!(
+                let mut dependent_table =
+                    if let Some(dependent_table) = table_fragments.get_mut(dependent_table_id) {
+                        dependent_table
+                    } else {
+                        tracing::error!(
                             "dependent table_fragment not exist: id={}",
                             dependent_table_id
-                        )
-                    })?;
+                        );
+                        continue;
+                    };
 
                 dependent_table
                     .fragments
