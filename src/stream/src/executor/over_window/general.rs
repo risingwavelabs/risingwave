@@ -165,7 +165,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let input_info = args.input.info();
         let input_schema = &input_info.schema;
 
-        let has_unbounded_frame = args.calls.iter().any(|call| call.frame.is_unbounded());
+        let has_unbounded_frame = args
+            .calls
+            .iter()
+            .any(|call| call.frame.bounds.is_unbounded());
         let cache_policy = if has_unbounded_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.

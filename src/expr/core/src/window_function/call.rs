@@ -78,10 +78,6 @@ impl Frame {
             exclusion,
         }
     }
-
-    pub fn is_unbounded(&self) -> bool {
-        self.bounds.is_unbounded()
-    }
 }
 
 impl Frame {
