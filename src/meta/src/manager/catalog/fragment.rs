@@ -431,6 +431,7 @@ impl FragmentManager {
         new_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let table_id = old_table_fragments.table_id();
         let dummy_table_id = new_table_fragments.table_id();
@@ -458,6 +459,7 @@ impl FragmentManager {
         // Directly set to `Created` and `Running` state.
         table_fragment.set_state(State::Created);
         table_fragment.update_actors_state(ActorState::Running);
+        table_fragment.set_actor_splits_by_split_assignment(split_assignment);
 
         table_fragments.insert(table_id, table_fragment.clone());
 
@@ -614,14 +616,16 @@ impl FragmentManager {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }
-                let mut dependent_table = table_fragments
-                    .get_mut(dependent_table_id)
-                    .with_context(|| {
-                        format!(
+                let mut dependent_table =
+                    if let Some(dependent_table) = table_fragments.get_mut(dependent_table_id) {
+                        dependent_table
+                    } else {
+                        tracing::error!(
                             "dependent table_fragment not exist: id={}",
                             dependent_table_id
-                        )
-                    })?;
+                        );
+                        continue;
+                    };
 
                 dependent_table
                     .fragments

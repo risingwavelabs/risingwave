@@ -12,8 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-pub mod context;
-mod pg_get_indexdef;
-mod pg_get_viewdef;
+use sea_orm::entity::prelude::*;
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
+#[sea_orm(table_name = "hummock_sequence")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub name: String,
+    pub seq: i64,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
