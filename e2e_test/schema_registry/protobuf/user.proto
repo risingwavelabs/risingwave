@@ -32,7 +32,7 @@ message UserWithNewType {
   int32 id = 1;
   string name = 2;
   string address = 3;
-  string city = 4;
-  string gender = 5; // change the type from Gender to string
+  int32 city = 4; // change the type from string to int32
+  Gender gender = 5;
   google.protobuf.SourceContext sc = 6;
 }

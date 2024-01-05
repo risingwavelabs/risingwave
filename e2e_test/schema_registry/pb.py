@@ -41,8 +41,8 @@ def get_user_with_new_type(i):
         id=i,
         name="User_{}".format(i),
         address="Address_{}".format(i),
-        city="City_{}".format(i),
-        gender="MALE" if i % 2 == 0 else "FEMALE",
+        city=i,
+        gender=user_pb2.MALE if i % 2 == 0 else user_pb2.FEMALE,
         sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
     )
 
