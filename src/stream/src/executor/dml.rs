@@ -192,6 +192,21 @@ impl DmlExecutor {
                                 batch_group.iter().map(|c| c.cardinality()).sum::<usize>();
 
                             if txn_buffer_cardinality >= self.chunk_size {
+                                // txn buffer is too large, so yield batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
+                                        }
+                                    }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+
                                 // txn buffer isn't small, so yield.
                                 for chunk in txn_buffer.vec {
                                     yield Message::Chunk(chunk);
@@ -202,21 +217,23 @@ impl DmlExecutor {
                                 // txn buffer is small and batch group has space.
                                 batch_group.extend(txn_buffer.vec);
                             } else {
-                                // txn buffer is small and batch group has no space, so yield the large one.
-                                if txn_buffer_cardinality < batch_group_cardinality {
-                                    mem::swap(&mut txn_buffer.vec, &mut batch_group);
-                                }
-
-                                for chunk in txn_buffer.vec {
-                                    for (op, row) in chunk.rows() {
-                                        if let Some(chunk) = builder.append_row(op, row) {
-                                            yield Message::Chunk(chunk);
+                                // txn buffer is small and batch group has no space, so yield the batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
                                         }
                                     }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 }
-                                if let Some(chunk) = builder.take() {
-                                    yield Message::Chunk(chunk);
-                                }
+
+                                // put txn buffer into the batch group
+                                mem::swap(&mut txn_buffer.vec, &mut batch_group);
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
