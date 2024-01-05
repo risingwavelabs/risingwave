@@ -1285,10 +1285,15 @@ impl DdlController {
             })
             .collect();
 
+        let uses_arrangement_backfill = match stream_job {
+            StreamingJob::MaterializedView(_) => fragment_graph.has_arrangement_backfill(),
+            _ => false,
+        };
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
             stream_job.table_job_type(),
+            uses_arrangement_backfill,
         )?;
 
         // 2. Build the actor graph.
@@ -1704,10 +1709,15 @@ impl DdlController {
                     )
                 })?;
 
+        let uses_arrangement_backfill = match stream_job {
+            StreamingJob::MaterializedView(_) => fragment_graph.has_arrangement_backfill(),
+            _ => false,
+        };
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,
             original_table_fragment.fragment_id,
             downstream_fragments,
+            uses_arrangement_backfill,
         )?;
 
         // 2. Build the actor graph.
