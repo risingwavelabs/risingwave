@@ -63,10 +63,6 @@ impl BoxedExecutorBuilder for SourceExecutor {
         // prepare connector source
         let source_props: HashMap<String, String> =
             HashMap::from_iter(source_node.with_properties.clone());
-        let connector = source_props
-            .get("connector")
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
         let config =
             ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
 
@@ -88,7 +84,6 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 .get_config()
                 .developer
                 .connector_message_buffer_size,
-            connector,
         };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,
@@ -151,7 +146,7 @@ impl SourceExecutor {
             self.metrics,
             self.source_ctrl_opts.clone(),
             None,
-            "".into(),
+            ConnectorProperties::default(),
         ));
         let stream = self
             .connector_source

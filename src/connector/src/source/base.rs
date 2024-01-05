@@ -159,7 +159,7 @@ pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
-    pub connector: String,
+    pub connector_props: ConnectorProperties,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -170,7 +170,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
-        connector: String,
+        connector_props: ConnectorProperties,
     ) -> Self {
         Self {
             connector_client,
@@ -182,7 +182,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             error_suppressor: None,
-            connector,
+            connector_props,
         }
     }
 
@@ -194,7 +194,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
-        connector: String,
+        connector_props: ConnectorProperties,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -203,7 +203,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_client,
-            connector,
+            connector_props,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
@@ -386,6 +386,12 @@ pub trait SplitReader: Sized + Send {
 }
 
 for_all_sources!(impl_connector_properties);
+
+impl Default for ConnectorProperties {
+    fn default() -> Self {
+        ConnectorProperties::Test(Box::default())
+    }
+}
 
 impl ConnectorProperties {
     pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {

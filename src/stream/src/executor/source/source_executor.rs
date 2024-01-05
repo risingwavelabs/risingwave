@@ -25,7 +25,7 @@ use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
 };
-use risingwave_connector::{dispatch_source_prop, ConnectorParams};
+use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
@@ -106,7 +106,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
-            source_desc.source.connector.clone(),
+            source_desc.source.config.clone(),
         );
         source_desc
             .source

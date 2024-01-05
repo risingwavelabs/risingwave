@@ -17,7 +17,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, AccessError, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
-use crate::source::SourceColumnDesc;
+use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
@@ -38,12 +38,9 @@ pub const DEBEZIUM_DELETE_OP: &str = "d";
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
 
-const PG_CDC: &str = "postgres-cdc";
-const MYSQL_CDC: &str = "mysql-cdc";
-
 pub fn parse_transaction_meta(
     accessor: &impl Access,
-    connector: &str,
+    connector_props: &ConnectorProperties,
 ) -> std::result::Result<TransactionControl, AccessError> {
     if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
         accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
@@ -53,20 +50,20 @@ pub fn parse_transaction_meta(
         // PG: txID:LSN
         // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
         match status.as_ref() {
-            DEBEZIUM_TRANSACTION_STATUS_BEGIN => match connector {
-                PG_CDC => {
+            DEBEZIUM_TRANSACTION_STATUS_BEGIN => match *connector_props {
+                ConnectorProperties::PostgresCdc(_) => {
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
-                MYSQL_CDC => return Ok(TransactionControl::Begin { id }),
+                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Begin { id }),
                 _ => {}
             },
-            DEBEZIUM_TRANSACTION_STATUS_COMMIT => match connector {
-                PG_CDC => {
+            DEBEZIUM_TRANSACTION_STATUS_COMMIT => match *connector_props {
+                ConnectorProperties::PostgresCdc(_) => {
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Commit { id: tx_id.into() });
                 }
-                MYSQL_CDC => return Ok(TransactionControl::Commit { id }),
+                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Commit { id }),
                 _ => {}
             },
             _ => {}
@@ -105,14 +102,14 @@ where
     /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
     pub(crate) fn transaction_control(
         &self,
-        connector: &str,
+        connector_props: &ConnectorProperties,
     ) -> Result<TransactionControl, AccessError> {
         let Some(accessor) = &self.value_accessor else {
             return Err(AccessError::Other(anyhow!(
                 "value_accessor must be provided to parse transaction metadata"
             )));
         };
-        parse_transaction_meta(accessor, connector)
+        parse_transaction_meta(accessor, connector_props)
     }
 }
 

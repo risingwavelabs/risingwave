@@ -171,7 +171,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
             self.actor_ctx.error_suppressor.clone(),
-            source_desc.source.connector.clone(),
+            source_desc.source.config.clone(),
         )
     }
 

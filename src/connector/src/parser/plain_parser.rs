@@ -99,7 +99,7 @@ impl PlainParser {
                 .expect("expect transaction metadata access builder")
                 .generate_accessor(data)
                 .await?;
-            return match parse_transaction_meta(&accessor, &self.source_ctx.connector) {
+            return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props) {
                 Ok(transaction_control) => Ok(ParseResult::TransactionControl(transaction_control)),
                 Err(err) => Err(err)?,
             };
@@ -179,7 +179,7 @@ mod tests {
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{DataType, SourceMessage, SplitId};
+    use crate::source::{ConnectorProperties, DataType, SourceMessage, SplitId};
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
@@ -198,7 +198,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut source_ctx = SourceContext::default();
-        source_ctx.connector = "postgres-cdc".into();
+        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
         let source_ctx = Arc::new(source_ctx);
         // format plain encode json parser
         let parser = PlainParser::new(
@@ -349,7 +349,7 @@ mod tests {
 
         // format plain encode json parser
         let mut source_ctx = SourceContext::default();
-        source_ctx.connector = "mysql-cdc".into();
+        source_ctx.connector_props = ConnectorProperties::MysqlCdc(Box::default());
         let mut parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             columns.clone(),

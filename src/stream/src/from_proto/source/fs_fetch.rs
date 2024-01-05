@@ -48,11 +48,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
         let properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
-        let connector = source
-            .with_properties
-            .get("connector")
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
         let source_desc_builder = SourceDescBuilder::new(
             source.columns.clone(),
             params.env.source_metrics(),
@@ -62,7 +57,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
-            connector,
         );
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,

@@ -110,7 +110,7 @@ impl DebeziumParser {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
                 if let Ok(transaction_control) =
-                    row_op.transaction_control(&self.source_ctx.connector)
+                    row_op.transaction_control(&self.source_ctx.connector_props)
                 {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
@@ -163,7 +163,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
-    use crate::source::DataType;
+    use crate::source::{ConnectorProperties, DataType};
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
@@ -189,7 +189,7 @@ mod tests {
             protocol_config: ProtocolProperties::Debezium,
         };
         let mut source_ctx = SourceContext::default();
-        source_ctx.connector = "postgres-cdc".into();
+        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
             .unwrap();
