@@ -15,7 +15,9 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalGcs, OpendalPosixFs, OpendalS3,
+};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -101,6 +103,17 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                 FsFetchExecutor::<_, OpendalS3>::new(
+                    params.actor_context.clone(),
+                    params.info,
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
+                FsFetchExecutor::<_, OpendalPosixFs>::new(
                     params.actor_context.clone(),
                     params.info,
                     stream_source_core,

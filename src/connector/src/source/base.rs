@@ -42,7 +42,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::OPENDAL_S3_CONNECTOR;
+use super::{OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
@@ -386,14 +386,20 @@ impl ConnectorProperties {
     pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+            })
             .unwrap_or(false)
     }
 
     pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+            })
             .unwrap_or(false)
     }
 }
