@@ -647,12 +647,8 @@ pub async fn handle(
             name,
             operation: AlterSourceOperation::FormatEncode { connector_schema },
         } => {
-            alter_source_with_sr::handle_alter_source_with_sr(
-                handler_args,
-                name,
-                connector_schema,
-            )
-            .await
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterFunction {
             name,

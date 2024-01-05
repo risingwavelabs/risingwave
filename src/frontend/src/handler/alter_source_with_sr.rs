@@ -17,7 +17,6 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_connector::source::external::CdcTableType;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
@@ -102,7 +101,7 @@ pub async fn handle_alter_source_with_sr(
     };
 
     if source.associated_table_id.is_some() {
-        bail_not_implemented!("alter source associated with table is not supported yet");
+        bail_not_implemented!("altering source associated with table is not supported yet");
     }
 
     let StreamSourceInfo {
@@ -122,7 +121,7 @@ pub async fn handle_alter_source_with_sr(
 
     if connector_schema.format != old_format || connector_schema.row_encode != old_row_encode {
         bail_not_implemented!(
-            "the original definition is FORMAT {:?} ENCODE {:?}, and altering them is not supported yet.",
+            "the original definition is FORMAT {:?} ENCODE {:?}, and altering them is not supported yet",
             &old_format,
             &old_row_encode,
         );
@@ -139,19 +138,12 @@ pub async fn handle_alter_source_with_sr(
     let mut with_properties = source.with_properties.clone().into_iter().collect();
     validate_compatibility(&connector_schema, &mut with_properties)?;
 
-    let create_cdc_source_job = if is_cdc_connector(&with_properties) {
-        CdcTableType::from_properties(&with_properties).can_backfill()
-    } else {
-        false
-    };
+    if is_cdc_connector(&with_properties) {
+        bail_not_implemented!("altering a cdc source is not supported");
+    }
 
-    let (Some(columns_from_resolve_source), source_info) = bind_columns_from_source(
-        &session,
-        &connector_schema,
-        &with_properties,
-        create_cdc_source_job,
-    )
-    .await?
+    let (Some(columns_from_resolve_source), source_info) =
+        bind_columns_from_source(&session, &connector_schema, &with_properties, false).await?
     else {
         // Source without schema registry is rejected.
         unreachable!()

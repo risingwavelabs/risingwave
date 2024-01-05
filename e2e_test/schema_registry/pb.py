@@ -81,8 +81,8 @@ if __name__ == "__main__":
 
     all_pb_messages = {
         'user': (get_user, user_pb2.User),
-        'user_more': (get_user_with_more_fields, user_pb2.UserWithMoreFields),
-        'user_new_type': (get_user_with_new_type, user_pb2.UserWithNewType),
+        'user_with_more_fields': (get_user_with_more_fields, user_pb2.UserWithMoreFields),
+        'user_with_new_type': (get_user_with_new_type, user_pb2.UserWithNewType),
     }
 
     assert pb_message in all_pb_messages, f'pb_message must be one of {list(all_pb_messages.keys())}'
