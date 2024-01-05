@@ -434,15 +434,19 @@ impl FragmentManager {
                         assert!(merge_update.new_upstream_fragment_id.is_some());
 
                         let stream_node = actor.nodes.as_mut().unwrap();
+                        let mut upstream_actor_ids = HashSet::new();
                         visit_stream_node(stream_node, |body| {
-                            if let NodeBody::Merge(m) = body
-                                && m.upstream_fragment_id == merge_update.upstream_fragment_id
-                            {
-                                m.upstream_fragment_id =
-                                    merge_update.new_upstream_fragment_id.unwrap();
-                                m.upstream_actor_id = merge_update.added_upstream_actor_id.clone();
+                            if let NodeBody::Merge(m) = body {
+                                if m.upstream_fragment_id == merge_update.upstream_fragment_id {
+                                    m.upstream_fragment_id =
+                                        merge_update.new_upstream_fragment_id.unwrap();
+                                    m.upstream_actor_id =
+                                        merge_update.added_upstream_actor_id.clone();
+                                }
+                                upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
                         });
+                        actor.upstream_actor_id = upstream_actor_ids.into_iter().collect();
                     }
                 }
                 for upstream_fragment_id in &mut fragment.upstream_fragment_ids {
