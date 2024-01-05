@@ -129,12 +129,11 @@ RisingWave is fundamentally a database that enables users to do **more than just
 * High availability
 * Serving highly concurrent queries
 * Role-based access control (RBAC)
-* Integration with data modeling tools (e.g., [dbt](https://docs.risingwave.com/docs/current/use-dbt/))
-* Integration with database management tools (e.g., [Dbeaver](https://docs.risingwave.com/docs/current/dbeaver-integration/))
-* Integration with BI tools (e.g., [Grafana](https://docs.risingwave.com/docs/current/grafana-integration/))
+* Integration with data modeling tools, such as [dbt](https://docs.risingwave.com/docs/current/use-dbt/)
+* Integration with database management tools, such as [Dbeaver](https://docs.risingwave.com/docs/current/dbeaver-integration/)
+* Integration with BI tools, such as [Grafana](https://docs.risingwave.com/docs/current/grafana-integration/)
 * Schema change
 * Processing of semi-structured data
-* And many more.
 
 
 ## RisingWave's limitations
