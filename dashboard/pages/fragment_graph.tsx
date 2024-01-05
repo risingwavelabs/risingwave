@@ -33,7 +33,7 @@ import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import DependencyGraph from "../components/DependencyGraph"
+import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
@@ -328,7 +328,7 @@ export default function Streaming() {
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
-                <DependencyGraph
+                <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
                   mvDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>

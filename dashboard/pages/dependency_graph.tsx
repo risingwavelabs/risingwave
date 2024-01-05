@@ -21,7 +21,7 @@ import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { StreamGraph } from "../components/StreamGraph"
+import RelationDependencyGraph from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import { FragmentPoint } from "../lib/layout"
@@ -122,7 +122,7 @@ export default function StreamingGraph() {
         >
           <Text fontWeight="semibold">Graph</Text>
           {mvDependency && (
-            <StreamGraph
+            <RelationDependencyGraph
               nodes={mvDependency}
               selectedId={router.query.id as string}
             />

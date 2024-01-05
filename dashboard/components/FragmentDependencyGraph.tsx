@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 const nodeRadius = 5
 const edgeRadius = 12
 
-export default function DependencyGraph({
+export default function FragmentDependencyGraph({
   mvDependency,
   svgWidth,
   selectedId,
