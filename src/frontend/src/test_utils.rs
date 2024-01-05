@@ -521,7 +521,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_source_format_encode(&self, source: PbSource) -> Result<()> {
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }

@@ -143,7 +143,7 @@ pub async fn handle_alter_source_with_sr(
     }
 
     let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(&session, &connector_schema, &with_properties, false).await?
+        bind_columns_from_source(&session, &connector_schema, &with_properties).await?
     else {
         // Source without schema registry is rejected.
         unreachable!()
@@ -179,7 +179,7 @@ pub async fn handle_alter_source_with_sr(
     pb_source.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source_format_encode(pb_source).await?;
+    catalog_writer.alter_source_with_sr(pb_source).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
