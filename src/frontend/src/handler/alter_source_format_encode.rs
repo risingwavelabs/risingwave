@@ -296,8 +296,7 @@ pub mod tests {
         let name_column = altered_source
             .columns
             .iter()
-            .filter(|col| col.column_desc.name == "name")
-            .next()
+            .find(|col| col.column_desc.name == "name")
             .unwrap();
         assert_eq!(name_column.column_desc.data_type, DataType::Varchar);
 
