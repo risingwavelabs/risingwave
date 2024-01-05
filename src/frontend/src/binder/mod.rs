@@ -119,6 +119,9 @@ pub struct Binder {
     /// The mapping from sql udf parameters to ast expressions
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
     udf_context: HashMap<String, AstExpr>,
+
+    /// The mapping from `function name` to `calling times`
+    udf_recursive_context: HashMap<String, i32>,
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works
@@ -221,6 +224,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: HashMap::new(),
+            udf_recursive_context: HashMap::new(),
         }
     }
 

@@ -55,6 +55,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_timestamp",
 ];
 
+/// The max calling depth for every sql udf
+/// To reduce the chance that the current running rw thread
+/// be killed by os, the current allowance depth of calling
+/// stack is set to `16`.
+const SQL_UDF_MAX_RECURSIVE_DEPTH: i32 = 16;
+
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = match f.name.0.as_slice() {
@@ -237,6 +243,7 @@ impl Binder {
                     )
                     .into());
                 }
+
                 // This represents the current user defined function is `language sql`
                 let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
                     func.body.as_ref().unwrap().as_str(),
@@ -247,6 +254,7 @@ impl Binder {
                     // Here we just return the original parse error message
                     return Err(ErrorCode::InvalidInputSyntax(err).into());
                 }
+
                 debug_assert!(parse_result.is_ok());
 
                 // We can safely unwrap here
@@ -279,12 +287,31 @@ impl Binder {
                     clean_flag = false;
                 }
 
+                // Check for potential recursive calling
+                if let Some(&calling_times) = self.udf_recursive_context.get(&function_name) {
+                    if calling_times >= SQL_UDF_MAX_RECURSIVE_DEPTH {
+                        return Err(ErrorCode::BindError(format!(
+                            "function {} calling stack depth limit exceeded",
+                            &function_name
+                        ))
+                        .into());
+                    } else {
+                        // Update the status for the current called function
+                        self.udf_recursive_context
+                            .entry(function_name)
+                            .and_modify(|c| *c += 1);
+                    }
+                } else {
+                    self.udf_recursive_context.insert(function_name, 1);
+                }
+
                 if let Ok(expr) = extract_udf_expression(ast) {
                     let bind_result = self.bind_expr(expr);
-                    // Clean the `udf_context` after inlining,
+                    // Clean the `udf_context` & `udf_recursive_context` after inlining,
                     // which makes sure the subsequent binding will not be affected
                     if clean_flag {
                         self.udf_context.clear();
+                        self.udf_recursive_context.clear();
                     }
                     return bind_result;
                 } else {

@@ -28,9 +28,17 @@ create function add_return(INT, INT) returns int language sql return $1 + $2;
 statement ok
 create function add_return_binding() returns int language sql return add_return(1, 1) + add_return(1, 1);
 
-# Recursive definition is forbidden
-statement error recursive definition is forbidden, please recheck your function syntax
+# Recursive definition can be accepted, but will be eventually rejected during runtime
+statement ok
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+
+# Complex but error-prone definition, recursive & normal sql udfs interleaving
+statement ok
+create function recursive_non_recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + sub($1, $2)';
+
+# Recursive corner case
+statement ok
+create function foo(INT) returns varchar language sql as $$select 'foo(INT)'$$;
 
 # Create a wrapper function for `add` & `sub`
 statement ok
@@ -71,6 +79,19 @@ query T
 select call_regexp_replace();
 ----
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
+
+query T
+select foo(114514);
+----
+foo(INT)
+
+# Rejected deep calling stack
+statement error function recursive calling stack depth limit exceeded
+select recursive(1, 1);
+
+# Same as above
+statement error function recursive calling stack depth limit exceeded
+select recursive_non_recursive(1, 1);
 
 query I
 select add_sub_wrapper(1, 1);
@@ -183,6 +204,15 @@ drop function call_regexp_replace;
 
 statement ok
 drop function add_sub_wrapper;
+
+statement ok
+drop function recursive;
+
+statement ok
+drop function foo;
+
+statement ok
+drop function recursive_non_recursive;
 
 # Drop the mock table
 statement ok
