@@ -111,3 +111,9 @@
     select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00' or ts is null;
   expected_outputs:
     - stream_plan
+- name: Many Temporal filter with or predicate
+  sql: |
+    create table t (t timestamp with time zone, a int);
+    select * from t where (t > NOW() - INTERVAL '1 hour' OR t is NULL OR a < 1) AND (t < NOW() - INTERVAL '1 hour' OR a > 1);
+  expected_outputs:
+    - stream_plan
