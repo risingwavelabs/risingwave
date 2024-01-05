@@ -233,16 +233,16 @@ impl CompactorManagerInner {
         ret
     }
 
-    pub fn get_expired_tasks(&self) -> Vec<CompactTask> {
+    pub fn get_heartbeat_expired_tasks(&self) -> Vec<CompactTask> {
         let heartbeat_expiry_ts: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs()
             - self.heartbeat_expiry_seconds;
-        Self::get_heartbeat_expired_tasks(&self.task_heartbeats, heartbeat_expiry_ts)
+        Self::get_heartbeat_expired_tasks_impl(&self.task_heartbeats, heartbeat_expiry_ts)
     }
 
-    fn get_heartbeat_expired_tasks(
+    fn get_heartbeat_expired_tasks_impl(
         task_heartbeats: &HashMap<HummockCompactionTaskId, TaskHeartbeat>,
         heartbeat_expiry_ts: u64,
     ) -> Vec<CompactTask> {
@@ -428,8 +428,8 @@ impl CompactorManager {
             .check_tasks_status(tasks, slow_task_duration)
     }
 
-    pub fn get_expired_tasks(&self) -> Vec<CompactTask> {
-        self.inner.read().get_expired_tasks()
+    pub fn get_heartbeat_expired_tasks(&self) -> Vec<CompactTask> {
+        self.inner.read().get_heartbeat_expired_tasks()
     }
 
     pub fn initiate_task_heartbeat(&self, task: CompactTask) {
@@ -504,11 +504,11 @@ mod tests {
 
         // Ensure task is expired.
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let expired = compactor_manager.get_expired_tasks();
+        let expired = compactor_manager.get_heartbeat_expired_tasks();
         assert_eq!(expired.len(), 1);
 
         // Mimic no-op compaction heartbeat
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_heartbeat_expired_tasks().len(), 1);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
@@ -518,7 +518,7 @@ mod tests {
             num_progress_key: 100,
             ..Default::default()
         }]);
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_heartbeat_expired_tasks().len(), 1);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
@@ -528,7 +528,7 @@ mod tests {
             num_progress_key: 100,
             ..Default::default()
         }]);
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
+        assert_eq!(compactor_manager.get_heartbeat_expired_tasks().len(), 0);
 
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);

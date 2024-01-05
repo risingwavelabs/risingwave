@@ -2059,7 +2059,7 @@ impl HummockManager {
                 GroupSplit,
                 CheckDeadTask,
                 Report,
-                CompactionHeartBeat,
+                CompactionHeartBeatExpiredCheck,
 
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
@@ -2091,7 +2091,7 @@ impl HummockManager {
                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             compaction_heartbeat_interval.reset();
             let compaction_heartbeat_trigger = IntervalStream::new(compaction_heartbeat_interval)
-                .map(|_| HummockTimerEvent::CompactionHeartBeat);
+                .map(|_| HummockTimerEvent::CompactionHeartBeatExpiredCheck);
 
             let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
                 hummock_manager.env.opts.periodic_compaction_interval_sec,
@@ -2270,7 +2270,7 @@ impl HummockManager {
                                     }
                                 }
 
-                                HummockTimerEvent::CompactionHeartBeat => {
+                                HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
                                     let compactor_manager =
                                         hummock_manager.compactor_manager.clone();
 
@@ -2280,7 +2280,7 @@ impl HummockManager {
                                     // progress (meta + compactor)
                                     // 2. meta periodically scans the task and performs a cancel on
                                     // the meta side for tasks that are not updated by heartbeat
-                                    for task in compactor_manager.get_expired_tasks() {
+                                    for task in compactor_manager.get_heartbeat_expired_tasks() {
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
                                                 task.task_id,
