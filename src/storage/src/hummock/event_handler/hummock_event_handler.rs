@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,7 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
@@ -37,7 +35,7 @@ use crate::hummock::event_handler::refiller::CacheRefillerEvent;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SyncedData, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
@@ -403,7 +401,7 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
+    fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
         let pinned_version = self
             .refiller
             .last_new_pinned_version()
@@ -413,9 +411,9 @@ impl HummockEventHandler {
 
         let mut sst_delta_infos = vec![];
         let newly_pinned_version = match version_payload {
-            Payload::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = pinned_version.version();
-                for version_delta in &version_deltas.version_deltas {
+            HummockVersionUpdate::VersionDeltas(version_deltas) => {
+                let mut version_to_apply = pinned_version.version().clone();
+                for version_delta in &version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
                         sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
@@ -425,7 +423,7 @@ impl HummockEventHandler {
 
                 version_to_apply
             }
-            Payload::PinnedVersion(version) => version,
+            HummockVersionUpdate::PinnedVersion(version) => version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -578,7 +576,17 @@ impl HummockEventHandler {
                 }
             }
 
-            HummockEvent::LocalSealEpoch { .. } => {}
+            HummockEvent::LocalSealEpoch {
+                epoch,
+                opts,
+                table_id,
+                ..
+            } => {
+                if let Some((direction, watermarks)) = opts.table_watermarks {
+                    self.uploader
+                        .add_table_watermarks(epoch, table_id, watermarks, direction)
+                }
+            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {

@@ -34,6 +34,11 @@ CASES_MAP = {
     'vector': ['json'],
     'nats': ['json'],
     'doris-sink': ['json'],
+    'starrocks-sink': ['json'],
+    'deltalake-sink': ['json'],
+    'pinot-sink': ['json'],
+    'client-library': ['none'],
+
 }
 
 def gen_pipeline_steps():

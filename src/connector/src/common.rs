@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -222,9 +222,6 @@ pub struct KafkaCommon {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
-
-    #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaPropertiesCommon,
 }
 
 const fn default_kafka_sync_call_timeout() -> Duration {
@@ -349,10 +346,6 @@ impl KafkaCommon {
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
-
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
-        self.rdkafka_properties.set_client(c);
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -365,9 +358,6 @@ pub struct PulsarCommon {
 
     #[serde(rename = "auth.token")]
     pub auth_token: Option<String>,
-
-    #[serde(flatten)]
-    pub oauth: Option<PulsarOauthCommon>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -383,21 +373,21 @@ pub struct PulsarOauthCommon {
 
     #[serde(rename = "oauth.scope")]
     pub scope: Option<String>,
-
-    #[serde(flatten)]
-    pub aws_auth_props: AwsAuthProps,
 }
 
 impl PulsarCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+    pub(crate) async fn build_client(
+        &self,
+        oauth: &Option<PulsarOauthCommon>,
+        aws_auth_props: &AwsAuthProps,
+    ) -> anyhow::Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
-        if let Some(oauth) = &self.oauth {
+        if let Some(oauth) = oauth.as_ref() {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials =
-                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
+                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;

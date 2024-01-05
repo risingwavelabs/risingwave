@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -759,7 +759,6 @@ impl HummockUploader {
             .push_front(imm);
     }
 
-    #[expect(dead_code)]
     pub(crate) fn add_table_watermarks(
         &mut self,
         epoch: u64,
@@ -1147,8 +1146,9 @@ mod tests {
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;

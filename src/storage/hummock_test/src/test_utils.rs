@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,14 +29,13 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::version_update_payload;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
     RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::event_handler::HummockEvent;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
@@ -75,9 +74,7 @@ pub async fn prepare_first_valid_version(
     .await;
     observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(
-            version,
-        ))) => version,
+        Some(HummockEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(version))) => version,
         _ => unreachable!("should be full version"),
     };
 
@@ -257,14 +254,7 @@ impl HummockTestEnv {
     pub async fn commit_epoch(&self, epoch: u64) {
         let res = self.storage.seal_and_sync_epoch(epoch).await.unwrap();
         self.meta_client
-            .commit_epoch_with_watermark(
-                epoch,
-                res.uncommitted_ssts,
-                res.table_watermarks
-                    .into_iter()
-                    .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
-                    .collect(),
-            )
+            .commit_epoch_with_watermark(epoch, res.uncommitted_ssts, res.table_watermarks)
             .await
             .unwrap();
 

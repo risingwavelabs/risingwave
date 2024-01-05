@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,28 @@
  */
 
 import { Box, FormControl, FormLabel, Input, VStack } from "@chakra-ui/react"
+import { useIsClient, useLocalStorage } from "@uidotdev/usehooks"
 import Head from "next/head"
 import { Fragment } from "react"
 import Title from "../components/Title"
+import {
+  API_ENDPOINT_KEY,
+  DEFAULT_API_ENDPOINT,
+  PREDEFINED_API_ENDPOINTS,
+} from "./api/api"
 
 export default function Settings() {
+  const isClient = useIsClient()
+  return isClient && <ClientSettings />
+}
+
+// Local storage is only available on the client side.
+function ClientSettings() {
+  const [apiEndpoint, saveApiEndpoint] = useLocalStorage(
+    API_ENDPOINT_KEY,
+    DEFAULT_API_ENDPOINT
+  )
+
   return (
     <Fragment>
       <Head>
@@ -31,15 +48,16 @@ export default function Settings() {
         <VStack spacing={4} w="full">
           <FormControl>
             <FormLabel>RisingWave Meta Node HTTP API</FormLabel>
-            <Input value="/api" />
-          </FormControl>
-          <FormControl>
-            <FormLabel>Grafana HTTP API</FormLabel>
-            <Input value="/api" />
-          </FormControl>
-          <FormControl>
-            <FormLabel>Prometheus HTTP API</FormLabel>
-            <Input value="/api" />
+            <Input
+              value={apiEndpoint}
+              onChange={(event) => saveApiEndpoint(event.target.value)}
+              list="predefined"
+            />
+            <datalist id="predefined">
+              {PREDEFINED_API_ENDPOINTS.map((endpoint) => (
+                <option key={endpoint} value={endpoint} />
+              ))}
+            </datalist>
           </FormControl>
         </VStack>
       </Box>

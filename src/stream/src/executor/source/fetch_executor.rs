@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarRef, ScalarRefImpl};
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalS3, OpendalSource,
+    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::{
@@ -122,6 +122,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                             let split: OpendalFsSplit<OpendalS3> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
+                            let split: OpendalFsSplit<OpendalPosixFs> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
                             SplitImpl::from(split)
                         }

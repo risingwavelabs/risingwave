@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -265,14 +265,16 @@ impl ConnectorClient {
 
     pub async fn start_sink_writer_stream(
         &self,
-        sink_param: SinkParam,
+        payload_schema: Option<TableSchema>,
+        sink_proto: PbSinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    sink_param: Some(sink_param),
+                    payload_schema,
+                    sink_param: Some(sink_proto),
                     format: sink_payload_format as i32,
                 })),
             },

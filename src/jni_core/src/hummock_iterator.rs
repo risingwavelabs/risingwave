@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
@@ -84,7 +85,10 @@ impl HummockJavaBindingIterator {
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
-        let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+        let pin_version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
+            unbounded_channel().0,
+        );
         let table_id = read_plan.table_id.into();
 
         for vnode in read_plan.vnode_ids {
