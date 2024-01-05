@@ -73,3 +73,8 @@ fn decimal_add(a: Decimal, b: Decimal) -> Decimal {
 fn jsonb_access(json: serde_json::Value, index: i32) -> Option<serde_json::Value> {
     json.get(index as usize).cloned()
 }
+
+#[function("series(int) -> setof int")]
+fn series(n: i32) -> impl Iterator<Item = i32> {
+    0..n
+}
