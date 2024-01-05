@@ -17,3 +17,22 @@ enum Gender {
   MALE = 0;
   FEMALE = 1;
 }
+
+message UserMore {
+  int32 id = 1;
+  string name = 2;
+  string address = 3;
+  string city = 4;
+  Gender gender = 5;
+  google.protobuf.SourceContext sc = 6;
+  int32 age = 7;
+}
+
+message UserNewType {
+  int32 id = 1;
+  string name = 2;
+  string address = 3;
+  string city = 4;
+  string gender = 5;
+  google.protobuf.SourceContext sc = 6;
+}

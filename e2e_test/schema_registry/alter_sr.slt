@@ -1,0 +1,41 @@
+# Before running this test, seed data into kafka:
+#   python3 e2e_test/schema_registry/pb.py <brokerlist> <schema-registry-url> <topic> <num-records> <pb_type>
+
+statement ok
+CREATE SOURCE src_user WITH (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+)
+FORMAT plain ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+# Changing type is not allowed
+statement error
+ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserNewType'
+);
+
+statement ok
+ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserMore'
+);
+
+# Dropping columns is not allowed
+statement error
+ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
+);
+
+# Changing format/encode is not allowed
+statement error
+ALTER SOURCE src_user FORMAT json ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserMore'
+);

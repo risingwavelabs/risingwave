@@ -107,12 +107,15 @@ echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20 user
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test_more" 1 user_more
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test_new_type" 1 user_new_type
 echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
 curl --silent 'http://message_queue:8081/subjects'; echo
 # curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
 curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
+sqllogictest -p 4566 -d dev './e2e_test/schema_registry/alter_sr.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill

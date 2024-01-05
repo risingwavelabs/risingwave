@@ -264,7 +264,12 @@ pub mod tests {
             )"#,
             proto_file.path().to_str().unwrap()
         );
-        assert!(frontend.run_sql(sql).await.unwrap_err().to_string().contains("the original definition is FORMAT Plain ENCODE Protobuf"));
+        assert!(frontend
+            .run_sql(sql)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("the original definition is FORMAT Plain ENCODE Protobuf"));
 
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
