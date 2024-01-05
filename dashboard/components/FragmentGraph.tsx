@@ -333,7 +333,7 @@ export default function FragmentGraph({
       }
 
       const createFragment = (sel: Enter<FragmentSelection>) => {
-        const gSel = sel.append("g").attr("class", "actor").call(applyFragment)
+        const gSel = sel.append("g").attr("class", "fragment").call(applyFragment)
         return gSel
       }
 
