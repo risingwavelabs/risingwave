@@ -15,8 +15,34 @@
  *
  */
 
+const PROD_API_ENDPOINT = "/api"
+const MOCK_API_ENDPOINT = "http://localhost:32333"
+const EXTERNAL_META_NODE_API_ENDPOINT = "http://localhost:5691/api"
+
+export const PREDEFINED_API_ENDPOINTS = [
+  PROD_API_ENDPOINT,
+  MOCK_API_ENDPOINT,
+  EXTERNAL_META_NODE_API_ENDPOINT,
+]
+
+export const DEFAULT_API_ENDPOINT: string =
+  process.env.NODE_ENV === "production" ? PROD_API_ENDPOINT : MOCK_API_ENDPOINT
+
+export const API_ENDPOINT_KEY = "risingwave.dashboard.api.endpoint"
+
 class Api {
-  async get(url: string) {
+  urlFor(path: string) {
+    let apiEndpoint: string = (
+      JSON.parse(localStorage.getItem(API_ENDPOINT_KEY) || "null") ||
+      DEFAULT_API_ENDPOINT
+    ).replace(/\/+$/, "") // remove trailing slashes
+
+    return `${apiEndpoint}${path}`
+  }
+
+  async get(path: string) {
+    const url = this.urlFor(path)
+
     try {
       const res = await fetch(url)
       const data = await res.json()
