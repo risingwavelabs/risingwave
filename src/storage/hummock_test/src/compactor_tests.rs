@@ -37,7 +37,9 @@ pub(crate) mod tests {
     };
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-    use risingwave_hummock_sdk::table_watermark::VnodeWatermark;
+    use risingwave_hummock_sdk::table_watermark::{
+        ReadTableWatermark, VnodeWatermark, WatermarkDirection,
+    };
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
@@ -65,7 +67,9 @@ pub(crate) mod tests {
         CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::iterator::{ConcatIterator, UserIterator};
+    use risingwave_storage::hummock::iterator::{
+        ConcatIterator, SkipWatermarkIterator, UserIterator,
+    };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
@@ -1948,33 +1952,31 @@ pub(crate) mod tests {
         assert!(can_concat(&fast_ret));
         let read_options = Arc::new(SstableIteratorReadOptions::default());
 
-        // let mut watermark = ReadTableWatermark {
-        //     direction: WatermarkDirection::Ascending,
-        //     vnode_watermarks: BTreeMap::default(),
-        // };
-        // for i in 0..VirtualNode::COUNT {
-        //     if i % 2 == 0 {
-        //         watermark
-        //             .vnode_watermarks
-        //             .insert(VirtualNode::from_index(i), watermark_key.clone());
-        //     }
-        // }
-        // let watermark = BTreeMap::from_iter([(TableId::new(1), watermark)]);
+        let mut watermark = ReadTableWatermark {
+            direction: WatermarkDirection::Ascending,
+            vnode_watermarks: BTreeMap::default(),
+        };
+        for i in 0..VirtualNode::COUNT {
+            if i % 2 == 0 {
+                watermark
+                    .vnode_watermarks
+                    .insert(VirtualNode::from_index(i), watermark_key.clone());
+            }
+        }
+        let watermark = BTreeMap::from_iter([(TableId::new(1), watermark)]);
 
         let mut normal_iter = UserIterator::for_test(
-            // SkipWatermarkIterator::new(
-            //     ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
-            //     watermark.clone(),
-            // ),
-            ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
+            SkipWatermarkIterator::new(
+                ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
+                watermark.clone(),
+            ),
             (Bound::Unbounded, Bound::Unbounded),
         );
         let mut fast_iter = UserIterator::for_test(
-            // SkipWatermarkIterator::new(
-            //     ConcatIterator::new(fast_ret, sstable_store.clone(), read_options.clone()),
-            //     watermark,
-            // ),
-            ConcatIterator::new(fast_ret, sstable_store.clone(), read_options.clone()),
+            SkipWatermarkIterator::new(
+                ConcatIterator::new(fast_ret, sstable_store, read_options),
+                watermark,
+            ),
             (Bound::Unbounded, Bound::Unbounded),
         );
         normal_iter.rewind().await.unwrap();
