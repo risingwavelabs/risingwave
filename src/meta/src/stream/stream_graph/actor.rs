@@ -655,6 +655,7 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
+        println!("default_parallelism: {:?}", default_parallelism);
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
