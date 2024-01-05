@@ -17,13 +17,20 @@ FORMAT plain ENCODE protobuf(
 statement error
 ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
     schema.registry = 'http://message_queue:8081',
-    message = 'test.UserNewType'
+    message = 'test.UserWithNewType'
+);
+
+# Changing format/encode is not allowed
+statement error
+ALTER SOURCE src_user FORMAT json ENCODE protobuf(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.User'
 );
 
 statement ok
 ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
     schema.registry = 'http://message_queue:8081',
-    message = 'test.UserMore'
+    message = 'test.UserWithMoreFields'
 );
 
 # Dropping columns is not allowed
@@ -31,11 +38,4 @@ statement error
 ALTER SOURCE src_user FORMAT plain ENCODE protobuf(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
-);
-
-# Changing format/encode is not allowed
-statement error
-ALTER SOURCE src_user FORMAT json ENCODE protobuf(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserMore'
 );
