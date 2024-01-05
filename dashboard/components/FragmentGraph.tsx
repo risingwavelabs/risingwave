@@ -265,7 +265,7 @@ export default function FragmentGraph({
             .append("path")
             .attr("fill", "none")
             .attr("stroke", theme.colors.gray[700])
-            .attr("stroke-width", 1.5) // TODO
+            .attr("stroke-width", 1.5)
             .call(applyEdge)
           return sel
         }
