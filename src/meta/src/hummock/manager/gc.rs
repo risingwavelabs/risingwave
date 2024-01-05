@@ -26,7 +26,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::FullScanTask;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{commit_multi_var, read_lock, write_lock, ResponseEvent};
+use crate::hummock::manager::{
+    commit_multi_var, create_trx_wrapper, read_lock, write_lock, ResponseEvent,
+};
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
@@ -79,14 +81,11 @@ impl HummockManager {
         if !versioning.version_safe_points.is_empty() {
             return Ok((0, deltas_to_delete.len()));
         }
-        let mut hummock_version_deltas = match self.sql_meta_store() {
-            None => BTreeMapTransactionWrapper::V1(BTreeMapTransaction::new(
-                &mut versioning.hummock_version_deltas,
-            )),
-            Some(_) => BTreeMapTransactionWrapper::V2(BTreeMapTransaction::new(
-                &mut versioning.hummock_version_deltas,
-            )),
-        };
+        let mut hummock_version_deltas = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
+        );
         let batch = deltas_to_delete
             .iter()
             .take(batch_size)
