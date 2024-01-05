@@ -778,10 +778,6 @@ impl CompleteStreamFragmentGraph {
             );
         }
 
-        tracing::debug!(?existing_fragments);
-        tracing::debug!(?extra_downstreams);
-        tracing::debug!(?extra_upstreams);
-
         Ok(Self {
             building_graph: graph,
             existing_fragments,
