@@ -834,7 +834,7 @@ fn find_affected_ranges<'cache>(
     } else {
         let mut min_first_curr_key = &Sentinelled::Largest;
 
-        'outer_loop: for call in calls {
+        for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta
@@ -844,8 +844,7 @@ fn find_affected_ranges<'cache>(
                         // cursor is at ghost position at first.
                         cursor.move_prev();
                         if cursor.position().is_ghost() {
-                            min_first_curr_key = first_key;
-                            break 'outer_loop;
+                            break;
                         }
                     }
                     cursor.key().unwrap_or(first_key)
@@ -854,14 +853,9 @@ fn find_affected_ranges<'cache>(
             min_first_curr_key = min_first_curr_key.min(key);
             if min_first_curr_key == first_key {
                 // if we already pushed the affected curr key to the first key, no more pushing is needed
-                break 'outer_loop;
+                break;
             }
         }
-
-        assert!(
-            !min_first_curr_key.is_largest(),
-            "# of window function calls > 0, meaning this must be mutated"
-        );
 
         min_first_curr_key
     };
@@ -873,15 +867,14 @@ fn find_affected_ranges<'cache>(
     } else {
         let mut min_frame_start = &Sentinelled::Largest;
 
-        'outer_loop: for call in calls {
+        for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta.find(first_curr_key).unwrap();
                     for _ in 0..bounds.start.n_preceding_rows().unwrap() {
                         cursor.move_prev();
                         if cursor.position().is_ghost() {
-                            min_frame_start = first_key;
-                            break 'outer_loop;
+                            break;
                         }
                     }
                     cursor.key().unwrap_or(first_key)
@@ -890,14 +883,9 @@ fn find_affected_ranges<'cache>(
             min_frame_start = min_frame_start.min(key);
             if min_frame_start == first_key {
                 // if we already pushed the affected frame start to the first key, no more pushing is needed
-                break 'outer_loop;
+                break;
             }
         }
-
-        assert!(
-            !min_frame_start.is_largest(),
-            "# of window function calls > 0, meaning this must be mutated"
-        );
 
         min_frame_start
     };
@@ -907,7 +895,7 @@ fn find_affected_ranges<'cache>(
     } else {
         let mut max_last_curr_key = &Sentinelled::Smallest;
 
-        'outer_loop: for call in calls {
+        for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta
@@ -915,8 +903,7 @@ fn find_affected_ranges<'cache>(
                     for _ in 0..bounds.start.n_preceding_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
-                            max_last_curr_key = last_key;
-                            break 'outer_loop;
+                            break;
                         }
                     }
                     cursor.key().unwrap_or(last_key)
@@ -925,14 +912,9 @@ fn find_affected_ranges<'cache>(
             max_last_curr_key = max_last_curr_key.max(key);
             if max_last_curr_key == last_key {
                 // if we already pushed the affected curr key to the last key, no more pushing is needed
-                break 'outer_loop;
+                break;
             }
         }
-
-        assert!(
-            !max_last_curr_key.is_smallest(),
-            "# of window function calls > 0, meaning this must be mutated"
-        );
 
         max_last_curr_key
     };
@@ -942,15 +924,14 @@ fn find_affected_ranges<'cache>(
     } else {
         let mut max_frame_end = &Sentinelled::Smallest;
 
-        'outer_loop: for call in calls {
+        for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
                     let mut cursor = part_with_delta.find(last_curr_key).unwrap();
                     for _ in 0..bounds.end.n_following_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
-                            max_frame_end = last_key;
-                            break 'outer_loop;
+                            break;
                         }
                     }
                     cursor.key().unwrap_or(last_key)
@@ -959,14 +940,9 @@ fn find_affected_ranges<'cache>(
             max_frame_end = max_frame_end.max(key);
             if max_frame_end == last_key {
                 // if we already pushed the affected frame end to the last key, no more pushing is needed
-                break 'outer_loop;
+                break;
             }
         }
-
-        assert!(
-            !max_frame_end.is_smallest(),
-            "# of window function calls > 0, meaning this must be mutated"
-        );
 
         max_frame_end
     };
