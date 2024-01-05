@@ -24,12 +24,12 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import { ActorPoint } from "../lib/layout"
+import { FragmentPoint } from "../lib/layout"
 import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): FragmentPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {

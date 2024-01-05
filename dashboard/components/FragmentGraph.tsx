@@ -15,10 +15,10 @@ import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
-  ActorBox as FragmentBox,
-  ActorBoxPosition as FragmentBoxPosition,
-  Point,
-  generateBoxLinks,
+  FragmentBox,
+  FragmentBoxPosition,
+  Position,
+  generateBoxEdges,
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
@@ -32,7 +32,7 @@ type FragmentLayout = {
   width: number
   height: number
   actorIds: string[]
-} & Point
+} & Position
 
 type Enter<Type> = Type extends d3.Selection<any, infer B, infer C, infer D>
   ? d3.Selection<d3.EnterElement, B, C, D>
@@ -48,10 +48,10 @@ function treeLayoutFlip<Datum>(
   const treeRoot = tree(root)
 
   // Flip back x, y
-  treeRoot.each((d: Point) => ([d.x, d.y] = [d.y, d.x]))
+  treeRoot.each((d: Position) => ([d.x, d.y] = [d.y, d.x]))
 
   // LTR -> RTL
-  treeRoot.each((d: Point) => (d.x = -d.x))
+  treeRoot.each((d: Position) => (d.x = -d.x))
 
   return treeRoot
 }
@@ -149,7 +149,7 @@ export default function FragmentGraph({
       fragmentDistanceX,
       fragmentDistanceY
     )
-    const fragmentLayoutPosition = new Map<string, Point>()
+    const fragmentLayoutPosition = new Map<string, Position>()
     fragmentLayout.forEach(({ id, x, y }: FragmentBoxPosition) => {
       fragmentLayoutPosition.set(id, { x, y })
     })
@@ -166,7 +166,7 @@ export default function FragmentGraph({
       svgHeight = Math.max(svgHeight, y + height + 50)
       svgWidth = Math.max(svgWidth, x + width)
     })
-    const edges = generateBoxLinks(fragmentLayout)
+    const edges = generateBoxEdges(fragmentLayout)
 
     return {
       layoutResult,
@@ -192,9 +192,9 @@ export default function FragmentGraph({
 
       // How to draw edges
       const treeLink = d3
-        .linkHorizontal<any, Point>()
-        .x((d: Point) => d.x)
-        .y((d: Point) => d.y)
+        .linkHorizontal<any, Position>()
+        .x((d: Position) => d.x)
+        .y((d: Position) => d.y)
 
       const isSelected = (id: string) => id === selectedFragmentId
 
@@ -358,7 +358,7 @@ export default function FragmentGraph({
       const curveStyle = d3.curveMonotoneX
 
       const line = d3
-        .line<Point>()
+        .line<Position>()
         .curve(curveStyle)
         .x(({ x }) => x)
         .y(({ y }) => y)

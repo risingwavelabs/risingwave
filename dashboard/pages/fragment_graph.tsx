@@ -37,7 +37,7 @@ import DependencyGraph from "../components/DependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import { ActorBox } from "../lib/layout"
+import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
@@ -101,8 +101,10 @@ function buildPlanNodeDependency(
   })
 }
 
-function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
-  const nodes: ActorBox[] = []
+function buildFragmentDependencyAsEdges(
+  fragments: TableFragments
+): FragmentBox[] {
+  const nodes: FragmentBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
   for (const fragmentId in fragments.fragments) {
     const fragment = fragments.fragments[fragmentId]
@@ -128,8 +130,8 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
       width: 0,
       height: 0,
       order: fragment.fragmentId,
-      fragment: fragment,
-    } as ActorBox)
+      fragment,
+    } as FragmentBox)
   }
   return nodes
 }

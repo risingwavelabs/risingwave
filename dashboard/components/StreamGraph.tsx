@@ -19,14 +19,14 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
-  ActorPoint,
-  ActorPointPosition,
+  FragmentPoint,
+  FragmentPointPosition,
   flipLayoutPoint,
-  generatePointLinks,
+  generatePointEdges,
 } from "../lib/layout"
 
 function boundBox(
-  actorPosition: ActorPointPosition[],
+  actorPosition: FragmentPointPosition[],
   nodeRadius: number
 ): {
   width: number
@@ -50,7 +50,7 @@ export function StreamGraph({
   nodes,
   selectedId,
 }: {
-  nodes: ActorPoint[]
+  nodes: FragmentPoint[]
   selectedId?: string
 }) {
   const svgRef = useRef<any>()
@@ -66,7 +66,7 @@ export function StreamGraph({
       y: y + layoutMargin,
       ...data,
     }))
-    const links = generatePointLinks(layoutMap)
+    const links = generatePointEdges(layoutMap)
     const { width, height } = boundBox(layoutMap, nodeRadius)
     return {
       layoutMap,
@@ -123,7 +123,7 @@ export function StreamGraph({
     const applyNode = (g: any) => {
       g.attr(
         "transform",
-        ({ x, y }: ActorPointPosition) => `translate(${x},${y})`
+        ({ x, y }: FragmentPointPosition) => `translate(${x},${y})`
       )
 
       let circle = g.select("circle")
@@ -134,7 +134,7 @@ export function StreamGraph({
       circle
         .attr("r", nodeRadius)
         .style("cursor", "pointer")
-        .attr("fill", ({ id }: ActorPointPosition) =>
+        .attr("fill", ({ id }: FragmentPointPosition) =>
           isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
         )
 
@@ -145,7 +145,7 @@ export function StreamGraph({
 
       text
         .attr("fill", "black")
-        .text(({ data: { name } }: ActorPointPosition) => name)
+        .text(({ data: { name } }: FragmentPointPosition) => name)
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
         .attr("dy", nodeRadius * 2)
