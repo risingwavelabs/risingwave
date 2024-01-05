@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -23,13 +21,13 @@ use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
-use risingwave_udf::ArrowFlightUdfClient;
+use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
-pub async fn handle_create_function(
+pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
@@ -41,34 +39,57 @@ pub async fn handle_create_function(
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
     }
+
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
-    // e.g., `language [ python / java / ...etc]`
-    let language = match params.language {
-        Some(lang) => {
-            let lang = lang.real_value().to_lowercase();
-            match &*lang {
-                "python" | "java" => lang,
-                _ => {
-                    return Err(ErrorCode::InvalidParameterValue(format!(
-                        "language {} is not supported",
-                        lang
-                    ))
-                    .into())
-                }
+
+    let language = "sql".to_string();
+    // Just a basic sanity check for language
+    if !matches!(params.language, Some(lang) if lang.real_value().to_lowercase() == "sql") {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`language` for sql udf must be `sql`".to_string(),
+        )
+        .into());
+    }
+
+    // SQL udf function supports both single quote (i.e., as 'select $1 + $2')
+    // and double dollar (i.e., as $$select $1 + $2$$) for as clause
+    let body = match &params.as_ {
+        Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
+        Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
+        None => {
+            if params.return_.is_none() {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "AS or RETURN must be specified".to_string(),
+                )
+                .into());
             }
+            // Otherwise this is a return expression
+            // Note: this is a current work around, and we are assuming return sql udf
+            // will NOT involve complex syntax, so just reuse the logic for select definition
+            format!("select {}", &params.return_.unwrap().to_string())
         }
-        // Empty language is acceptable since we only require the external server implements the
-        // correct protocol.
-        None => "".to_string(),
     };
-    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
-        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
+
+    // We do NOT allow recursive calling inside sql udf
+    // Since there does not exist the base case for this definition
+    if body.contains(format!("{}(", name.real_value()).as_str()) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "recursive definition is forbidden, please recheck your function syntax".to_string(),
+        )
+        .into());
+    }
+
+    // Sanity check for link, this must be none with sql udf function
+    if let Some(CreateFunctionUsing::Link(_)) = params.using {
+        return Err(ErrorCode::InvalidParameterValue(
+            "USING must NOT be specified with sql udf function".to_string(),
+        )
+        .into());
     };
-    let Some(CreateFunctionUsing::Link(link)) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
+
+    // Get return type for the current sql udf function
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -125,33 +146,19 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    // check the service
-    let client = ArrowFlightUdfClient::connect(&link)
-        .await
-        .map_err(|e| anyhow!(e))?;
-    /// A helper function to create a unnamed field from data type.
-    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-        arrow_schema::Field::new("", data_type, true)
+    // Parse function body here
+    // Note that the parsing here is just basic syntax / semantic check, the result will NOT be stored
+    // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
+    let parse_result = Parser::parse_sql(body.as_str());
+    if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) = parse_result
+    {
+        // Here we just return the original parse error message
+        return Err(ErrorCode::InvalidInputSyntax(err).into());
+    } else {
+        debug_assert!(parse_result.is_ok());
     }
-    let args = arrow_schema::Schema::new(
-        arg_types
-            .iter()
-            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-            .try_collect::<_, Fields, _>()?,
-    );
-    let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
-        Kind::Table(_) => vec![
-            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-            to_field(return_type.clone().try_into()?),
-        ],
-        _ => unreachable!(),
-    });
-    client
-        .check(&identifier, &args, &returns)
-        .await
-        .map_err(|e| anyhow!(e))?;
 
+    // Create the actual function, will be stored in function catalog
     let function = Function {
         id: FunctionId::placeholder().0,
         schema_id,
@@ -161,9 +168,9 @@ pub async fn handle_create_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
-        identifier,
-        body: None,
-        link,
+        identifier: "".to_string(),
+        body: Some(body),
+        link: "".to_string(),
         owner: session.user_id(),
     };
 
