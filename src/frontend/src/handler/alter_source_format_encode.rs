@@ -181,10 +181,13 @@ pub async fn handle_alter_source_format_encode(
         .format_encode_options
         .extend(format_encode_options);
 
+    let mut pb_source = source.to_prost(schema_id, database_id);
+
+    // update version
+    pb_source.version += 1;
+
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_source_format_encode(source.to_prost(schema_id, database_id))
-        .await?;
+    catalog_writer.alter_source_format_encode(pb_source).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
