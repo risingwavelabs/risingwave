@@ -300,6 +300,12 @@ export interface ActorPointPosition {
   data: ActorPoint
 }
 
+export interface Link {
+  points: Array<{ x: number; y: number }>
+  source: string
+  target: string
+}
+
 /**
  * @param fragments
  * @returns the coordination of the top-left corner of the actor box
@@ -457,7 +463,7 @@ export function flipLayoutPoint(
   }))
 }
 
-export function generatePointLinks(layoutMap: ActorPointPosition[]) {
+export function generatePointLinks(layoutMap: ActorPointPosition[]): Link[] {
   const links = []
   const fragmentMap = new Map<string, ActorPointPosition>()
   for (const x of layoutMap) {
@@ -479,7 +485,7 @@ export function generatePointLinks(layoutMap: ActorPointPosition[]) {
   return links
 }
 
-export function generateBoxLinks(layoutMap: ActorBoxPosition[]) {
+export function generateBoxLinks(layoutMap: ActorBoxPosition[]): Link[] {
   const links = []
   const fragmentMap = new Map<string, ActorBoxPosition>()
   for (const x of layoutMap) {

@@ -30,6 +30,19 @@ interface Point {
   y: number
 }
 
+interface ActorLayout {
+  layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
+  width: number
+  height: number
+  extraInfo: string
+}
+
+type PlanNodeDesc = ActorLayout & Point & { id: string }
+
+type Enter<Type> = Type extends d3.Selection<any, infer B, infer C, infer D>
+  ? d3.Selection<d3.EnterElement, B, C, D>
+  : never
+
 function treeLayoutFlip<Datum>(
   root: d3.HierarchyNode<Datum>,
   { dx, dy }: { dx: number; dy: number }
@@ -92,31 +105,23 @@ export default function FragmentGraph({
   fragmentDependency: ActorBox[]
   selectedFragmentId: string | undefined
 }) {
-  const svgRef = useRef<any>()
+  const svgRef = useRef<SVGSVGElement>(null)
 
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [currentStreamNode, setCurrentStreamNode] = useState<PlanNodeDatum>()
 
   const openPlanNodeDetail = useCallback(
-    () => (node: d3.HierarchyNode<PlanNodeDatum>) => {
-      setCurrentStreamNode(node.data)
+    (node: PlanNodeDatum) => {
+      setCurrentStreamNode(node)
       onOpen()
     },
-    [onOpen]
-  )()
+    [onOpen, setCurrentStreamNode]
+  )
 
   const planNodeDependencyDagCallback = useCallback(() => {
     const deps = cloneDeep(planNodeDependencies)
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
-    const layoutActorResult = new Map<
-      string,
-      {
-        layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
-        width: number
-        height: number
-        extraInfo: string
-      }
-    >()
+    const layoutActorResult = new Map<string, ActorLayout>()
     const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
@@ -151,7 +156,7 @@ export default function FragmentGraph({
     fragmentLayout.forEach(({ id, x, y }: ActorBoxPosition) => {
       fragmentLayoutPosition.set(id, { x, y })
     })
-    const layoutResult = []
+    const layoutResult: PlanNodeDesc[] = []
     for (const [fragmentId, result] of layoutActorResult) {
       const { x, y } = fragmentLayoutPosition.get(fragmentId)!
       layoutResult.push({ id: fragmentId, x, y, ...result })
@@ -173,16 +178,6 @@ export default function FragmentGraph({
     }
   }, [planNodeDependencies, fragmentDependency])
 
-  type PlanNodeDesc = {
-    layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
-    width: number
-    height: number
-    x: number
-    y: number
-    id: string
-    extraInfo: string
-  }
-
   const {
     svgWidth,
     svgHeight,
@@ -203,17 +198,15 @@ export default function FragmentGraph({
         .x((d: Point) => d.x)
         .y((d: Point) => d.y)
 
-      const isSelected = (d: any) => d === selectedFragmentId
+      const isSelected = (id: string) => id === selectedFragmentId
 
-      const applyActor = (
-        gSel: d3.Selection<SVGGElement, PlanNodeDesc, SVGGElement, undefined>
-      ) => {
+      const applyFragment = (gSel: ActorSelection) => {
         gSel.attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-        // Actor text (fragment id)
-        let text = gSel.select<SVGTextElement>(".actor-text-frag-id")
+        // Fragment text line 1 (fragment id)
+        let text = gSel.select<SVGTextElement>(".text-frag-id")
         if (text.empty()) {
-          text = gSel.append("text").attr("class", "actor-text-frag-id")
+          text = gSel.append("text").attr("class", "text-frag-id")
         }
 
         text
@@ -226,10 +219,10 @@ export default function FragmentGraph({
           .attr("fill", "black")
           .attr("font-size", 12)
 
-        // Actor text (actors)
-        let text2 = gSel.select<SVGTextElement>(".actor-text-actor-id")
+        // Fragment text line 2 (actor ids)
+        let text2 = gSel.select<SVGTextElement>(".text-actor-id")
         if (text2.empty()) {
-          text2 = gSel.append("text").attr("class", "actor-text-actor-id")
+          text2 = gSel.append("text").attr("class", "text-actor-id")
         }
 
         text2
@@ -266,23 +259,9 @@ export default function FragmentGraph({
           linkSelection = gSel.append("g").attr("class", "links")
         }
 
-        const applyLink = (
-          sel: d3.Selection<
-            SVGPathElement,
-            d3.HierarchyPointLink<any>,
-            SVGGElement,
-            PlanNodeDesc
-          >
-        ) => sel.attr("d", treeLink)
+        const applyLink = (sel: LinkSelection) => sel.attr("d", treeLink)
 
-        const createLink = (
-          sel: d3.Selection<
-            d3.EnterElement,
-            d3.HierarchyPointLink<any>,
-            SVGGElement,
-            PlanNodeDesc
-          >
-        ) => {
+        const createLink = (sel: Enter<LinkSelection>) => {
           sel
             .append("path")
             .attr("fill", "none")
@@ -295,6 +274,7 @@ export default function FragmentGraph({
         const links = linkSelection
           .selectAll<SVGPathElement, null>("path")
           .data(({ layoutRoot }) => layoutRoot.links())
+        type LinkSelection = typeof links
 
         links.enter().call(createLink)
         links.call(applyLink)
@@ -306,10 +286,10 @@ export default function FragmentGraph({
           nodes = gSel.append("g").attr("class", "nodes")
         }
 
-        const applyActorNode = (g: any) => {
-          g.attr("transform", (d: any) => `translate(${d.x},${d.y})`)
+        const applyActorNode = (g: ActorNodeSelection) => {
+          g.attr("transform", (d) => `translate(${d.x},${d.y})`)
 
-          let circle = g.select("circle")
+          let circle = g.select<SVGCircleElement>("circle")
           if (circle.empty()) {
             circle = g.append("circle")
           }
@@ -318,16 +298,16 @@ export default function FragmentGraph({
             .attr("fill", theme.colors.blue[500])
             .attr("r", nodeRadius)
             .style("cursor", "pointer")
-            .on("click", (_d: any, i: any) => openPlanNodeDetail(i))
+            .on("click", (_d, i) => openPlanNodeDetail(i.data))
 
-          let text = g.select("text")
+          let text = g.select<SVGTextElement>("text")
           if (text.empty()) {
             text = g.append("text")
           }
 
           text
             .attr("fill", "black")
-            .text((d: any) => d.data.name)
+            .text((d) => d.data.name)
             .attr("font-family", "inherit")
             .attr("text-anchor", "middle")
             .attr("dy", nodeRadius * 1.8)
@@ -338,22 +318,21 @@ export default function FragmentGraph({
           return g
         }
 
-        const createActorNode = (sel: any) =>
+        const createActorNode = (sel: Enter<ActorNodeSelection>) =>
           sel.append("g").attr("class", "actor-node").call(applyActorNode)
 
         const actorNodeSelection = nodes
-          .selectAll(".actor-node")
+          .selectAll<SVGGElement, null>(".actor-node")
           .data(({ layoutRoot }) => layoutRoot.descendants())
+        type ActorNodeSelection = typeof actorNodeSelection
 
         actorNodeSelection.exit().remove()
         actorNodeSelection.enter().call(createActorNode)
         actorNodeSelection.call(applyActorNode)
       }
 
-      const createActor = (
-        sel: d3.Selection<d3.EnterElement, PlanNodeDesc, SVGGElement, undefined>
-      ) => {
-        const gSel = sel.append("g").attr("class", "actor").call(applyActor)
+      const createActor = (sel: Enter<ActorSelection>) => {
+        const gSel = sel.append("g").attr("class", "actor").call(applyFragment)
         return gSel
       }
 
@@ -361,15 +340,17 @@ export default function FragmentGraph({
         .select<SVGGElement>(".actors")
         .selectAll<SVGGElement, null>(".actor")
         .data(planNodeDependencyDag)
+      type ActorSelection = typeof actorSelection
 
       actorSelection.enter().call(createActor)
-      actorSelection.call(applyActor)
+      actorSelection.call(applyFragment)
       actorSelection.exit().remove()
 
       const edgeSelection = svgSelection
         .select<SVGGElement>(".actor-links")
         .selectAll<SVGPathElement, null>(".actor-link")
         .data(links)
+      type EdgeSelection = typeof edgeSelection
 
       const curveStyle = d3.curveMonotoneX
 
@@ -379,19 +360,19 @@ export default function FragmentGraph({
         .x(({ x }) => x)
         .y(({ y }) => y)
 
-      const applyEdge = (sel: any) =>
+      const applyEdge = (sel: EdgeSelection) =>
         sel
-          .attr("d", ({ points }: any) => line(points))
+          .attr("d", ({ points }) => line(points))
           .attr("fill", "none")
-          .attr("stroke-width", (d: any) =>
+          .attr("stroke-width", (d) =>
             isSelected(d.source) || isSelected(d.target) ? 2 : 1
           )
-          .attr("stroke", (d: any) =>
+          .attr("stroke", (d) =>
             isSelected(d.source) || isSelected(d.target)
               ? theme.colors.blue["500"]
               : theme.colors.gray["300"]
           )
-      const createEdge = (sel: any) =>
+      const createEdge = (sel: Enter<EdgeSelection>) =>
         sel.append("path").attr("class", "actor-link").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
