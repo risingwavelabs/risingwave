@@ -23,6 +23,7 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -605,13 +606,112 @@ impl GlobalBarrierManagerContext {
     async fn scale_actors(&self, info: &InflightActorInfo) -> MetaResult<bool> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(info).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(info),
+            MetadataManager::V2(_) => self.scale_actors_v2(info).await,
         }
     }
 
-    fn scale_actors_v2(&self, _info: &InflightActorInfo) -> MetaResult<bool> {
-        let _mgr = self.metadata_manager.as_v2_ref();
-        unimplemented!("implement auto-scale funcs in sql backend")
+    async fn scale_actors_v2(&self, info: &InflightActorInfo) -> MetaResult<bool> {
+        let mgr = self.metadata_manager.as_v2_ref();
+        let prev_used_parallel_units: HashSet<_> = mgr
+            .catalog_controller
+            .all_inuse_parallel_units()
+            .await?
+            .into_iter()
+            .collect();
+        let curr_worker_parallel_units: HashSet<_> = info
+            .node_map
+            .iter()
+            .flat_map(|(_, worker_node)| {
+                worker_node
+                    .parallel_units
+                    .iter()
+                    .map(|parallel_unit| parallel_unit.id as i32)
+            })
+            .collect();
+
+        // todo: maybe we can only check the reduced workers
+        if curr_worker_parallel_units == prev_used_parallel_units {
+            debug!("no changed workers, skipping.");
+            return Ok(false);
+        }
+
+        info!("parallel unit has changed, triggering a forced reschedule.");
+
+        debug!(
+            "previous worker parallel units {:?}, current worker parallel units {:?}",
+            prev_used_parallel_units, curr_worker_parallel_units
+        );
+
+        let streaming_parallelisms = mgr
+            .catalog_controller
+            .get_all_streaming_parallelisms()
+            .await?;
+
+        let table_parallelisms = streaming_parallelisms
+            .into_iter()
+            .map(|(id, parallelism)| {
+                (
+                    id as u32,
+                    match parallelism {
+                        StreamingParallelism::Auto => TableParallelism::Auto,
+                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+                        StreamingParallelism::Custom => TableParallelism::Custom,
+                    },
+                )
+            })
+            .collect();
+
+        let workers = mgr
+            .cluster_controller
+            .list_active_streaming_workers()
+            .await?;
+
+        let schedulable_worker_ids = workers
+            .iter()
+            .filter(|worker| {
+                !worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id)
+            .collect();
+
+        let plan = self
+            .scale_controller
+            .generate_table_resize_plan(TableResizePolicy {
+                worker_ids: schedulable_worker_ids,
+                table_parallelisms,
+            })
+            .await?;
+
+        let (reschedule_fragment, _) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+                None,
+            )
+            .await?;
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment, &Default::default())
+            .await
+        {
+            tracing::error!(
+                error = %e.as_report(),
+                "failed to apply reschedule for offline scaling in recovery",
+            );
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
+        Ok(true)
     }
 
     async fn scale_actors_v1(&self, info: &InflightActorInfo) -> MetaResult<bool> {
@@ -685,8 +785,6 @@ impl GlobalBarrierManagerContext {
 
         let plan = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
                 table_parallelisms: table_parallelisms.clone(),
@@ -705,8 +803,6 @@ impl GlobalBarrierManagerContext {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .prepare_reschedule_command(
                 plan,
                 RescheduleOptions {
@@ -721,8 +817,6 @@ impl GlobalBarrierManagerContext {
 
         if let Err(e) = self
             .scale_controller
-            .as_ref()
-            .unwrap()
             .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
             .await
         {

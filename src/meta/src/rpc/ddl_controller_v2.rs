@@ -43,7 +43,7 @@ impl DdlController {
 
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
-            .create_job_catalog(&mut streaming_job, &ctx)
+            .create_job_catalog(&mut streaming_job, &ctx, &fragment_graph.parallelism)
             .await?;
         let job_id = streaming_job.id();
 
@@ -299,7 +299,12 @@ impl DdlController {
         };
         let dummy_id = mgr
             .catalog_controller
-            .create_job_catalog_for_replace(&streaming_job, &ctx, table.get_version()?)
+            .create_job_catalog_for_replace(
+                &streaming_job,
+                &ctx,
+                table.get_version()?,
+                &fragment_graph.default_parallelism(),
+            )
             .await?;
 
         tracing::debug!(id = streaming_job.id(), "building replace streaming job");
