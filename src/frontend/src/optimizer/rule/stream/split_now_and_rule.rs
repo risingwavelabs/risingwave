@@ -16,9 +16,8 @@ use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
-use crate::Explain;
 
-/// Split `LogicalFilter` with many AND conjunctions with now into multiple `LogicalFilter`, prepared for SplitNowOrRule
+/// Split `LogicalFilter` with many AND conjunctions with now into multiple `LogicalFilter`, prepared for `SplitNowOrRule`
 ///
 /// Before:
 /// ```text
@@ -64,8 +63,8 @@ impl Rule for SplitNowAndRule {
                 .clone()
                 .group_by::<_, 2>(|e| if e.count_nows() > 0 { 0 } else { 1 });
 
-        let mut plan = LogicalFilter::create(input, others).into();
-        for e in with_now.into_iter() {
+        let mut plan = LogicalFilter::create(input, others);
+        for e in with_now {
             plan = LogicalFilter::new(
                 plan,
                 Condition {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::expr::{
@@ -90,14 +89,6 @@ impl Rule for FilterWithNowToJoinRule {
 impl FilterWithNowToJoinRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterWithNowToJoinRule {})
-    }
-}
-
-fn rank_cmp(cmp: Type) -> u8 {
-    match cmp {
-        Type::GreaterThan | Type::GreaterThanOrEqual => 0,
-        Type::LessThan | Type::LessThanOrEqual => 1,
-        _ => 2,
     }
 }
 
