@@ -4724,7 +4724,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.43.0",
+ "opendal",
  "ordered-float 3.9.1",
  "parquet 49.0.0",
  "prometheus",
@@ -5473,9 +5473,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.0+0.34.0"
+version = "0.3.1+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
+checksum = "79bf1f687bdd0146a72d6132478032d770ebe1dbe42e1f46799c4dcbd9b31cbc"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -6193,39 +6193,6 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c04ac25bc94e2b572a0f41bcc650cb39dd09255efce72b68eb5dc188b018c52a"
-dependencies = [
- "anyhow",
- "async-compat",
- "async-trait",
- "backon",
- "base64 0.21.4",
- "bytes",
- "chrono",
- "flagset",
- "futures",
- "http 0.2.9",
- "log",
- "md-5",
- "once_cell",
- "parking_lot 0.12.1",
- "percent-encoding",
- "pin-project",
- "prometheus",
- "quick-xml 0.30.0",
- "reqsign",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "opendal"
 version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c32736a48ef08a5d2212864e2295c8e54f4d6b352b7f49aa0c29a12fc410ff66"
@@ -6247,6 +6214,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "percent-encoding",
  "pin-project",
+ "prometheus",
  "quick-xml 0.30.0",
  "reqsign",
  "reqwest",
@@ -8485,7 +8453,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.44.0",
+ "opendal",
  "parking_lot 0.12.1",
  "paste",
  "pretty_assertions",
@@ -9053,7 +9021,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.44.0",
+ "opendal",
  "prometheus",
  "risingwave_common",
  "rustls",
