@@ -118,7 +118,7 @@ impl Binder {
             // For type inference, we need to bind the array type first.
             return self.bind_array_transform(f);
         }
-      
+
         // Used later in sql udf expression evaluation
         let args = f.args.clone();
 
