@@ -182,6 +182,7 @@ impl StreamNode for StreamDeltaJoin {
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
                 table_desc: Some(left_table_desc.to_protobuf()),
+                output_col_idx: left_table.output_col_idx.iter().map(|&v| v as u32).collect(),
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
@@ -193,6 +194,7 @@ impl StreamNode for StreamDeltaJoin {
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
                 table_desc: Some(right_table_desc.to_protobuf()),
+                output_col_idx: right_table.output_col_idx.iter().map(|&v| v as u32).collect(),
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })
