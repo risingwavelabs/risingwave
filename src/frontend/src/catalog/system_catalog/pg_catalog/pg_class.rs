@@ -25,6 +25,7 @@ pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         (DataType::Varchar, "relname"),
         (DataType::Int32, "relnamespace"),
         (DataType::Int32, "relowner"),
+        (DataType::Varchar, "relpersistence"),
         (DataType::Varchar, "relkind"), /* r = ordinary table, i = index, S = sequence, t =
                                          * TOAST table, v = view, m = materialized view, c =
                                          * composite type, f = foreign table, p = partitioned
@@ -42,7 +43,7 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     name: "pg_class",
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_CLASS_COLUMNS,
-    sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, \
+    sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, 'p' as relpersistence, \
         CASE \
             WHEN relation_type = 'table' THEN 'r' \
             WHEN relation_type = 'system table' THEN 'r' \
