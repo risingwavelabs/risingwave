@@ -67,6 +67,10 @@ pub struct SinkDesc {
 
     /// Id of the target table for sink into table.
     pub target_table: Option<TableId>,
+
+    /// Indicate whether the sink accepts the data chunk with extra partition column.
+    /// For more detil of partition column, see `PartitionComputeInfo`
+    pub with_extra_partition_col: bool,
 }
 
 impl SinkDesc {
@@ -123,6 +127,7 @@ impl SinkDesc {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
+            with_extra_partition_col: self.with_extra_partition_col,
         }
     }
 }

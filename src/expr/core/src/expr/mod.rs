@@ -40,6 +40,7 @@ pub(crate) mod expr_udf;
 pub(crate) mod wrapper;
 
 mod build;
+mod external;
 pub mod test_utils;
 mod value;
 

@@ -78,6 +78,7 @@ mod to_char;
 mod to_jsonb;
 mod vnode;
 pub use to_jsonb::*;
+mod construct_struct;
 mod to_timestamp;
 mod translate;
 mod trigonometric;

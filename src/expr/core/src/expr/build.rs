@@ -27,7 +27,7 @@ use super::wrapper::non_strict::NonStrict;
 use super::wrapper::EvalErrorReport;
 use super::NonStrictExpression;
 use crate::expr::{
-    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    external, BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
 };
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
@@ -109,6 +109,16 @@ where
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
                 E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
+
+                // Iceberg partition transform functions
+                // # TODO
+                // Move to general types
+                E::IcebergBucket => external::iceberg::Bucket::build_boxed(prost, build_child),
+                E::IcebergTruncate => external::iceberg::Truncate::build_boxed(prost, build_child),
+                E::IcebergYear => external::iceberg::Year::build_boxed(prost, build_child),
+                E::IcebergMonth => external::iceberg::Month::build_boxed(prost, build_child),
+                E::IcebergDay => external::iceberg::Day::build_boxed(prost, build_child),
+                E::IcebergHour => external::iceberg::Hour::build_boxed(prost, build_child),
 
                 // General types, lookup in the function signature map
                 _ => FuncCallBuilder::build_boxed(prost, build_child),
@@ -216,7 +226,9 @@ pub fn build_func_non_strict(
     Ok(wrapped)
 }
 
-pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {
+pub fn get_children_and_return_type_for_func_call(
+    prost: &ExprNode,
+) -> Result<(&[ExprNode], DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());
     if let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() {
         Ok((func_call.get_children(), ret_type))

@@ -17,6 +17,7 @@ use std::io::{Error, ErrorKind};
 
 use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
+use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
@@ -25,22 +26,26 @@ use risingwave_common::constants::log_store::{
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
+use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::{derive_columns, derive_pk};
-use super::generic::GenericPlanRef;
+use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -48,6 +53,156 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+
+/// ## Why we need `PartitionComputeInfo`?
+///
+/// For some sink, it will write the data into different file based on the partition value. E.g. iceberg sink(<https://iceberg.apache.org/spec/#partitioning>)
+/// For this kind of sink, the file num can be reduced if we can shuffle the data based on the partition value. More details can be found in <https://github.com/risingwavelabs/rfcs/pull/77>.
+/// So if the `PartitionComputeInfo` provided, we will create a `StreamProject` node to compute the partition value and shuffle the data based on the partition value before the sink.
+///
+/// ## What is `PartitionComputeInfo`?
+/// The `PartitionComputeInfo` contains the information about partition compute. The stream sink will use
+/// these information to create the corresponding expression in `StreamProject` node.
+///
+/// #TODO
+/// Maybe we should move this in sink?
+pub enum PartitionComputeInfo {
+    Iceberg(IcebergPartitionInfo),
+}
+
+impl PartitionComputeInfo {
+    pub fn convert_to_expression(self, columns: &[ColumnCatalog]) -> Result<ExprImpl> {
+        match self {
+            PartitionComputeInfo::Iceberg(info) => info.convert_to_expression(columns),
+        }
+    }
+}
+
+pub struct IcebergPartitionInfo {
+    pub partition_type: DataType,
+    // (partition_field_name, partition_field_transform)
+    pub partition_fields: Vec<(String, Transform)>,
+}
+
+impl IcebergPartitionInfo {
+    #[inline]
+    fn transform_to_expression(
+        transform: &Transform,
+        col_id: usize,
+        columns: &[ColumnCatalog],
+    ) -> Result<ExprImpl> {
+        match transform {
+            Transform::Identity => Ok(ExprImpl::InputRef(
+                InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
+            )),
+            Transform::Void => Ok(ExprImpl::literal_null(
+                columns[col_id].column_desc.data_type.clone(),
+            )),
+            Transform::Bucket(n) => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergBucket,
+                    vec![
+                        ExprImpl::InputRef(
+                            InputRef::new(col_id, columns[col_id].column_desc.data_type.clone())
+                                .into(),
+                        ),
+                        ExprImpl::literal_int(*n),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            )),
+            Transform::Truncate(w) => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergTruncate,
+                    vec![
+                        ExprImpl::InputRef(
+                            InputRef::new(col_id, columns[col_id].column_desc.data_type.clone())
+                                .into(),
+                        ),
+                        ExprImpl::literal_int(*w),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            )),
+            Transform::Year => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergYear,
+                    vec![ExprImpl::InputRef(
+                        InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
+                    )],
+                )
+                .unwrap()
+                .into(),
+            )),
+            Transform::Month => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergMonth,
+                    vec![ExprImpl::InputRef(
+                        InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
+                    )],
+                )
+                .unwrap()
+                .into(),
+            )),
+            Transform::Day => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergDay,
+                    vec![ExprImpl::InputRef(
+                        InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
+                    )],
+                )
+                .unwrap()
+                .into(),
+            )),
+            Transform::Hour => Ok(ExprImpl::FunctionCall(
+                FunctionCall::new(
+                    Type::IcebergHour,
+                    vec![ExprImpl::InputRef(
+                        InputRef::new(col_id, columns[col_id].column_desc.data_type.clone()).into(),
+                    )],
+                )
+                .unwrap()
+                .into(),
+            )),
+        }
+    }
+
+    pub fn convert_to_expression(self, columns: &[ColumnCatalog]) -> Result<ExprImpl> {
+        let child_exprs = self
+            .partition_fields
+            .into_iter()
+            .map(|(field_name, transform)| {
+                let col_id = find_column_idx_by_name(columns, &field_name)?;
+                Self::transform_to_expression(&transform, col_id, columns)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let return_type = DataType::Struct(StructType::new(
+            child_exprs
+                .iter()
+                .enumerate()
+                .map(|(id, expr)| (format!("f{id}"), expr.return_type()))
+                .collect_vec(),
+        ));
+        Ok(ExprImpl::FunctionCall(
+            FunctionCall::new_unchecked(Type::ConstructStruct, child_exprs, return_type).into(),
+        ))
+    }
+}
+#[inline]
+fn find_column_idx_by_name(columns: &[ColumnCatalog], col_name: &str) -> Result<usize> {
+    columns
+            .iter()
+            .position(|col| col.column_desc.name == col_name)
+            .ok_or_else(|| {
+                ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", col_name)
+                )))
+                .into()
+            })
+}
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -90,6 +245,7 @@ impl StreamSink {
         definition: String,
         properties: WithOptions,
         format_desc: Option<SinkFormatDesc>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (input, sink) = Self::derive_sink_desc(
@@ -104,6 +260,7 @@ impl StreamSink {
             definition,
             properties,
             format_desc,
+            partition_info,
         )?;
 
         let unsupported_sink =
@@ -136,9 +293,40 @@ impl StreamSink {
         Ok(Self::new(input, sink))
     }
 
+    fn derive_iceberg_sink_distribution(
+        input: PlanRef,
+        partition_info: Option<PartitionComputeInfo>,
+        columns: &[ColumnCatalog],
+    ) -> Result<(RequiredDist, PlanRef)> {
+        // For here, we need to add the plan node to compute the partition value, and add it as a extra column.
+        if let Some(partition_info) = partition_info {
+            let input_fields = input.schema().fields();
+
+            let mut exprs: Vec<_> = input_fields
+                .iter()
+                .enumerate()
+                .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
+                .collect();
+
+            // Add the partition compute expression to the end of the exprs
+            exprs.push(partition_info.convert_to_expression(columns)?);
+            let partition_col_idx = exprs.len() - 1;
+            let project = StreamProject::new(generic::Project::new(exprs.clone(), input));
+            Ok((
+                RequiredDist::shard_by_key(project.schema().len(), &[partition_col_idx]),
+                project.into(),
+            ))
+        } else {
+            Ok((
+                RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key()),
+                input,
+            ))
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn derive_sink_desc(
-        input: PlanRef,
+        mut input: PlanRef,
         user_distributed_by: RequiredDist,
         name: String,
         db_name: String,
@@ -149,17 +337,28 @@ impl StreamSink {
         definition: String,
         properties: WithOptions,
         format_desc: Option<SinkFormatDesc>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<(PlanRef, SinkDesc)> {
+        let connector_name = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
+            ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "connector not specified when create sink",
+            )))
+        })?;
+
         let sink_type =
             Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
-        let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+        let mut downstream_pk =
+            Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+
+        let with_extra_partition_col = partition_info.is_some();
 
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
-                match properties.get("connector") {
-                    Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
+                match connector_name.as_str() {
+                    s if s == "jdbc" && sink_type == SinkType::Upsert => {
                         if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
                             return Err(ErrorCode::SinkError(Box::new(Error::new(
                                 ErrorKind::InvalidInput,
@@ -173,6 +372,19 @@ impl StreamSink {
                         // for upsert jdbc sink we align distribution to downstream to avoid
                         // lock contentions
                         RequiredDist::hash_shard(downstream_pk.as_slice())
+                    }
+                    ICEBERG_SINK => {
+                        // If user doesn't specify the downstream primary key, we use the stream key as the pk.
+                        if sink_type.is_upsert() && downstream_pk.is_empty() {
+                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
+                        }
+                        let (required_dist, new_input) = Self::derive_iceberg_sink_distribution(
+                            input,
+                            partition_info,
+                            &columns,
+                        )?;
+                        input = new_input;
+                        required_dist
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
@@ -209,6 +421,7 @@ impl StreamSink {
             sink_type,
             format_desc,
             target_table,
+            with_extra_partition_col,
         };
         Ok((input, sink_desc))
     }
@@ -315,19 +528,7 @@ impl StreamSink {
                     if trimmed_key.is_empty() {
                         continue;
                     }
-                    match columns
-                        .iter()
-                        .position(|col| col.column_desc.name == trimmed_key)
-                    {
-                        Some(index) => downstream_pk_indices.push(index),
-                        None => {
-                            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                                ErrorKind::InvalidInput,
-                                format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", trimmed_key),
-                            )))
-                            .into());
-                        }
-                    }
+                    downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
                 }
                 Ok(downstream_pk_indices)
             }

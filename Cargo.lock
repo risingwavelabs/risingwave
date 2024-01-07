@@ -4689,7 +4689,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=3f7b53ba5b563524212c25810345d1314678e7fc#3f7b53ba5b563524212c25810345d1314678e7fc"
+source = "git+https://github.com/ZENOTME/icelake?branch=transform#5f4e462eb3ad6d92b585949938e8fd1a3b4f55f9"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0",
@@ -7355,7 +7355,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -7389,7 +7389,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -8428,7 +8428,9 @@ dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
  "arrow-array 49.0.0",
+ "arrow-row 49.0.0",
  "arrow-schema 49.0.0",
+ "arrow-select 49.0.0",
  "async-nats",
  "async-trait",
  "auto_enums",
@@ -8610,6 +8612,7 @@ dependencies = [
  "expect-test",
  "futures-async-stream",
  "futures-util",
+ "icelake",
  "itertools 0.12.0",
  "madsim-tokio",
  "num-traits",
@@ -8700,6 +8703,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
+ "icelake",
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
@@ -12461,7 +12465,7 @@ dependencies = [
  "hmac",
  "hyper",
  "indexmap 1.9.3",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "jni",
  "lazy_static",
  "lexical-core",
@@ -12544,6 +12548,9 @@ dependencies = [
  "url",
  "uuid",
  "whoami",
+ "zstd 0.13.0",
+ "zstd-safe 7.0.0",
+ "zstd-sys",
 ]
 
 [[package]]

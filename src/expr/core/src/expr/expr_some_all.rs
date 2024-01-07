@@ -22,7 +22,7 @@ use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::build::get_children_and_return_type;
+use super::build::get_children_and_return_type_for_func_call;
 use super::{BoxedExpression, Build, Expression};
 use crate::Result;
 
@@ -211,17 +211,19 @@ impl Build for SomeAllExpression {
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<Self> {
         let outer_expr_type = prost.get_function_type().unwrap();
-        let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;
+        let (outer_children, outer_return_type) =
+            get_children_and_return_type_for_func_call(prost)?;
         ensure!(matches!(outer_return_type, DataType::Boolean));
 
         let mut inner_expr_type = outer_children[0].get_function_type().unwrap();
         let (mut inner_children, mut inner_return_type) =
-            get_children_and_return_type(&outer_children[0])?;
+            get_children_and_return_type_for_func_call(&outer_children[0])?;
         let mut stack = vec![];
         while inner_children.len() != 2 {
             stack.push((inner_expr_type, inner_return_type));
             inner_expr_type = inner_children[0].get_function_type().unwrap();
-            (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
+            (inner_children, inner_return_type) =
+                get_children_and_return_type_for_func_call(&inner_children[0])?;
         }
 
         let left_expr = build_child(&inner_children[0])?;

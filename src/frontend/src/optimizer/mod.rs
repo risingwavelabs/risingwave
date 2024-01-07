@@ -58,8 +58,8 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext,
+    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -718,6 +718,7 @@ impl PlanRoot {
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
         target_table: Option<TableId>,
+        partition_info: Option<PartitionComputeInfo>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -734,6 +735,7 @@ impl PlanRoot {
             definition,
             properties,
             format_desc,
+            partition_info,
         )
     }
 
