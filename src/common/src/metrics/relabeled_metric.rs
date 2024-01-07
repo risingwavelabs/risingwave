@@ -123,3 +123,6 @@ pub type RelabeledGuardedHistogramVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedHistogramVec<N>>;
 pub type RelabeledGuardedIntCounterVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedIntCounterVec<N>>;
+
+pub type RelabeledGuardedSlowOpHistogramVec<const N: usize> =
+    RelabeledMetricVec<SlowOpHistogramVec<N>>;
