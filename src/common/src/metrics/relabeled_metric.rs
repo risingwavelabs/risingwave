@@ -15,6 +15,7 @@
 use prometheus::core::{MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
+use super::{LabeledSlowOpHistogramVecGuard, SlowOpHistogramVec};
 use crate::config::MetricLevel;
 use crate::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedMetric, LabelGuardedMetricVec,
@@ -98,6 +99,20 @@ impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricV
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
         self.metric.with_guarded_label_values(vals)
+    }
+}
+
+impl<const N: usize> RelabeledMetricVec<SlowOpHistogramVec<N>> {
+    pub fn monitor(&self, vals: &[&str; N]) -> LabeledSlowOpHistogramVecGuard<N> {
+        if self.metric_level > self.relabel_threshold {
+            // relabel first n labels to empty string
+            let mut relabeled_vals = *vals;
+            for label in relabeled_vals.iter_mut().take(self.relabel_num) {
+                *label = "";
+            }
+            return self.metric.monitor(&relabeled_vals);
+        }
+        self.metric.monitor(vals)
     }
 }
 

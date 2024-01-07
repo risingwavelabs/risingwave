@@ -26,7 +26,7 @@ use prometheus::core::{
 };
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
-use prometheus::{Gauge, Histogram, HistogramTimer, HistogramVec, IntCounter, IntGauge};
+use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -321,61 +321,6 @@ impl<T, const N: usize> Deref for LabelGuardedMetric<T, N> {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-#[must_use = "Timer should be kept in a variable otherwise it cannot observe duration"]
-#[derive(Debug)]
-pub struct ThresholdHistogramTimer {
-    histogram: Histogram,
-    inner: Option<HistogramTimer>,
-    threshold: f64,
-}
-
-impl Deref for ThresholdHistogramTimer {
-    type Target = HistogramTimer;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().unwrap()
-    }
-}
-
-impl Drop for ThresholdHistogramTimer {
-    fn drop(&mut self) {
-        let inner = self.inner.take().unwrap();
-        let v = inner.stop_and_discard();
-        if v >= self.threshold {
-            self.histogram.observe(v);
-        }
-    }
-}
-
-impl<const N: usize> LabelGuardedHistogram<N> {
-    pub fn observe_with_threshold(&self, v: f64, threshold: f64) {
-        if v >= threshold {
-            self.inner.observe(v);
-        }
-    }
-
-    pub fn start_timer_with_threshold(&self, threshold: f64) -> ThresholdHistogramTimer {
-        let histogram = self.inner.clone();
-        let inner = Some(self.inner.start_timer());
-        ThresholdHistogramTimer {
-            histogram,
-            inner,
-            threshold,
-        }
-    }
-
-    /// Observe execution time of a closure, in second.
-    pub fn observe_closure_duration_with_threshold<F, T>(&self, f: F, threshold: f64) -> T
-    where
-        F: FnOnce() -> T,
-    {
-        let timer = self.start_timer_with_threshold(threshold);
-        let res = f();
-        drop(timer);
-        res
     }
 }
 
