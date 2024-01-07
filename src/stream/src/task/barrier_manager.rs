@@ -49,7 +49,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
-    pub sync_result: SyncResult,
+    pub sync_result: Option<SyncResult>,
 
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,

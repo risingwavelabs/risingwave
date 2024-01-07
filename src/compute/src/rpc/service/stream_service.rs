@@ -188,12 +188,15 @@ impl StreamService for StreamServiceImpl {
                 |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
             )?;
 
+        let (synced_sstables, table_watermarks) = sync_result
+            .map(|sync_result| (sync_result.uncommitted_ssts, sync_result.table_watermarks))
+            .unwrap_or_default();
+
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
             create_mview_progress,
-            synced_sstables: sync_result
-                .uncommitted_ssts
+            synced_sstables: synced_sstables
                 .into_iter()
                 .map(
                     |LocalSstableInfo {
@@ -208,8 +211,7 @@ impl StreamService for StreamServiceImpl {
                 )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
-            table_watermarks: sync_result
-                .table_watermarks
+            table_watermarks: table_watermarks
                 .into_iter()
                 .map(|(key, value)| (key.table_id, value.to_protobuf()))
                 .collect(),

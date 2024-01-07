@@ -22,7 +22,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::util::pending_on_none;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -71,7 +71,55 @@ pub(super) struct BarrierState {
     kind: BarrierKind,
 }
 
-type AwaitEpochCompletedFuture = impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)>;
+type AwaitEpochCompletedFuture =
+    impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)> + 'static;
+
+fn sync_epoch(
+    state_store: &StateStoreImpl,
+    streaming_metrics: &StreamingMetrics,
+    prev_epoch: u64,
+    kind: BarrierKind,
+) -> impl Future<Output = StreamResult<Option<SyncResult>>> + 'static {
+    let barrier_sync_latency = streaming_metrics.barrier_sync_latency.clone();
+    let state_store = state_store.clone();
+
+    async move {
+        let sync_result = match kind {
+            BarrierKind::Unspecified => unreachable!(),
+            BarrierKind::Initial => {
+                if let Some(hummock) = state_store.as_hummock() {
+                    let mce = hummock.get_pinned_version().max_committed_epoch();
+                    assert_eq!(
+                        mce, prev_epoch,
+                        "first epoch should match with the current version",
+                    );
+                }
+                tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+                None
+            }
+            BarrierKind::Barrier => None,
+            BarrierKind::Checkpoint => {
+                let timer = barrier_sync_latency.start_timer();
+                let sync_result = dispatch_state_store!(state_store, store, {
+                    store
+                        .sync(prev_epoch)
+                        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+                        .await
+                        .inspect_err(|e| {
+                            tracing::error!(
+                                prev_epoch,
+                                error = %e.as_report(),
+                                "Failed to sync state store",
+                            );
+                        })
+                })?;
+                timer.observe_duration();
+                Some(sync_result)
+            }
+        };
+        Ok(sync_result)
+    }
+}
 
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
@@ -183,69 +231,27 @@ impl ManagedBarrierState {
                 }
             }
 
-            let barrier_sync_latency = self.streaming_metrics.barrier_sync_latency.clone();
-            let state_store = self.state_store.clone();
-
-            self.await_epoch_completed_futures.push_back(async move {
-                let sync_result = match kind {
-                    BarrierKind::Unspecified => unreachable!(),
-                    BarrierKind::Initial => {
-                        if let Some(hummock) = state_store.as_hummock() {
-                            let mce = hummock.get_pinned_version().max_committed_epoch();
-                            assert_eq!(
-                                mce, prev_epoch,
-                                "first epoch should match with the current version",
-                            );
-                        }
-                        tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-                        SyncResult {
-                            sync_size: 0,
-                            uncommitted_ssts: Vec::new(),
-                            table_watermarks: HashMap::new(),
-                        }
-                    }
-                    BarrierKind::Barrier => SyncResult {
-                        sync_size: 0,
-                        uncommitted_ssts: Vec::new(),
-                        table_watermarks: HashMap::new(),
+            self.await_epoch_completed_futures.push_back(
+                sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
+                    move |result| {
+                        (
+                            prev_epoch,
+                            result.map(move |sync_result| BarrierCompleteResult {
+                                sync_result,
+                                create_mview_progress,
+                            }),
+                        )
                     },
-                    BarrierKind::Checkpoint => {
-                        let timer = barrier_sync_latency.start_timer();
-                        match dispatch_state_store!(state_store, store, {
-                            store
-                                .sync(prev_epoch)
-                                .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
-                                .await
-                                .inspect_err(|e| {
-                                    tracing::error!(
-                                        prev_epoch,
-                                        error = %e.as_report(),
-                                        "Failed to sync state store",
-                                    );
-                                })
-                        }) {
-                            Ok(sync_result) => {
-                                timer.observe_duration();
-                                sync_result
-                            }
-                            Err(err) => {
-                                return (prev_epoch, Err(err.into()));
-                            }
-                        }
-                    }
-                };
-                (
-                    prev_epoch,
-                    Ok(BarrierCompleteResult {
-                        sync_result,
-                        create_mview_progress,
-                    }),
-                )
-            });
+                ),
+            );
         }
     }
 
     /// Returns an iterator on epochs that is awaiting on `actor_id`.
+    /// This is used on notifying actor failure. On actor failure, the
+    /// barrier manager can call this method to iterate on epochs that
+    /// waits on the failed actor and then notify failure on the result
+    /// sender of the epoch.
     pub(crate) fn epochs_await_on_actor(
         &self,
         actor_id: ActorId,
@@ -274,7 +280,7 @@ impl ManagedBarrierState {
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            epoch = barrier.epoch.prev, actor_id, state = ?self.epoch_barrier_state_map,
+            epoch = ?barrier.epoch, actor_id, state = ?self.epoch_barrier_state_map,
             "collect_barrier",
         );
 
@@ -383,20 +389,29 @@ impl ManagedBarrierState {
         self.may_have_collected_all(barrier.epoch.prev);
     }
 
-    pub(crate) async fn next_completed_epoch(&mut self) -> u64 {
-        let (prev_epoch, result) = pending_on_none(self.await_epoch_completed_futures.next()).await;
-        let state = self
-            .epoch_barrier_state_map
-            .get_mut(&prev_epoch)
-            .expect("should exist");
-        match &state.inner {
-            ManagedBarrierStateInner::AllCollected => {}
-            _ => unreachable!(),
-        };
-        state.inner = ManagedBarrierStateInner::Completed(result);
-        prev_epoch
+    /// Return a future that yields the next completed epoch. The future is cancellation safe.
+    pub(crate) fn next_completed_epoch(&mut self) -> impl Future<Output = u64> + '_ {
+        pending_on_none(self.await_epoch_completed_futures.next()).map(|(prev_epoch, result)| {
+            let state = self
+                .epoch_barrier_state_map
+                .get_mut(&prev_epoch)
+                .expect("should exist");
+            // sanity check on barrier state
+            match &state.inner {
+                ManagedBarrierStateInner::AllCollected => {}
+                _ => unreachable!(),
+            };
+            state.inner = ManagedBarrierStateInner::Completed(result);
+            prev_epoch
+        })
     }
 
+    /// Pop the completion result of an completed epoch.
+    /// Return:
+    /// - `Err(_)` `prev_epoch` is not an epoch to be collected.
+    /// - `Ok(None)` when `prev_epoch` exists but has not completed.
+    /// - `Ok(Some(_))` when `prev_epoch` has completed but not been reclaimed yet.
+    ///    The `BarrierCompleteResult` will be popped out.
     pub(crate) fn pop_completed_epoch(
         &mut self,
         prev_epoch: u64,
