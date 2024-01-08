@@ -434,7 +434,9 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     // We alter parallelism back to auto
 
-    session.run("alter table t set parallelism = adaptive").await?;
+    session
+        .run("alter table t set parallelism = adaptive")
+        .await?;
 
     session
         .run("select parallelism from rw_table_fragments")
