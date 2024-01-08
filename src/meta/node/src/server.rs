@@ -19,6 +19,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -489,6 +490,13 @@ pub async fn start_service_as_election_leader(
         )),
         MetadataManager::V2(_) => None,
     };
+
+    let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
+        max_length: opts.cached_traces_num,
+        max_memory_usage: opts.cached_traces_memory_limit_bytes,
+    });
+    let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
+
     #[cfg(not(madsim))]
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
@@ -499,6 +507,7 @@ pub async fn start_service_as_election_leader(
             compute_clients: ComputeClientPool::default(),
             ui_path: address_info.ui_path,
             diagnose_command,
+            trace_state,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)
@@ -526,7 +535,7 @@ pub async fn start_service_as_election_leader(
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+    let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
@@ -534,7 +543,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
-    ));
+    );
 
     {
         let source_manager = source_manager.clone();
@@ -602,7 +611,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager.clone(),
+        barrier_manager.context().clone(),
         sink_manager.clone(),
     )
     .await;
@@ -613,7 +622,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        barrier_manager.clone(),
+        barrier_manager.context().clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
@@ -814,6 +823,7 @@ pub async fn start_service_as_election_leader(
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(TraceServiceServer::new(trace_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

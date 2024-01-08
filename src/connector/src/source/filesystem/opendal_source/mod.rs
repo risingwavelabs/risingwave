@@ -38,10 +38,15 @@ pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
+
+    /// The base64 encoded credential key. If not set, ADC will be used.
     #[serde(rename = "gcs.credential")]
     pub credential: Option<String>,
+
+    /// If credential/ADC is not set. The service account can be used to provide the credential info.
     #[serde(rename = "gcs.service_account", default)]
     pub service_account: Option<String>,
+
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 
@@ -107,7 +112,7 @@ pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
 
-    // The following are only supported by s3_v2 (opendal) source.
+    /// The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 
@@ -131,11 +136,11 @@ impl SourceProperties for OpendalS3Properties {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct PosixFsProperties {
-    // The root directly of the files to search. The files will be searched recursively.
+    /// The root directly of the files to search. The files will be searched recursively.
     #[serde(rename = "posix_fs.root")]
     pub root: String,
 
-    // The regex pattern to match files under root directory.
+    /// The regex pattern to match files under root directory.
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 
