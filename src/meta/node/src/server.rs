@@ -526,7 +526,7 @@ pub async fn start_service_as_election_leader(
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+    let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
@@ -534,7 +534,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
-    ));
+    );
 
     {
         let source_manager = source_manager.clone();
@@ -602,7 +602,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager.clone(),
+        &barrier_manager,
         sink_manager.clone(),
     )
     .await;
@@ -613,7 +613,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        barrier_manager.clone(),
+        &barrier_manager,
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());

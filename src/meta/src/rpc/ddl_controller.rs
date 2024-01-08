@@ -61,7 +61,7 @@ use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::{CatalogControllerRef, ReleaseContext};
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
@@ -171,7 +171,7 @@ pub struct DdlController {
     pub(crate) metadata_manager: MetadataManager,
     pub(crate) stream_manager: GlobalStreamManagerRef,
     pub(crate) source_manager: SourceManagerRef,
-    barrier_manager: BarrierManagerRef,
+    barrier_manager_context: GlobalBarrierManagerContext,
 
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
@@ -242,7 +242,7 @@ impl DdlController {
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
-        barrier_manager: BarrierManagerRef,
+        barrier_manager: &GlobalBarrierManager,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -251,7 +251,7 @@ impl DdlController {
             metadata_manager,
             stream_manager,
             source_manager,
-            barrier_manager,
+            barrier_manager_context: barrier_manager.context().clone(),
             aws_client,
             creating_streaming_job_permits,
         }
@@ -268,7 +268,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         if !command.allow_in_recovery() {
-            self.barrier_manager.check_status_running().await?;
+            self.barrier_manager_context.check_status_running().await?;
         }
         let ctrl = self.clone();
         let fut = async move {
@@ -335,7 +335,7 @@ impl DdlController {
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
-        self.barrier_manager.get_ddl_progress().await
+        self.barrier_manager_context.get_ddl_progress().await
     }
 
     async fn create_database(&self, mut database: Database) -> MetaResult<NotificationVersion> {
