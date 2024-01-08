@@ -142,6 +142,12 @@ impl<S> MonitoredStateStore<S> {
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
         let table_id_label = table_id.to_string();
+
+        let guard = self
+            .storage_metrics
+            .slow_op_duration
+            .monitor(&["get", table_id_label.as_str()]);
+
         let timer = self
             .storage_metrics
             .get_duration
@@ -155,6 +161,8 @@ impl<S> MonitoredStateStore<S> {
             .inspect_err(|e| error!("Failed in get: {:?}", e))?;
 
         timer.observe_duration();
+
+        drop(guard);
 
         self.storage_metrics
             .get_key_size

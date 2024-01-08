@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
@@ -20,7 +21,8 @@ use prometheus::{
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledHistogramVec,
+    RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedSlowOpHistogramVec,
+    RelabeledHistogramVec, SlowOpHistogramOpts, SlowOpHistogramVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::register_guarded_histogram_vec_with_registry;
@@ -42,6 +44,8 @@ pub struct MonitoredStorageMetrics {
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
+
+    pub slow_op_duration: RelabeledGuardedSlowOpHistogramVec<2>,
 }
 
 pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
@@ -196,9 +200,28 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            time_buckets
+            time_buckets.clone(),
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = SlowOpHistogramOpts {
+            inner: histogram_opts!(
+                "state_store_slow_op_duration",
+                "State store slow op duration",
+                time_buckets
+            ),
+            threshold: Duration::from_micros(100),
+        };
+        // TODO(MrCroxx): make it configurable.
+        let slow_op_duration = SlowOpHistogramVec::new(opts, &["op", "table_id"]);
+        registry
+            .register(Box::new(slow_op_duration.clone()))
+            .unwrap();
+        let slow_op_duration = RelabeledGuardedSlowOpHistogramVec::with_metric_level(
+            MetricLevel::Critical,
+            slow_op_duration,
+            metric_level,
+        );
 
         Self {
             get_duration,
@@ -212,6 +235,7 @@ impl MonitoredStorageMetrics {
             iter_in_process_counts,
             sync_duration,
             sync_size,
+            slow_op_duration,
         }
     }
 
