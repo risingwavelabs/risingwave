@@ -24,7 +24,6 @@ import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
-
 import java.sql.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
