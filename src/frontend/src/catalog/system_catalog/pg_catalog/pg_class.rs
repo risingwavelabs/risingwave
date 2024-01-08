@@ -25,7 +25,8 @@ pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         (DataType::Varchar, "relname"),
         (DataType::Int32, "relnamespace"),
         (DataType::Int32, "relowner"),
-        (DataType::Varchar, "relpersistence"),
+        (DataType::Varchar, "relpersistence"), /* p = permanent table, u = unlogged table, t =
+                                                * temporary table */
         (DataType::Varchar, "relkind"), /* r = ordinary table, i = index, S = sequence, t =
                                          * TOAST table, v = view, m = materialized view, c =
                                          * composite type, f = foreign table, p = partitioned
