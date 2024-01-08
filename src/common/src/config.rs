@@ -1169,7 +1169,7 @@ pub mod default {
         }
 
         pub fn check_fast_compaction_result() -> bool {
-            true
+            false
         }
 
         pub fn max_preload_io_retry_times() -> usize {
