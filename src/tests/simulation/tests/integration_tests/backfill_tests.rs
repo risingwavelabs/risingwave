@@ -128,7 +128,12 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     // Create a table with parallelism = 1;
     session.run("SET STREAMING_PARALLELISM=1;").await?;
     session.run("CREATE TABLE t (v1 int primary key)").await?;
-    // TODO(kwannoel): test the parallelism of the table.
+    let parallelism_per_fragment = session
+        .run("select parallelism from rw_tables join rw_fragments on id=table_id and name='t';")
+        .await?;
+    for parallelism in parallelism_per_fragment.split('\n') {
+        assert_eq!(parallelism.parse::<usize>().unwrap(), 1);
+    }
 
     // Ingest snapshot data
     session
@@ -168,7 +173,12 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     upstream_task.await?;
 
     // Verify its parallelism
-    // TODO(kwannoel): test the parallelism of the table.
+    let parallelism_per_fragment = session.run(
+        "select parallelism from rw_materialized_views join rw_fragments on id=table_id and name='m1';"
+    ).await?;
+    for parallelism in parallelism_per_fragment.split('\n') {
+        assert_eq!(parallelism.parse::<usize>().unwrap(), 3);
+    }
 
     // Verify all data has been ingested, with no extra data in m1.
     let result = session
