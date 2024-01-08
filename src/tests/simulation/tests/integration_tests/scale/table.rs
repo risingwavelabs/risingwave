@@ -106,10 +106,15 @@ async fn test_scale_on_schema_change() -> Result<()> {
     cluster.run("alter table t add column v2 int").await?;
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("materialize"), identity_contains("StreamTableScan")])
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            identity_contains("StreamTableScan"),
+        ])
         .await?;
 
-    cluster.reschedule_resolve_no_shuffle(fragment.reschedule([1], [0, 4])).await?;
+    cluster
+        .reschedule_resolve_no_shuffle(fragment.reschedule([1], [0, 4]))
+        .await?;
 
     let fragment = cluster
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])
