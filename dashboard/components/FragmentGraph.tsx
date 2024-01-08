@@ -372,31 +372,9 @@ export default function FragmentGraph({
 
         const color = (d: Edge) => {
           if (backPressures) {
-            console.log(backPressures, d.target, d.source)
-
-            const value = backPressures.get(`${d.target}_${d.source}`)
-
+            let value = backPressures.get(`${d.target}_${d.source}`)
             if (value) {
-              console.log(value)
-              const colorRange = [
-                theme.colors.green["200"],
-                theme.colors.red["500"],
-              ]
-              const endColor = tinycolor(colorRange[0])
-                .mix(tinycolor(colorRange[1]), Math.ceil(value))
-                .toHexString()
-
-              // if (p90Value < 10) {
-              //   return theme.colors.green["200"]
-              // } else if (p90Value < 50) {
-              //   return theme.colors.yellow["200"]
-              // } else if (p90Value < 90) {
-              //   return theme.colors.orange["500"]
-              // } else {
-              //   return theme.colors.red["500"]
-              // }
-
-              return endColor
+              return backPressureColor(value)
             }
           }
 
@@ -463,4 +441,33 @@ export default function FragmentGraph({
       {/* <BackPressureTable selectedFragmentIds={includedFragmentIds} /> */}
     </Fragment>
   )
+}
+
+/**
+ * The color for the given back pressure value.
+ *
+ * @param value The back pressure rate, between 0 and 100.
+ */
+function backPressureColor(value: number) {
+  const colorRange = [
+    theme.colors.green["100"],
+    theme.colors.green["300"],
+    theme.colors.yellow["400"],
+    theme.colors.orange["500"],
+    theme.colors.red["700"],
+  ].map((c) => tinycolor(c))
+
+  value = Math.max(value, 0)
+  value = Math.min(value, 100)
+
+  const step = colorRange.length - 1
+  const pos = (value / 100) * step
+  const floor = Math.floor(pos)
+  const ceil = Math.ceil(pos)
+
+  const color = tinycolor(colorRange[floor])
+    .mix(tinycolor(colorRange[ceil]), (pos - floor) * 100)
+    .toHexString()
+
+  return color
 }
