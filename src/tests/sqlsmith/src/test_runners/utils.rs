@@ -26,13 +26,12 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    generate_update_statements, insert_sql_gen, mview_sql_gen,
-    parse_create_table_statements, parse_sql, session_sql_gen, sql_gen, Table,
+    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
+    parse_sql, session_sql_gen, sql_gen, Table,
 };
 
 pub(super) type PgResult<A> = std::result::Result<A, PgError>;
 pub(super) type Result<A> = anyhow::Result<A>;
-
 
 pub(super) async fn update_base_tables<R: Rng>(
     client: &Client,
@@ -72,6 +71,48 @@ pub(super) async fn set_variable(client: &Client, variable: &str, value: &str) -
     s
 }
 
+/// Sanity checks for sqlsmith
+pub(super) async fn test_sqlsmith<R: Rng>(
+    client: &Client,
+    rng: &mut R,
+    tables: Vec<Table>,
+    base_tables: Vec<Table>,
+    row_count: usize,
+) {
+    // Test inserted rows should be at least 50% population count,
+    // otherwise we don't have sufficient data in our system.
+    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
+    test_population_count(client, base_tables, row_count).await;
+    tracing::info!("passed population count test");
+
+    let threshold = 0.50; // permit at most 50% of queries to be skipped.
+    let sample_size = 20;
+
+    let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
+    tracing::info!(
+        "percentage of skipped batch queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
+    if skipped_percentage > threshold {
+        panic!("skipped batch queries exceeded threshold.");
+    }
+
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
+    tracing::info!(
+        "percentage of skipped stream queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
+    if skipped_percentage > threshold {
+        panic!("skipped stream queries exceeded threshold.");
+    }
+}
+
 pub(super) async fn test_session_variable<R: Rng>(client: &Client, rng: &mut R) -> String {
     let session_sql = session_sql_gen(rng);
     tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
@@ -80,7 +121,11 @@ pub(super) async fn test_session_variable<R: Rng>(client: &Client, rng: &mut R) 
 }
 
 /// Expects at least 50% of inserted rows included.
-pub(super) async fn test_population_count(client: &Client, base_tables: Vec<Table>, expected_count: usize) {
+pub(super) async fn test_population_count(
+    client: &Client,
+    base_tables: Vec<Table>,
+    expected_count: usize,
+) {
     let mut actual_count = 0;
     for t in base_tables {
         let q = format!("select * from {};", t.name);

@@ -17,10 +17,10 @@
 //! - differential testing: For testing the database with generated batch,
 //!   stream queries and comparing their results.
 
-mod fuzzing;
 mod diff;
+mod fuzzing;
 
 mod utils;
 
-pub use fuzzing::{generate, run, run_pre_generated};
 pub use diff::run_differential_testing;
+pub use fuzzing::{generate, run, run_pre_generated};

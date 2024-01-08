@@ -14,30 +14,20 @@
 
 //! Provides E2E Test runner functionality.
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use itertools::Itertools;
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
-use risingwave_sqlparser::ast::Statement;
 use similar::{ChangeTag, TextDiff};
-use tokio::time::{sleep, timeout, Duration};
-use tokio_postgres::error::Error as PgError;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
-use crate::utils::read_file_contents;
-use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
-use crate::{
-    differential_sql_gen, generate_update_statements, insert_sql_gen, mview_sql_gen,
-    parse_create_table_statements, parse_sql, session_sql_gen, sql_gen, Table,
-};
-
 use crate::test_runners::utils::{
-    PgResult, Result,
     create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
     generate_rng, populate_tables, run_query, run_query_inner, set_variable, update_base_tables,
+    Result,
 };
+use crate::{differential_sql_gen, Table};
 
 /// Differential testing for batch and stream
 pub async fn run_differential_testing(
