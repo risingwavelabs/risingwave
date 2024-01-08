@@ -157,6 +157,10 @@ pub struct RwConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+serde_with::with_prefix!(meta_prefix "meta_");
+serde_with::with_prefix!(streaming_prefix "stream_");
+serde_with::with_prefix!(batch_prefix "batch_");
+
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
@@ -305,6 +309,9 @@ pub struct MetaConfig {
     /// Keeps the latest N events per channel.
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
+
+    #[serde(default, with = "meta_prefix")]
+    pub developer: MetaDeveloperConfig,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -369,6 +376,22 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
             })),
         }
     }
+}
+
+/// The subsections `[meta.developer]`.
+///
+/// It is put at [`MetaConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct MetaDeveloperConfig {
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_num")]
+    pub cached_traces_num: u32,
+
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    #[serde(default = "default::developer::meta_cached_traces_memory_limit_bytes")]
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -747,9 +770,6 @@ pub struct HeapProfilingConfig {
     pub dir: String,
 }
 
-serde_with::with_prefix!(streaming_prefix "stream_");
-serde_with::with_prefix!(batch_prefix "batch_");
-
 /// The subsections `[streaming.developer]`.
 ///
 /// It is put at [`StreamingConfig::developer`].
@@ -1118,7 +1138,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            1.5000
+            2.5000
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1304,6 +1324,13 @@ pub mod default {
     }
 
     pub mod developer {
+        pub fn meta_cached_traces_num() -> u32 {
+            256
+        }
+
+        pub fn meta_cached_traces_memory_limit_bytes() -> usize {
+            1 << 27 // 128 MiB
+        }
 
         pub fn batch_output_channel_size() -> usize {
             64

@@ -174,9 +174,9 @@ pub trait LogReader: Send + Sized + 'static {
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 
-pub trait LogStoreFactory: 'static {
-    type Reader: LogReader + Send + 'static;
-    type Writer: LogWriter + Send + 'static;
+pub trait LogStoreFactory: Send + 'static {
+    type Reader: LogReader;
+    type Writer: LogWriter;
 
     fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
 }

@@ -2955,6 +2955,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "datasize"
+version = "0.2.15"
+source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
+dependencies = [
+ "datasize_derive",
+]
+
+[[package]]
+name = "datasize_derive"
+version = "0.2.15"
+source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4714,7 +4732,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opendal 0.43.0",
  "ordered-float 3.9.1",
  "parquet 49.0.0",
  "prometheus",
@@ -6216,8 +6234,9 @@ dependencies = [
 
 [[package]]
 name = "opendal"
-version = "0.43.0"
-source = "git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69#9a222e4d72b328a24d5775b1565292f4636bbe69"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c32736a48ef08a5d2212864e2295c8e54f4d6b352b7f49aa0c29a12fc410ff66"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -6228,6 +6247,7 @@ dependencies = [
  "chrono",
  "flagset",
  "futures",
+ "getrandom",
  "http 0.2.9",
  "log",
  "md-5",
@@ -6456,6 +6476,26 @@ checksum = "0ae859aa07428ca9a929b936690f8b12dc5f11dd8c6992a18ca93919f28bc177"
 dependencies = [
  "libc",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "otlp-embedded"
+version = "0.0.1"
+source = "git+https://github.com/risingwavelabs/otlp-embedded?rev=58c1f003484449d7c6dd693b348bf19dd44889cb#58c1f003484449d7c6dd693b348bf19dd44889cb"
+dependencies = [
+ "axum",
+ "datasize",
+ "hex",
+ "itertools 0.12.0",
+ "madsim-tonic",
+ "madsim-tonic-build",
+ "prost 0.12.1",
+ "rust-embed",
+ "schnellru",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7826,15 +7866,16 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f52b6eef6975eb2decff7d7e95744c8a6b6bb8558bc9b4230c0a3431a74f59c"
+checksum = "dce87f66ba6c6acef277a729f989a0eca946cb9ce6a15bcc036bda0f72d4b9fd"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.4",
  "chrono",
  "form_urlencoded",
+ "getrandom",
  "hex",
  "hmac",
  "home",
@@ -8471,7 +8512,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.43.0 (git+https://github.com/apache/incubator-opendal?rev=9a222e4d72b328a24d5775b1565292f4636bbe69)",
+ "opendal 0.44.0",
  "parking_lot 0.12.1",
  "paste",
  "pretty_assertions",
@@ -8905,6 +8946,7 @@ dependencies = [
  "mime_guess",
  "num-integer",
  "num-traits",
+ "otlp-embedded",
  "parking_lot 0.12.1",
  "prometheus",
  "prometheus-http-query",
@@ -8973,6 +9015,7 @@ dependencies = [
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
+ "otlp-embedded",
  "prometheus-http-query",
  "redact",
  "regex",
@@ -9039,7 +9082,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opendal 0.44.0",
  "prometheus",
  "risingwave_common",
  "rustls",
@@ -9556,6 +9599,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-embed"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "810294a8a4a0853d4118e3b94bb079905f2107c7fe979d8f0faae98765eb6378"
+dependencies = [
+ "rust-embed-impl",
+ "rust-embed-utils",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-impl"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfc144a1273124a67b8c1d7cd19f5695d1878b31569c0512f6086f0f4676604e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rust-embed-utils",
+ "syn 2.0.37",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-utils"
+version = "8.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "816ccd4875431253d6bb54b804bcff4369cbde9bae33defde25fdf6c2ef91d40"
+dependencies = [
+ "mime_guess",
+ "sha2",
+ "walkdir",
+]
+
+[[package]]
 name = "rust-ini"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9746,6 +9824,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c3733bf4cf7ea0880754e19cb5a462007c4a8c1914bff372ccc95b464f1df88"
 dependencies = [
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "schnellru"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "772575a524feeb803e5b0fcbc6dd9f367e579488197c94c6e4023aad2305774d"
+dependencies = [
+ "ahash 0.8.6",
+ "cfg-if",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -12424,6 +12513,7 @@ dependencies = [
  "aws-sigv4",
  "aws-smithy-runtime",
  "aws-smithy-types",
+ "axum",
  "base64 0.21.4",
  "bit-vec",
  "bitflags 2.4.0",
@@ -12452,9 +12542,9 @@ dependencies = [
  "futures-task",
  "futures-util",
  "generic-array",
- "getrandom",
  "governor",
  "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
  "hashbrown 0.14.0",
  "hmac",
  "hyper",
@@ -12542,6 +12632,7 @@ dependencies = [
  "url",
  "uuid",
  "whoami",
+ "zeroize",
 ]
 
 [[package]]

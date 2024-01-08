@@ -15,20 +15,21 @@
  *
  */
 
-import { Box, Button, Flex, Text, useToast, VStack } from "@chakra-ui/react"
+import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
 import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { StreamGraph } from "../components/StreamGraph"
+import RelationDependencyGraph from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
-import { ActorPoint } from "../lib/layout"
-import { getRelations, Relation, relationIsStreamingJob } from "./api/streaming"
+import useErrorToast from "../hook/useErrorToast"
+import { FragmentPoint } from "../lib/layout"
+import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): FragmentPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -47,7 +48,7 @@ function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
 }
 
 export default function StreamingGraph() {
-  const toast = useToast()
+  const toast = useErrorToast()
   const [streamingJobList, setStreamingJobList] = useState<Relation[]>()
 
   useEffect(() => {
@@ -55,14 +56,7 @@ export default function StreamingGraph() {
       try {
         setStreamingJobList(await getRelations())
       } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
+        toast(e)
       }
     }
     doFetch()
@@ -83,7 +77,7 @@ export default function StreamingGraph() {
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Streaming Graph</Title>
+      <Title>Dependency Graph</Title>
       <Flex flexDirection="row" height="full">
         <Flex
           width={SIDEBAR_WIDTH}
@@ -94,14 +88,14 @@ export default function StreamingGraph() {
           flexDirection="column"
         >
           <Text fontWeight="semibold" mb={3}>
-            All Nodes
+            Relations
           </Text>
           <Box flex={1} overflowY="scroll">
-            <VStack width="full" spacing={1}>
+            <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
               {streamingJobList?.map((r) => {
                 const match = router.query.id === r.id.toString()
                 return (
-                  <Link href={`?id=${r.id}`} key={r.id}>
+                  <Link href={`?id=${r.id}`} key={r.id} shallow>
                     <Button
                       colorScheme={match ? "blue" : "gray"}
                       color={match ? "blue.600" : "gray.500"}
@@ -128,7 +122,7 @@ export default function StreamingGraph() {
         >
           <Text fontWeight="semibold">Graph</Text>
           {mvDependency && (
-            <StreamGraph
+            <RelationDependencyGraph
               nodes={mvDependency}
               selectedId={router.query.id as string}
             />

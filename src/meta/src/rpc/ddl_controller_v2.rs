@@ -161,7 +161,6 @@ impl DdlController {
                 self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-                // TODO: should retry until success.
                 let version = mgr
                     .catalog_controller
                     .finish_streaming_job(stream_job_id as _)
@@ -179,7 +178,6 @@ impl DdlController {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
                     if result.is_ok() {
-                        // TODO: should retry until success.
                         let _ = mgr
                             .catalog_controller
                             .finish_streaming_job(stream_job_id as _)

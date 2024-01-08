@@ -265,7 +265,6 @@ impl Compactor {
             builder_factory,
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
-            self.task_config.is_target_l0_or_lbase,
             self.task_config.table_vnode_partition.clone(),
         );
         let compaction_statistics = compact_and_build_sst(
@@ -303,17 +302,19 @@ pub fn start_compactor(
     let stream_retry_interval = Duration::from_secs(30);
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
-    let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
-    let running_task_count = compactor_context.running_task_count.clone();
     let pull_task_ack = Arc::new(AtomicBool::new(true));
+    const MAX_PULL_TASK_COUNT: u32 = 4;
+    let max_pull_task_count = std::cmp::min(
+        compactor_context
+            .max_task_parallelism
+            .load(Ordering::SeqCst),
+        MAX_PULL_TASK_COUNT,
+    );
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
         0.0
     );
-    let max_pull_task_count = (cpu_core_num as f32
-        * compactor_context.storage_opts.compactor_max_task_multiplier)
-        .ceil() as u32;
 
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
@@ -367,7 +368,6 @@ pub fn start_compactor(
                     event_loop_iteration_now = Instant::now();
                 }
 
-                let running_task_count = running_task_count.clone();
                 let pull_task_ack = pull_task_ack.clone();
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
@@ -393,11 +393,8 @@ pub fn start_compactor(
 
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack.load(Ordering::SeqCst) {
-                            // reset pending_pull_task_count when all pending task had been refill
-                            pending_pull_task_count = {
-                                assert_ge!(max_pull_task_count, running_task_count.load(Ordering::SeqCst));
-                                max_pull_task_count - running_task_count.load(Ordering::SeqCst)
-                            };
+                            // TODO: Compute parallelism on meta side
+                            pending_pull_task_count = compactor_context.get_free_quota().max(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
                                 if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
@@ -422,7 +419,7 @@ pub fn start_compactor(
                         }
 
                         tracing::info!(
-                            running_task_count = %running_task_count.load(Ordering::Relaxed),
+                            running_parallelism_count = %compactor_context.running_task_parallelism.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
                             pending_pull_task_count = %pending_pull_task_count
                         );
@@ -461,10 +458,8 @@ pub fn start_compactor(
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
                         let filter_key_extractor_manager = filter_key_extractor_manager.clone();
                         executor.spawn(async move {
-                                let running_task_count = running_task_count.clone();
                                 match event {
                                     ResponseEvent::CompactTask(compact_task)  => {
-                                        running_task_count.fetch_add(1, Ordering::SeqCst);
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
@@ -483,13 +478,11 @@ pub fn start_compactor(
                                             Err(err) => {
                                                 tracing::warn!("Failed to track pending SST object id. {:#?}", err);
                                                 let mut compact_task = compact_task;
-                                                // return TaskStatus::TrackSstObjectIdFailed;
                                                 compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
                                                 (compact_task, HashMap::default())
                                             }
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
-                                        running_task_count.fetch_sub(1, Ordering::SeqCst);
 
                                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                             event: Some(RequestEvent::ReportTask(
@@ -658,7 +651,6 @@ pub fn start_shared_compactor(
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
-                                    context.running_task_count.fetch_add(1, Ordering::SeqCst);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -672,7 +664,6 @@ pub fn start_shared_compactor(
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    context.running_task_count.fetch_sub(1, Ordering::SeqCst);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(compact_task),

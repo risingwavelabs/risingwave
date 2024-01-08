@@ -48,25 +48,30 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         println!("Table #{}", table_fragment.table_id);
 
         for fragment in table_fragment.fragments.values() {
-            if fragment.fragment_type_mask & FragmentTypeFlag::Source as u32 == 0 {
+            let fragment_type_mask = fragment.fragment_type_mask;
+            if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
+                || fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+            {
+                // skip dummy source for dml fragment
                 continue;
             }
 
             println!("\tFragment #{}", fragment.fragment_id);
             for actor in &fragment.actors {
-                let ConnectorSplits { splits } = actor_splits.remove(&actor.actor_id).unwrap();
-                let splits = splits
-                    .iter()
-                    .map(|split| SplitImpl::try_from(split).unwrap())
-                    .map(|split| split.id())
-                    .collect_vec();
+                if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
+                    let splits = splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .map(|split| split.id())
+                        .collect_vec();
 
-                println!(
-                    "\t\tActor #{:<3} ({}): [{}]",
-                    actor.actor_id,
-                    splits.len(),
-                    splits.join(",")
-                );
+                    println!(
+                        "\t\tActor #{:<3} ({}): [{}]",
+                        actor.actor_id,
+                        splits.len(),
+                        splits.join(",")
+                    );
+                }
             }
         }
     }

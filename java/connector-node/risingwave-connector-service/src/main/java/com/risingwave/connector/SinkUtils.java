@@ -39,10 +39,6 @@ public class SinkUtils {
                 return new FileSinkFactory();
             case "jdbc":
                 return new JDBCSinkFactory();
-            case "iceberg_java":
-                return new IcebergSinkFactory();
-            case "deltalake":
-                return new DeltaLakeSinkFactory();
             case "elasticsearch":
                 return new EsSinkFactory();
             case "cassandra":

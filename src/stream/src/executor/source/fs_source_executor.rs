@@ -104,6 +104,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.source_ctrl_opts.clone(),
             None,
             self.actor_ctx.error_suppressor.clone(),
+            source_desc.source.config.clone(),
         );
         source_desc
             .source
@@ -329,7 +330,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // init in-memory split states with persisted state if any
         self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)

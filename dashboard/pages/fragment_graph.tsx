@@ -25,7 +25,6 @@ import {
   Input,
   Select,
   Text,
-  useToast,
   VStack,
 } from "@chakra-ui/react"
 import * as d3 from "d3"
@@ -34,10 +33,11 @@ import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import DependencyGraph from "../components/DependencyGraph"
+import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
-import { ActorBox } from "../lib/layout"
+import useErrorToast from "../hook/useErrorToast"
+import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
@@ -53,7 +53,7 @@ export interface PlanNodeDatum {
   children?: PlanNodeDatum[]
   operatorId: string | number
   node: StreamNode | DispatcherNode
-  actor_ids?: string[]
+  actorIds?: string[]
 }
 
 function buildPlanNodeDependency(
@@ -94,15 +94,17 @@ function buildPlanNodeDependency(
 
   return d3.hierarchy({
     name: dispatcherName,
-    actor_ids: fragment.actors.map((a) => a.actorId.toString()),
+    actorIds: fragment.actors.map((a) => a.actorId.toString()),
     children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
     node: dispatcherNode,
   })
 }
 
-function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
-  const nodes: ActorBox[] = []
+function buildFragmentDependencyAsEdges(
+  fragments: TableFragments
+): FragmentBox[] {
+  const nodes: FragmentBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
   for (const fragmentId in fragments.fragments) {
     const fragment = fragments.fragments[fragmentId]
@@ -128,8 +130,8 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
       width: 0,
       height: 0,
       order: fragment.fragmentId,
-      fragment: fragment,
-    } as ActorBox)
+      fragment,
+    } as FragmentBox)
   }
   return nodes
 }
@@ -161,16 +163,21 @@ export default function Streaming() {
     return undefined
   }, [fragmentList, router.query.id])
 
+  const setRelationId = useCallback(
+    (id: number) => router.replace(`?id=${id}`, undefined, { shallow: true }),
+    [router]
+  )
+
   useEffect(() => {
     if (relationList) {
       if (!router.query.id) {
         if (relationList.length > 0) {
-          router.replace(`?id=${relationList[0].id}`)
+          setRelationId(relationList[0].id)
         }
       }
     }
     return () => {}
-  }, [router, router.query.id, relationList])
+  }, [router, router.query.id, relationList, setRelationId])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -210,9 +217,7 @@ export default function Streaming() {
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
 
-  const setRelationId = (id: number) => router.replace(`?id=${id}`)
-
-  const toast = useToast()
+  const toast = useErrorToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
@@ -228,13 +233,7 @@ export default function Streaming() {
       }
     }
 
-    toast({
-      title: "Fragment not found",
-      description: "",
-      status: "error",
-      duration: 5000,
-      isClosable: true,
-    })
+    toast(new Error(`Fragment ${searchFragIdInt} not found`))
   }
 
   const handleSearchActor = () => {
@@ -254,18 +253,12 @@ export default function Streaming() {
       }
     }
 
-    toast({
-      title: "Actor not found",
-      description: "",
-      status: "error",
-      duration: 5000,
-      isClosable: true,
-    })
+    toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
-      <Title>Streaming Plan</Title>
+      <Title>Fragment Graph</Title>
       <Flex flexDirection="row" height="full" width="full">
         <VStack
           mr={3}
@@ -332,15 +325,10 @@ export default function Streaming() {
             </VStack>
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
-            <Text fontWeight="semibold">Plan</Text>
-            {relationInfo && (
-              <Text>
-                {relationInfo.id} - {relationInfo.name}
-              </Text>
-            )}
+            <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
-                <DependencyGraph
+                <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
                   mvDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>

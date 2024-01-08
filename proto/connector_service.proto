@@ -27,7 +27,6 @@ message SinkParam {
   string db_name = 5;
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
-  optional uint32 target_table = 8;
 }
 
 enum SinkPayloadFormat {
@@ -40,6 +39,7 @@ message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
+    TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
@@ -161,6 +161,7 @@ message CdcMessage {
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
+  bool is_transaction_meta = 6;
 }
 
 enum SourceType {

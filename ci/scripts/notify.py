@@ -13,13 +13,15 @@ MAIN_CRON_TEST_MAP = {
     "test-notify-2": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
     "backwards-compat-tests": ["noelkwan"],
+    "sqlsmith-differential-tests": ["noelkwan"],
     "fuzz-test": ["noelkwan"],
     "e2e-test-release": ["zhi"],
     "e2e-iceberg-sink-tests": ["renjie"],
     "e2e-java-binding-tests": ["yiming"],
     "e2e-clickhouse-sink-tests": ["bohan"],
     "e2e-pulsar-sink-tests": ["renjie"],
-    "s3-source-test-for-opendal-fs-engine": ["congyi"],
+    "s3-source-test-for-opendal-fs-engine": ["congyi", "kexiang"],
+    "s3-source-tests": ["congyi", "kexiang"],
     "pulsar-source-tests": ["renjie"],
     "connector-node-integration-test": ["siyuan"],
 }
@@ -97,6 +99,7 @@ def get_mock_test_status(test):
         "e2e-clickhouse-sink-tests": "hard_failed",
         "e2e-pulsar-sink-tests": "",
         "s3-source-test-for-opendal-fs-engine": "",
+        "s3-source-tests": "",
         "pulsar-source-tests": "",
         "connector-node-integration-test": ""
     }

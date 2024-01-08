@@ -199,35 +199,6 @@ impl ObjectStore for OpendalObjectStore {
     }
 }
 
-impl OpendalObjectStore {
-    // This function is only used in unit test, as list api will spawn the thread to stat Metakey::ContentLength,
-    // which will panic in deterministic test.
-    #[cfg(test)]
-    async fn list_for_test(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let object_lister = self.op.lister_with(prefix).recursive(true).await?;
-
-        let stream = stream::unfold(object_lister, |mut object_lister| async move {
-            match object_lister.next().await {
-                Some(Ok(object)) => {
-                    let key = object.path().to_string();
-                    let last_modified = 0_f64;
-                    let total_size = 0_usize;
-                    let metadata = ObjectMetadata {
-                        key,
-                        last_modified,
-                        total_size,
-                    };
-                    Some((Ok(metadata), object_lister))
-                }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => None,
-            }
-        });
-
-        Ok(stream.boxed())
-    }
-}
-
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
@@ -273,7 +244,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list_for_test(prefix)
+            .list(prefix)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()

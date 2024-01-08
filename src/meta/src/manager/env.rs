@@ -201,6 +201,13 @@ pub struct MetaOpts {
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
+
+    /// The number of traces to be cached in-memory by the tracing collector
+    /// embedded in the meta node.
+    pub cached_traces_num: u32,
+    /// The maximum memory usage in bytes for the tracing collector embedded
+    /// in the meta node.
+    pub cached_traces_memory_limit_bytes: usize,
 }
 
 impl MetaOpts {
@@ -248,6 +255,8 @@ impl MetaOpts {
             event_log_enabled: false,
             event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
+            cached_traces_num: 1,
+            cached_traces_memory_limit_bytes: usize::MAX,
         }
     }
 }
