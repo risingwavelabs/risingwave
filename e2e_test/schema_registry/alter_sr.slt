@@ -14,14 +14,14 @@ FORMAT PLAIN ENCODE PROTOBUF(
 );
 
 # Changing type is not allowed
-statement error this altering statement will drop columns, which is not supported yet: (city: character varying)
+statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(city: character varying\)
 ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.UserWithNewType'
 );
 
 # Changing format/encode is not allowed
-statement error the original definition is FORMAT PLAIN ENCODE PROTOBUF, and altering them is not supported yet
+statement error Feature is not yet implemented: the original definition is FORMAT PLAIN ENCODE PROTOBUF, and altering them is not supported yet
 ALTER SOURCE src_user FORMAT json ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
@@ -34,7 +34,7 @@ ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
 );
 
 # Dropping columns is not allowed
-statement error this altering statement will drop columns, which is not supported yet: (age: integer)
+statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(age: integer\)
 ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
