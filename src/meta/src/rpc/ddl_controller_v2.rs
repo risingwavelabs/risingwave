@@ -38,12 +38,12 @@ impl DdlController {
         let MetadataManager::V2(mgr) = &self.metadata_manager else {
             unreachable!("MetadataManager should be V2")
         };
-        let job_id = streaming_job.id();
 
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         mgr.catalog_controller
             .create_job_catalog(&mut streaming_job, &ctx)
             .await?;
+        let job_id = streaming_job.id();
 
         match &mut streaming_job {
             StreamingJob::Table(Some(src), table, job_type) => {
