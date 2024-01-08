@@ -25,6 +25,10 @@ statement ok
 create function jsonb_access(jsonb, int) returns jsonb
 language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
 
+statement ok
+create function series(int) returns table (x int)
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+
 query I
 select int_42();
 ----
@@ -58,6 +62,15 @@ select jsonb_access(a::jsonb, 1) from
 NULL
 false
 
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
 statement ok
 drop function int_42;
 
@@ -75,3 +88,6 @@ drop function decimal_add;
 
 statement ok
 drop function jsonb_access;
+
+statement ok
+drop function series;

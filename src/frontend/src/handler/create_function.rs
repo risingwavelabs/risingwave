@@ -171,7 +171,12 @@ pub async fn handle_create_function(
             }
         }
         "wasm" => {
-            identifier = wasm_identifier(&function_name, &arg_types, &return_type);
+            identifier = wasm_identifier(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
 
             link = match using {
                 CreateFunctionUsing::Link(link) => {
@@ -260,11 +265,12 @@ fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> R
 }
 
 /// Generate the function identifier in wasm binary.
-fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType) -> String {
+fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType, table_function: bool) -> String {
     format!(
-        "{}({})->{}",
+        "{}({}){}{}",
         name,
         args.iter().map(datatype_name).join(","),
+        if table_function { "->>" } else { "->" },
         datatype_name(ret)
     )
 }
