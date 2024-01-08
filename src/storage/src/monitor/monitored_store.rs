@@ -145,8 +145,8 @@ impl<S> MonitoredStateStore<S> {
 
         let guard = self
             .storage_metrics
-            .slow_op_duration
-            .monitor(&["get", table_id_label.as_str()]);
+            .slow_get_duration
+            .monitor(&[table_id_label.as_str()]);
 
         let timer = self
             .storage_metrics

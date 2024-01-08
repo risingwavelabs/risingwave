@@ -27,6 +27,11 @@ use risingwave_common::metrics::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::register_guarded_histogram_vec_with_registry;
 
+#[derive(Debug, Default)]
+pub struct SlowOpMonitorConfig {
+    pub slow_get_threshold: Duration,
+}
+
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
@@ -45,19 +50,28 @@ pub struct MonitoredStorageMetrics {
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 
-    pub slow_op_duration: RelabeledGuardedSlowOpHistogramVec<2>,
+    pub slow_get_duration: RelabeledGuardedSlowOpHistogramVec<1>,
 }
 
 pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
 
-pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetrics {
+pub fn global_storage_metrics(
+    metric_level: MetricLevel,
+    config: SlowOpMonitorConfig,
+) -> MonitoredStorageMetrics {
     GLOBAL_STORAGE_METRICS
-        .get_or_init(|| MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
+        .get_or_init(|| {
+            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level, config)
+        })
         .clone()
 }
 
 impl MonitoredStorageMetrics {
-    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
+    pub fn new(
+        registry: &Registry,
+        metric_level: MetricLevel,
+        config: SlowOpMonitorConfig,
+    ) -> Self {
         // 256B ~ max 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms ~ max 2.7h
@@ -206,20 +220,19 @@ impl MonitoredStorageMetrics {
 
         let opts = SlowOpHistogramOpts {
             inner: histogram_opts!(
-                "state_store_slow_op_duration",
-                "State store slow op duration",
-                time_buckets
+                "state_store_slow_get_duration",
+                "State store slow get duration",
+                time_buckets.clone(),
             ),
-            threshold: Duration::from_micros(100),
+            threshold: config.slow_get_threshold,
         };
-        // TODO(MrCroxx): make it configurable.
-        let slow_op_duration = SlowOpHistogramVec::new(opts, &["op", "table_id"]);
+        let slow_get_duration = SlowOpHistogramVec::new(opts, &["table_id"]);
         registry
-            .register(Box::new(slow_op_duration.clone()))
+            .register(Box::new(slow_get_duration.clone()))
             .unwrap();
-        let slow_op_duration = RelabeledGuardedSlowOpHistogramVec::with_metric_level(
+        let slow_get_duration = RelabeledGuardedSlowOpHistogramVec::with_metric_level(
             MetricLevel::Critical,
-            slow_op_duration,
+            slow_get_duration,
             metric_level,
         );
 
@@ -235,11 +248,11 @@ impl MonitoredStorageMetrics {
             iter_in_process_counts,
             sync_duration,
             sync_size,
-            slow_op_duration,
+            slow_get_duration,
         }
     }
 
     pub fn unused() -> Self {
-        global_storage_metrics(MetricLevel::Disabled)
+        global_storage_metrics(MetricLevel::Disabled, Default::default())
     }
 }

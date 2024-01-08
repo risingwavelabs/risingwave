@@ -886,6 +886,8 @@ pub struct ObjectStoreConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_slow_read_monitor_threshold_ms")]
+    pub object_store_slow_read_monitor_threshold_ms: u64,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
@@ -1452,6 +1454,10 @@ pub mod default {
 
         pub fn object_store_read_timeout_ms() -> u64 {
             60 * 60 * 1000
+        }
+
+        pub fn object_store_slow_read_monitor_threshold_ms() -> u64 {
+            1000
         }
 
         pub mod s3 {

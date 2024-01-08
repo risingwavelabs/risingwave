@@ -162,6 +162,7 @@ object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
 object_store_read_timeout_ms = 3600000
+object_store_slow_read_monitor_threshold_ms = 1000
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
