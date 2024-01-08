@@ -25,13 +25,13 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 
+import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.time.LocalTime;
-import java.time.LocalDateTime;
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.sql.*;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -66,7 +66,14 @@ public class JDBCSinkTest {
     static TableSchema getTestTableSchema() {
         return new TableSchema(
                 Lists.newArrayList(
-                        "id", "v_varchar", "v_date", "v_time", "v_timestamp", "v_timestamptz", "v_jsonb", "v_bytea"),
+                        "id",
+                        "v_varchar",
+                        "v_date",
+                        "v_time",
+                        "v_timestamp",
+                        "v_timestamptz",
+                        "v_jsonb",
+                        "v_bytea"),
                 Lists.newArrayList(
                         Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build(),
@@ -223,8 +230,12 @@ public class JDBCSinkTest {
             assertEquals("Clare", rs.getString(2));
             assertEquals(LocalDate.ofEpochDay(0), rs.getObject(3, LocalDate.class));
             assertEquals(LocalTime.of(0, 0, 0, 1000), rs.getObject(4, LocalTime.class));
-            assertEquals(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000), rs.getObject(5, LocalDateTime.class));
-            assertEquals(OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC), rs.getObject(6, OffsetDateTime.class));
+            assertEquals(
+                    LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                    rs.getObject(5, LocalDateTime.class));
+            assertEquals(
+                    OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                    rs.getObject(6, OffsetDateTime.class));
             assertEquals(
                     "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
                     rs.getString(7));
@@ -255,7 +266,7 @@ public class JDBCSinkTest {
     @Test
     public void testPostgres() throws SQLException {
         PostgreSQLContainer pg =
-                new PostgreSQLContainer<>("postgres:15-alpine")
+                new PostgreSQLContainer<>("postgres:latest")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")
@@ -272,7 +283,7 @@ public class JDBCSinkTest {
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:8")
+                new MySQLContainer<>("mysql:latest")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")
