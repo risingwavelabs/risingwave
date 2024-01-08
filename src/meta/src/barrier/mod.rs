@@ -811,10 +811,15 @@ impl GlobalBarrierManager {
             checkpoint,
             span,
         } = self.scheduled_barriers.pop_or_default().await;
+        self.checkpoint_control.pre_resolve(&command);
         let info = self
             .context
-            .resolve_actor_info(&mut self.checkpoint_control, &command)
+            .resolve_actor_info(|s: ActorState, table_id: TableId, actor_id: ActorId| {
+                self.checkpoint_control
+                    .can_actor_send_or_collect(s, table_id, actor_id)
+            })
             .await;
+        self.checkpoint_control.post_resolve(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
         let kind = if checkpoint {
@@ -1263,31 +1268,21 @@ impl GlobalBarrierManagerContext {
     /// will create or drop before this barrier flow through them.
     async fn resolve_actor_info(
         &self,
-        checkpoint_control: &mut CheckpointControl,
-        command: &Command,
+        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
     ) -> BarrierActorInfo {
-        checkpoint_control.pre_resolve(command);
-
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
-                    checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
-                };
                 let all_nodes = mgr
                     .cluster_manager
                     .list_active_streaming_compute_nodes()
                     .await;
-                let all_actor_infos = mgr.fragment_manager.load_all_actors(check_state).await;
+                let all_actor_infos = mgr.fragment_manager.load_all_actors(&check_state).await;
 
                 BarrierActorInfo::resolve(all_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
                 let check_state = |s: ActorState, table_id: ObjectId, actor_id: i32| {
-                    checkpoint_control.can_actor_send_or_collect(
-                        s,
-                        TableId::new(table_id as _),
-                        actor_id as _,
-                    )
+                    check_state(s, TableId::new(table_id as _), actor_id as _)
                 };
                 let all_nodes = mgr
                     .cluster_controller
@@ -1307,8 +1302,6 @@ impl GlobalBarrierManagerContext {
                 BarrierActorInfo::resolve(all_nodes, all_actor_infos)
             }
         };
-
-        checkpoint_control.post_resolve(command);
 
         info
     }

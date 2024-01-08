@@ -63,11 +63,11 @@ impl GlobalBarrierManager {
     }
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
+        let default_checkpoint_control = CheckpointControl::new(self.context.metrics.clone());
         self.context
-            .resolve_actor_info(
-                &mut CheckpointControl::new(self.context.metrics.clone()),
-                &Command::barrier(),
-            )
+            .resolve_actor_info(|s, table_id, actor_id| {
+                default_checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
+            })
             .await
     }
 
