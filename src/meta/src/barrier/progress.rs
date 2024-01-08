@@ -161,7 +161,7 @@ pub enum TrackingJob {
 impl TrackingJob {
     fn metadata_manager(&self) -> &MetadataManager {
         match self {
-            TrackingJob::New(command) => &command.context.metadata_manager,
+            TrackingJob::New(command) => command.context.metadata_manager(),
             TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
         }
     }

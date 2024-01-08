@@ -181,6 +181,8 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    env: MetaSrvEnv,
 }
 
 /// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
@@ -600,6 +602,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            env: env.clone(),
         };
 
         Self {
@@ -825,17 +828,13 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            self.context.metadata_manager.clone(),
-            self.context.hummock_manager.clone(),
-            self.env.stream_client_pool_ref(),
             info,
             prev_epoch.clone(),
             curr_epoch.clone(),
             self.state.paused_reason(),
             command,
             kind,
-            self.context.source_manager.clone(),
-            self.context.scale_controller.clone(),
+            self.context.clone(),
             span.clone(),
         ));
 

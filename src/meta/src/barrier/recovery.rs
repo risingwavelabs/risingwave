@@ -319,17 +319,13 @@ impl GlobalBarrierManager {
 
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
-                        self.context.metadata_manager.clone(),
-                        self.context.hummock_manager.clone(),
-                        self.env.stream_client_pool_ref(),
                         info,
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         paused_reason,
                         command,
                         BarrierKind::Initial,
-                        self.context.source_manager.clone(),
-                        self.context.scale_controller.clone(),
+                        self.context.clone(),
                         tracing::Span::current(), // recovery span
                     ));
 
