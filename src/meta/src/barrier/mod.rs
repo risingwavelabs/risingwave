@@ -1177,9 +1177,7 @@ impl GlobalBarrierManager {
                     // Update the progress of all commands.
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
                         // Those with actors complete can be finished immediately.
-                        if let Some(command) = tracker.update(progress, &version_stats)
-                            && !command.tracks_sink()
-                        {
+                        if let Some(command) = tracker.update(progress, &version_stats) {
                             tracing::trace!(?progress, "finish progress");
                             commands.push(command);
                         } else {
