@@ -21,15 +21,15 @@ import Head from "next/head"
 import Link from "next/link"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { StreamGraph } from "../components/StreamGraph"
+import RelationDependencyGraph from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import { ActorPoint } from "../lib/layout"
+import { FragmentPoint } from "../lib/layout"
 import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): FragmentPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -122,7 +122,7 @@ export default function StreamingGraph() {
         >
           <Text fontWeight="semibold">Graph</Text>
           {mvDependency && (
-            <StreamGraph
+            <RelationDependencyGraph
               nodes={mvDependency}
               selectedId={router.query.id as string}
             />

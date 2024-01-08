@@ -158,7 +158,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// The meta data of the original message for a row writer.
 ///
 /// Extracted from the `SourceMessage`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
     meta: &'a SourceMeta,
     split_id: &'a str,
@@ -665,6 +665,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
                                 tracing::warn!(current_id, id, "already in transaction");
                             }
+                            tracing::debug!("begin upstream transaction: id={}", id);
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
@@ -672,6 +673,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if current_id != Some(&id) {
                                 tracing::warn!(?current_id, id, "transaction id mismatch");
                             }
+                            tracing::debug!("commit upstream transaction: id={}", id);
                             current_transaction = None;
                         }
                     }
@@ -692,6 +694,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
             yield_asap = false;
+
             yield StreamChunkWithState {
                 chunk: builder.take(0),
                 split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
