@@ -13,27 +13,6 @@ FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.User'
 );
 
-statement ok
-CREATE SOURCE src_user_no_sr (
-    id INT,
-    name VARCHAR,
-    address VARCHAR,
-    city VARCHAR,
-    gender VARCHAR,
-) WITH (
-  connector = 'kafka',
-  topic = 'sr_pb_test',
-  properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE PROTOBUF;
-
-# Altering a non-sr source is not allowed
-statement error Not supported: altering a source without schema registry
-ALTER SOURCE src_user_no_sr FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithMoreFields'
-);
-
 # Changing type is not allowed
 statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: (city: character varying)
 ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
@@ -62,7 +41,51 @@ ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
 );
 
 statement ok
-DROP SOURCE src_user_no_sr;
+CREATE TABLE t_more_fields (
+    id INT,
+    name VARCHAR,
+    address VARCHAR,
+    city VARCHAR,
+    gender VARCHAR,
+    age INT,
+);
+
+statement ok
+INSERT INTO t_more_fields VALUES
+    (10086, 'Rising', 'Wave', 'Labs', 'MALE', 24),
+    (10087, 'Rising', 'Wave', 'Labs', 'FEMALE', 25);
+
+statement ok
+CREATE SINK sink_more_fields FROM t_more_fields(
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092'
+) FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://message_queue:8081',
+    message = 'test.UserWithMoreFields'
+);
+
+statement ok
+flush;
+
+sleep 10s
+
+statement ok
+CREATE MATERIALIZED VIEW mv_more_fields as SELECT * FROM src_user;
+
+query II
+SELECT MAX(age), MIN(age) FROM mv_more_fields;
+----
+25 24
+
+statement ok
+DROP MATERIALIZED VIEW mv_more_fields;
+
+statement ok
+DROP SINK sink_more_fields;
+
+statement ok
+DROP TABLE t_more_fields;
 
 statement ok
 DROP SOURCE src_user;
