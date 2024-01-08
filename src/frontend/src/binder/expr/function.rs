@@ -122,7 +122,7 @@ impl Binder {
         // Used later in sql udf expression evaluation
         let args = f.args.clone();
 
-        let inputs = f
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -224,12 +224,10 @@ impl Binder {
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
+
             if func.language == "sql" {
                 if func.body.is_none() {
                     return Err(ErrorCode::InvalidInputSyntax(
