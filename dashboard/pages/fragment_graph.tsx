@@ -145,11 +145,16 @@ const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
-  const { response: actorBackPressures } = useFetch(getActorBackPressures)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
   const [backPressureAlgo, setBackPressureAlgo] = useState<BackPressureAlgo>()
   const router = useRouter()
+
+  const { response: actorBackPressures } = useFetch(
+    getActorBackPressures,
+    5000,
+    backPressureAlgo !== undefined
+  )
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
