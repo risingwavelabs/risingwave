@@ -42,7 +42,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
@@ -400,6 +400,7 @@ impl ConnectorProperties {
             .map(|s| {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -410,6 +411,7 @@ impl ConnectorProperties {
             .map(|s| {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
             })
             .unwrap_or(false)
     }
