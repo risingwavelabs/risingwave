@@ -39,7 +39,8 @@ pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 /// todo: should we add internal tables as well?
-pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| {
+    BuiltinView {
     name: "pg_class",
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_CLASS_COLUMNS,
@@ -57,4 +58,5 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         FROM rw_catalog.rw_relations\
     "
     .to_string(),
+}
 });
