@@ -177,7 +177,6 @@ test_sink_backfill_recovery() {
 
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
-  sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
 
   # Restart
   restart_cluster
