@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
 use futures::TryStreamExt;
+use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TABLE_PREFIX_LEN};
+use risingwave_common::range::RangeBoundsExt;
+use risingwave_hummock_sdk::key::{
+    gen_key_from_bytes, prefix_slice_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
+};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
-use risingwave_storage::hummock::CachePolicy;
+use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
@@ -1779,4 +1787,489 @@ async fn test_get_with_min_epoch() {
             .unwrap();
         assert!(v.is_none());
     }
+}
+
+#[tokio::test]
+async fn test_table_watermark() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(TEST_TABLE_ID).await;
+    let mut local1 = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    let mut local2 = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    let vnode1 = VirtualNode::from_index(1);
+    let vnode_bitmap1 = {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        builder.set(1, true);
+        builder.finish()
+    };
+    let vnode2 = VirtualNode::from_index(2);
+    let vnode_bitmap2 = {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        builder.set(2, true);
+        builder.finish()
+    };
+
+    let epoch1 = (31 * 1000) << 16;
+    local1.init_for_test(epoch1).await.unwrap();
+    local2.init_for_test(epoch1).await.unwrap();
+
+    fn gen_inner_key(index: usize) -> Bytes {
+        Bytes::copy_from_slice(format!("key_{:05}", index).as_bytes())
+    }
+
+    fn gen_key(vnode: VirtualNode, index: usize) -> TableKey<Bytes> {
+        gen_key_from_bytes(vnode, &gen_inner_key(index))
+    }
+
+    fn gen_val(index: usize) -> Bytes {
+        Bytes::copy_from_slice(format!("val_{}", index).as_bytes())
+    }
+
+    fn gen_range() -> Range<usize> {
+        0..30
+    }
+
+    fn gen_batch(
+        vnode: VirtualNode,
+        index: impl Iterator<Item = usize>,
+    ) -> Vec<(TableKey<Bytes>, Bytes)> {
+        index
+            .map(|index| (gen_key(vnode, index), gen_val(index)))
+            .collect_vec()
+    }
+
+    let epoch1_indexes = || gen_range().filter(|index| index % 3 == 0);
+
+    // epoch 1 write
+    let batch1_epoch1 = gen_batch(vnode1, epoch1_indexes());
+    let batch2_epoch1 = gen_batch(vnode2, epoch1_indexes());
+
+    for (local, batch) in [(&mut local1, batch1_epoch1), (&mut local2, batch2_epoch1)] {
+        for (key, value) in batch {
+            local.insert(key, value, None).unwrap();
+        }
+    }
+
+    // test read after write
+    {
+        for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
+            for index in epoch1_indexes() {
+                let value = risingwave_storage::store::LocalStateStore::get(
+                    local,
+                    gen_key(vnode, index),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                assert_eq!(value.unwrap(), gen_val(index));
+            }
+            let result = risingwave_storage::store::LocalStateStore::iter(
+                local,
+                RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .map_ok(|(full_key, value)| (full_key.user_key, value))
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+            let expected = epoch1_indexes()
+                .map(|index| {
+                    (
+                        UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
+                        gen_val(index),
+                    )
+                })
+                .collect_vec();
+            assert_eq!(expected, result);
+        }
+    }
+
+    let watermark1 = 10;
+
+    let epoch2 = (32 * 1000) << 16;
+    for (local, vnode_bitmap) in [
+        (&mut local1, vnode_bitmap1.clone()),
+        (&mut local2, vnode_bitmap2.clone()),
+    ] {
+        local.flush(vec![]).await.unwrap();
+        local.seal_current_epoch(
+            epoch2,
+            SealCurrentEpochOptions::new(
+                vec![VnodeWatermark::new(
+                    Arc::new(vnode_bitmap),
+                    gen_inner_key(watermark1),
+                )],
+                WatermarkDirection::Ascending,
+            ),
+        );
+    }
+
+    // test read after seal with watermark1
+    {
+        for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
+            for index in epoch1_indexes() {
+                let value = risingwave_storage::store::LocalStateStore::get(
+                    local,
+                    gen_key(vnode, index),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                if index < watermark1 {
+                    assert!(value.is_none());
+                } else {
+                    assert_eq!(value.unwrap(), gen_val(index));
+                }
+            }
+
+            // iter full range
+            {
+                let result = risingwave_storage::store::LocalStateStore::iter(
+                    local,
+                    RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .map_ok(|(full_key, value)| (full_key.user_key, value))
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+                let expected = epoch1_indexes()
+                    .filter(|index| index >= &watermark1)
+                    .map(|index| {
+                        (
+                            UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
+                            gen_val(index),
+                        )
+                    })
+                    .collect_vec();
+                assert_eq!(expected, result);
+            }
+
+            // iter below watermark
+            {
+                let result = risingwave_storage::store::LocalStateStore::iter(
+                    local,
+                    (
+                        Included(gen_key(vnode, 0)),
+                        Included(gen_key(vnode, watermark1 - 1)),
+                    ),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+                assert!(result.is_empty());
+            }
+        }
+    }
+
+    let epoch2_indexes = || {
+        gen_range()
+            .filter(|index| index % 3 == 1)
+            .filter(|index| index >= &watermark1)
+    };
+
+    // epoch 2 write
+    let batch1_epoch2 = gen_batch(vnode1, epoch2_indexes());
+    let batch2_epoch2 = gen_batch(vnode2, epoch2_indexes());
+
+    let epoch3 = (33 * 1000) << 16;
+
+    for (local, batch) in [(&mut local1, batch1_epoch2), (&mut local2, batch2_epoch2)] {
+        for (key, value) in batch {
+            local.insert(key, value, None).unwrap();
+        }
+        local.flush(vec![]).await.unwrap();
+        local.seal_current_epoch(epoch3, SealCurrentEpochOptions::no_watermark());
+    }
+
+    let indexes_after_epoch2 = || gen_range().filter(|index| index % 3 == 0 || index % 3 == 1);
+
+    let test_after_epoch2 = |local1: LocalHummockStorage, local2: LocalHummockStorage| async {
+        for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
+            for index in indexes_after_epoch2() {
+                let value = risingwave_storage::store::LocalStateStore::get(
+                    local,
+                    gen_key(vnode, index),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                if index < watermark1 {
+                    assert!(value.is_none());
+                } else {
+                    assert_eq!(value.unwrap(), gen_val(index));
+                }
+            }
+
+            // iter full range
+            {
+                let result = risingwave_storage::store::LocalStateStore::iter(
+                    local,
+                    RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .map_ok(|(full_key, value)| (full_key.user_key, value))
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+                let expected = indexes_after_epoch2()
+                    .filter(|index| index >= &watermark1)
+                    .map(|index| {
+                        (
+                            UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
+                            gen_val(index),
+                        )
+                    })
+                    .collect_vec();
+                assert_eq!(expected, result);
+            }
+
+            // iter below watermark
+            {
+                let result = risingwave_storage::store::LocalStateStore::iter(
+                    local,
+                    (
+                        Included(gen_key(vnode, 0)),
+                        Included(gen_key(vnode, watermark1 - 1)),
+                    ),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+                assert!(result.is_empty());
+            }
+        }
+        (local1, local2)
+    };
+
+    let (local1, local2) = test_after_epoch2(local1, local2).await;
+
+    let check_version_table_watermark = |version: PinnedVersion| {
+        let table_watermarks = version.table_watermark_index().get(&TEST_TABLE_ID).unwrap();
+        assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
+        let index = table_watermarks.index();
+        assert_eq!(2, index.len());
+        let vnode1_watermark = index.get(&vnode1).unwrap();
+        assert_eq!(1, vnode1_watermark.len());
+        assert_eq!(
+            &gen_inner_key(watermark1),
+            vnode1_watermark.get(&epoch1).unwrap()
+        );
+        let vnode2_watermark = index.get(&vnode2).unwrap();
+        assert_eq!(1, vnode2_watermark.len());
+        assert_eq!(
+            &gen_inner_key(watermark1),
+            vnode2_watermark.get(&epoch1).unwrap()
+        );
+    };
+
+    test_env.commit_epoch(epoch1).await;
+    test_env.storage.try_wait_epoch_for_test(epoch1).await;
+
+    let test_global_read = |storage: HummockStorage, epoch: u64| async move {
+        // inner vnode read
+        for vnode in [vnode1, vnode2] {
+            for index in indexes_after_epoch2() {
+                let value = storage
+                    .get(
+                        gen_key(vnode, index),
+                        epoch,
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                if index < watermark1 {
+                    assert!(value.is_none());
+                } else {
+                    assert_eq!(value.unwrap(), gen_val(index));
+                }
+            }
+
+            // iter full range
+            {
+                let result = storage
+                    .iter(
+                        RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
+                        epoch,
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .map_ok(|(full_key, value)| (full_key.user_key, value))
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap();
+                let expected = indexes_after_epoch2()
+                    .filter(|index| index >= &watermark1)
+                    .map(|index| {
+                        (
+                            UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
+                            gen_val(index),
+                        )
+                    })
+                    .collect_vec();
+                assert_eq!(expected, result);
+            }
+
+            // iter below watermark
+            {
+                let result = storage
+                    .iter(
+                        (
+                            Included(gen_key(vnode, 0)),
+                            Included(gen_key(vnode, watermark1 - 1)),
+                        ),
+                        epoch,
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap();
+                assert!(result.is_empty());
+            }
+        }
+
+        // cross vnode read
+        let result = storage
+            .iter(
+                (
+                    Included(TableKey(prefix_slice_with_vnode(
+                        vnode1,
+                        &gen_inner_key(gen_range().start),
+                    ))),
+                    Included(TableKey(prefix_slice_with_vnode(
+                        vnode2,
+                        &gen_inner_key(gen_range().end),
+                    ))),
+                ),
+                epoch,
+                ReadOptions {
+                    table_id: TEST_TABLE_ID,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .map_ok(|(full_key, value)| (full_key.user_key, value))
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        let expected = [vnode1, vnode2]
+            .into_iter()
+            .flat_map(|vnode| {
+                gen_range()
+                    .filter(|index| index % 3 == 0 || index % 3 == 1)
+                    .filter(|index| index >= &watermark1)
+                    .map(move |index| {
+                        (
+                            UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
+                            gen_val(index),
+                        )
+                    })
+            })
+            .collect_vec();
+        assert_eq!(expected, result);
+    };
+
+    test_global_read(test_env.storage.clone(), epoch2).await;
+
+    check_version_table_watermark(test_env.storage.get_pinned_version());
+
+    let (local1, local2) = test_after_epoch2(local1, local2).await;
+
+    test_env.commit_epoch(epoch2).await;
+    test_env.storage.try_wait_epoch_for_test(epoch2).await;
+
+    test_global_read(test_env.storage.clone(), epoch2).await;
+
+    check_version_table_watermark(test_env.storage.get_pinned_version());
+
+    let (mut local1, mut local2) = test_after_epoch2(local1, local2).await;
+
+    let epoch4 = (34 * 1000) << 16;
+
+    for (local, vnode_bitmap) in [
+        (&mut local1, vnode_bitmap1.clone()),
+        (&mut local2, vnode_bitmap2.clone()),
+    ] {
+        // regress watermark
+        local.seal_current_epoch(
+            epoch4,
+            SealCurrentEpochOptions::new(
+                vec![VnodeWatermark::new(
+                    Arc::new(vnode_bitmap),
+                    gen_inner_key(5),
+                )],
+                WatermarkDirection::Ascending,
+            ),
+        );
+    }
+
+    test_global_read(test_env.storage.clone(), epoch3).await;
+
+    let (local1, local2) = test_after_epoch2(local1, local2).await;
+
+    test_env.commit_epoch(epoch3).await;
+    test_env.storage.try_wait_epoch_for_test(epoch3).await;
+
+    check_version_table_watermark(test_env.storage.get_pinned_version());
+
+    let (_local1, _local2) = test_after_epoch2(local1, local2).await;
+
+    test_global_read(test_env.storage.clone(), epoch3).await;
 }

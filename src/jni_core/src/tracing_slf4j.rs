@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,19 +15,25 @@
 use std::borrow::Cow;
 
 use jni::objects::JString;
-use jni::sys::jint;
+use jni::sys::{jboolean, jint};
 use tracing::Level;
 
 use crate::{execute_and_catch, EnvParam};
 
+const TARGET: &str = "risingwave_connector_node";
+
 #[no_mangle]
 pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEvent(
     env: EnvParam<'_>,
+    thread_name: JString<'_>,
     class_name: JString<'_>,
     level: jint,
     message: JString<'_>,
 ) {
     execute_and_catch(env, move |env| {
+        let thread_name = env.get_string(&thread_name)?;
+        let thread_name: Cow<'_, str> = (&thread_name).into();
+
         let class_name = env.get_string(&class_name)?;
         let class_name: Cow<'_, str> = (&class_name).into();
 
@@ -37,9 +43,10 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
         macro_rules! event {
             ($lvl:expr) => {
                 tracing::event!(
-                    target: "risingwave_connector_node",
+                    target: TARGET,
                     $lvl,
-                    class = class_name.as_ref(),
+                    thread = &*thread_name,
+                    class = &*class_name,
                     "{message}",
                 )
             };
@@ -57,4 +64,37 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
 
         Ok(())
     })
+}
+
+#[no_mangle]
+pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEventEnabled(
+    env: EnvParam<'_>,
+    level: jint,
+) -> jboolean {
+    execute_and_catch(env, move |_env| {
+        // Currently we only support `StaticDirective` in `tracing-subscriber`, so
+        // filtering by fields like `thread` and `class` is not supported.
+        // TODO: should we support dynamic `Directive`?
+        macro_rules! event_enabled {
+            ($lvl:expr) => {
+                tracing::event_enabled!(
+                    target: TARGET,
+                    $lvl,
+                )
+            };
+        }
+
+        // See `com.risingwave.tracing.TracingSlf4jImpl`.
+        let enabled = match level {
+            0 => event_enabled!(Level::ERROR),
+            1 => event_enabled!(Level::WARN),
+            2 => event_enabled!(Level::INFO),
+            3 => event_enabled!(Level::DEBUG),
+            4 => event_enabled!(Level::TRACE),
+            _ => unreachable!(),
+        };
+
+        Ok(enabled)
+    })
+    .into()
 }

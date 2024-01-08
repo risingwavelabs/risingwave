@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
+mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
@@ -52,6 +53,7 @@ pub mod create_mv;
 pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
+pub mod create_sql_function;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -204,16 +206,39 @@ pub async fn handle(
             returns,
             params,
         } => {
-            create_function::handle_create_function(
-                handler_args,
-                or_replace,
-                temporary,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            // For general udf, `language` clause could be ignored
+            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+            if params.language.is_none()
+                || !params
+                    .language
+                    .as_ref()
+                    .unwrap()
+                    .real_value()
+                    .eq_ignore_ascii_case("sql")
+            {
+                // User defined function with external source (e.g., language [ python / java ])
+                create_function::handle_create_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            } else {
+                create_sql_function::handle_create_sql_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
         }
         Statement::CreateTable {
             name,
@@ -500,6 +525,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
+            operation: AlterTableOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_TABLE,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
             operation: AlterTableOperation::SetSchema { new_schema_name },
         } => {
             alter_set_schema::handle_alter_set_schema(
@@ -515,6 +552,18 @@ pub async fn handle(
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterIndex {
+            name,
+            operation: AlterIndexOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_INDEX,
+            )
+            .await
+        }
         Statement::AlterView {
             materialized,
             name,
@@ -531,6 +580,19 @@ pub async fn handle(
             } else {
                 alter_rename::handle_rename_view(handler_args, name, view_name).await
             }
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetParallelism { parallelism },
+        } if materialized => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_MATERIALIZED_VIEW,
+            )
+            .await
         }
         Statement::AlterView {
             materialized,
@@ -584,6 +646,7 @@ pub async fn handle(
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
+
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::ChangeOwner { new_owner_name },
@@ -606,6 +669,18 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SINK,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetParallelism { parallelism },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SINK,
             )
             .await
         }

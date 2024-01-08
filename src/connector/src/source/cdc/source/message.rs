@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ pub struct DebeziumCdcMeta {
     pub full_table_name: String,
     // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
     pub source_ts_ms: i64,
+    // Whether the message is a transaction metadata
+    pub is_transaction_meta: bool,
 }
 
 impl From<CdcMessage> for SourceMessage {
@@ -38,6 +40,7 @@ impl From<CdcMessage> for SourceMessage {
             meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
                 full_table_name: message.full_table_name,
                 source_ts_ms: message.source_ts_ms,
+                is_transaction_meta: message.is_transaction_meta,
             }),
         }
     }

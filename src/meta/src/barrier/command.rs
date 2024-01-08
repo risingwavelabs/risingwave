@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -40,8 +40,8 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, DdlType, FragmentManagerRef, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::manager::{DdlType, MetadataManager, WorkerId};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
     ThrottleConfig,
@@ -84,8 +84,8 @@ pub struct ReplaceTablePlan {
     pub init_split_assignment: SplitAssignment,
 }
 
-/// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
-/// we'll build different barriers to send, and may do different stuffs after the barrier is
+/// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
+/// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
@@ -114,6 +114,14 @@ pub enum Command {
     /// The TableIds here are the ids for the stream job.
     /// It does not include internal table ids.
     DropStreamingJobs(HashSet<TableId>),
+
+    /// `DropStreamingJobsV2` command generates a `Stop` barrier by the given actor info.
+    /// This is used by new SQL metastore and catalog has already been dropped.
+    ///
+    /// Barriers from the actors to be dropped will STILL be collected.
+    /// After the barrier is collected, it notifies the local stream manager of compute nodes to
+    /// drop actors.
+    DropStreamingJobsV2(HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>),
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -146,6 +154,7 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
+        table_parallelism: HashMap<TableId, TableParallelism>,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -156,8 +165,8 @@ pub enum Command {
     /// of the Merge executors are changed additionally.
     ReplaceTable(ReplaceTablePlan),
 
-    /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
-    /// newly added splits.
+    /// `SourceSplitAssignment` generates a `Splits` barrier for pushing initialized splits or
+    /// changed splits.
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
@@ -207,6 +216,9 @@ impl Command {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
             Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
+            Command::DropStreamingJobsV2(job_info) => {
+                CommandChanges::DropTables(job_info.keys().cloned().collect())
+            }
             Command::CancelStreamingJob(table_fragments) => {
                 CommandChanges::DropTables(std::iter::once(table_fragments.table_id()).collect())
             }
@@ -254,8 +266,8 @@ impl Command {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub struct CommandContext {
-    pub fragment_manager: FragmentManagerRef,
-    catalog_manager: CatalogManagerRef,
+    pub metadata_manager: MetadataManager,
+
     hummock_manager: HummockManagerRef,
 
     client_pool: StreamClientPoolRef,
@@ -275,7 +287,7 @@ pub struct CommandContext {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    scale_controller: Option<ScaleControllerRef>,
 
     /// The tracing span of this command.
     ///
@@ -288,8 +300,7 @@ pub struct CommandContext {
 impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        fragment_manager: FragmentManagerRef,
-        catalog_manager: CatalogManagerRef,
+        metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
@@ -299,12 +310,11 @@ impl CommandContext {
         command: Command,
         kind: BarrierKind,
         source_manager: SourceManagerRef,
-        scale_controller: ScaleControllerRef,
+        scale_controller: Option<ScaleControllerRef>,
         span: tracing::Span,
     ) -> Self {
         Self {
-            fragment_manager,
-            catalog_manager,
+            metadata_manager,
             hummock_manager,
             client_pool,
             info: Arc::new(info),
@@ -372,7 +382,21 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs(table_ids) => {
-                let actors = self.fragment_manager.get_table_actor_ids(table_ids).await?;
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unreachable!("only available in v1");
+                };
+
+                let actors = mgr.fragment_manager.get_table_actor_ids(table_ids).await?;
+                Some(Mutation::Stop(StopMutation { actors }))
+            }
+
+            Command::DropStreamingJobsV2(job_info) => {
+                let actors: Vec<ActorId> = job_info
+                    .values()
+                    .flat_map(|v| v.values())
+                    .flatten()
+                    .copied()
+                    .collect();
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
@@ -415,6 +439,7 @@ impl CommandContext {
                     init_split_assignment,
                 }) = replace_table
                 {
+                    // TODO: support in v2.
                     let update = Self::generate_update_mutation_for_replace_table(
                         old_table_fragments,
                         merge_updates,
@@ -452,13 +477,16 @@ impl CommandContext {
             ),
 
             Command::RescheduleFragment { reschedules, .. } => {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unimplemented!("implement scale functions in v2");
+                };
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
                     {
                         // Find the actors of the upstream fragment.
-                        let upstream_actor_ids = self
+                        let upstream_actor_ids = mgr
                             .fragment_manager
                             .get_running_actors_of_fragment(upstream_fragment_id)
                             .await?;
@@ -492,7 +520,7 @@ impl CommandContext {
                 for (&fragment_id, reschedule) in reschedules {
                     for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                         // Find the actors of the downstream fragment.
-                        let downstream_actor_ids = self
+                        let downstream_actor_ids = mgr
                             .fragment_manager
                             .get_running_actors_of_fragment(downstream_fragment_id)
                             .await?;
@@ -754,7 +782,10 @@ impl CommandContext {
             Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
-                self.fragment_manager
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unimplemented!("implement config change funcs in v2");
+                };
+                mgr.fragment_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
                 self.source_manager
@@ -763,13 +794,27 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs(table_ids) => {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unreachable!("only available in v1");
+                };
                 // Tell compute nodes to drop actors.
-                let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
+                let node_actors = mgr.fragment_manager.table_node_actors(table_ids).await?;
                 self.clean_up(node_actors).await?;
                 // Drop fragment info in meta store.
-                self.fragment_manager
+                mgr.fragment_manager
                     .drop_table_fragments_vec(table_ids)
                     .await?;
+            }
+
+            Command::DropStreamingJobsV2(job_info) => {
+                let mut node_actors: BTreeMap<WorkerId, Vec<ActorId>> = BTreeMap::new();
+                for worker_actor_ids in job_info.values() {
+                    for (worker_id, actor_ids) in worker_actor_ids {
+                        node_actors.entry(*worker_id).or_default().extend(actor_ids);
+                    }
+                }
+                // Tell compute nodes to drop actors.
+                self.clean_up(node_actors).await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
@@ -793,39 +838,46 @@ impl CommandContext {
                     .unregister_table_ids_fail_fast(&table_ids)
                     .await;
 
-                // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
-                // We need to cleanup the table state. So we can do it here.
-                // The logic is the same as above, for hummock_manager.unregister_table_ids.
-                if let Err(e) = self
-                    .catalog_manager
-                    .cancel_create_table_procedure(
-                        table_fragments.table_id().table_id,
-                        table_fragments.internal_table_ids(),
-                    )
-                    .await
-                {
-                    let table_id = table_fragments.table_id().table_id;
-                    tracing::warn!(
-                        table_id,
-                        reason=?e,
-                        "cancel_create_table_procedure failed for CancelStreamingJob",
-                    );
-                    // If failed, check that table is not in meta store.
-                    // If any table is, just panic, let meta do bootstrap recovery.
-                    // Otherwise our persisted state is dirty.
-                    let mut table_ids = table_fragments.internal_table_ids();
-                    table_ids.push(table_id);
-                    self.catalog_manager.assert_tables_deleted(table_ids).await;
-                }
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
+                        // We need to cleanup the table state. So we can do it here.
+                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
+                        if let Err(e) = mgr
+                            .catalog_manager
+                            .cancel_create_table_procedure(
+                                table_fragments.table_id().table_id,
+                                table_fragments.internal_table_ids(),
+                            )
+                            .await
+                        {
+                            let table_id = table_fragments.table_id().table_id;
+                            tracing::warn!(
+                                table_id,
+                                reason=?e,
+                                "cancel_create_table_procedure failed for CancelStreamingJob",
+                            );
+                            // If failed, check that table is not in meta store.
+                            // If any table is, just panic, let meta do bootstrap recovery.
+                            // Otherwise our persisted state is dirty.
+                            let mut table_ids = table_fragments.internal_table_ids();
+                            table_ids.push(table_id);
+                            mgr.catalog_manager.assert_tables_deleted(table_ids).await;
+                        }
 
-                // We need to drop table fragments here,
-                // since this is not done in stream manager (foreground ddl)
-                // OR barrier manager (background ddl)
-                self.fragment_manager
-                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                        table_fragments.table_id(),
-                    )))
-                    .await?;
+                        // We need to drop table fragments here,
+                        // since this is not done in stream manager (foreground ddl)
+                        // OR barrier manager (background ddl)
+                        mgr.fragment_manager
+                            .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                                table_fragments.table_id(),
+                            )))
+                            .await?;
+                    }
+                    MetadataManager::V2(_mgr) => {
+                        unimplemented!("implement cancel for sql backend")
+                    }
+                }
             }
 
             Command::CreateStreamingJob {
@@ -837,46 +889,56 @@ impl CommandContext {
                 replace_table,
                 ..
             } => {
-                let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
-                for (table_id, actors) in upstream_mview_actors {
-                    let downstream_actors = dispatchers
-                        .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(&k, v)| (k, v.clone()))
-                        .collect();
-                    dependent_table_actors.push((*table_id, downstream_actors));
-                }
-                self.fragment_manager
-                    .post_create_table_fragments(
-                        &table_fragments.table_id(),
-                        dependent_table_actors,
-                        init_split_assignment.clone(),
-                    )
-                    .await?;
+                match &self.metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        let mut dependent_table_actors =
+                            Vec::with_capacity(upstream_mview_actors.len());
+                        for (table_id, actors) in upstream_mview_actors {
+                            let downstream_actors = dispatchers
+                                .iter()
+                                .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                                .map(|(&k, v)| (k, v.clone()))
+                                .collect();
+                            dependent_table_actors.push((*table_id, downstream_actors));
+                        }
+                        mgr.fragment_manager
+                            .post_create_table_fragments(
+                                &table_fragments.table_id(),
+                                dependent_table_actors,
+                                init_split_assignment.clone(),
+                            )
+                            .await?;
 
-                if let Some(ReplaceTablePlan {
-                    old_table_fragments,
-                    new_table_fragments,
-                    merge_updates,
-                    dispatchers,
-                    init_split_assignment: _,
-                }) = replace_table
-                {
-                    let table_ids =
-                        HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
-                    // Tell compute nodes to drop actors.
-                    let node_actors = self.fragment_manager.table_node_actors(&table_ids).await?;
-                    self.clean_up(node_actors).await?;
-
-                    // Drop fragment info in meta store.
-                    self.fragment_manager
-                        .post_replace_table(
+                        if let Some(ReplaceTablePlan {
                             old_table_fragments,
                             new_table_fragments,
                             merge_updates,
                             dispatchers,
-                        )
-                        .await?;
+                            init_split_assignment,
+                        }) = replace_table
+                        {
+                            let table_ids =
+                                HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
+                            // Tell compute nodes to drop actors.
+                            let node_actors =
+                                mgr.fragment_manager.table_node_actors(&table_ids).await?;
+                            self.clean_up(node_actors).await?;
+
+                            // Drop fragment info in meta store.
+                            mgr.fragment_manager
+                                .post_replace_table(
+                                    old_table_fragments,
+                                    new_table_fragments,
+                                    merge_updates,
+                                    dispatchers,
+                                    init_split_assignment.clone(),
+                                )
+                                .await?;
+                        }
+                    }
+                    MetadataManager::V2(_) => {
+                        unimplemented!("support post collect in v2");
+                    }
                 }
 
                 // Extract the fragments that include source operators.
@@ -891,10 +953,15 @@ impl CommandContext {
                     .await;
             }
 
-            Command::RescheduleFragment { reschedules } => {
+            Command::RescheduleFragment {
+                reschedules,
+                table_parallelism,
+            } => {
                 let node_dropped_actors = self
                     .scale_controller
-                    .post_apply_reschedule(reschedules)
+                    .as_ref()
+                    .unwrap()
+                    .post_apply_reschedule(reschedules, table_parallelism)
                     .await?;
                 self.clean_up(node_dropped_actors).await?;
             }
@@ -904,21 +971,25 @@ impl CommandContext {
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
-                ..
+                init_split_assignment,
             }) => {
+                let MetadataManager::V1(mgr) = &self.metadata_manager else {
+                    unimplemented!("implement replace funcs in v2");
+                };
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
                 // Tell compute nodes to drop actors.
-                let node_actors = self.fragment_manager.table_node_actors(&table_ids).await?;
+                let node_actors = mgr.fragment_manager.table_node_actors(&table_ids).await?;
                 self.clean_up(node_actors).await?;
 
                 // Drop fragment info in meta store.
-                self.fragment_manager
+                mgr.fragment_manager
                     .post_replace_table(
                         old_table_fragments,
                         new_table_fragments,
                         merge_updates,
                         dispatchers,
+                        init_split_assignment.clone(),
                     )
                     .await?;
             }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
-use risingwave_connector::source::external::{DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY};
+use risingwave_connector::source::cdc::external::{
+    DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -476,13 +478,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        context.session_ctx(),
-        &source_schema,
-        &with_properties,
-        false,
-    )
-    .await?;
+    let (columns_from_resolve_source, source_info) =
+        bind_columns_from_source(context.session_ctx(), &source_schema, &with_properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -682,6 +679,8 @@ fn gen_table_plan_inner(
             TableId::placeholder().table_id,
         )),
         version: INITIAL_SOURCE_VERSION_ID,
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -867,17 +866,17 @@ fn derive_connect_properties(
                 let prefix = format!("{}.", db_name.as_str());
                 external_table_name
                     .strip_prefix(prefix.as_str())
-                    .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
+                    .ok_or_else(|| anyhow!("The upstream table name must contain database name prefix, e.g. 'mydb.table'."))?
             }
             POSTGRES_CDC_CONNECTOR => {
-                let schema_name = connect_properties
-                    .get(SCHEMA_NAME_KEY)
-                    .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
+                let (schema_name, table_name) = external_table_name
+                    .split_once('.')
+                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
 
-                let prefix = format!("{}.", schema_name.as_str());
-                external_table_name
-                    .strip_prefix(prefix.as_str())
-                    .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
+                // insert 'schema.name' into connect properties
+                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+
+                table_name
             }
             _ => {
                 return Err(RwError::from(anyhow!(

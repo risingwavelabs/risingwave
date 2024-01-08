@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::error::Error;
 use std::io::Write;
 use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::ToSql;
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use serde::{Deserialize, Serialize};
 
 use super::to_binary::ToBinary;
@@ -35,6 +36,20 @@ use crate::estimate_size::ZeroHeapSize;
 pub struct Timestamptz(i64);
 
 impl ZeroHeapSize for Timestamptz {}
+
+impl ToSql for Timestamptz {
+    accepts!(TIMESTAMPTZ);
+
+    to_sql_checked!();
+
+    fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        let instant = self.to_datetime_utc();
+        instant.to_sql(&Type::ANY, out)
+    }
+}
 
 impl ToBinary for Timestamptz {
     fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {

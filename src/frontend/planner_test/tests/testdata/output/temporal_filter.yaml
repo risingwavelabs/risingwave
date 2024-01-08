@@ -90,6 +90,75 @@
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
+- name: Temporal filter with equal condition
+  sql: |-
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where date_trunc('week', now())  = date_trunc('week',ts);
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, t1._row_id(hidden), $expr1(hidden)], stream_key: [t1._row_id, $expr1], pk_columns: [t1._row_id, $expr1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1._row_id, $expr1) }
+      └─StreamHashJoin { type: LeftSemi, predicate: $expr1 = $expr2, output: [t1.ts, t1._row_id, $expr1] }
+        ├─StreamExchange { dist: HashShard($expr1) }
+        │ └─StreamProject { exprs: [t1.ts, DateTrunc('week':Varchar, t1.ts, 'UTC':Varchar) as $expr1, t1._row_id] }
+        │   └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard($expr2) }
+          └─StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+            └─StreamNow { output: [now] }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [ts, t1._row_id(hidden), $expr1(hidden)], stream_key: [t1._row_id, $expr1], pk_columns: [t1._row_id, $expr1], pk_conflict: NoCheck }
+    ├── materialized table: 4294967294
+    └── StreamExchange Hash([1, 2]) from 1
+
+    Fragment 1
+    StreamHashJoin { type: LeftSemi, predicate: $expr1 = $expr2, output: [t1.ts, t1._row_id, $expr1] }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([1]) from 2
+    └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
+    StreamProject { exprs: [t1.ts, DateTrunc('week':Varchar, t1.ts, 'UTC':Varchar) as $expr1, t1._row_id] }
+    └── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 4 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    └── StreamNow { output: [now] } { state table: 5 }
+
+    Table 0
+    ├── columns: [ t1_ts, $expr1, t1__row_id ]
+    ├── primary key: [ $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
+
+    Table 1 { columns: [ $expr1, t1__row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 2 { columns: [ $expr2 ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 3 { columns: [ $expr2, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 4
+    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 5 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+
+    Table 4294967294
+    ├── columns: [ ts, t1._row_id, $expr1 ]
+    ├── primary key: [ $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 1, 2 ]
+    └── read pk prefix len hint: 2
+
 - name: Temporal filter with `now()` in upper bound on append only table
   sql: |-
     create table t1 (ts timestamp with time zone) APPEND ONLY;
@@ -149,56 +218,43 @@
     create table t1 (ts timestamp with time zone);
     select * from t1 where ts < now() - interval '1 hour' and ts >= now() - interval '2 hour';
   stream_plan: |-
-    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id], condition_always_relax: true }
-      ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamDynamicFilter { predicate: (t1.ts >= $expr2), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
+      ├─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], condition_always_relax: true }
       │ ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       │ └─StreamExchange { dist: Broadcast }
-      │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+      │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
       │     └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id], condition_always_relax: true }
+    └── StreamDynamicFilter { predicate: (t1.ts >= $expr2), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
         ├── left table: 0
         ├── right table: 1
-        ├── StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
-        │   ├── left table: 2
-        │   ├── right table: 3
-        │   ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-        │   │   ├── state table: 4
+        ├── StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], condition_always_relax: true } { left table: 2, right table: 3 }
+        │   ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 4 }
         │   │   ├── Upstream
         │   │   └── BatchPlanNode
         │   └── StreamExchange Broadcast from 1
         └── StreamExchange Broadcast from 2
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
     └── StreamNow { output: [now] } { state table: 5 }
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
     └── StreamNow { output: [now] } { state table: 6 }
 
-    Table 0
-    ├── columns: [ t1_ts, t1__row_id ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
-    └── read pk prefix len hint: 1
+    Table 0 { columns: [ t1_ts, t1__row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr2 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2
-    ├── columns: [ t1_ts, t1__row_id ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
-    └── read pk prefix len hint: 1
+    Table 2 { columns: [ t1_ts, t1__row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -214,12 +270,7 @@
 
     Table 6 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294
-    ├── columns: [ ts, t1._row_id ]
-    ├── primary key: [ $1 ASC ]
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
-    └── read pk prefix len hint: 1
+    Table 4294967294 { columns: [ ts, t1._row_id ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - name: Temporal filter in on clause for inner join's left side
   sql: |
@@ -231,14 +282,14 @@
     └─StreamExchange { dist: HashShard(t1.a, t1._row_id, t2._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.a = t2.b, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.a) }
-        │ └─StreamDynamicFilter { predicate: (t1.ta < $expr2), output: [t1.a, t1.ta, t1._row_id], condition_always_relax: true }
-        │   ├─StreamDynamicFilter { predicate: (t1.ta >= $expr1), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
+        │ └─StreamDynamicFilter { predicate: (t1.ta >= $expr2), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
+        │   ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], condition_always_relax: true }
         │   │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         │   │ └─StreamExchange { dist: Broadcast }
-        │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+        │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
         │   │     └─StreamNow { output: [now] }
         │   └─StreamExchange { dist: Broadcast }
-        │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+        │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
         │       └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(t2.b) }
           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -262,14 +313,14 @@
         ├─StreamExchange { dist: HashShard(t2.b) }
         │ └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
         └─StreamExchange { dist: HashShard(t1.a) }
-          └─StreamDynamicFilter { predicate: (t1.ta < $expr2), output: [t1.a, t1.ta, t1._row_id], condition_always_relax: true }
-            ├─StreamDynamicFilter { predicate: (t1.ta >= $expr1), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
+          └─StreamDynamicFilter { predicate: (t1.ta >= $expr2), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
+            ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], condition_always_relax: true }
             │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
             │ └─StreamExchange { dist: Broadcast }
-            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
             │     └─StreamNow { output: [now] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
                 └─StreamNow { output: [now] }
 - name: Temporal filter in on clause for full join's left side
   sql: |
@@ -291,14 +342,14 @@
         ├─StreamExchange { dist: HashShard(t1.a) }
         │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.b) }
-          └─StreamDynamicFilter { predicate: (t2.tb < $expr2), output: [t2.b, t2.tb, t2._row_id], condition_always_relax: true }
-            ├─StreamDynamicFilter { predicate: (t2.tb >= $expr1), output_watermarks: [t2.tb], output: [t2.b, t2.tb, t2._row_id], cleaned_by_watermark: true }
+          └─StreamDynamicFilter { predicate: (t2.tb >= $expr2), output_watermarks: [t2.tb], output: [t2.b, t2.tb, t2._row_id], cleaned_by_watermark: true }
+            ├─StreamDynamicFilter { predicate: (t2.tb < $expr1), output: [t2.b, t2.tb, t2._row_id], condition_always_relax: true }
             │ ├─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
             │ └─StreamExchange { dist: Broadcast }
-            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
             │     └─StreamNow { output: [now] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
                 └─StreamNow { output: [now] }
 - name: Temporal filter in on clause for right join's right side
   sql: |
@@ -324,3 +375,125 @@
         │   └─StreamTableScan { table: version, columns: [version.id2], pk: [version.id2], dist: UpstreamHashShard(version.id2) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: [now] }
+- name: Temporal filter with or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00';
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
+      │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
+      │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
+      │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
+      │     │   └─StreamShare { id: 2 }
+      │     │     └─StreamFilter { predicate: (Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     └─StreamExchange { dist: Broadcast }
+      │       └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
+          └─StreamFilter { predicate: (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) }
+            └─StreamShare { id: 2 }
+              └─StreamFilter { predicate: (Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+- name: Temporal filter with or is null
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts is null;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
+      │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
+      │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
+      │     │ └─StreamFilter { predicate: Not(IsNull(t1.ts)) }
+      │     │   └─StreamShare { id: 2 }
+      │     │     └─StreamFilter { predicate: (Not(IsNull(t1.ts)) OR IsNull(t1.ts)) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     └─StreamExchange { dist: Broadcast }
+      │       └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
+          └─StreamFilter { predicate: IsNull(t1.ts) }
+            └─StreamShare { id: 2 }
+              └─StreamFilter { predicate: (Not(IsNull(t1.ts)) OR IsNull(t1.ts)) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+- name: Temporal filter with or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00' or ts is null;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
+      │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
+      │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
+      │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts)) }
+      │     │   └─StreamShare { id: 2 }
+      │     │     └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     └─StreamExchange { dist: Broadcast }
+      │       └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
+          └─StreamFilter { predicate: ((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts)) }
+            └─StreamShare { id: 2 }
+              └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+- name: Many Temporal filter with or predicate
+  sql: |
+    create table t (t timestamp with time zone, a int);
+    select * from t where (t > NOW() - INTERVAL '1 hour' OR t is NULL OR a < 1) AND (t < NOW() - INTERVAL '1 hour' OR a > 1);
+  stream_plan: |-
+    StreamMaterialize { columns: [t, a, $src(hidden), t._row_id(hidden), $src#1(hidden)], stream_key: [t._row_id, $src, $src#1], pk_columns: [t._row_id, $src, $src#1], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t._row_id, $src, 0:Int32) }
+      │ └─StreamProject { exprs: [t.t, t.a, $src, t._row_id, 0:Int32] }
+      │   └─StreamDynamicFilter { predicate: (t.t < $expr2), output: [t.t, t.a, t._row_id, $src], condition_always_relax: true }
+      │     ├─StreamFilter { predicate: Not((t.a > 1:Int32)) }
+      │     │ └─StreamShare { id: 13 }
+      │     │   └─StreamUnion { all: true }
+      │     │     ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
+      │     │     │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [t.t] }
+      │     │     │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [t.t], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
+      │     │     │     ├─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+      │     │     │     │ └─StreamShare { id: 2 }
+      │     │     │     │   └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+      │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      │     │     │     └─StreamExchange { dist: Broadcast }
+      │     │     │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+      │     │     │         └─StreamNow { output: [now] }
+      │     │     └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
+      │     │       └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
+      │     │         └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+      │     │           └─StreamShare { id: 2 }
+      │     │             └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+      │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      │     └─StreamExchange { dist: Broadcast }
+      │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+      │         └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t._row_id, $src, 1:Int32) }
+        └─StreamProject { exprs: [t.t, t.a, $src, t._row_id, 1:Int32] }
+          └─StreamFilter { predicate: (t.a > 1:Int32) }
+            └─StreamShare { id: 13 }
+              └─StreamUnion { all: true }
+                ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
+                │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [t.t] }
+                │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [t.t], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
+                │     ├─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+                │     │ └─StreamShare { id: 2 }
+                │     │   └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+                │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                │     └─StreamExchange { dist: Broadcast }
+                │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+                │         └─StreamNow { output: [now] }
+                └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
+                  └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
+                    └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+                      └─StreamShare { id: 2 }
+                        └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+                          └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

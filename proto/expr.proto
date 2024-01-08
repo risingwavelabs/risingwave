@@ -269,9 +269,12 @@ message ExprNode {
     PG_SLEEP_FOR = 2025;
     PG_SLEEP_UNTIL = 2026;
 
-    // Adminitration functions
-    COL_DESCRIPTION = 2100;
-    CAST_REGCLASS = 2101;
+    // System administration functions
+    CAST_REGCLASS = 2100;
+    // System information functions
+    PG_GET_INDEXDEF = 2400;
+    COL_DESCRIPTION = 2401;
+    PG_GET_VIEWDEF = 2402;
   }
   Type function_type = 1;
   data.DataType return_type = 3;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
-#![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
 #![feature(lazy_cell)]

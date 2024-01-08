@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,8 +41,9 @@ use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
-pub use self::mysql::mysql_row_to_datums;
+pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
+pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
@@ -69,6 +70,7 @@ mod json_parser;
 mod maxwell;
 mod mysql;
 pub mod plain_parser;
+mod postgres;
 mod protobuf;
 mod unified;
 mod upsert_parser;
@@ -156,7 +158,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 /// The meta data of the original message for a row writer.
 ///
 /// Extracted from the `SourceMessage`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
     meta: &'a SourceMeta,
     split_id: &'a str,
@@ -663,6 +665,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
                                 tracing::warn!(current_id, id, "already in transaction");
                             }
+                            tracing::debug!("begin upstream transaction: id={}", id);
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
@@ -670,6 +673,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             if current_id != Some(&id) {
                                 tracing::warn!(?current_id, id, "transaction id mismatch");
                             }
+                            tracing::debug!("commit upstream transaction: id={}", id);
                             current_transaction = None;
                         }
                     }
@@ -690,6 +694,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
             yield_asap = false;
+
             yield StreamChunkWithState {
                 chunk: builder.take(0),
                 split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),

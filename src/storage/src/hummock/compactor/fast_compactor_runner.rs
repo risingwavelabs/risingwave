@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -317,7 +317,6 @@ impl CompactorRunner {
             builder_factory,
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
         );
         assert_eq!(
@@ -466,7 +465,10 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                if self.executor.builder.need_flush() {
+                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
+                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
+                    && self.executor.last_key_is_delete;
+                if self.executor.builder.need_flush() || need_deleted {
                     let largest_key = sstable_iter.sstable.value().meta.largest_key.clone();
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;

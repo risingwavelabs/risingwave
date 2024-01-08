@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,8 +61,8 @@ public class EsSinkTest {
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkRow(Op.INSERT, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
+                        new ArraySinkRow(Op.INSERT, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
         sink.sync();
         // container is slow here, but our default flush time is 5s,
         // so 3s is enough for sync test

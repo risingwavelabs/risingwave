@@ -265,7 +265,13 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"avg({metric('storage_compact_task_pending_num')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "compactor_task_split_count - {{%s}} @ {{%s}}"
+                            "compactor_task_count - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+
+                        panels.target(
+                            f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -2422,6 +2428,16 @@ def section_hummock_tiered_cache(outer_panels):
     panels = outer_panels.sub_panel()
     file_cache_hit_filter = 'op="lookup",extra="hit"'
     file_cache_miss_filter = 'op="lookup",extra="miss"'
+    refill_ops_filter = 'type=~"meta|data",op!~"filtered|ignored"'
+    inheritance_parent_lookup_filter = 'type="parent_meta"'
+    inheritance_parent_lookup_hit_filter = 'type="parent_meta",op="hit"'
+    inheritance_parent_lookup_miss_filter = 'type="parent_meta",op="miss"'
+    unit_inheritance_filter = 'type="unit_inheritance"'
+    unit_inheritance_hit_filter = 'type="unit_inheritance",op="hit"'
+    unit_inheritance_miss_filter = 'type="unit_inheritance",op="miss"'
+    block_refill_filter = 'type="block"'
+    block_refill_success_filter = 'type="block",op="success"'
+    block_refill_unfiltered_filter = 'type="block",op="unfiltered"'
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
@@ -2448,7 +2464,7 @@ def section_hummock_tiered_cache(outer_panels):
                                 + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
                                 % NODE_LABEL,
                             ),
-                            [50, 99, "max"],
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -2463,23 +2479,53 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_bytes(
-                    "Size",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
-                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
-                        ),
-                    ],
-                ),
                 panels.timeseries_percentage(
-                    "Cache Hit Ratio",
+                    "Hit Ratio",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) / (sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}) + sum(rate({metric('foyer_storage_op_duration_count', file_cache_miss_filter)}[$__rate_interval])) by (foyer, {NODE_LABEL}))",
                             "{{foyer}} file cache hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Refill Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
+                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('refill_total', refill_ops_filter)}[$__rate_interval])) by (type, op, {NODE_LABEL})",
+                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes_per_sec(
+                    "Data Refill Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_bytes')}[$__rate_interval])) by (foyer, op, {NODE_LABEL})",
+                            "{{type}} file cache - {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Refill Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, foyer, op, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} cache refill - {{op}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),
@@ -2493,32 +2539,117 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_ops(
-                    "Refill Ops",
+                panels.timeseries_bytes(
+                    "Size",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
-                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('refill_total')}[$__rate_interval])) by (type, op, {NODE_LABEL})",
-                            "{{type}} file cache refill - {{op}} @ {{%s}}" % NODE_LABEL,
+                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, {NODE_LABEL})",
+                            "{{foyer}} size @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Refill Latency",
+                    "Inner Op Duration",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, type, op, {NODE_LABEL}))",
-                                f"p{legend} - "
-                                + "{{type}} file cache refill - {{op}} @ {{%s}}"
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_inner_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
                                 % NODE_LABEL,
                             ),
-                            [50, 99, "max"],
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Slow Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('foyer_storage_slow_op_duration_count')}[$__rate_interval])) by (foyer, op, extra, {NODE_LABEL})",
+                            "{{foyer}} file cache {{op}} {{extra}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Slow Op Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_slow_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{foyer}} file cache - {{op}} {{extra}} @ {{%s}}"
+                                % NODE_LABEL,
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Inheritance - Parent Meta Lookup Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', inheritance_parent_lookup_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "parent meta lookup {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Inheritance - Parent Meta Lookup Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', inheritance_parent_lookup_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) / (sum(rate({metric('refill_total', inheritance_parent_lookup_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) + sum(rate({metric('refill_total', inheritance_parent_lookup_miss_filter)}[$__rate_interval])) by ({NODE_LABEL}))",
+                            "parent meta lookup hit ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Inheritance - Unit inheritance Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', unit_inheritance_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "unit inheritance {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Inheritance - Unit inheritance Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', unit_inheritance_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) / (sum(rate({metric('refill_total', unit_inheritance_hit_filter)}[$__rate_interval])) by ({NODE_LABEL}) + sum(rate({metric('refill_total', unit_inheritance_miss_filter)}[$__rate_interval])) by ({NODE_LABEL}))",
+                            "unit inheritance ratio @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Block Refill Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', block_refill_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
+                            "block refill {{op}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Block Refill Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('refill_total', block_refill_success_filter)}[$__rate_interval])) by ({NODE_LABEL}) / sum(rate({metric('refill_total', block_refill_unfiltered_filter)}[$__rate_interval])) by ({NODE_LABEL})",
+                            "block refill ratio @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),

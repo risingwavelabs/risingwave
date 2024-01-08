@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ impl SplitReader for NexmarkSplitReader {
         let offset = split.start_offset.unwrap_or(split_index);
         let assigned_split = split;
 
-        let mut generator = EventGenerator::new(NexmarkConfig::from(&*properties))
+        let mut generator = EventGenerator::new(NexmarkConfig::from(&properties))
             .with_offset(offset)
             .with_step(split_num);
         // If the user doesn't specify the event type in the source definition, then the user
@@ -188,18 +188,18 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::source::nexmark::{NexmarkPropertiesInner, NexmarkSplitEnumerator};
+    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
     use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
-        let props = Box::new(NexmarkPropertiesInner {
+        let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
             table_type: Some(EventType::Bid),
             max_chunk_size: 5,
             ..Default::default()
-        });
+        };
 
         let mut enumerator =
             NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())

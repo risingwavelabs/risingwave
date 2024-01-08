@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -343,6 +344,9 @@ impl GenericPlanNode for Scan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
+        if matches!(self.table_catalog.table_type, TableType::Internal) {
+            return None;
+        }
         let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
         self.table_desc
             .stream_key

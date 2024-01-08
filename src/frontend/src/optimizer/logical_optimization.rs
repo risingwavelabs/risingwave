@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -240,7 +240,11 @@ static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Push down filter with now into a left semijoin",
-        vec![FilterWithNowToJoinRule::create()],
+        vec![
+            SplitNowAndRule::create(),
+            SplitNowOrRule::create(),
+            FilterWithNowToJoinRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });

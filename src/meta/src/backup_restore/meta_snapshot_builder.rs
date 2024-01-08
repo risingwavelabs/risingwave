@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@ use anyhow::anyhow;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
@@ -46,10 +46,10 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
         }
     }
 
-    pub async fn build<D: Future<Output = HummockVersion>>(
+    pub async fn build(
         &mut self,
         id: MetaSnapshotId,
-        hummock_version_builder: D,
+        hummock_version_builder: impl Future<Output = HummockVersion>,
     ) -> BackupResult<()> {
         self.snapshot.format_version = VERSION;
         self.snapshot.id = id;
@@ -169,7 +169,8 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
     use risingwave_common::system_param::system_params_for_test;
-    use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_pb::hummock::HummockVersionStats;
 
     use crate::backup_restore::meta_snapshot_builder;
     use crate::manager::model::SystemParamsModel;

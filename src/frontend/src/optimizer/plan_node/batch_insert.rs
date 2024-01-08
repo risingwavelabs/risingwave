@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,6 +101,7 @@ impl ToBatchPb for BatchInsert {
             },
             row_id_index: self.core.row_id_index.map(|index| index as _),
             returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }

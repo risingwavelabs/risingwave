@@ -165,6 +165,8 @@ impl MigrationTrait for Migration {
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
+                    .col(ColumnDef::new(Object::InitializedAtClusterVersion).string())
+                    .col(ColumnDef::new(Object::CreatedAtClusterVersion).string())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_object_owner_id")
@@ -395,6 +397,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
+                    .col(ColumnDef::new(Actor::ExprContext).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")
@@ -538,7 +541,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::StreamKey).json().not_null())
                     .col(ColumnDef::new(Table::AppendOnly).boolean().not_null())
                     .col(ColumnDef::new(Table::Properties).json().not_null())
-                    .col(ColumnDef::new(Table::FragmentId).integer().not_null())
+                    .col(ColumnDef::new(Table::FragmentId).integer())
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
                     .col(ColumnDef::new(Table::ValueIndices).json().not_null())
@@ -562,10 +565,8 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Table::JobStatus).string().not_null())
-                    .col(ColumnDef::new(Table::CreateType).string().not_null())
                     .col(ColumnDef::new(Table::Description).string())
-                    .col(ColumnDef::new(Table::Version).json().not_null())
+                    .col(ColumnDef::new(Table::Version).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -623,7 +624,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFormatDesc).json())
-                    .col(ColumnDef::new(Sink::JobStatus).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_object_id")
@@ -671,8 +671,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexItems).json().not_null())
-                    .col(ColumnDef::new(Index::OriginalColumns).json().not_null())
-                    .col(ColumnDef::new(Index::JobStatus).string().not_null())
+                    .col(ColumnDef::new(Index::IndexColumnsLen).integer().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_index_object_id")
@@ -709,6 +708,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Language).string().not_null())
                     .col(ColumnDef::new(Function::Link).string().not_null())
                     .col(ColumnDef::new(Function::Identifier).string().not_null())
+                    .col(ColumnDef::new(Function::Body).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -969,6 +969,7 @@ enum Actor {
     ParallelUnitId,
     UpstreamActorIds,
     VnodeBitmap,
+    ExprContext,
 }
 
 #[derive(DeriveIden)]
@@ -1021,8 +1022,6 @@ enum Table {
     DmlFragmentId,
     Cardinality,
     CleanedByWatermark,
-    JobStatus,
-    CreateType,
     Description,
     Version,
 }
@@ -1060,7 +1059,6 @@ enum Sink {
     DbName,
     SinkFromName,
     SinkFormatDesc,
-    JobStatus,
 }
 
 #[derive(DeriveIden)]
@@ -1089,8 +1087,7 @@ enum Index {
     IndexTableId,
     PrimaryTableId,
     IndexItems,
-    OriginalColumns,
-    JobStatus,
+    IndexColumnsLen,
 }
 
 #[derive(DeriveIden)]
@@ -1103,6 +1100,7 @@ enum Function {
     Language,
     Link,
     Identifier,
+    Body,
     Kind,
 }
 
@@ -1116,6 +1114,8 @@ enum Object {
     DatabaseId,
     InitializedAt,
     CreatedAt,
+    InitializedAtClusterVersion,
+    CreatedAtClusterVersion,
 }
 
 #[derive(DeriveIden)]

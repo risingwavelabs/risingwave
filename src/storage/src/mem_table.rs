@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,20 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::Bound::{Included, Unbounded};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
@@ -54,7 +58,7 @@ pub enum KeyOp {
 #[derive(Clone)]
 pub struct MemTable {
     pub(crate) buffer: MemTableStore,
-    pub(crate) is_consistent_op: bool,
+    pub(crate) op_consistency_level: OpConsistencyLevel,
     pub(crate) kv_size: KvSize,
 }
 
@@ -107,17 +111,17 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
 
 impl MemTable {
-    pub fn new(is_consistent_op: bool) -> Self {
+    pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
         Self {
             buffer: BTreeMap::new(),
-            is_consistent_op,
+            op_consistency_level,
             kv_size: KvSize::new(),
         }
     }
 
     pub fn drain(&mut self) -> Self {
         self.kv_size.set(0);
-        std::mem::replace(self, Self::new(self.is_consistent_op))
+        std::mem::replace(self, Self::new(self.op_consistency_level.clone()))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -126,7 +130,7 @@ impl MemTable {
 
     /// write methods
     pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
-        if !self.is_consistent_op {
+        if let OpConsistencyLevel::Inconsistent = &self.op_consistency_level {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
             let insert_value = KeyOp::Insert(value);
             self.kv_size.add(&pk, &insert_value);
@@ -134,7 +138,7 @@ impl MemTable {
             self.sub_origin_size(origin_value, key_len);
 
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -169,13 +173,14 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
-        if !self.is_consistent_op {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let delete_value = KeyOp::Delete(old_value);
             self.kv_size.add(&pk, &delete_value);
             let origin_value = self.buffer.insert(pk, delete_value);
             self.sub_origin_size(origin_value, key_len);
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -189,7 +194,7 @@ impl MemTable {
                 self.kv_size.sub_val(origin_value);
                 match origin_value {
                     KeyOp::Insert(original_value) => {
-                        if ENABLE_SANITY_CHECK && original_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -233,7 +238,8 @@ impl MemTable {
         old_value: Bytes,
         new_value: Bytes,
     ) -> Result<()> {
-        if !self.is_consistent_op {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
             let update_value = KeyOp::Update((old_value, new_value));
@@ -241,7 +247,7 @@ impl MemTable {
             let origin_value = self.buffer.insert(pk, update_value);
             self.sub_origin_size(origin_value, key_len);
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -255,7 +261,7 @@ impl MemTable {
                 self.kv_size.sub_val(origin_value);
                 match origin_value {
                     KeyOp::Insert(original_new_value) => {
-                        if ENABLE_SANITY_CHECK && original_new_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -268,7 +274,7 @@ impl MemTable {
                         Ok(())
                     }
                     KeyOp::Update((origin_old_value, original_new_value)) => {
-                        if ENABLE_SANITY_CHECK && original_new_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -426,7 +432,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     epoch: Option<u64>,
 
     table_id: TableId,
-    is_consistent_op: bool,
+    op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
 }
 
@@ -434,10 +440,10 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     pub fn new(inner: S, option: NewLocalOptions) -> Self {
         Self {
             inner,
-            mem_table: MemTable::new(option.is_consistent_op),
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
             epoch: None,
             table_id: option.table_id,
-            is_consistent_op: option.is_consistent_op,
+            op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
         }
     }
@@ -524,45 +530,48 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
-                // state store with `is_consistent_op=false`.
+                // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_insert_sanity_check(
-                            key.clone(),
-                            value.clone(),
+                            &key,
+                            &value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_delete_sanity_check(
-                            key.clone(),
-                            old_value,
+                            &key,
+                            &old_value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_update_sanity_check(
-                            key.clone(),
-                            old_value,
-                            new_value.clone(),
+                            &key,
+                            &old_value,
+                            &new_value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -570,16 +579,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 }
             }
         }
-        self.inner
-            .ingest_batch(
-                kv_pairs,
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            )
-            .await
+        self.inner.ingest_batch(
+            kv_pairs,
+            delete_ranges,
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
     }
 
     fn epoch(&self) -> u64 {
@@ -600,7 +607,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64, _opts: SealCurrentEpochOptions) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -612,6 +619,39 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+        if let Some((direction, watermarks)) = opts.table_watermarks {
+            let delete_ranges = watermarks
+                .iter()
+                .flat_map(|vnode_watermark| {
+                    let inner_range = match direction {
+                        WatermarkDirection::Ascending => {
+                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                        }
+                        WatermarkDirection::Descending => {
+                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                        }
+                    };
+                    vnode_watermark
+                        .vnode_bitmap()
+                        .iter_vnodes()
+                        .map(move |vnode| {
+                            let (start, end) =
+                                prefixed_range_with_vnode(inner_range.clone(), vnode);
+                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                        })
+                })
+                .collect_vec();
+            if let Err(e) = self.inner.ingest_batch(
+                Vec::new(),
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            ) {
+                error!(err = ?e, "failed to write delete ranges of table watermark");
+            }
+        }
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
@@ -633,10 +673,13 @@ mod tests {
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+    use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(true);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -746,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size_not_consistent_op() {
-        let mut mem_table = MemTable::new(false);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::Inconsistent);
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -829,7 +872,9 @@ mod tests {
         let mut test_data = ordered_test_data.clone();
 
         test_data.shuffle(&mut rng);
-        let mut mem_table = MemTable::new(true);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
         for (key, op) in test_data {
             match op {
                 KeyOp::Insert(value) => {

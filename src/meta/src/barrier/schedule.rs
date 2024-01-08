@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,8 +92,12 @@ impl ScheduledQueue {
         // command and execute it when the cluster is ready to clean up it.
         // TODO: this is just a workaround to allow dropping streaming jobs when the cluster is under recovery,
         // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
-        if let QueueStatus::Blocked(reason) = &self.status &&
-            !matches!(scheduled.command, Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)) {
+        if let QueueStatus::Blocked(reason) = &self.status
+            && !matches!(
+                scheduled.command,
+                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+            )
+        {
             return Err(MetaError::unavailable(reason));
         }
         self.queue.push_back(scheduled);
@@ -427,6 +431,7 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
+            + 1
             >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }

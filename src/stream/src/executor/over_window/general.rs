@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
+use delta_btree_map::{Change, PositionType};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -33,7 +34,6 @@ use risingwave_expr::window_function::{
 };
 use risingwave_storage::StateStore;
 
-use super::delta_btree_map::Change;
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
@@ -42,7 +42,6 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
@@ -658,6 +657,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             this.state_table.update_vnode_bitmap(vnode_bitmap);
                         if cache_may_stale {
                             vars.cached_partitions.clear();
+                            vars.recently_accessed_ranges.clear();
                         }
                     }
 
