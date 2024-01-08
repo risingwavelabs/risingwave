@@ -611,7 +611,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        &barrier_manager,
+        barrier_manager.context().clone(),
         sink_manager.clone(),
     )
     .await;
@@ -622,7 +622,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        &barrier_manager,
+        barrier_manager.context().clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());

@@ -41,14 +41,15 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
+use crate::barrier::schedule::ScheduledBarriers;
+use crate::barrier::{CheckpointControl, Command, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{MetadataManager, WorkerId};
 use crate::model::{BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
-impl GlobalBarrierManager {
+impl GlobalBarrierManagerContext {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.
@@ -63,17 +64,16 @@ impl GlobalBarrierManager {
     }
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
-        let default_checkpoint_control = CheckpointControl::new(self.context.metrics.clone());
-        self.context
-            .resolve_actor_info(|s, table_id, actor_id| {
-                default_checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
-            })
-            .await
+        let default_checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        self.resolve_actor_info(|s, table_id, actor_id| {
+            default_checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
+        })
+        .await
     }
 
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self) -> MetaResult<()> {
-        match &self.context.metadata_manager {
+        match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 // Please look at `CatalogManager::clean_dirty_tables` for more details.
                 mgr.catalog_manager
@@ -99,14 +99,12 @@ impl GlobalBarrierManager {
                     .await?;
 
                 // unregister compaction group for dirty table fragments.
-                self.context
-                    .hummock_manager
+                self.hummock_manager
                     .unregister_table_fragments_vec(&to_drop_table_fragments)
                     .await;
 
                 // clean up source connector dirty changes.
-                self.context
-                    .source_manager
+                self.source_manager
                     .drop_source_fragments(&to_drop_table_fragments)
                     .await;
             }
@@ -121,8 +119,7 @@ impl GlobalBarrierManager {
                     .await?;
 
                 // unregister compaction group for cleaned state tables.
-                self.context
-                    .hummock_manager
+                self.hummock_manager
                     .unregister_table_ids_fail_fast(
                         &state_table_ids
                             .into_iter()
@@ -132,8 +129,7 @@ impl GlobalBarrierManager {
                     .await;
 
                 // unregister cleaned sources.
-                self.context
-                    .source_manager
+                self.source_manager
                     .unregister_sources(source_ids.into_iter().map(|id| id as u32).collect())
                     .await;
             }
@@ -143,14 +139,14 @@ impl GlobalBarrierManager {
     }
 
     async fn recover_background_mv_progress(&self) -> MetaResult<()> {
-        match &self.context.metadata_manager {
+        match &self.metadata_manager {
             MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
             MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
     }
 
     async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
-        let MetadataManager::V1(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unreachable!()
         };
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
@@ -192,17 +188,18 @@ impl GlobalBarrierManager {
             }
         }
 
-        let version_stats = self.context.hummock_manager.get_version_stats().await;
+        let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            *self.context.tracker.lock().await = CreateMviewProgressTracker::recover(
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
                 table_map.into(),
                 upstream_mv_counts.into(),
                 mview_definitions.into(),
                 version_stats,
                 senders.into(),
                 table_fragment_map.into(),
-                self.context.metadata_manager.clone(),
+                self.metadata_manager.clone(),
             );
         }
         for (table, internal_tables, finished) in receivers {
@@ -240,7 +237,7 @@ impl GlobalBarrierManager {
     }
 
     async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
-        let MetadataManager::V2(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
             unreachable!()
         };
         let mviews = mgr
@@ -277,10 +274,10 @@ impl GlobalBarrierManager {
             receivers.push((mview.table_id, finished_rx));
         }
 
-        let version_stats = self.context.hummock_manager.get_version_stats().await;
+        let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            let mut tracker = self.context.tracker.lock().await;
+            let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::recover(
                 table_map.into(),
                 upstream_mv_counts.into(),
@@ -288,7 +285,7 @@ impl GlobalBarrierManager {
                 version_stats,
                 senders.into(),
                 table_fragment_map.into(),
-                self.context.metadata_manager.clone(),
+                self.metadata_manager.clone(),
             );
         }
         for (id, finished) in receivers {
@@ -330,9 +327,10 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
+        scheduled_barriers: &ScheduledBarriers,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers
+        scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
             .await;
 
@@ -341,7 +339,7 @@ impl GlobalBarrierManager {
             .await
             .expect("clean dirty streaming jobs");
 
-        self.context.sink_manager.reset().await;
+        self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
 
         // Mview progress needs to be recovered.
@@ -353,7 +351,7 @@ impl GlobalBarrierManager {
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
-        let recovery_timer = self.context.metrics.recovery_latency.start_timer();
+        let recovery_timer = self.metrics.recovery_latency.start_timer();
 
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
@@ -361,9 +359,8 @@ impl GlobalBarrierManager {
                     // This is a quick path to accelerate the process of dropping streaming jobs. Not that
                     // some table fragments might have been cleaned as dirty, but it's fine since the drop
                     // interface is idempotent.
-                    if let MetadataManager::V1(mgr) = &self.context.metadata_manager {
-                        let to_drop_tables =
-                            self.scheduled_barriers.pre_apply_drop_scheduled().await;
+                    if let MetadataManager::V1(mgr) = &self.metadata_manager {
+                        let to_drop_tables = scheduled_barriers.pre_apply_drop_scheduled().await;
                         mgr.fragment_manager
                             .drop_table_fragments_vec(&to_drop_tables)
                             .await?;
@@ -402,8 +399,7 @@ impl GlobalBarrierManager {
                     })?;
 
                     // get split assignments for all actors
-                    let source_split_assignments =
-                        self.context.source_manager.list_assignments().await;
+                    let source_split_assignments = self.source_manager.list_assignments().await;
                     let command = Command::Plain(Some(Mutation::Add(AddMutation {
                         // Actors built during recovery is not treated as newly added actors.
                         actor_dispatchers: Default::default(),
@@ -423,7 +419,7 @@ impl GlobalBarrierManager {
                         paused_reason,
                         command,
                         BarrierKind::Initial,
-                        self.context.clone(),
+                        self.clone(),
                         tracing::Span::current(), // recovery span
                     ));
 
@@ -431,11 +427,7 @@ impl GlobalBarrierManager {
                     {
                         use risingwave_common::util::epoch::INVALID_EPOCH;
 
-                        let mce = self
-                            .context
-                            .hummock_manager
-                            .get_current_max_committed_epoch()
-                            .await;
+                        let mce = self.hummock_manager.get_current_max_committed_epoch().await;
 
                         if mce != INVALID_EPOCH {
                             command_ctx.wait_epoch_commit(mce).await?;
@@ -465,7 +457,7 @@ impl GlobalBarrierManager {
                     BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };
                 if recovery_result.is_err() {
-                    self.context.metrics.recovery_failure_cnt.inc();
+                    self.metrics.recovery_failure_cnt.inc();
                 }
                 recovery_result
             }
@@ -475,7 +467,7 @@ impl GlobalBarrierManager {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready().await;
+        scheduled_barriers.mark_ready().await;
 
         tracing::info!(
             epoch = state.in_flight_prev_epoch().value().0,
@@ -488,14 +480,14 @@ impl GlobalBarrierManager {
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors(&self) -> MetaResult<BarrierActorInfo> {
-        match &self.context.metadata_manager {
+        match &self.metadata_manager {
             MetadataManager::V1(_) => self.migrate_actors_v1().await,
             MetadataManager::V2(_) => self.migrate_actors_v2().await,
         }
     }
 
     async fn migrate_actors_v2(&self) -> MetaResult<BarrierActorInfo> {
-        let MetadataManager::V2(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V2(mgr) = &self.metadata_manager else {
             unreachable!()
         };
 
@@ -577,7 +569,7 @@ impl GlobalBarrierManager {
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(&self) -> MetaResult<BarrierActorInfo> {
-        let MetadataManager::V1(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unreachable!()
         };
 
@@ -610,21 +602,21 @@ impl GlobalBarrierManager {
     }
 
     async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
-        match &self.context.metadata_manager {
+        match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(info).await,
             MetadataManager::V2(_) => self.scale_actors_v2(info),
         }
     }
 
     fn scale_actors_v2(&self, _info: &BarrierActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V2(_mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V2(_mgr) = &self.metadata_manager else {
             unreachable!()
         };
         unimplemented!("implement auto-scale funcs in sql backend")
     }
 
     async fn scale_actors_v1(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
-        let MetadataManager::V1(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unreachable!()
         };
         debug!("start scaling-in offline actors.");
@@ -669,7 +661,6 @@ impl GlobalBarrierManager {
             .collect();
 
         let plan = self
-            .context
             .scale_controller
             .as_ref()
             .unwrap()
@@ -680,7 +671,6 @@ impl GlobalBarrierManager {
             .await?;
 
         let (reschedule_fragment, applied_reschedules) = self
-            .context
             .scale_controller
             .as_ref()
             .unwrap()
@@ -694,7 +684,6 @@ impl GlobalBarrierManager {
             .await?;
 
         if let Err(e) = self
-            .context
             .scale_controller
             .as_ref()
             .unwrap()
@@ -723,7 +712,7 @@ impl GlobalBarrierManager {
         &self,
         expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
-        let MetadataManager::V1(mgr) = &self.context.metadata_manager else {
+        let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unreachable!()
         };
 
@@ -853,7 +842,7 @@ impl GlobalBarrierManager {
             .flatten_ok()
             .try_collect()?;
 
-        let mut node_actors = self.context.metadata_manager.all_node_actors(false).await?;
+        let mut node_actors = self.metadata_manager.all_node_actors(false).await?;
 
         info.actor_map.iter().map(|(node_id, actors)| {
             let new_actors = node_actors.remove(node_id).unwrap_or_default();

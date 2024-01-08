@@ -732,7 +732,8 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(prev_epoch, paused_reason)
+            self.context
+                .recovery(prev_epoch, paused_reason, &self.scheduled_barriers)
                 .instrument(span)
                 .await
         };
@@ -845,7 +846,8 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
+        self.context
+            .inject_barrier(command_ctx.clone(), barrier_complete_tx)
             .instrument(span)
             .await;
 
@@ -867,7 +869,9 @@ impl GlobalBarrierManager {
         self.checkpoint_control
             .enqueue_command(command_ctx.clone(), notifiers);
     }
+}
 
+impl GlobalBarrierManagerContext {
     /// Inject a barrier to all CNs and spawn a task to collect it
     async fn inject_barrier(
         &self,
@@ -1023,7 +1027,9 @@ impl GlobalBarrierManager {
             .send(BarrierCompletion { prev_epoch, result })
             .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
+}
 
+impl GlobalBarrierManager {
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
     /// order. If commit is err, all nodes will be handled.
     async fn handle_barrier_complete(&mut self, completion: BarrierCompletion) {
@@ -1111,7 +1117,11 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.state = self.recovery(prev_epoch, None).instrument(span).await;
+            self.state = self
+                .context
+                .recovery(prev_epoch, None, &self.scheduled_barriers)
+                .instrument(span)
+                .await;
             self.context.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
@@ -1346,6 +1356,8 @@ impl GlobalBarrierManagerContext {
         ddl_progress.into_values().collect()
     }
 }
+
+pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();

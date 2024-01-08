@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_meta::barrier::{GlobalBarrierManager, GlobalBarrierManagerContext};
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
@@ -28,6 +27,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
+use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
@@ -37,7 +37,7 @@ pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
-    barrier_manager_context: GlobalBarrierManagerContext,
+    barrier_manager: BarrierManagerRef,
     scale_controller: Option<ScaleControllerRef>,
 }
 
@@ -46,7 +46,7 @@ impl ScaleServiceImpl {
         metadata_manager: MetadataManager,
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
-        barrier_manager: &GlobalBarrierManager,
+        barrier_manager: BarrierManagerRef,
     ) -> Self {
         let scale_controller = match &metadata_manager {
             MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
@@ -60,7 +60,7 @@ impl ScaleServiceImpl {
             metadata_manager,
             source_manager,
             stream_manager,
-            barrier_manager_context: barrier_manager.context().clone(),
+            barrier_manager,
             scale_controller,
         }
     }
@@ -139,7 +139,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.barrier_manager_context.check_status_running().await?;
+        self.barrier_manager.check_status_running().await?;
 
         let MetadataManager::V1(mgr) = &self.metadata_manager else {
             unimplemented!("only available in v1");
@@ -220,7 +220,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        self.barrier_manager_context.check_status_running().await?;
+        self.barrier_manager.check_status_running().await?;
 
         let req = request.into_inner();
 

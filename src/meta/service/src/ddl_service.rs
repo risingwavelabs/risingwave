@@ -18,7 +18,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_pb::catalog::connection::private_link_service::{
@@ -32,6 +31,7 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use tonic::{Request, Response, Status};
 
+use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -59,7 +59,7 @@ impl DdlServiceImpl {
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
-        barrier_manager: &GlobalBarrierManager,
+        barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
