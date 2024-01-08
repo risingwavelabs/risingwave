@@ -39,7 +39,7 @@ import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
 import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
@@ -102,6 +102,22 @@ function buildPlanNodeDependency(
   })
 }
 
+function findMergeNodes(root: StreamNode): MergeNode[] {
+  let mergeNodes = new Set<MergeNode>()
+
+  const findMergeNodesRecursive = (node: StreamNode) => {
+    if (node.nodeBody?.$case === "merge") {
+      mergeNodes.add(node.nodeBody.merge)
+    }
+    for (const child of node.input || []) {
+      findMergeNodesRecursive(child)
+    }
+  }
+
+  findMergeNodesRecursive(root)
+  return Array.from(mergeNodes)
+}
+
 function buildFragmentDependencyAsEdges(
   fragments: TableFragments
 ): FragmentBox[] {
@@ -116,11 +132,17 @@ function buildFragmentDependencyAsEdges(
   for (const id in fragments.fragments) {
     const fragment = fragments.fragments[id]
     const parentIds = new Set<number>()
+    const externalParentIds = new Set<number>()
+
     for (const actor of fragment.actors) {
       for (const upstreamActorId of actor.upstreamActorId) {
         const upstreamFragmentId = actorToFragmentMapping.get(upstreamActorId)
         if (upstreamFragmentId) {
           parentIds.add(upstreamFragmentId)
+        } else {
+          for (const m of findMergeNodes(actor.nodes!)) {
+            externalParentIds.add(m.upstreamFragmentId)
+          }
         }
       }
     }
@@ -128,11 +150,12 @@ function buildFragmentDependencyAsEdges(
       id: fragment.fragmentId.toString(),
       name: `Fragment ${fragment.fragmentId}`,
       parentIds: Array.from(parentIds).map((x) => x.toString()),
+      externalParentIds: Array.from(externalParentIds).map((x) => x.toString()),
       width: 0,
       height: 0,
       order: fragment.fragmentId,
       fragment,
-    } as FragmentBox)
+    })
   }
   return nodes
 }

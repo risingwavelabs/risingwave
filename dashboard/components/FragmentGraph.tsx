@@ -87,10 +87,10 @@ function boundBox<Datum>(
 const nodeRadius = 12
 const nodeMarginX = nodeRadius * 6
 const nodeMarginY = nodeRadius * 4
-const fragmentMarginX = nodeRadius
-const fragmentMarginY = nodeRadius
-const fragmentDistanceX = nodeRadius * 5
-const fragmentDistanceY = nodeRadius * 5
+const fragmentMarginX = nodeRadius * 2
+const fragmentMarginY = nodeRadius * 2
+const fragmentDistanceX = nodeRadius * 4
+const fragmentDistanceY = nodeRadius * 4
 
 export default function FragmentGraph({
   planNodeDependencies,
@@ -421,6 +421,7 @@ export default function FragmentGraph({
   }, [
     fragmentLayout,
     fragmentEdgeLayout,
+    backPressures,
     selectedFragmentId,
     openPlanNodeDetail,
   ])
