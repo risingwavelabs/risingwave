@@ -60,7 +60,7 @@
   </a>
 </div>
 
-RisingWave is a distributed SQL streaming database engineered to provide the <b>simplest</b> and <b>most cost-efficient</b> approach for <b>processing</b> and <b>managing</b> streaming data with utmost reliability.
+RisingWave is a distributed SQL streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b> and <b>managing</b> streaming data with utmost reliability.
 
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
@@ -142,8 +142,6 @@ RisingWave isn’t a panacea for all data engineering hurdles. It has its own se
   * RisingWave does not provide low-level APIs in languages like Java and Scala, and does not allow users to manage internal states manually (unless you want to hack!). _For coding in Java, Python, and other languages, please consider using RisingWave's [User-Defined Functions (UDF)](https://docs.risingwave.com/docs/current/user-defined-functions/)_.
 * **No support for transaction processing**
   * RisingWave isn’t cut out for transactional workloads, thus it’s not a viable substitute for operational databases dedicated to transaction processing. _However, it supports [read-only transactions](https://docs.risingwave.com/docs/current/transactions/#read-only-transactions), ensuring data freshness and consistency. It also comprehends the transactional semantics of upstream database [Change Data Capture (CDC)](https://docs.risingwave.com/docs/current/transactions/#transactions-within-a-cdc-table)_.
-* **Not tailored for ad-hoc analytical queries**
-  * RisingWave's row store design is tailored for optimal stream processing performance rather than interactive analytical workloads. Hence, it's not a suitable replacement for OLAP databases. Yet, a reliable integration with many OLAP databases exists, and a collaborative use of RisingWave and OLAP databases is a common practice among many users.
 
 
 ## In-production use cases
