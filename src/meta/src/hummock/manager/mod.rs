@@ -778,7 +778,7 @@ impl HummockManager {
             BTreeMapTransactionWrapper,
             BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots,)
         );
-        let release_snapshot = pinned_snapshots.remove(&context_id);
+        let release_snapshot = pinned_snapshots.remove(context_id);
         if release_snapshot.is_some() {
             commit_multi_var!(
                 self.env.meta_store(),
@@ -1291,7 +1291,7 @@ impl HummockManager {
         let mut compact_task = if let Some(input_task) = trivial_move_compact_task {
             input_task
         } else {
-            match compact_task_assignment.remove(&task_id) {
+            match compact_task_assignment.remove(task_id) {
                 Some(compact_task) => compact_task.compact_task.unwrap(),
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task_id));
@@ -1317,12 +1317,12 @@ impl HummockManager {
             // purge stale compact_status
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
-                    compact_statuses.remove(&group_id);
+                    compact_statuses.remove(group_id);
                 }
             }
 
-            match compact_statuses.get_mut(&compact_task.compaction_group_id) {
-                Some(compact_status) => {
+            match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                Some(mut compact_status) => {
                     compact_status.report_compact_task(&compact_task);
                 }
                 None => {
@@ -3152,14 +3152,14 @@ fn drop_sst(
     object_id: HummockSstableObjectId,
     sst_id: HummockSstableId,
 ) -> bool {
-    match branched_ssts.get_mut(&object_id) {
-        Some(entry) => {
+    match branched_ssts.get_mut(object_id) {
+        Some(mut entry) => {
             // if group_id not exist, it would not pass the stale check before.
             let removed_sst_id = entry.get(&group_id).unwrap();
             assert_eq!(*removed_sst_id, sst_id);
             entry.remove(&group_id);
             if entry.is_empty() {
-                branched_ssts.remove(&object_id);
+                branched_ssts.remove(object_id);
                 true
             } else {
                 false

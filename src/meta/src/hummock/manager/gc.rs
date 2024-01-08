@@ -95,7 +95,7 @@ impl HummockManager {
             return Ok((0, 0));
         }
         for delta_id in &batch {
-            hummock_version_deltas.remove(delta_id);
+            hummock_version_deltas.remove(*delta_id);
         }
         commit_multi_var!(
             self.env.meta_store(),

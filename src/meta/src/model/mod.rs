@@ -676,27 +676,57 @@ pub enum BTreeMapTransactionWrapper<'a, K: Ord, V> {
     V2(BTreeMapTransaction<'a, K, V, TransactionV2>),
 }
 
-impl<'a, K: Ord + Debug, V: Clone> Deref for BTreeMapTransactionWrapper<'a, K, V> {
-    type Target = BTreeMap<K, V>;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
-            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
-        }
-    }
-}
-
-impl<'a, K: Ord + Debug, V: Clone> DerefMut for BTreeMapTransactionWrapper<'a, K, V> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
-            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
-        }
-    }
-}
-
 impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
+    pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
+            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
+        }
+    }
+
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
+            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
+        }
+    }
+
+    /// Get the value of the provided key by merging the staging value and the original value
+    pub fn get(&self, key: &K) -> Option<&V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.get(key),
+            BTreeMapTransactionWrapper::V2(v) => v.get(key),
+        }
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.contains_key(key),
+            BTreeMapTransactionWrapper::V2(v) => v.contains_key(key),
+        }
+    }
+
+    pub fn get_mut(&mut self, key: K) -> Option<BTreeMapTransactionValueGuard<'_, K, V>> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.get_mut(key),
+            BTreeMapTransactionWrapper::V2(v) => v.get_mut(key),
+        }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.insert(key, value),
+            BTreeMapTransactionWrapper::V2(v) => v.insert(key, value),
+        }
+    }
+
+    pub fn remove(&mut self, key: K) -> Option<V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.remove(key),
+            BTreeMapTransactionWrapper::V2(v) => v.remove(key),
+        }
+    }
+
     pub fn commit_memory(self) {
         match self {
             BTreeMapTransactionWrapper::V1(v) => v.commit_memory(),
