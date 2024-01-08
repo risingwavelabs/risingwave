@@ -21,7 +21,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::stream::Fuse;
 use futures::{stream, StreamExt, TryStreamExt};
@@ -709,10 +709,7 @@ impl StageRunner {
                 return Err(SchedulerError::EmptyWorkerNodes);
             }
             return Ok(Some(
-                candidates
-                    .get(self.stage.session_id.0 as usize % candidates.len())
-                    .context("no available worker node for dml")?
-                    .clone(),
+                candidates[self.stage.session_id.0 as usize % candidates.len()].clone(),
             ));
         };
 

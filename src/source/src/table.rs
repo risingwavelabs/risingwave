@@ -95,6 +95,7 @@ impl TableDmlHandle {
             }
             let len = guard.changes_txs.len();
             // Use session id instead of txn_id to choose channel so that we can preserve transaction order in the same session.
+            // PS: only hold if there's no scaling on the table.
             let sender = guard
                 .changes_txs
                 .get((session_id % len as u32) as usize)

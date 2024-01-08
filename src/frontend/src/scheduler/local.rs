@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -583,10 +583,7 @@ impl LocalQueryExecution {
                 if candidates.is_empty() {
                     return Err(SchedulerError::EmptyWorkerNodes);
                 }
-                candidates
-                    .get(stage.session_id.0 as usize % candidates.len())
-                    .context("no available worker node for dml")?
-                    .clone()
+                candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };
             Ok(vec![worker_node])
         } else {
