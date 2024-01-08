@@ -186,6 +186,12 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
+            if (isMultiTableShared) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
         } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -217,20 +223,10 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (isMultiTableShared) {
-            adjustConfigForSharedCdcStream(dbzProps);
-        }
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
-    }
-
-    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
-        // disable table filtering for the shared cdc stream
-        LOG.info("Disable table filtering for the shared cdc stream");
-        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
