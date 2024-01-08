@@ -15,13 +15,16 @@
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::mem::take;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
+use futures::FutureExt;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
@@ -45,9 +48,8 @@ use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -58,6 +60,7 @@ use self::notifier::Notifier;
 use self::progress::TrackingCommand;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::rpc::BarrierRpcManager;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -72,6 +75,7 @@ mod info;
 mod notifier;
 mod progress;
 mod recovery;
+mod rpc;
 mod schedule;
 mod trace;
 
@@ -135,6 +139,7 @@ struct Scheduled {
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
 }
+
 /// Changes to the actors to be sent or collected after this command is committed.
 ///
 /// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
@@ -185,6 +190,8 @@ pub struct GlobalBarrierManagerContext {
     env: MetaSrvEnv,
 }
 
+type BarrierCompletionFuture = impl Future<Output = BarrierCompletion> + Send + 'static;
+
 /// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
@@ -211,6 +218,8 @@ pub struct GlobalBarrierManager {
     state: BarrierManagerState,
 
     checkpoint_control: CheckpointControl,
+
+    rpc_manager: BarrierRpcManager,
 }
 
 /// Controls the concurrent execution of commands.
@@ -605,6 +614,8 @@ impl GlobalBarrierManager {
             env: env.clone(),
         };
 
+        let rpc_manager = BarrierRpcManager::new(context.clone());
+
         Self {
             enable_recovery,
             scheduled_barriers,
@@ -613,6 +624,7 @@ impl GlobalBarrierManager {
             env,
             state: initial_invalid_state,
             checkpoint_control,
+            rpc_manager,
         }
     }
 
@@ -717,7 +729,6 @@ impl GlobalBarrierManager {
 
         let mut min_interval = tokio::time::interval(interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env
@@ -750,9 +761,9 @@ impl GlobalBarrierManager {
                     }
                 }
                 // Barrier completes.
-                completion = barrier_complete_rx.recv() => {
+                completion = self.rpc_manager.next_complete_barrier() => {
                     self.handle_barrier_complete(
-                        completion.unwrap(),
+                        completion,
                     )
                     .await;
                 }
@@ -760,11 +771,11 @@ impl GlobalBarrierManager {
                 // There's barrier scheduled.
                 _ = self.scheduled_barriers.wait_one(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
                     min_interval.reset(); // Reset the interval as we have a new barrier.
-                    self.handle_new_barrier(&barrier_complete_tx).await;
+                    self.handle_new_barrier().await;
                 }
                 // Minimum interval reached.
                 _ = min_interval.tick(), if self.checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {
-                    self.handle_new_barrier(&barrier_complete_tx).await;
+                    self.handle_new_barrier().await;
                 }
             }
             self.checkpoint_control.update_barrier_nums_metrics();
@@ -772,10 +783,7 @@ impl GlobalBarrierManager {
     }
 
     /// Handle the new barrier from the scheduled queue and inject it.
-    async fn handle_new_barrier(
-        &mut self,
-        barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
-    ) {
+    async fn handle_new_barrier(&mut self) {
         assert!(self
             .checkpoint_control
             .can_inject_barrier(self.in_flight_barrier_nums));
@@ -821,8 +829,8 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        self.context
-            .inject_barrier(command_ctx.clone(), barrier_complete_tx)
+        self.rpc_manager
+            .inject_barrier(command_ctx.clone())
             .instrument(span)
             .await;
 
@@ -850,17 +858,11 @@ impl GlobalBarrierManager {
     async fn handle_barrier_complete(&mut self, completion: BarrierCompletion) {
         let BarrierCompletion { prev_epoch, result } = completion;
 
-        // Received barrier complete responses with an epoch that is not managed by checkpoint
-        // control, which means a recovery has been triggered. We should ignore it because
-        // trying to complete and commit the epoch is not necessary and could cause
-        // meaningless recovery again.
-        if !self.checkpoint_control.contains_epoch(prev_epoch) {
-            tracing::warn!(
-                "received barrier complete response for an unknown epoch: {}",
-                prev_epoch
-            );
-            return;
-        }
+        assert!(
+            self.checkpoint_control.contains_epoch(prev_epoch),
+            "received barrier complete response for an unknown epoch: {}",
+            prev_epoch
+        );
 
         if let Err(err) = result {
             // FIXME: If it is a connector source error occurred in the init barrier, we should pass
@@ -903,6 +905,7 @@ impl GlobalBarrierManager {
         fail_nodes: impl IntoIterator<Item = EpochNode>,
     ) {
         self.checkpoint_control.clear_changes();
+        self.rpc_manager.clear();
 
         for node in fail_nodes {
             if let Some(timer) = node.timer {
@@ -1113,8 +1116,8 @@ impl GlobalBarrierManagerContext {
     async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext>,
-        barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
-    ) {
+    ) -> BarrierCompletionFuture {
+        let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
         let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
@@ -1125,16 +1128,23 @@ impl GlobalBarrierManagerContext {
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,
-                    barrier_complete_tx.clone(),
+                    tx,
                 ));
             }
             Err(e) => {
-                let _ = barrier_complete_tx.send(BarrierCompletion {
+                let _ = tx.send(BarrierCompletion {
                     prev_epoch,
                     result: Err(e),
                 });
             }
         }
+        rx.map(move |result| match result {
+            Ok(completion) => completion,
+            Err(e) => BarrierCompletion {
+                prev_epoch,
+                result: Err(anyhow!("failed to receive barrier completion result: {:?}", e).into()),
+            },
+        })
     }
 
     /// Send inject-barrier-rpc to stream service and wait for its response before returns.
@@ -1211,7 +1221,7 @@ impl GlobalBarrierManagerContext {
         node_need_collect: HashMap<WorkerId, bool>,
         client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext>,
-        barrier_complete_tx: UnboundedSender<BarrierCompletion>,
+        barrier_complete_tx: oneshot::Sender<BarrierCompletion>,
     ) {
         let prev_epoch = command_context.prev_epoch.value().0;
         let tracing_context =
