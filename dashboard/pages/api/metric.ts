@@ -18,7 +18,7 @@ import { MetricsSample } from "../../components/metrics"
 import api from "./api"
 
 export async function getActorBackPressures() {
-  const res = await api.get("/api/metrics/actor/back_pressures")
+  const res = await api.get("/metrics/actor/back_pressures")
   return res
 }
 

@@ -30,6 +30,7 @@ pub struct FunctionCatalog {
     pub return_type: DataType,
     pub language: String,
     pub identifier: String,
+    pub body: Option<String>,
     pub link: String,
 }
 
@@ -63,6 +64,7 @@ impl From<&PbFunction> for FunctionCatalog {
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
+            body: prost.body.clone(),
             link: prost.link.clone(),
         }
     }

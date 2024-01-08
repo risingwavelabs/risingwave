@@ -576,6 +576,8 @@ message ArrangementInfo {
   repeated plan_common.ColumnDesc column_descs = 2;
   // Used to build storage table by stream lookup join of delta join.
   plan_common.StorageTableDesc table_desc = 4;
+  // Output index columns
+  repeated uint32 output_col_idx = 5;
 }
 
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will

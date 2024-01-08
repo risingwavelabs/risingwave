@@ -59,7 +59,7 @@ services:
       - "2222:2222"
     depends_on:
       - etcd-0
-    env_file: multiple_object_storage.env
+    env_file: aws.env
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:

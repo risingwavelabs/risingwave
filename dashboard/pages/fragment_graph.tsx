@@ -33,11 +33,11 @@ import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import DependencyGraph from "../components/DependencyGraph"
+import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import { ActorBox } from "../lib/layout"
+import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
@@ -53,7 +53,7 @@ export interface PlanNodeDatum {
   children?: PlanNodeDatum[]
   operatorId: string | number
   node: StreamNode | DispatcherNode
-  actor_ids?: string[]
+  actorIds?: string[]
 }
 
 function buildPlanNodeDependency(
@@ -94,15 +94,17 @@ function buildPlanNodeDependency(
 
   return d3.hierarchy({
     name: dispatcherName,
-    actor_ids: fragment.actors.map((a) => a.actorId.toString()),
+    actorIds: fragment.actors.map((a) => a.actorId.toString()),
     children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
     node: dispatcherNode,
   })
 }
 
-function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
-  const nodes: ActorBox[] = []
+function buildFragmentDependencyAsEdges(
+  fragments: TableFragments
+): FragmentBox[] {
+  const nodes: FragmentBox[] = []
   const actorToFragmentMapping = new Map<number, number>()
   for (const fragmentId in fragments.fragments) {
     const fragment = fragments.fragments[fragmentId]
@@ -128,8 +130,8 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
       width: 0,
       height: 0,
       order: fragment.fragmentId,
-      fragment: fragment,
-    } as ActorBox)
+      fragment,
+    } as FragmentBox)
   }
   return nodes
 }
@@ -326,7 +328,7 @@ export default function Streaming() {
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
               <Box flex="1" overflowY="scroll">
-                <DependencyGraph
+                <FragmentDependencyGraph
                   svgWidth={SIDEBAR_WIDTH}
                   mvDependency={fragmentDependencyDag}
                   onSelectedIdChange={(id) =>

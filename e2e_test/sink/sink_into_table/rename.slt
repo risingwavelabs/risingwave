@@ -27,11 +27,11 @@ ALTER TABLE source RENAME TO src;
 statement ok
 ALTER TABLE target RENAME TO tar;
 
-query TT
+query TT rowsort
 SELECT name, definition from rw_tables;
 ----
-tar	CREATE TABLE tar (v INT)
 src	CREATE TABLE src (v INT) APPEND ONLY
+tar	CREATE TABLE tar (v INT)
 
 query TT
 SELECT name, definition from rw_sinks;
