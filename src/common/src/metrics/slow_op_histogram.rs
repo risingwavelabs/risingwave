@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,7 +40,7 @@ pub struct SlowOpHistogramInfo<const N: usize> {
     /// count of duplicated label values
     labels_count: HashMap<[String; N], usize>,
     /// dropped label values to remove
-    labels_to_remove: Vec<[String; N]>,
+    uncollected_removed_labels: HashSet<[String; N]>,
 }
 
 #[derive(Clone)]
@@ -83,6 +83,7 @@ impl<const N: usize> SlowOpHistogramVec<N> {
         let mut guard = self.info.lock();
         let sequence = guard.sequence;
         guard.sequence += 1;
+        guard.uncollected_removed_labels.remove(&label_values);
         *guard.labels_count.entry(label_values.clone()).or_default() += 1;
         guard.ongoing.insert(sequence, (label_values, start));
 
@@ -114,7 +115,7 @@ impl<const N: usize> Collector for SlowOpHistogramVec<N> {
 
         let res = self.inner.collect();
 
-        for label_values in guard.labels_to_remove.drain(..) {
+        for label_values in guard.uncollected_removed_labels.drain() {
             let label_values_str = label_values.iter().map(|s| s.as_str()).collect_vec();
             let _ = self.inner.remove_label_values(&label_values_str);
         }
@@ -151,7 +152,7 @@ impl<const N: usize> Drop for LabeledSlowOpHistogramVecGuard<N> {
                     .labels_count
                     .remove(&label_values)
                     .expect("should exist");
-                guard.labels_to_remove.push(label_values);
+                guard.uncollected_removed_labels.insert(label_values);
             }
         }
     }
