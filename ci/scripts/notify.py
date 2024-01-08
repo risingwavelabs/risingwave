@@ -13,6 +13,7 @@ MAIN_CRON_TEST_MAP = {
     "test-notify-2": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
     "backwards-compat-tests": ["noelkwan"],
+    "sqlsmith-differential-tests": ["noelkwan"],
     "fuzz-test": ["noelkwan"],
     "e2e-test-release": ["zhi"],
     "e2e-iceberg-sink-tests": ["renjie"],
