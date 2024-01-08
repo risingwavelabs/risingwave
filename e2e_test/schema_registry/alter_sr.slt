@@ -56,7 +56,7 @@ INSERT INTO t_more_fields VALUES
     (10087, 'Rising', 'Wave', 'Labs', 'FEMALE', 25);
 
 statement ok
-CREATE SINK sink_more_fields FROM t_more_fields(
+CREATE SINK sink_more_fields FROM t_more_fields WITH(
     connector = 'kafka',
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092'
