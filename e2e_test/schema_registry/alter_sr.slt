@@ -46,14 +46,14 @@ CREATE TABLE t_more_fields (
     name VARCHAR,
     address VARCHAR,
     city VARCHAR,
-    gender VARCHAR,
+    gender INT,
     age INT,
 );
 
 statement ok
 INSERT INTO t_more_fields VALUES
-    (10086, 'Rising', 'Wave', 'Labs', 'MALE', 24),
-    (10087, 'Rising', 'Wave', 'Labs', 'FEMALE', 25);
+    (10086, 'Rising', 'Wave', 'Labs', 0, 24),
+    (10087, 'Rising', 'Wave', 'Labs', 1, 25);
 
 statement ok
 CREATE SINK sink_more_fields FROM t_more_fields WITH(
