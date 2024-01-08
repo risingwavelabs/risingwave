@@ -795,6 +795,15 @@ pub async fn build_remote_object_store(
             .await
             .monitored(metrics),
         ),
+        opendal_s3 if opendal_s3.starts_with("opendal_s3://") => {
+            let opendal_s3 = opendal_s3.strip_prefix("opendal_s3://").unwrap();
+            let (bucket, root) = opendal_s3.split_once('@').unwrap_or((opendal_s3, ""));
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_s3_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();

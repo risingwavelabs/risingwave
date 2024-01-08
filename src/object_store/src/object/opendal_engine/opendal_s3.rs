@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::{layers::{LoggingLayer, RetryLayer}, services::S3};
-use opendal::services::Gcs;
+use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::services::S3;
 use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
@@ -22,44 +22,29 @@ use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal gcs engine.
     pub fn new_s3_engine(bucket: String, root: String) -> ObjectResult<Self> {
-        // Create gcs backend builder.
-        let mut builder = Gcs::default();
-
-        builder.bucket(&bucket);
-
-        builder.root(&root);
-
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
-        builder.region(&s3_properties.region_name);
+        builder.root(&root);
 
-        if let Some(endpoint_url) = s3_properties.endpoint_url {
+        if let Ok(endpoint_url) = std::env::var("RW_S3_ENDPOINT") {
             builder.endpoint(&endpoint_url);
         }
 
-        if let Some(access) = s3_properties.access {
+        if let Ok(access) = std::env::var("AWS_ACCESS_KEY_ID") {
             builder.access_key_id(&access);
         } else {
-            tracing::error!(
-                "access key id of aws s3 is not set, bucket {}",
-                s3_properties.bucket_name
-            );
+            tracing::error!("access key id of aws s3 is not set, bucket {}", bucket);
         }
 
-        if let Some(secret) = s3_properties.secret {
+        if let Ok(secret) = std::env::var("AWS_SECRET_ACCESS_KEY") {
             builder.secret_access_key(&secret);
         } else {
-            tracing::error!(
-                "secret access key of aws s3 is not set, bucket {}",
-                s3_properties.bucket_name
-            );
+            tracing::error!("secret access key of aws s3 is not set, bucket {}", bucket);
         }
 
-        builder.enable_virtual_host_style();
-
-        if let Some(assume_role) = assume_role {
-            builder.role_arn(&assume_role);
+        if std::env::var("RW_IS_FORCE_PATH_STYLE").is_err() {
+            builder.enable_virtual_host_style();
         }
 
         builder.disable_config_load();
@@ -69,7 +54,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Gcs,
+            engine_type: EngineType::OpendalS3,
         })
     }
 }

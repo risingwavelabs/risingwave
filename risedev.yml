@@ -191,6 +191,19 @@ profile:
       - use: compactor
       # - use: prometheus
       # - use: grafana
+  opendal_s3:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use google cloud storage as storage backend, configure bucket name:
+      - use: opendal
+        engine: opendal_s3
+        bucket: bucket-name
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
   obs:
     steps:
       # - use: etcd
