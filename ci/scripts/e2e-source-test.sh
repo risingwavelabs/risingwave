@@ -123,6 +123,7 @@ curl --silent 'http://message_queue:8081/subjects'; echo
 # curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
 curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
+cp e2e_test/schema_registry/protobuf/user.pb ./user.pb
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/alter_sr.slt'
 
 echo "--- Kill cluster"
