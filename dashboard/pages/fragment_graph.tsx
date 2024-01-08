@@ -32,7 +32,7 @@ import { dagStratify } from "d3-dag"
 import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
@@ -41,6 +41,7 @@ import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
+import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
@@ -138,11 +139,16 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 200
 
+type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
+const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
+
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
+  const { response: actorBackPressures } = useFetch(getActorBackPressures)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+  const [backPressureAlgo, setBackPressureAlgo] = useState<BackPressureAlgo>()
   const router = useRouter()
 
   const fragmentDependencyCallback = useCallback(() => {
@@ -256,6 +262,40 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
+  const backPressures = useMemo(() => {
+    if (actorBackPressures && backPressureAlgo) {
+      let map = new Map()
+
+      for (const m of actorBackPressures.outputBufferBlockingDuration) {
+        console.log(backPressureAlgo)
+        let algoFunc
+        switch (backPressureAlgo) {
+          case "p50":
+            algoFunc = p50
+            break
+          case "p90":
+            algoFunc = p90
+            break
+          case "p95":
+            algoFunc = p95
+            break
+          case "p99":
+            algoFunc = p99
+            break
+          default:
+            return
+        }
+
+        const value = algoFunc(m.sample) * 100
+        map.set(
+          `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+          value
+        )
+      }
+      return map
+    }
+  }, [actorBackPressures, backPressureAlgo])
+
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
       <Title>Fragment Graph</Title>
@@ -324,6 +364,26 @@ export default function Streaming() {
               </HStack>
             </VStack>
           </FormControl>
+          <FormControl>
+            <FormLabel>Back Pressure</FormLabel>
+            <Select
+              value={backPressureAlgo}
+              onChange={(event) =>
+                setBackPressureAlgo(
+                  event.target.value === "disabled"
+                    ? undefined
+                    : (event.target.value as BackPressureAlgo)
+                )
+              }
+            >
+              <option value="disabled">Disabled</option>
+              {backPressureAlgos.map((algo) => (
+                <option value={algo} key={algo}>
+                  {algo}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (
@@ -353,6 +413,7 @@ export default function Streaming() {
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
+              backPressures={backPressures}
             />
           )}
         </Box>

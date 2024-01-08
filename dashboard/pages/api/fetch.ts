@@ -18,7 +18,10 @@
 import { useEffect, useState } from "react"
 import useErrorToast from "../../hook/useErrorToast"
 
-export default function useFetch<T>(fetchFn: () => Promise<T>) {
+export default function useFetch<T>(
+  fetchFn: () => Promise<T>,
+  when: boolean = true
+) {
   const [response, setResponse] = useState<T>()
   const toast = useErrorToast()
 
@@ -31,8 +34,10 @@ export default function useFetch<T>(fetchFn: () => Promise<T>) {
         toast(e)
       }
     }
-    fetchData()
-  }, [toast, fetchFn])
+    if (when) {
+      fetchData()
+    }
+  }, [toast, fetchFn, when])
 
   return { response }
 }

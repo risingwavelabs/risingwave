@@ -10,11 +10,13 @@ import {
   theme,
   useDisclosure,
 } from "@chakra-ui/react"
+import { tinycolor } from "@ctrl/tinycolor"
 import loadable from "@loadable/component"
 import * as d3 from "d3"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import {
+  Edge,
   FragmentBox,
   FragmentBoxPosition,
   Position,
@@ -22,7 +24,6 @@ import {
   layout,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
-import BackPressureTable from "./BackPressureTable"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -95,10 +96,12 @@ export default function FragmentGraph({
   planNodeDependencies,
   fragmentDependency,
   selectedFragmentId,
+  backPressures,
 }: {
   planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: FragmentBox[]
-  selectedFragmentId: string | undefined
+  selectedFragmentId?: string
+  backPressures?: Map<string, number>
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -363,18 +366,51 @@ export default function FragmentGraph({
         .x(({ x }) => x)
         .y(({ y }) => y)
 
-      const applyEdge = (sel: EdgeSelection) =>
-        sel
+      const applyEdge = (sel: EdgeSelection) => {
+        const isEdgeSelected = (d: Edge) =>
+          isSelected(d.source) || isSelected(d.target)
+
+        const color = (d: Edge) => {
+          if (backPressures) {
+            console.log(backPressures, d.target, d.source)
+
+            const value = backPressures.get(`${d.target}_${d.source}`)
+
+            if (value) {
+              console.log(value)
+              const colorRange = [
+                theme.colors.green["200"],
+                theme.colors.red["500"],
+              ]
+              const endColor = tinycolor(colorRange[0])
+                .mix(tinycolor(colorRange[1]), Math.ceil(value))
+                .toHexString()
+
+              // if (p90Value < 10) {
+              //   return theme.colors.green["200"]
+              // } else if (p90Value < 50) {
+              //   return theme.colors.yellow["200"]
+              // } else if (p90Value < 90) {
+              //   return theme.colors.orange["500"]
+              // } else {
+              //   return theme.colors.red["500"]
+              // }
+
+              return endColor
+            }
+          }
+
+          return isEdgeSelected(d)
+            ? theme.colors.blue["500"]
+            : theme.colors.gray["300"]
+        }
+
+        return sel
           .attr("d", ({ points }) => line(points))
           .attr("fill", "none")
-          .attr("stroke-width", (d) =>
-            isSelected(d.source) || isSelected(d.target) ? 2 : 1
-          )
-          .attr("stroke", (d) =>
-            isSelected(d.source) || isSelected(d.target)
-              ? theme.colors.blue["500"]
-              : theme.colors.gray["300"]
-          )
+          .attr("stroke-width", (d) => (isEdgeSelected(d) ? 4 : 2))
+          .attr("stroke", color)
+      }
       const createEdge = (sel: Enter<EdgeSelection>) =>
         sel.append("path").attr("class", "fragment-edge").call(applyEdge)
 
@@ -423,7 +459,7 @@ export default function FragmentGraph({
         <g className="fragment-edges" />
         <g className="fragments" />
       </svg>
-      <BackPressureTable selectedFragmentIds={includedFragmentIds} />
+      {/* <BackPressureTable selectedFragmentIds={includedFragmentIds} /> */}
     </Fragment>
   )
 }
