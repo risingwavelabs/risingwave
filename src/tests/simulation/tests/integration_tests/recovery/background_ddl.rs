@@ -300,7 +300,7 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
     // With 10 rate limit, and amplification factor of 1000,
     // We should expect 10,000 rows / s.
     // That should be enough to cause barrier latency to spike.
-    session.run("SET STREAMING_RATE_LIMIT=40").await?;
+    // session.run("SET STREAMING_RATE_LIMIT=100").await?;
 
     tracing::info!("seeded base tables");
 
@@ -341,10 +341,11 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
     tracing::info!("restarted cn: trigger stream job recovery");
 
     // Attempt to cancel
+    sleep(Duration::from_secs(10)).await;
     let mut session2 = cluster.start_session();
     let handle = tokio::spawn(async move {
         let result = cancel_stream_jobs(&mut session2).await;
-        assert!(result.is_err())
+        assert!(result.is_err(), "{:?}", result)
     });
 
     sleep(Duration::from_secs(2)).await;
