@@ -490,7 +490,7 @@ steps:
     retry: *auto-retry
 
   - label: "PosixFs source on OpenDAL fs engine (csv parser)"
-    key: "s3-source-test-for-opendal-fs-engine"
+    key: "s3-source-test-for-opendal-fs-engine-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'posix_fs_source.py csv_without_header'"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
