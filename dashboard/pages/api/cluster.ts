@@ -18,19 +18,19 @@ import { WorkerNode } from "../../proto/gen/common"
 import api from "./api"
 
 export async function getClusterMetrics() {
-  const res = await api.get("/api/metrics/cluster")
+  const res = await api.get("/metrics/cluster")
   return res
 }
 
 export async function getClusterInfoFrontend() {
-  const res: WorkerNode[] = (await api.get("/api/clusters/1")).map(
+  const res: WorkerNode[] = (await api.get("/clusters/1")).map(
     WorkerNode.fromJSON
   )
   return res
 }
 
 export async function getClusterInfoComputeNode() {
-  const res: WorkerNode[] = (await api.get("/api/clusters/2")).map(
+  const res: WorkerNode[] = (await api.get("/clusters/2")).map(
     WorkerNode.fromJSON
   )
   return res

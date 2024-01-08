@@ -913,7 +913,7 @@ impl CommandContext {
                             new_table_fragments,
                             merge_updates,
                             dispatchers,
-                            init_split_assignment: _,
+                            init_split_assignment,
                         }) = replace_table
                         {
                             let table_ids =
@@ -930,6 +930,7 @@ impl CommandContext {
                                     new_table_fragments,
                                     merge_updates,
                                     dispatchers,
+                                    init_split_assignment.clone(),
                                 )
                                 .await?;
                         }
@@ -971,7 +972,7 @@ impl CommandContext {
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
-                ..
+                init_split_assignment,
             }) => {
                 let MetadataManager::V1(mgr) = &self.barrier_manager_context.metadata_manager
                 else {
@@ -990,6 +991,7 @@ impl CommandContext {
                         new_table_fragments,
                         merge_updates,
                         dispatchers,
+                        init_split_assignment.clone(),
                     )
                     .await?;
             }
