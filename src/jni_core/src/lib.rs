@@ -32,10 +32,12 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
-use chrono::NaiveDateTime;
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use jni::objects::{
-    AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JString, ReleaseMode,
+    AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
+    JValueOwned, ReleaseMode,
 };
+use jni::signature::ReturnType;
 use jni::sys::{
     jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
 };
@@ -233,10 +235,11 @@ where
 #[derive(Default)]
 struct JavaClassMethodCache {
     big_decimal_ctor: OnceLock<(GlobalRef, JMethodID)>,
-    timestamp_ctor: OnceLock<(GlobalRef, JMethodID)>,
 
-    date_ctor: OnceLock<(GlobalRef, JMethodID)>,
-    time_ctor: OnceLock<(GlobalRef, JMethodID)>,
+    timestamp_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    timestamptz_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
 }
 
 // TODO: may only return a RowRef
@@ -607,27 +610,127 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
-        let millis = match scalar_value {
-            // supports sinking rw timestamptz to mysql timestamp
-            ScalarRefImpl::Timestamptz(tz) => tz.timestamp_millis(),
-            ScalarRefImpl::Timestamp(ts) => ts.0.timestamp_millis(),
-            _ => panic!("expect timestamp or timestamptz"),
-        };
-        let (ts_class_ref, constructor) = pointer
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_timestamp();
+
+        let sig = gen_jni_sig!(java.time.LocalDateTime of(int year, int month, int dayOfMonth, int hour, int minute, int second, int nanoOfSecond));
+
+        let (timestamp_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
             .timestamp_ctor
             .get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Timestamp")?;
-                let init_method = env.get_method_id(&cls, "<init>", "(J)V")?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalDateTime))?;
+                let init_method = env.get_static_method_id(&cls, "of", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let ts_class = <&JClass<'_>>::from(ts_class_ref.as_obj());
-            let date_obj =
-                env.new_object_unchecked(ts_class, *constructor, &[jvalue { j: millis }])?;
-            Ok(date_obj)
+            let JValueOwned::Object(timestamp_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(timestamp_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[
+                    jvalue { i: value.0.year() },
+                    jvalue {
+                        i: value.0.month() as i32,
+                    },
+                    jvalue {
+                        i: value.0.day() as i32,
+                    },
+                    jvalue {
+                        i: value.0.hour() as i32,
+                    },
+                    jvalue {
+                        i: value.0.minute() as i32,
+                    },
+                    jvalue {
+                        i: value.0.second() as i32,
+                    },
+                    jvalue {
+                        i: value.0.nanosecond() as i32,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "of".to_string(),
+                    sig: sig.into(),
+                }));
+            };
+            Ok(timestamp_obj)
+        }
+    })
+}
+
+#[no_mangle]
+extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamptzValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingIterator<'a>>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move |env: &mut EnvParam<'_>| {
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_timestamptz()
+            .to_datetime_utc();
+
+        let utc = {
+            let cls = env.find_class(gen_class_name!(java.time.ZoneOffset))?;
+            env.get_static_field(&cls, "UTC", gen_jni_type_sig!(java.time.ZoneOffset))?
+                .l()?
+        };
+
+        let sig = gen_jni_sig!(java.time.OffsetDateTime of(int year, int month, int dayOfMonth, int hour, int minute, int second, int nanoOfSecond, java.time.ZoneOffset offset));
+
+        let (timestamptz_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .timestamptz_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class(gen_class_name!(java.time.OffsetDateTime))?;
+                let init_method = env.get_static_method_id(&cls, "of", sig)?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        unsafe {
+            let JValueOwned::Object(timestamptz_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(timestamptz_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[
+                    jvalue { i: value.year() },
+                    jvalue {
+                        i: value.month() as i32,
+                    },
+                    jvalue {
+                        i: value.day() as i32,
+                    },
+                    jvalue {
+                        i: value.hour() as i32,
+                    },
+                    jvalue {
+                        i: value.minute() as i32,
+                    },
+                    jvalue {
+                        i: value.second() as i32,
+                    },
+                    jvalue {
+                        i: value.nanosecond() as i32,
+                    },
+                    jvalue { l: *utc },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "of".to_string(),
+                    sig: sig.into(),
+                }));
+            };
+            Ok(timestamptz_obj)
         }
     })
 }
@@ -676,22 +779,30 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        // Constructs a Date object using a milliseconds time value.
         let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_date();
-        let datetime = value.0.and_hms_opt(0, 0, 0).unwrap();
-        let millis = datetime.timestamp_millis();
+        let epoch_days = (value.0 - NaiveDateTime::UNIX_EPOCH.date()).num_days();
+
+        let sig = gen_jni_sig!(java.time.LocalDate ofEpochDay(long));
 
         let (date_class_ref, constructor) =
             pointer.as_ref().class_cache.date_ctor.get_or_try_init(|| {
-                let cls = env.find_class(gen_class_name!(java.sql.Date))?;
-                let init_method =
-                    env.get_method_id(&cls, "<init>", gen_jni_sig!(void Date(long)))?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalDate))?;
+                let init_method = env.get_static_method_id(&cls, "ofEpochDay", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let date_class = <&JClass<'_>>::from(date_class_ref.as_obj());
-            let date_obj =
-                env.new_object_unchecked(date_class, *constructor, &[jvalue { j: millis }])?;
+            let JValueOwned::Object(date_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(date_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[jvalue { j: epoch_days }],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "ofEpochDay".to_string(),
+                    sig: sig.into(),
+                }));
+            };
             Ok(date_obj)
         }
     })
@@ -704,23 +815,42 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        // Constructs a Time object using a milliseconds time value.
         let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_time();
-        let epoch_date = NaiveDateTime::UNIX_EPOCH.date();
-        let datetime = epoch_date.and_time(value.0);
-        let millis = datetime.timestamp_millis();
+
+        let sig = gen_jni_sig!(java.time.LocalTime of(int hour, int minute, int second, int nanoOfSecond));
 
         let (time_class_ref, constructor) =
             pointer.as_ref().class_cache.time_ctor.get_or_try_init(|| {
-                let cls = env.find_class(gen_class_name!(java.sql.Time))?;
-                let init_method =
-                    env.get_method_id(&cls, "<init>", gen_jni_sig!(void Time(long)))?;
+                let cls = env.find_class(gen_class_name!(java.time.LocalTime))?;
+                let init_method = env.get_static_method_id(&cls, "of", sig)?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
-            let time_class = <&JClass<'_>>::from(time_class_ref.as_obj());
-            let time_obj =
-                env.new_object_unchecked(time_class, *constructor, &[jvalue { j: millis }])?;
+            let JValueOwned::Object(time_obj) = env.call_static_method_unchecked(
+                <&JClass<'_>>::from(time_class_ref.as_obj()),
+                *constructor,
+                ReturnType::Object,
+                &[
+                    jvalue {
+                        i: value.0.hour() as i32,
+                    },
+                    jvalue {
+                        i: value.0.minute() as i32,
+                    },
+                    jvalue {
+                        i: value.0.second() as i32,
+                    },
+                    jvalue {
+                        i: value.0.nanosecond() as i32,
+                    },
+                ],
+            )?
+            else {
+                return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                    name: "of".to_string(),
+                    sig: sig.into(),
+                }));
+            };
             Ok(time_obj)
         }
     })

@@ -48,7 +48,7 @@ public class Utils {
                             ((Short) rowIndex).toString().repeat((rowIndex % 10) + 1)));
         }
 
-        if (row.getTimestamp(7).getTime() != rowIndex * 1000) {
+        if (row.getTimestamp(7).getSecond() != rowIndex) {
             throw new RuntimeException(
                     String.format("invalid Timestamp value: %s %s", row.getTimestamp(7), rowIndex));
         }
