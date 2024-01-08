@@ -561,7 +561,6 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         table_job_type: Option<TableJobType>,
-        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -570,7 +569,6 @@ impl CompleteStreamFragmentGraph {
             }),
             None,
             table_job_type,
-            uses_arrangement_backfill,
         )
     }
 
@@ -580,7 +578,6 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -590,7 +587,6 @@ impl CompleteStreamFragmentGraph {
                 downstream_fragments,
             }),
             None,
-            uses_arrangement_backfill,
         )
     }
 
@@ -599,8 +595,8 @@ impl CompleteStreamFragmentGraph {
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
         table_job_type: Option<TableJobType>,
-        uses_arrangement_backfill: bool,
     ) -> MetaResult<Self> {
+        let uses_arrangement_backfill = graph.has_arrangement_backfill();
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
@@ -695,7 +691,7 @@ impl CompleteStreamFragmentGraph {
                             let dispatch_strategy = if uses_arrangement_backfill {
                                 DispatchStrategy {
                                     r#type: DispatcherType::Hash as _,
-                                    dist_key_indices, // not used for `Exchange`
+                                    dist_key_indices,
                                     output_indices,
                                 }
                             } else {
