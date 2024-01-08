@@ -105,7 +105,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
         sink.barrier(true);
@@ -128,7 +128,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
         sink.barrier(true);
@@ -168,7 +168,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes()),
                         new ArraySinkRow(
@@ -178,7 +178,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
 
@@ -197,7 +197,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes()),
                         new ArraySinkRow(
@@ -207,7 +207,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
                                 "I want to eat".getBytes()),
                         new ArraySinkRow(
@@ -217,7 +217,7 @@ public class JDBCSinkTest {
                                 LocalDate.ofEpochDay(0),
                                 LocalTime.of(0, 0, 0, 1000),
                                 LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
-                                OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
 
@@ -233,7 +233,7 @@ public class JDBCSinkTest {
                     LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
                     rs.getObject(5, LocalDateTime.class));
             assertEquals(
-                    OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 1000, ZoneOffset.UTC),
+                    OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                     rs.getObject(6, OffsetDateTime.class));
             assertEquals(
                     "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
