@@ -212,19 +212,17 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
 }
 
 fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
-    let parallelism = match state
+    match state
         .parallelism
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        None => "unknown".to_string(),
-        Some(PbParallelism::Auto(_)) => "auto".to_string(),
+        Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }
-        Some(PbParallelism::Custom(_)) => "custom".to_string(),
-    };
-    parallelism
+        None | Some(PbParallelism::Custom(_)) => "custom".to_string(),
+    }
 }
 
 /// get acl items of `object` in string, ignore public.

@@ -23,7 +23,7 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
-    FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
+    FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
@@ -45,7 +45,7 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableParallelism {
     /// This is when the system decides the parallelism, based on the available parallel units.
-    Auto,
+    Adaptive,
     /// We set this when the `TableFragments` parallelism is changed.
     /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
     Fixed(usize),
@@ -63,7 +63,7 @@ impl From<PbTableParallelism> for TableParallelism {
         use Parallelism::*;
         match &value.parallelism {
             Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
-            Some(Auto(_)) => Self::Auto,
+            Some(Adaptive(_)) => Self::Adaptive,
             Some(Custom(_)) => Self::Custom,
             _ => unreachable!(),
         }
@@ -75,7 +75,7 @@ impl From<TableParallelism> for PbTableParallelism {
         use TableParallelism::*;
 
         let parallelism = match value {
-            Auto => PbParallelism::Auto(PbAutoParallelism {}),
+            Adaptive => PbParallelism::Adaptive(PbAdaptiveParallelism {}),
             Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
                 parallelism: n as u32,
             }),
@@ -198,7 +198,7 @@ impl TableFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
-            TableParallelism::Auto,
+            TableParallelism::Adaptive,
         )
     }
 

@@ -469,13 +469,13 @@ message TableParallelism {
     uint32 parallelism = 1;
   }
 
-  message AutoParallelism {}
+  message AdaptiveParallelism {}
 
   message CustomParallelism {}
 
   oneof parallelism {
     FixedParallelism fixed = 1;
-    AutoParallelism auto = 2;
+    AdaptiveParallelism adaptive = 2;
     CustomParallelism custom = 3;
   }
 }
