@@ -17,7 +17,7 @@ use std::iter::repeat_with;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::ctl_ext::predicate::identity_contains;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
 const MV1: &str = "create materialized view m1 as select * from t;";
