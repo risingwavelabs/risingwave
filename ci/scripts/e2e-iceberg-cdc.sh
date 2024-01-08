@@ -52,6 +52,8 @@ bash ./start_spark_connect_server.sh
 # 1. import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc.sql
 
+sleep 10
+
 # 2. create table and sink
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/cdc/no_partition_cdc_init.toml
 

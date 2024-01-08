@@ -116,6 +116,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client(),
             sink_metrics,
+            with_extra_partition_col: sink_desc.with_extra_partition_col,
         };
 
         let log_store_identity = format!(

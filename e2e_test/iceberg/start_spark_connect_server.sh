@@ -8,9 +8,10 @@ PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
 
-
-wget https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
-tar -xzf $SPARK_FILE --no-same-owner
+if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
+    wget https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    tar -xzf $SPARK_FILE --no-same-owner
+fi
 
 ./spark-${SPARK_VERSION}-bin-hadoop3/sbin/start-connect-server.sh --packages $PACKAGES \
   --master local[3] \

@@ -17,7 +17,10 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
+use arrow_schema::DataType as ArrowDataType;
 use either::Either;
+use icelake::catalog::load_catalog;
+use icelake::TableIdentifier;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -27,6 +30,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
@@ -43,6 +47,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_mv::get_column_names;
+use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -52,13 +57,15 @@ use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGene
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{generic, Explain, LogicalSource, StreamProject};
+use crate::optimizer::plan_node::{
+    generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
+};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
-use crate::{Planner, TableCatalog, WithOptions};
+use crate::{Explain, Planner, TableCatalog, WithOptions};
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
@@ -98,6 +105,7 @@ pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
+    partition_info: Option<PartitionComputeInfo>,
 ) -> Result<SinkPlanContext> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
@@ -207,6 +215,7 @@ pub fn gen_sink_plan(
         sink_from_table_name,
         format_desc,
         target_table,
+        partition_info,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
 
@@ -271,6 +280,77 @@ pub fn gen_sink_plan(
     })
 }
 
+// This function is used to return partition compute info for a sink.
+// Return Some(PartitionComputeInfo) if the sink need to compute partition.
+// Return None if the sink does not need to compute partition.
+// More details refer in `PartitionComputeInfo`.
+//
+// # TODO
+// We need return None for range partition
+pub async fn get_partition_compute_info(
+    with_options: &WithOptions,
+) -> Option<PartitionComputeInfo> {
+    let properties = HashMap::from_iter(with_options.clone().into_inner().into_iter());
+    let connector = properties.get(UPSTREAM_SOURCE_KEY)?;
+    match connector.as_str() {
+        ICEBERG_SINK => {
+            let iceberg_config = IcebergConfig::from_hashmap(properties).ok()?;
+            get_partition_compute_info_for_iceberg(&iceberg_config).await
+        }
+        _ => None,
+    }
+}
+
+async fn get_partition_compute_info_for_iceberg(
+    iceberg_config: &IcebergConfig,
+) -> Option<PartitionComputeInfo> {
+    let catalog = load_catalog(&iceberg_config.build_iceberg_configs().ok()?)
+        .await
+        .ok()?;
+    let table_id = TableIdentifier::new(iceberg_config.table_name.split('.')).ok()?;
+    let table = catalog.load_table(&table_id).await.ok()?;
+    let partition_spec = table
+        .current_table_metadata()
+        .current_partition_spec()
+        .ok()?;
+
+    if partition_spec.is_unpartitioned() {
+        return None;
+    }
+
+    // Only compute the partition and shuffle by them for the sparse partition which means that the data distribution is more sparse.
+    // For other partition types, we just let the sink to compute the partition.
+    let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
+        icelake::types::Transform::Identity
+        | icelake::types::Transform::Truncate(_)
+        | icelake::types::Transform::Bucket(_) => true,
+        icelake::types::Transform::Year
+        | icelake::types::Transform::Month
+        | icelake::types::Transform::Day
+        | icelake::types::Transform::Hour
+        | icelake::types::Transform::Void => false,
+    });
+
+    if !has_sparse_partition {
+        return None;
+    }
+
+    let arrow_type: ArrowDataType = table.current_partition_type().ok()?.try_into().ok()?;
+    let partition_fields = table
+        .current_table_metadata()
+        .current_partition_spec()
+        .ok()?
+        .fields
+        .iter()
+        .map(|f| (f.name.clone(), f.transform))
+        .collect_vec();
+
+    Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
+        partition_type: arrow_type.into(),
+        partition_fields,
+    }))
+}
+
 pub async fn handle_create_sink(
     handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
@@ -285,6 +365,8 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
+    let partition_info = get_partition_compute_info(&handle_args.with_options).await;
+
     let (sink, graph, target_table_catalog) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
 
@@ -293,7 +375,7 @@ pub async fn handle_create_sink(
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
-        } = gen_sink_plan(&session, context.clone(), stmt)?;
+        } = gen_sink_plan(&session, context.clone(), stmt, partition_info)?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {

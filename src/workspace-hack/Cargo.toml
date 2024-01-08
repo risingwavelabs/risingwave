@@ -61,7 +61,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hmac = { version = "0.12", default-features = false, features = ["reset"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["serde", "std"] }
-itertools = { version = "0.11" }
+itertools = { version = "0.10" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -142,6 +142,9 @@ unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 whoami = { version = "1" }
+zstd = { version = "0.13" }
+zstd-safe = { version = "7", default-features = false, features = ["arrays", "legacy", "std", "zdict_builder"] }
+zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -156,7 +159,7 @@ either = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
-itertools = { version = "0.11" }
+itertools = { version = "0.10" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }

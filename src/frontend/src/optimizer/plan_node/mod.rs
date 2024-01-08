@@ -940,7 +940,7 @@ pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
-pub use stream_sink::StreamSink;
+pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;

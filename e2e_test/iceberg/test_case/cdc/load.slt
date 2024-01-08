@@ -38,6 +38,8 @@ CREATE SINK s1 AS select * from products WITH (
 statement ok
 flush;
 
+sleep 10s
+
 query I
 select count(*) from products;
 ----

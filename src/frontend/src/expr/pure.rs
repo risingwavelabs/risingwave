@@ -225,7 +225,14 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Greatest
             | expr_node::Type::Least
             | expr_node::Type::ConvertFrom
-            | expr_node::Type::ConvertTo =>
+            | expr_node::Type::ConvertTo
+            | expr_node::Type::ConstructStruct
+            | expr_node::Type::IcebergBucket
+            | expr_node::Type::IcebergTruncate
+            | expr_node::Type::IcebergYear
+            | expr_node::Type::IcebergMonth
+            | expr_node::Type::IcebergDay
+            | expr_node::Type::IcebergHour =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

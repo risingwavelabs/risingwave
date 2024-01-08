@@ -34,6 +34,7 @@ either = "1"
 enum-as-inner = "0.6"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
+icelake = { workspace = true }
 itertools = "0.12"
 num-traits = "0.2"
 parse-display = "0.8"

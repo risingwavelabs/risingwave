@@ -223,6 +223,7 @@ message SinkDesc {
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
+  bool with_extra_partition_col = 15;
 }
 
 enum SinkLogStoreType {
