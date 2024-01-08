@@ -19,14 +19,15 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
-  ActorPoint,
-  ActorPointPosition,
+  FragmentPoint,
+  FragmentPointPosition,
+  Position,
   flipLayoutPoint,
-  generatePointLinks,
+  generatePointEdges,
 } from "../lib/layout"
 
 function boundBox(
-  actorPosition: ActorPointPosition[],
+  fragmentPosition: FragmentPointPosition[],
   nodeRadius: number
 ): {
   width: number
@@ -34,7 +35,7 @@ function boundBox(
 } {
   let width = 0
   let height = 0
-  for (const { x, y, data } of actorPosition) {
+  for (const { x, y } of fragmentPosition) {
     width = Math.max(width, x + nodeRadius)
     height = Math.max(height, y + nodeRadius)
   }
@@ -46,11 +47,11 @@ const rowMargin = 200
 const nodeRadius = 10
 const layoutMargin = 100
 
-export function StreamGraph({
+export default function RelationDependencyGraph({
   nodes,
   selectedId,
 }: {
-  nodes: ActorPoint[]
+  nodes: FragmentPoint[]
   selectedId?: string
 }) {
   const svgRef = useRef<any>()
@@ -61,12 +62,15 @@ export function StreamGraph({
       layerMargin,
       rowMargin,
       nodeRadius
-    ).map(({ x, y, ...data }) => ({
-      x: x + layoutMargin,
-      y: y + layoutMargin,
-      ...data,
-    }))
-    const links = generatePointLinks(layoutMap)
+    ).map(
+      ({ x, y, ...data }) =>
+        ({
+          x: x + layoutMargin,
+          y: y + layoutMargin,
+          ...data,
+        } as FragmentPointPosition)
+    )
+    const links = generatePointEdges(layoutMap)
     const { width, height } = boundBox(layoutMap, nodeRadius)
     return {
       layoutMap,
@@ -85,7 +89,7 @@ export function StreamGraph({
     const curveStyle = d3.curveMonotoneY
 
     const line = d3
-      .line<{ x: number; y: number }>()
+      .line<Position>()
       .curve(curveStyle)
       .x(({ x }) => x)
       .y(({ y }) => y)
@@ -120,13 +124,10 @@ export function StreamGraph({
     edgeSelection.enter().call(createEdge)
     edgeSelection.call(applyEdge)
 
-    const applyNode = (g: any) => {
-      g.attr(
-        "transform",
-        ({ x, y }: ActorPointPosition) => `translate(${x},${y})`
-      )
+    const applyNode = (g: NodeSelection) => {
+      g.attr("transform", ({ x, y }) => `translate(${x},${y})`)
 
-      let circle = g.select("circle")
+      let circle = g.select<SVGCircleElement>("circle")
       if (circle.empty()) {
         circle = g.append("circle")
       }
@@ -134,18 +135,18 @@ export function StreamGraph({
       circle
         .attr("r", nodeRadius)
         .style("cursor", "pointer")
-        .attr("fill", ({ id }: ActorPointPosition) =>
+        .attr("fill", ({ id }) =>
           isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
         )
 
-      let text = g.select("text")
+      let text = g.select<SVGTextElement>("text")
       if (text.empty()) {
         text = g.append("text")
       }
 
       text
         .attr("fill", "black")
-        .text(({ data: { name } }: ActorPointPosition) => name)
+        .text(({ name }) => name)
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
         .attr("dy", nodeRadius * 2)
@@ -161,6 +162,8 @@ export function StreamGraph({
 
     const g = svgSelection.select(".boxes")
     const nodeSelection = g.selectAll(".node").data(layoutMap)
+    type NodeSelection = typeof nodeSelection
+
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
