@@ -3018,7 +3018,7 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+        if let Some(table_col_index_mapping) = table_col_index_mapping {
             let expr_rewriter = ReplaceTableExprRewriter {
                 table_col_index_mapping,
             };

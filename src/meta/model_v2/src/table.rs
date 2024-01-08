@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::table::PbTableType;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -187,10 +187,28 @@ impl From<PbTable> for ActiveModel {
         let table_type = pb_table.table_type();
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
 
+        let fragment_id = if pb_table.fragment_id == u32::MAX - 1 {
+            NotSet
+        } else {
+            Set(Some(pb_table.fragment_id as FragmentId))
+        };
+        let dml_fragment_id = pb_table
+            .dml_fragment_id
+            .map(|x| Set(Some(x as FragmentId)))
+            .unwrap_or_default();
+        let optional_associated_source_id =
+            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
+                pb_table.optional_associated_source_id
+            {
+                Set(Some(src_id as SourceId))
+            } else {
+                NotSet
+            };
+
         Self {
             table_id: Set(pb_table.id as _),
             name: Set(pb_table.name),
-            optional_associated_source_id: NotSet,
+            optional_associated_source_id,
             table_type: Set(table_type.into()),
             belongs_to_job_id: Set(None),
             columns: Set(pb_table.columns.into()),
@@ -199,7 +217,7 @@ impl From<PbTable> for ActiveModel {
             stream_key: Set(pb_table.stream_key.into()),
             append_only: Set(pb_table.append_only),
             properties: Set(pb_table.properties.into()),
-            fragment_id: NotSet,
+            fragment_id,
             vnode_col_index: Set(pb_table.vnode_col_index.map(|x| x as i32)),
             row_id_index: Set(pb_table.row_id_index.map(|x| x as i32)),
             value_indices: Set(pb_table.value_indices.into()),
@@ -208,7 +226,7 @@ impl From<PbTable> for ActiveModel {
             read_prefix_len_hint: Set(pb_table.read_prefix_len_hint as _),
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
-            dml_fragment_id: NotSet,
+            dml_fragment_id,
             cardinality: Set(pb_table.cardinality.map(|x| x.into())),
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
