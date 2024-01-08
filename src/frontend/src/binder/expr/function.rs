@@ -59,7 +59,7 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
 /// To reduce the chance that the current running rw thread
 /// be killed by os, the current allowance depth of calling
 /// stack is set to `16`.
-const SQL_UDF_MAX_RECURSIVE_DEPTH: i32 = 16;
+const SQL_UDF_MAX_RECURSIVE_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {

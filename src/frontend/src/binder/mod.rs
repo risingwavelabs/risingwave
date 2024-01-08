@@ -116,7 +116,7 @@ pub struct Binder {
 
     param_types: ParameterTypes,
 
-    /// The mapping from `sql udf parameters`` to `ast expressions`
+    /// The mapping from `sql udf parameters` to `ast expressions`
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
     udf_context: HashMap<String, AstExpr>,
 
