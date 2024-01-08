@@ -16,9 +16,11 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
+pub use risingwave_expr::sig::*;
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
@@ -32,6 +34,7 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
+use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
 use crate::user::UserId;
 
 #[derive(Clone, Debug)]
@@ -50,6 +53,7 @@ pub struct SchemaCatalog {
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
     view_by_name: HashMap<String, Arc<ViewCatalog>>,
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
+    function_registry: FunctionRegistry,
     function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
     function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
     connection_by_name: HashMap<String, Arc<ConnectionCatalog>>,
@@ -320,6 +324,23 @@ impl SchemaCatalog {
         self.view_by_id.insert(id, view_ref);
     }
 
+    pub fn get_func_sign(func: &FunctionCatalog) -> FuncSign {
+        FuncSign {
+            name: FuncName::Udf(func.name.clone()),
+            inputs_type: func
+                .arg_types
+                .iter()
+                .map(|t| t.clone().into())
+                .collect_vec(),
+            variadic: false,
+            ret_type: func.return_type.clone().into(),
+            build: FuncBuilder::Udf,
+            // dummy type infer, will not use this result
+            type_infer: |_| Ok(DataType::Boolean),
+            deprecated: false,
+        }
+    }
+
     pub fn create_function(&mut self, prost: &PbFunction) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -327,6 +348,8 @@ impl SchemaCatalog {
         let args = function.arg_types.clone();
         let function_ref = Arc::new(function);
 
+        self.function_registry
+            .insert(Self::get_func_sign(&function_ref));
         self.function_by_name
             .entry(name)
             .or_default()
@@ -342,6 +365,11 @@ impl SchemaCatalog {
             .function_by_id
             .remove(&id)
             .expect("function not found by id");
+
+        self.function_registry
+            .remove(Self::get_func_sign(&function_ref))
+            .expect("function not found in registry");
+
         self.function_by_name
             .get_mut(&function_ref.name)
             .expect("function not found by name")
@@ -537,12 +565,47 @@ impl SchemaCatalog {
         self.function_by_id.get(&function_id)
     }
 
+    pub fn get_function_by_name_inputs(
+        &self,
+        name: &str,
+        inputs: &mut [ExprImpl],
+    ) -> Option<&Arc<FunctionCatalog>> {
+        infer_type_with_sigmap(
+            FuncName::Udf(name.to_string()),
+            inputs,
+            &self.function_registry,
+        )
+        .ok()?;
+        let args = inputs.iter().map(|x| x.return_type()).collect_vec();
+        self.function_by_name.get(name)?.get(&args)
+    }
+
     pub fn get_function_by_name_args(
         &self,
         name: &str,
         args: &[DataType],
     ) -> Option<&Arc<FunctionCatalog>> {
-        self.function_by_name.get(name)?.get(args)
+        let args = args.iter().map(|x| Some(x.clone())).collect_vec();
+        let func = infer_type_name(
+            &self.function_registry,
+            FuncName::Udf(name.to_string()),
+            &args,
+        )
+        .ok()?;
+
+        let args = func
+            .inputs_type
+            .iter()
+            .filter_map(|x| {
+                if let SigDataType::Exact(t) = x {
+                    Some(t.clone())
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        self.function_by_name.get(name)?.get(&args)
     }
 
     pub fn get_functions_by_name(&self, name: &str) -> Option<Vec<&Arc<FunctionCatalog>>> {
@@ -619,6 +682,7 @@ impl From<&PbSchema> for SchemaCatalog {
             system_table_by_name: HashMap::new(),
             view_by_name: HashMap::new(),
             view_by_id: HashMap::new(),
+            function_registry: FunctionRegistry::default(),
             function_by_name: HashMap::new(),
             function_by_id: HashMap::new(),
             connection_by_name: HashMap::new(),
