@@ -61,6 +61,7 @@ CREATE SINK sink_more_fields FROM t_more_fields WITH(
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092'
 ) FORMAT PLAIN ENCODE PROTOBUF(
+    force_append_only='true',
     schema.registry = 'http://message_queue:8081',
     message = 'test.UserWithMoreFields'
 );
