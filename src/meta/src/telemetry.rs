@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
@@ -22,8 +20,9 @@ use risingwave_common::telemetry::{
 };
 use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
-use crate::manager::ClusterManager;
+use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,14 +63,14 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 
 #[derive(Clone)]
 pub struct MetaReportCreator {
-    cluster_mgr: Arc<ClusterManager>,
+    metadata_manager: MetadataManager,
     meta_backend: MetaBackend,
 }
 
 impl MetaReportCreator {
-    pub fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
+    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
         Self {
-            cluster_mgr,
+            metadata_manager,
             meta_backend,
         }
     }
@@ -86,7 +85,12 @@ impl TelemetryReportCreator for MetaReportCreator {
         session_id: String,
         up_time: u64,
     ) -> TelemetryResult<MetaTelemetryReport> {
-        let node_map = self.cluster_mgr.count_worker_node().await;
+        let node_map = self
+            .metadata_manager
+            .count_worker_node()
+            .await
+            .map_err(|err| err.as_report().to_string())?;
+
         Ok(MetaTelemetryReport {
             base: TelemetryReportBase {
                 tracking_id,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,12 +42,12 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::OPENDAL_S3_CONNECTOR;
+use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::opendal_source::OpendalS3Properties;
-use crate::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
+use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -57,11 +57,15 @@ const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
-pub trait TryFromHashmap: Sized {
-    fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
+pub trait TryFromHashmap: Sized + UnknownFields {
+    /// Used to initialize the source properties from the raw untyped `WITH` options.
+    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
 }
 
-pub trait SourceProperties: TryFromHashmap + Clone {
+/// Represents `WITH` options for sources.
+///
+/// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
+pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
@@ -72,10 +76,24 @@ pub trait SourceProperties: TryFromHashmap + Clone {
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
 }
 
-impl<P: DeserializeOwned> TryFromHashmap for P {
-    fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self> {
+pub trait UnknownFields {
+    /// Unrecognized fields in the `WITH` clause.
+    fn unknown_fields(&self) -> HashMap<String, String>;
+}
+
+impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
+    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
         let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))
+        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+
+        if !deny_unknown_fields || res.unknown_fields().is_empty() {
+            Ok(res)
+        } else {
+            Err(anyhow!(
+                "Unknown fields in the WITH clause: {:?}",
+                res.unknown_fields()
+            ))
+        }
     }
 }
 
@@ -141,6 +159,7 @@ pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
+    pub connector_props: ConnectorProperties,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -151,6 +170,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
+        connector_props: ConnectorProperties,
     ) -> Self {
         Self {
             connector_client,
@@ -162,6 +182,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             error_suppressor: None,
+            connector_props,
         }
     }
 
@@ -173,6 +194,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+        connector_props: ConnectorProperties,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -181,6 +203,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_client,
+            connector_props,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
@@ -364,56 +387,55 @@ pub trait SplitReader: Sized + Send {
 
 for_all_sources!(impl_connector_properties);
 
+impl Default for ConnectorProperties {
+    fn default() -> Self {
+        ConnectorProperties::Test(Box::default())
+    }
+}
+
 impl ConnectorProperties {
     pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+            })
             .unwrap_or(false)
     }
 
     pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+            })
             .unwrap_or(false)
     }
 }
 
 impl ConnectorProperties {
-    pub fn extract(mut with_properties: HashMap<String, String>) -> Result<Self> {
-        if Self::is_new_fs_connector_hash_map(&with_properties) {
-            let connector = with_properties
-                .remove(UPSTREAM_SOURCE_KEY)
-                .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-            match connector.as_str() {
-                "s3_v2" => {
-                    let assume_role = with_properties.get("s3.assume_role").cloned();
-                    return Ok(ConnectorProperties::OpendalS3(Box::new(
-                        OpendalS3Properties {
-                            s3_properties: S3Properties::try_from_hashmap(with_properties)?,
-                            assume_role,
-                        },
-                    )));
-                }
-                "gcs" => {
-                    return Ok(ConnectorProperties::Gcs(Box::new(
-                        GcsProperties::try_from_hashmap(with_properties)?,
-                    )));
-                }
-                _ => {
-                    unreachable!()
-                }
-            }
-        }
-
+    /// Creates typed source properties from the raw `WITH` properties.
+    ///
+    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_hashmap` method.
+    ///
+    /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
+    /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
+    pub fn extract(
+        mut with_properties: HashMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self> {
         let connector = with_properties
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(with_properties).map(ConnectorProperties::from),
+            PropType::try_from_hashmap(with_properties, deny_unknown_fields)
+                .map(ConnectorProperties::from),
             |other| Err(anyhow!("connector '{}' is not supported", other))
         )
     }
@@ -687,7 +709,7 @@ mod tests {
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props).unwrap();
+        let props = ConnectorProperties::extract(props, true).unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -707,7 +729,7 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props).unwrap();
+        let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             assert!(k.common.broker_rewrite_map.is_some());
             println!("{:?}", k.common.broker_rewrite_map);
@@ -741,7 +763,7 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
+        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(
                 c.properties.get("connector_node_addr").unwrap(),
@@ -757,7 +779,7 @@ mod tests {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
+        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(
                 c.properties.get("connector_node_addr").unwrap(),

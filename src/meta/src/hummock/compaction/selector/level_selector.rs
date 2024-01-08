@@ -1,4 +1,4 @@
-//  Copyright 2023 RisingWave Labs
+//  Copyright 2024 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ impl DynamicLevelSelectorCore {
                 Box::new(MinOverlappingPicker::new(
                     picker_info.select_level,
                     picker_info.target_level,
-                    self.config.max_bytes_for_level_base,
+                    self.config.max_bytes_for_level_base / 2,
                     overlap_strategy,
                 ))
             }

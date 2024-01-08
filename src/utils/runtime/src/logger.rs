@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
@@ -30,7 +31,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
 
 pub struct LoggerSettings {
-    /// The name of the service.
+    /// The name of the service. Used to identify the service in distributed tracing.
     name: String,
     /// Enable tokio console output.
     enable_tokio_console: bool,
@@ -38,10 +39,14 @@ pub struct LoggerSettings {
     colorful: bool,
     /// Output to `stderr` instead of `stdout`.
     stderr: bool,
+    /// Whether to include thread name in the log.
+    with_thread_name: bool,
     /// Override target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
     /// Override the default level.
     default_level: Option<tracing::metadata::LevelFilter>,
+    /// The endpoint of the tracing collector in OTLP gRPC protocol.
+    tracing_endpoint: Option<String>,
 }
 
 impl Default for LoggerSettings {
@@ -51,14 +56,39 @@ impl Default for LoggerSettings {
 }
 
 impl LoggerSettings {
+    /// Create a new logger settings from the given command-line options.
+    ///
+    /// If env var `RW_TRACING_ENDPOINT` is not set, the meta address will be used
+    /// as the default tracing endpoint, which means that the embedded tracing
+    /// collector will be used. This can be disabled by setting env var
+    /// `RW_DISABLE_EMBEDDED_TRACING` to `true`.
+    pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
+        let mut settings = Self::new(O::name());
+        if settings.tracing_endpoint.is_none() // no explicit endpoint
+            && !env_var_is_true("RW_DISABLE_EMBEDDED_TRACING") // not disabled by env var
+            && let Some(addr) = opts.meta_addr().exactly_one() // meta address is valid
+            && !Deployment::current().is_ci()
+        // not in CI
+        {
+            // Use embedded collector in the meta service.
+            // TODO: when there's multiple meta nodes for high availability, we may send
+            // to a wrong node here.
+            settings.tracing_endpoint = Some(addr.to_string());
+        }
+        settings
+    }
+
+    /// Create a new logger settings with the given service name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             stderr: false,
+            with_thread_name: false,
             targets: vec![],
             default_level: None,
+            tracing_endpoint: std::env::var("RW_TRACING_ENDPOINT").ok(),
         }
     }
 
@@ -71,6 +101,12 @@ impl LoggerSettings {
     /// Output to `stderr` instead of `stdout`.
     pub fn stderr(mut self, enabled: bool) -> Self {
         self.stderr = enabled;
+        self
+    }
+
+    /// Whether to include thread name in the log.
+    pub fn with_thread_name(mut self, enabled: bool) -> Self {
+        self.with_thread_name = enabled;
         self
     }
 
@@ -87,6 +123,12 @@ impl LoggerSettings {
     /// Overrides the default level.
     pub fn with_default(mut self, level: impl Into<tracing::metadata::LevelFilter>) -> Self {
         self.default_level = Some(level.into());
+        self
+    }
+
+    /// Overrides the tracing endpoint.
+    pub fn with_tracing_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.tracing_endpoint = Some(endpoint.into());
         self
     }
 }
@@ -149,6 +191,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
             .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("risingwave_connector_node", Level::INFO)
             .with_target("pgwire", Level::INFO)
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
@@ -170,7 +213,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
             .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
+            .with_target("sled", Level::INFO)
+            // Expose hyper connection socket addr log.
+            .with_target("hyper::client::connect::http", Level::DEBUG);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
@@ -210,6 +255,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_thread_names(settings.with_thread_name)
             .with_timer(default_timer.clone())
             .with_ansi(settings.colorful)
             .with_writer(move || {
@@ -340,7 +386,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Tracing layer
     #[cfg(not(madsim))]
-    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
+    if let Some(endpoint) = settings.tracing_endpoint {
         println!("tracing enabled, exported to `{endpoint}`");
 
         use opentelemetry::{sdk, KeyValue};
@@ -359,7 +405,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let otel_tracer = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
-                .thread_name("risingwave-otel")
+                .thread_name("rw-otel")
                 .worker_threads(2)
                 .build()
                 .unwrap();

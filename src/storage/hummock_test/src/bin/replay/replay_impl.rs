@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -206,10 +206,7 @@ impl LocalReplay for LocalReplayImpl {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions) {
-        self.0.seal_current_epoch(
-            next_epoch,
-            opts.try_into().expect("should not fail to convert"),
-        );
+        self.0.seal_current_epoch(next_epoch, opts.into());
     }
 
     fn epoch(&self) -> u64 {

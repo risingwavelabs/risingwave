@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,8 @@ pub const RW_SINKS: BuiltinTable = BuiltinTable {
         (DataType::Varchar, "acl"),
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
+        (DataType::Varchar, "initialized_at_cluster_version"),
+        (DataType::Varchar, "created_at_cluster_version"),
     ],
     pk: &[0],
 };
@@ -82,6 +84,12 @@ impl SysCatalogReaderImpl {
                         ),
                         sink.initialized_at_epoch.map(|e| e.as_scalar()),
                         sink.created_at_epoch.map(|e| e.as_scalar()),
+                        sink.initialized_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
+                        sink.created_at_cluster_version
+                            .clone()
+                            .map(|v| ScalarImpl::Utf8(v.into())),
                     ])
                 })
             })

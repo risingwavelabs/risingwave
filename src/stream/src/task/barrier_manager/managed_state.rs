@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -176,9 +176,7 @@ impl ManagedBarrierState {
                 } => {
                     if remaining_actors.contains(&actor_id)
                         && let Some(collect_notifier) = collect_notifier.take()
-                        && collect_notifier
-                            .send(Err(err.clone()))
-                            .is_err()
+                        && collect_notifier.send(Err(err.clone())).is_err()
                     {
                         warn!(error = %err.as_report(), actor_id, "failed to notify actor exiting");
                     }

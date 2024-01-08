@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ pub struct DeleteExecutor {
     identity: String,
     returning: bool,
     txn_id: TxnId,
+    session_id: u32,
 }
 
 impl DeleteExecutor {
@@ -55,6 +56,7 @@ impl DeleteExecutor {
         chunk_size: usize,
         identity: String,
         returning: bool,
+        session_id: u32,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -74,6 +76,7 @@ impl DeleteExecutor {
             identity,
             returning,
             txn_id,
+            session_id,
         }
     }
 }
@@ -110,7 +113,7 @@ impl DeleteExecutor {
             self.child.schema().data_types(),
             "bad delete schema"
         );
-        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
 
@@ -182,6 +185,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             delete_node.returning,
+            delete_node.session_id,
         )))
     }
 }
@@ -247,6 +251,7 @@ mod tests {
             1024,
             "DeleteExecutor".to_string(),
             false,
+            0,
         ));
 
         let handle = tokio::spawn(async move {

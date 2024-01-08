@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,6 +90,7 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
@@ -190,6 +191,7 @@ macro_rules! for_all_rules {
             , { AggProjectMergeRule }
             , { UnionMergeRule }
             , { DagToTreeRule }
+            , { SplitNowAndRule }
             , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { TopNOnIndexRule }

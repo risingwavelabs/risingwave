@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -214,7 +214,7 @@ impl FrontendEnv {
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, system_params_reader) = MetaClient::register_new(
-            opts.meta_addr.clone().as_str(),
+            opts.meta_addr,
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
@@ -436,7 +436,7 @@ impl FrontendEnv {
         Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
                 .worker_threads(4)
-                .thread_name("frontend-compute-threads")
+                .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
                 .unwrap(),

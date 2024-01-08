@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,17 +22,8 @@ use protobuf_native::compiler::{
 use protobuf_native::MessageLite;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use url::Url;
 
-use crate::parser::util::download_from_http;
 use crate::schema::schema_registry::Client;
-
-const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
-
-pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec<u8>> {
-    let schema_bytes = download_from_http(location).await?;
-    Ok(schema_bytes.to_vec())
-}
 
 macro_rules! embed_wkts {
     [$( $path:literal ),+ $(,)?] => {

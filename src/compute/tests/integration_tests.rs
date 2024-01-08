@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -245,6 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![],
         Some(row_id_index),
         false,
+        0,
     ));
 
     let value_indices = (0..column_descs.len()).collect_vec();
@@ -366,6 +367,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         1024,
         "DeleteExecutor".to_string(),
         false,
+        0,
     ));
 
     curr_epoch += 1;

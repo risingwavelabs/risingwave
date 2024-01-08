@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ pub mod fragment;
 pub mod function;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
+pub mod hummock_sequence;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod index;
@@ -123,12 +124,27 @@ impl From<CreateType> for PbCreateType {
     }
 }
 
+impl From<PbCreateType> for CreateType {
+    fn from(create_type: PbCreateType) -> Self {
+        match create_type {
+            PbCreateType::Background => Self::Background,
+            PbCreateType::Foreground => Self::Foreground,
+            PbCreateType::Unspecified => unreachable!("Unspecified create type"),
+        }
+    }
+}
+
 /// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
 macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
         pub struct $struct_name(pub $field_type);
         impl Eq for $struct_name {}
+        impl From<$field_type> for $struct_name {
+            fn from(value: $field_type) -> Self {
+                Self(value)
+            }
+        }
 
         impl $struct_name {
             pub fn into_inner(self) -> $field_type {

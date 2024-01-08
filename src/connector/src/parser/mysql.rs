@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ macro_rules! handle_data_type {
     }};
 }
 
-pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
+pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
@@ -165,7 +165,7 @@ mod tests {
     use risingwave_common::types::{DataType, ToText};
     use tokio_stream::StreamExt;
 
-    use crate::parser::mysql_row_to_datums;
+    use crate::parser::mysql_row_to_owned_row;
 
     // manual test case
     #[ignore]
@@ -189,7 +189,7 @@ mod tests {
         let row_stream = s.map(|row| {
             // convert mysql row into OwnedRow
             let mut mysql_row = row.unwrap();
-            Ok::<_, anyhow::Error>(Some(mysql_row_to_datums(&mut mysql_row, &t1schema)))
+            Ok::<_, anyhow::Error>(Some(mysql_row_to_owned_row(&mut mysql_row, &t1schema)))
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {

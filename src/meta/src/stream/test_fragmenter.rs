@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -459,16 +459,17 @@ async fn test_graph_builder() -> MetaResult<()> {
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job, expr_context)
+        .generate_graph(&env, &job, expr_context)
         .await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);

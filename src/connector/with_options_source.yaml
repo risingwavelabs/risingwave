@@ -1,5 +1,38 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 
+DatagenProperties:
+  fields:
+  - name: datagen.split.num
+    field_type: String
+    comments: split_num means data source partition
+    required: false
+  - name: datagen.rows.per.second
+    field_type: u64
+    comments: default_rows_per_second =10  when the split_num = 3 and default_rows_per_second =10  there will be three readers that generate respectively 4,3,3 message per second
+    required: false
+    default: '10'
+  - name: fields
+    field_type: HashMap<String,String>
+    comments: 'Some connector options of the datagen source''s fields  for example: create datagen source with column v1 int, v2 float  ''fields.v1.kind''=''sequence'',  ''fields.v1.start''=''1'',  ''fields.v1.end''=''1000'',  ''fields.v2.kind''=''random'',  datagen will create v1 by self-incrementing from 1 to 1000  datagen will create v2 by randomly generating from default_min to default_max'
+    required: false
+GcsProperties:
+  fields:
+  - name: gcs.bucket_name
+    field_type: String
+    required: true
+  - name: gcs.credential
+    field_type: String
+    comments: The base64 encoded credential key. If not set, ADC will be used.
+    required: false
+  - name: gcs.service_account
+    field_type: String
+    comments: If credential/ADC is not set. The service account can be used to provide the credential info.
+    required: false
+    default: Default::default
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
 KafkaProperties:
   fields:
   - name: bytes.per.second
@@ -225,7 +258,7 @@ NatsProperties:
   - name: stream
     field_type: String
     required: true
-NexmarkPropertiesInner:
+NexmarkProperties:
   fields:
   - name: nexmark.split.num
     field_type: i32
@@ -397,6 +430,45 @@ NexmarkPropertiesInner:
     field_type: usize
     required: false
     default: None
+OpendalS3Properties:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    comments: The following are only supported by s3_v2 (opendal) source.
+    required: false
+    default: Default::default
+PosixFsProperties:
+  fields:
+  - name: posix_fs.root
+    field_type: String
+    comments: The root directly of the files to search. The files will be searched recursively.
+    required: true
+  - name: match_pattern
+    field_type: String
+    comments: The regex pattern to match files under root directory.
+    required: false
+    default: Default::default
 PubsubProperties:
   fields:
   - name: pubsub.split_count
@@ -488,3 +560,31 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+S3Properties:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+TestSourceProperties:
+  fields:
+  - name: properties
+    field_type: HashMap<String,String>
+    required: false

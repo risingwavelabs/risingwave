@@ -1,3 +1,5 @@
+#![allow(clippy::enum_variant_names)]
+
 pub use sea_orm_migration::prelude::*;
 
 mod m20230908_072257_init;
