@@ -22,7 +22,7 @@ ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
 
 # Changing format/encode is not allowed
 statement error Feature is not yet implemented: the original definition is FORMAT PLAIN ENCODE PROTOBUF, and altering them is not supported yet
-ALTER SOURCE src_user FORMAT json ENCODE PROTOBUF(
+ALTER SOURCE src_user FORMAT NATIVE ENCODE PROTOBUF(
     schema.registry = 'http://message_queue:8081',
     message = 'test.User'
 );
