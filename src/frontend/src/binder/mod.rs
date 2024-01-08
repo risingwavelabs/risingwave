@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigMap, SearchPath};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
 mod bind_param;
@@ -59,6 +59,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -116,9 +117,9 @@ pub struct Binder {
 
     param_types: ParameterTypes,
 
-    /// The mapping from sql udf parameters to ast expressions
+    /// The mapping from `sql udf parameters` to `ExprImpl` generated from ast expressions
     /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_context: HashMap<String, AstExpr>,
+    udf_context: HashMap<String, ExprImpl>,
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding. It works

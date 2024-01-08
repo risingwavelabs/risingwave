@@ -247,36 +247,53 @@ impl Binder {
                     // Here we just return the original parse error message
                     return Err(ErrorCode::InvalidInputSyntax(err).into());
                 }
+
                 debug_assert!(parse_result.is_ok());
 
                 // We can safely unwrap here
                 let ast = parse_result.unwrap();
 
-                let mut clean_flag = true;
+                let mut clean_flag = false;
 
-                // We need to check if the `udf_context` is empty first, consider the following example:
-                // - create function add(INT, INT) returns int language sql as 'select $1 + $2';
-                // - create function add_wrapper(INT, INT) returns int language sql as 'select add($1, $2)';
-                // - select add_wrapper(1, 1);
-                // When binding `add($1, $2)` in `add_wrapper`, the input args are [$1, $2] instead of
-                // the original [1, 1], thus we need to check `udf_context` to see if the input
-                // args already exist in the context. If so, we do NOT need to create the context again.
-                // Otherwise the current `udf_context` will be corrupted.
+                // We need to check if the `udf_context` is empty first,
+                // If so, we will clear the `udf_context` after binding.
+                // Since this is the root (top-most) binding for sql udf.
+                // Otherwise we need to restore the context later, or the
+                // original `udf_context` will be corrupted.
                 if self.udf_context.is_empty() {
-                    // The actual inline logic for sql udf
-                    if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
-                        self.udf_context = context;
-                    } else {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
-                        )
-                        .into());
+                    clean_flag = true;
+                }
+
+                // Stash the current `udf_context`
+                let prev_context = self.udf_context.clone();
+
+                // The actual inline logic for sql udf
+                // Note that we will always create new udf context for each sql udf
+                if let Ok(context) = create_udf_context(&args, &Arc::clone(func)) {
+                    let mut udf_context = HashMap::new();
+                    for (c, e) in context {
+                        // Note that we need to bind the args before actual delve in the function body
+                        // This will update the context in the subsequent inner calling function
+                        // e.g.,
+                        // - create function print(INT) returns int language sql as 'select $1';
+                        // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+                        // - select print_add_one(1); # The result should be 2 instead of 1.
+                        // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
+                        // causing the result to always be 1.
+                        let Ok(e) = self.bind_expr(e) else {
+                            return Err(ErrorCode::BindError(format!(
+                                "failed to bind the argument, please recheck your syntax"
+                            ))
+                            .into());
+                        };
+                        udf_context.insert(c, e);
                     }
+                    self.udf_context = udf_context;
                 } else {
-                    // If the `udf_context` is not empty, this means the current binding
-                    // function is not the root binding sql udf, thus we should NOT
-                    // clean the context after binding.
-                    clean_flag = false;
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                    )
+                    .into());
                 }
 
                 if let Ok(expr) = extract_udf_expression(ast) {
@@ -285,6 +302,9 @@ impl Binder {
                     // which makes sure the subsequent binding will not be affected
                     if clean_flag {
                         self.udf_context.clear();
+                    } else {
+                        // Restore context information for subsequent binding
+                        self.udf_context = prev_context;
                     }
                     return bind_result;
                 } else {
