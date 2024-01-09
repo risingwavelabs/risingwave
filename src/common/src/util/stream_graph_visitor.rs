@@ -131,7 +131,11 @@ pub fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
                 }
             }
