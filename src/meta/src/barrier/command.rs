@@ -1012,6 +1012,21 @@ impl CommandContext {
                             .await?;
                     }
                 }
+
+                // Apply the split changes in source manager.
+                self.barrier_manager_context
+                    .source_manager
+                    .drop_source_fragments(std::slice::from_ref(old_table_fragments))
+                    .await;
+                let source_fragments = new_table_fragments.stream_source_fragments();
+                self.barrier_manager_context
+                    .source_manager
+                    .apply_source_change(
+                        Some(source_fragments),
+                        Some(init_split_assignment.clone()),
+                        None,
+                    )
+                    .await;
             }
         }
 
