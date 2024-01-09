@@ -284,23 +284,18 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
 
-    // 100,000 fact records
-    session.run("CREATE TABLE fact (v1 int)").await?;
+    // Join 2 fact tables together to create a high barrier latency scenario.
+
+    session.run("CREATE TABLE fact1 (v1 int)").await?;
     session
-        .run("INSERT INTO fact select 1 from generate_series(1, 100000)")
+        .run("INSERT INTO fact1 select 1 from generate_series(1, 100000)")
         .await?;
 
-    // Amplification factor of 1000 per record.
-    session.run("CREATE TABLE dimension (v1 int)").await?;
+    session.run("CREATE TABLE fact2 (v1 int)").await?;
     session
-        .run("INSERT INTO dimension select 1 from generate_series(1, 1000)")
+        .run("INSERT INTO fact2 select 1 from generate_series(1, 100000)")
         .await?;
     session.flush().await?;
-
-    // With 10 rate limit, and amplification factor of 1000,
-    // We should expect 10,000 rows / s.
-    // That should be enough to cause barrier latency to spike.
-    // session.run("SET STREAMING_RATE_LIMIT=100").await?;
 
     tracing::info!("seeded base tables");
 
@@ -308,11 +303,16 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
     // Keep creating mv1, if it's not created.
     loop {
         session.run(SET_BACKGROUND_DDL).await?;
-        session.run("CREATE MATERIALIZED VIEW mv1 as select fact.v1 from fact join dimension on fact.v1 = dimension.v1").await?;
+        session.run("CREATE MATERIALIZED VIEW mv1 as select fact1.v1 from fact1 join fact2 on fact1.v1 = fact2.v1").await?;
         tracing::info!("created mv in background");
         sleep(Duration::from_secs(1)).await;
 
-        kill_cn_and_wait_recover(&cluster).await;
+        cluster
+            .kill_nodes_and_restart(["compute-1", "compute-2", "compute-3"], 2)
+            .await;
+        sleep(Duration::from_secs(3)).await;
+
+        tracing::debug!("killed cn, waiting recovery");
 
         // Check if mv stream job is created in the background
         match session
@@ -324,12 +324,13 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
                 continue;
             }
             Err(e) => {
-                if e.to_string().contains("in creating procedure") {
-                    // MV already created and recovered.
-                    break;
-                } else {
-                    return Err(e);
-                }
+                return Err(e);
+                // if e.to_string().contains("in creating procedure") {
+                //     // MV already created and recovered.
+                //     break;
+                // } else {
+                //     return Err(e);
+                // }
             }
             Ok(s) => {
                 tracing::info!("created mv stream job with status: {}", s);
@@ -340,32 +341,39 @@ async fn test_high_barrier_latency_cancel() -> Result<()> {
 
     tracing::info!("restarted cn: trigger stream job recovery");
 
-    // Attempt to cancel
-    sleep(Duration::from_secs(10)).await;
-    let mut session2 = cluster.start_session();
-    let handle = tokio::spawn(async move {
-        let result = cancel_stream_jobs(&mut session2).await;
-        assert!(result.is_err(), "{:?}", result)
-    });
+    // Loop in case the cancel gets dropped before it drops the table fragment.
+    for _ in 0..5 {
+        let mut session2 = cluster.start_session();
+        let handle = tokio::spawn(async move {
+            let result = cancel_stream_jobs(&mut session2).await;
+            assert!(result.is_err(), "{:?}", result)
+        });
 
-    sleep(Duration::from_secs(2)).await;
-    kill_cn_and_wait_recover(&cluster).await;
-    tracing::info!("restarted cn: cancel should take effect");
+        sleep(Duration::from_millis(500)).await;
+        kill_cn_and_wait_recover(&cluster).await;
+        tracing::info!("restarted cn: cancel should take effect");
 
-    handle.await.unwrap();
+        handle.await.unwrap();
 
-    // Create MV with same relation name should succeed,
-    // since the previous job should be cancelled.
-    tracing::info!("recreating mv");
-    session.run("SET BACKGROUND_DDL=false").await?;
-    session
-        .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
-        .await?;
-    tracing::info!("recreated mv");
+        // Create MV with same relation name should succeed,
+        // since the previous job should be cancelled.
+        tracing::info!("recreating mv");
+        session.run("SET BACKGROUND_DDL=false").await?;
+        if let Err(e) = session
+            .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
+            .await
+        {
+            tracing::info!("Recreate mv failed with {e:?}");
+            continue;
+        } else {
+            tracing::info!("recreated mv");
+            break;
+        }
+    }
 
     session.run(DROP_MV1).await?;
-    session.run("DROP TABLE fact").await?;
-    session.run("DROP TABLE dimension").await?;
+    session.run("DROP TABLE fact1").await?;
+    session.run("DROP TABLE fact2").await?;
 
     Ok(())
 }
