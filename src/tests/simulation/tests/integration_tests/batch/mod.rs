@@ -14,6 +14,8 @@
 
 #![cfg(madsim)]
 
+mod dml;
+
 use std::io::Write;
 
 use clap::Parser;
