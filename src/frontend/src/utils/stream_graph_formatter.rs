@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::cmp::max;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
-use pretty_xmlish::{Pretty, PrettyConfig};
+use pretty_xmlish::{Pretty, PrettyConfig, XmlNode};
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::agg_call_state::MaterializedInputState;
@@ -156,19 +157,19 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut fields: Vec<(&str, Pretty<'_>)> = Vec::with_capacity(7);
+        let mut fields: Vec<(Cow<'_, str>, Pretty<'_>)> = Vec::with_capacity(7);
         let mut node_copy = node.clone();
         stream_graph_visitor::visit_stream_node_tables_inner(
             &mut node_copy,
             false,
             |table, table_name| {
-                fields.push((table_name, self.pretty_add_table(table)));
+                fields.push((table_name.to_string().into(), self.pretty_add_table(table)));
             },
         );
 
         if self.verbose {
             fields.push((
-                "output",
+                "output".into(),
                 Pretty::Array(
                     node.fields
                         .iter()
@@ -177,7 +178,7 @@ impl StreamGraphFormatter {
                 ),
             ));
             fields.push((
-                "stream key",
+                "stream key".into(),
                 Pretty::Array(
                     node.stream_key
                         .iter()
@@ -191,7 +192,7 @@ impl StreamGraphFormatter {
             .iter()
             .map(|input| self.explain_node(input))
             .collect();
-        Pretty::simple_record(one_line_explain, fields, children)
+        Pretty::Record(XmlNode::new(one_line_explain.into(), fields, children))
     }
 
     fn call_states<'a>(
