@@ -287,7 +287,7 @@ impl Binder {
 
                 // Check for potential recursive calling
                 if let Some(&calling_times) = self.udf_recursive_context.get(&function_name) {
-                    if calling_times >= SQL_UDF_MAX_RECURSIVE_DEPTH {
+                    if calling_times as u32 >= SQL_UDF_MAX_RECURSIVE_DEPTH {
                         return Err(ErrorCode::BindError(format!(
                             "function {} calling stack depth limit exceeded",
                             &function_name
