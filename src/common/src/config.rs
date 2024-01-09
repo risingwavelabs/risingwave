@@ -1447,11 +1447,11 @@ pub mod default {
         }
 
         pub fn object_store_upload_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            10 * 60 * 1000
         }
 
         pub fn object_store_read_timeout_ms() -> u64 {
-            60 * 60 * 1000
+            10 * 60 * 1000
         }
 
         pub mod s3 {
