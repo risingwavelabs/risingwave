@@ -52,6 +52,7 @@ pub struct InsertExecutor {
     row_id_index: Option<usize>,
     returning: bool,
     txn_id: TxnId,
+    session_id: u32,
 }
 
 impl InsertExecutor {
@@ -67,6 +68,7 @@ impl InsertExecutor {
         sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         returning: bool,
+        session_id: u32,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -89,6 +91,7 @@ impl InsertExecutor {
             row_id_index,
             returning,
             txn_id,
+            session_id,
         }
     }
 }
@@ -116,7 +119,7 @@ impl InsertExecutor {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
 
@@ -253,6 +256,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             sorted_default_columns,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
+            insert_node.session_id,
         )))
     }
 }
@@ -348,6 +352,7 @@ mod tests {
             vec![],
             row_id_index,
             false,
+            0,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

@@ -24,7 +24,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
-use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
@@ -581,7 +580,10 @@ impl LocalQueryExecution {
                     .worker_node_manager
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+                if candidates.is_empty() {
+                    return Err(SchedulerError::EmptyWorkerNodes);
+                }
+                candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };
             Ok(vec![worker_node])
         } else {

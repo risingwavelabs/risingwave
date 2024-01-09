@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This type inference is just to infer the return type of function calls, and make sure the
-//! functionCall expressions have same input type requirement and return type definition as backend.
+//! Contains test runners:
+//! - fuzzing: For crashing testing the database with generated batch, stream queries.
+//! - differential testing: For testing the database with generated batch,
+//!   stream queries and comparing their results.
 
-mod cast;
-mod func;
-pub use cast::{
-    align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, least_restrictive, CastContext,
-    CastSig,
-};
-pub use func::{infer_some_all, infer_type, infer_type_name, infer_type_with_sigmap, FuncSign};
+mod diff;
+mod fuzzing;
+
+mod utils;
+
+pub use diff::run_differential_testing;
+pub use fuzzing::{generate, run, run_pre_generated};

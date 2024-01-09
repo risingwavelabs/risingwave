@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This type inference is just to infer the return type of function calls, and make sure the
-//! functionCall expressions have same input type requirement and return type definition as backend.
+use crate::util::meta_addr::MetaAddressStrategy;
 
-mod cast;
-mod func;
-pub use cast::{
-    align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, least_restrictive, CastContext,
-    CastSig,
-};
-pub use func::{infer_some_all, infer_type, infer_type_name, infer_type_with_sigmap, FuncSign};
+/// Accessor trait for a component's command-line options.
+pub trait Opts {
+    /// The name of the component.
+    fn name() -> &'static str;
+
+    /// The address to the meta node.
+    fn meta_addr(&self) -> MetaAddressStrategy;
+}
