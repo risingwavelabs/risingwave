@@ -26,7 +26,6 @@ struct Entry<K: Ord, V> {
     value: V,
 }
 
-// TODO(rc): May be a good idea to extract this into a separate crate.
 /// A common sliding window buffer.
 pub struct WindowBuffer<K: Ord, V: Clone> {
     frame: Frame,

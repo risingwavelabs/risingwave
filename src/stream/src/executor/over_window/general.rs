@@ -457,6 +457,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
         // into the cache.
+        // TODO(rc): maybe we can find affected ranges for each window function call (each frame) to simplify
+        // the implementation of `find_affected_ranges`
         let (part_with_delta, affected_ranges) = partition
             .find_affected_ranges(&this.state_table, &delta)
             .await?;
