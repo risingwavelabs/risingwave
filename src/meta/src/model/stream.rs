@@ -55,7 +55,7 @@ impl From<PbTableParallelism> for TableParallelism {
             Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
             Some(Auto(_)) => Self::Auto,
             Some(Custom(_)) => Self::Custom,
-            _ => Self::Auto,
+            _ => Self::Custom,
         }
     }
 }
