@@ -77,3 +77,58 @@ async fn test_dml_rate_limit() -> Result<()> {
     sleep(Duration::from_secs(3)).await;
     Ok(())
 }
+
+#[tokio::test]
+async fn test_dml_rate_limit_barrier_bypass() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+
+    // With no rate limit, we expect to timeout.
+    {
+        let mut session = cluster.start_session();
+
+        // With no rate limit, flush should timeout
+        session.run("CREATE TABLE t (v1 int)").await?;
+        session.run("CREATE SINK s1 as select s1.v1 from t s1 join t s2 on s1.v1 = s2.v1 with (connector='blackhole')").await?;
+
+        // 3 CN * 1 = 3 records / s
+        {
+            let mut session = cluster.start_session();
+            tokio::spawn(async move {
+                let _ = session
+                    .run("INSERT INTO t SELECT 1 FROM generate_series(1, 100000)")
+                    .await;
+            });
+        }
+        sleep(Duration::from_secs(100)).await;
+        tracing::debug!("{:#?}", session.run("SELECT count(*) from t;").await);
+        let result = tokio::time::timeout(Duration::from_secs(10), session.run("FLUSH")).await;
+        assert!(result.is_err(), "expected timeout error, got result: {:?}", result);
+        session.run("DROP SINK s1;").await?;
+        session.run("DROP TABLE t").await?;
+    }
+
+    {
+        let mut session = cluster.start_session();
+
+        session.run("SET STREAMING_RATE_LIMIT=1").await?;
+        session.run("CREATE TABLE t (v1 int)").await?;
+        session.run("CREATE SINK s1 as select s1.v1 from t s1 join t s2 on s1.v1 = s2.v1 with (connector='blackhole')").await?;
+
+        // 3 CN * 1 = 3 records / s
+        {
+            let mut session = cluster.start_session();
+            tokio::spawn(async move {
+                let _ = session
+                    .run("INSERT INTO t SELECT 1 FROM generate_series(1, 100000)")
+                    .await;
+            });
+        }
+        sleep(Duration::from_secs(100)).await;
+        tokio::time::timeout(Duration::from_secs(10), session.run("FLUSH")).await??;
+        session.run("DROP SINK s1;").await?;
+        session.run("DROP TABLE t").await?;
+    }
+
+    Ok(())
+}
