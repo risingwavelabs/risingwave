@@ -65,7 +65,7 @@ where
 }
 
 /// Visit the tables of a [`StreamNode`].
-fn visit_stream_node_tables_inner<F>(
+pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
     internal_tables_only: bool,
     mut f: F,
