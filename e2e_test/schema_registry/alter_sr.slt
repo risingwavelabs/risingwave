@@ -40,13 +40,13 @@ ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.User'
 );
 
+statement ok
+CREATE MATERIALIZED VIEW mv_more_fields AS SELECT * FROM src_user;
+
 system ok
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
 
 sleep 10s
-
-statement ok
-CREATE MATERIALIZED VIEW mv_more_fields AS SELECT * FROM src_user;
 
 query III
 SELECT COUNT(*), MAX(age), MIN(age) FROM mv_more_fields;
