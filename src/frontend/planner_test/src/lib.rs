@@ -793,6 +793,7 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    false,
                     None,
                 ) {
                     Ok(sink_plan) => {

@@ -4732,7 +4732,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.43.0",
+ "opendal",
  "ordered-float 3.9.1",
  "parquet 49.0.0",
  "prometheus",
@@ -6201,39 +6201,6 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c04ac25bc94e2b572a0f41bcc650cb39dd09255efce72b68eb5dc188b018c52a"
-dependencies = [
- "anyhow",
- "async-compat",
- "async-trait",
- "backon",
- "base64 0.21.4",
- "bytes",
- "chrono",
- "flagset",
- "futures",
- "http 0.2.9",
- "log",
- "md-5",
- "once_cell",
- "parking_lot 0.12.1",
- "percent-encoding",
- "pin-project",
- "prometheus",
- "quick-xml 0.30.0",
- "reqsign",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "opendal"
 version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c32736a48ef08a5d2212864e2295c8e54f4d6b352b7f49aa0c29a12fc410ff66"
@@ -6255,6 +6222,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "percent-encoding",
  "pin-project",
+ "prometheus",
  "quick-xml 0.30.0",
  "reqsign",
  "reqwest",
@@ -8312,6 +8280,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "twox-hash",
@@ -8512,7 +8481,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.44.0",
+ "opendal",
  "parking_lot 0.12.1",
  "paste",
  "pretty_assertions",
@@ -8552,7 +8521,6 @@ dependencies = [
  "tokio-util",
  "tonic 0.10.2",
  "tracing",
- "tracing-futures",
  "tracing-subscriber",
  "tracing-test",
  "url",
@@ -8778,7 +8746,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-stream",
  "tracing",
- "tracing-futures",
  "uuid",
  "workspace-hack",
 ]
@@ -9082,7 +9049,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.44.0",
+ "opendal",
  "prometheus",
  "risingwave_common",
  "rustls",
@@ -9415,7 +9382,6 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tracing",
- "tracing-futures",
  "uuid",
  "workspace-hack",
  "xorf",
@@ -10300,9 +10266,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
+checksum = "953ad9342b3aaca7cb43c45c097dd008d4907070394bd0751a0aa8817e5a018d"
 dependencies = [
  "dashmap",
  "futures",
@@ -10314,9 +10280,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test_derive"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
+checksum = "b93fb4adc70021ac1b47f7d45e8cc4169baaa7ea58483bc5b721d19a26202212"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11183,9 +11149,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "778409884b05cc4a1b90b9c3a0f395a01c430355fe299d084152bdf50f3fa807"
+checksum = "54a6a1db013d9f7175962ec64a0fb90760832062e29f6664f1aefee91d072a50"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -11193,9 +11159,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03162af1a5f99722388354158f3c5af20915d52a5d0d9bc4871d0fd7553e308f"
+checksum = "98c358cfea7a4a0f4554d4df6533f9b652d44c0108e99db3685f28f30b0954aa"
 dependencies = [
  "either",
  "proc-macro2",
@@ -12766,9 +12732,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a0956f1ba7c7909bfb66c2e9e4124ab6f6482560f6628b5aaeba39207c9aad9"
+checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
 
 [[package]]
 name = "zstd"
