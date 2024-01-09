@@ -158,7 +158,7 @@ impl PlanRoot {
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
-    pub fn into_subplan(self) -> PlanRef {
+    pub fn into_unordered_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
@@ -859,7 +859,7 @@ mod tests {
             out_fields,
             out_names,
         );
-        let subplan = root.into_subplan();
+        let subplan = root.into_unordered_subplan();
         assert_eq!(
             subplan.schema(),
             &Schema::new(vec![Field::with_name(DataType::Int32, "v1")])
