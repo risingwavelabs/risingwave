@@ -194,6 +194,28 @@ impl BuildingFragment {
 
         table_columns
     }
+
+    pub fn has_arrangement_backfill(&self) -> bool {
+        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill
+                || stream_node
+                    .get_input()
+                    .iter()
+                    .any(has_arrangement_backfill_node)
+        }
+        let stream_node = match self.inner.node.as_ref() {
+            Some(node) => node,
+            _ => return false,
+        };
+        has_arrangement_backfill_node(stream_node)
+    }
 }
 
 impl Deref for BuildingFragment {
@@ -468,31 +490,6 @@ impl StreamFragmentGraph {
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
-
-    pub fn has_arrangement_backfill(&self) -> bool {
-        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
-            let is_backfill = if let Some(node) = &stream_node.node_body
-                && let Some(node) = node.as_stream_scan()
-            {
-                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
-            } else {
-                false
-            };
-            is_backfill
-                || stream_node
-                    .get_input()
-                    .iter()
-                    .any(has_arrangement_backfill_node)
-        }
-        for fragment in self.fragments.values() {
-            let fragment = &**fragment;
-            let node = fragment.node.as_ref().unwrap();
-            if has_arrangement_backfill_node(node) {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
@@ -596,7 +593,6 @@ impl CompleteStreamFragmentGraph {
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
         table_job_type: Option<TableJobType>,
     ) -> MetaResult<Self> {
-        let uses_arrangement_backfill = graph.has_arrangement_backfill();
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
@@ -608,6 +604,7 @@ impl CompleteStreamFragmentGraph {
             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
             // of the new materialized view.
             for (&id, fragment) in &mut graph.fragments {
+                let uses_arrangement_backfill = fragment.has_arrangement_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
                         Some(TableJobType::SharedCdcSource) => {
