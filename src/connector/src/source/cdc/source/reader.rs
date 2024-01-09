@@ -205,7 +205,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         while let Some(result) = rx.recv().await {
             let GetEventStreamResponse { events, .. } = result?;
-            tracing::trace!("receive events {:?}", events.len());
+            tracing::trace!("receive {} cdc events ", events.len());
             metrics
                 .connector_source_rows_received
                 .with_label_values(&[source_type.as_str_name(), &source_id])
