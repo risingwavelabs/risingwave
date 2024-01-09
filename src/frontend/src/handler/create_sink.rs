@@ -105,16 +105,18 @@ pub fn gen_sink_plan(
 
     // Used for debezium's table name
     let sink_from_table_name;
-    let sink_form_is_from;
+    // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
+    // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
+    let direct_sink;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
-            sink_form_is_from = true;
+            direct_sink = true;
             Box::new(gen_sink_query_from_name(from_name)?)
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
-            sink_form_is_from = false;
+            direct_sink = false;
             query
         }
     };
@@ -193,13 +195,13 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
-    let without_backfill = match with_options.get(SINK_WITHOUT_BACKFILL) {
-        Some(flag) if flag.eq("true") => {
-            if sink_form_is_from {
+    let without_backfill = match with_options.remove(SINK_WITHOUT_BACKFILL) {
+        Some(flag) if flag.eq_ignore_ascii_case("false") => {
+            if direct_sink {
                 true
             } else {
                 return Err(ErrorCode::BindError(
-                    "`without_backfill` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
                 )
                 .into());
             }

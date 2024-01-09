@@ -144,7 +144,7 @@ impl ToStreamContext {
         }
     }
 
-    pub fn get_stream_scan_type(&self) -> StreamScanType {
+    pub fn stream_scan_type(&self) -> StreamScanType {
         self.stream_scan_type
     }
 

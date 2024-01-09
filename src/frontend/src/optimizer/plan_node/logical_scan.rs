@@ -535,7 +535,7 @@ impl ToStream for LogicalScan {
             } else {
                 Ok(StreamTableScan::new_with_stream_scan_type(
                     self.core.clone(),
-                    ctx.get_stream_scan_type(),
+                    ctx.stream_scan_type(),
                 )
                 .into())
             }

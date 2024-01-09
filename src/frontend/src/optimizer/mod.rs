@@ -733,10 +733,10 @@ impl PlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        without_backfail: bool,
+        without_backfill: bool,
         target_table: Option<TableId>,
     ) -> Result<StreamSink> {
-        let stream_scan_type = if without_backfail {
+        let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
         } else {
             StreamScanType::Backfill
