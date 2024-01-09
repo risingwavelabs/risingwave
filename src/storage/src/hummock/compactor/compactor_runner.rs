@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
-use super::{CompactionStatistics, TaskConfig};
+use super::{check_compaction_result, CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
@@ -542,6 +542,16 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
+        // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
+        if context.storage_opts.check_fast_compaction_result
+            && let Err(e) = check_compaction_result(&compact_task, context.clone()).await
+        {
+            tracing::error!(
+                "Failed to check fast compaction task {} because: {:?}",
+                compact_task.task_id,
+                e
+            );
+        }
         return (compact_task, table_stats);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {

@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -128,7 +128,7 @@ impl Binder {
         // Used later in sql udf expression evaluation
         let args = f.args.clone();
 
-        let inputs = f
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -230,12 +230,10 @@ impl Binder {
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
+
             if func.language == "sql" {
                 if func.body.is_none() {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -1398,27 +1396,22 @@ impl Binder {
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err({
+            None => {
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
                 let candidates = FUNCTIONS_BKTREE
                     .find(function_name, allowed_distance)
-                    .map(|(_idx, c)| c);
+                    .map(|(_idx, c)| c)
+                    .join(" or ");
 
-                let mut candidates = candidates.peekable();
-
-                let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: \"{}\"", function_name)
-                } else {
-                    format!(
-                        "unsupported function \"{}\", do you mean \"{}\"?",
-                        function_name,
-                        candidates.join(" or ")
-                    )
-                };
-
-                not_implemented!(issue = 112, "{}", err_msg).into()
-            }),
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
+                    "{}({})",
+                    function_name,
+                    inputs.iter().map(|e| e.return_type()).join(", ")
+                )
+                .into())
+            }
         }
     }
 

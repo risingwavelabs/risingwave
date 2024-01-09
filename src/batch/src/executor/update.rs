@@ -49,6 +49,7 @@ pub struct UpdateExecutor {
     returning: bool,
     txn_id: TxnId,
     update_column_indices: Vec<usize>,
+    session_id: u32,
 }
 
 impl UpdateExecutor {
@@ -63,6 +64,7 @@ impl UpdateExecutor {
         identity: String,
         returning: bool,
         update_column_indices: Vec<usize>,
+        session_id: u32,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -86,6 +88,7 @@ impl UpdateExecutor {
             returning,
             txn_id,
             update_column_indices,
+            session_id,
         }
     }
 }
@@ -134,7 +137,7 @@ impl UpdateExecutor {
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let mut write_handle: risingwave_source::WriteHandle =
-            table_dml_handle.write_handle(self.txn_id)?;
+            table_dml_handle.write_handle(self.session_id, self.txn_id)?;
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -246,6 +249,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.plan_node().get_identity().clone(),
             update_node.returning,
             update_column_indices,
+            update_node.session_id,
         )))
     }
 }
@@ -321,6 +325,7 @@ mod tests {
             "UpdateExecutor".to_string(),
             false,
             vec![0, 1],
+            0,
         ));
 
         let handle = tokio::spawn(async move {

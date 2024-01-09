@@ -17,12 +17,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, PrettyConfig};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::agg_call_state::MaterializedInputState;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragmentEdge;
-use risingwave_pb::stream_plan::{
-    agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
-};
+use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
 
 use crate::TableCatalog;
 
@@ -54,10 +52,6 @@ impl StreamGraphFormatter {
             tables: BTreeMap::default(),
             verbose,
         }
-    }
-
-    fn pretty_add_table<'a>(&mut self, tb: &Table) -> Pretty<'a> {
-        Pretty::debug(&self.add_table(tb))
     }
 
     /// collect the table catalog and return the table id
@@ -155,171 +149,30 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut fields = Vec::with_capacity(7);
-        match node.get_node_body().unwrap() {
-            stream_node::NodeBody::Source(node) if let Some(source) = &node.source_inner => {
-                fields.push((
-                    "source state table",
-                    self.pretty_add_table(source.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::StreamFsFetch(node) if let Some(fetch) = &node.node_inner => {
-                fields.push((
-                    "fs fetch state table",
-                    self.pretty_add_table(fetch.get_state_table().unwrap()),
-                ))
-            }
-            stream_node::NodeBody::Materialize(node) => fields.push((
-                "materialized table",
-                self.pretty_add_table(node.get_table().unwrap()),
-            )),
-            stream_node::NodeBody::SimpleAgg(inner) => {
-                fields.push((
-                    "intermediate state table",
-                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
-                ));
-                fields.push(("state tables", self.call_states(&inner.agg_call_states)));
-                fields.push((
-                    "distinct tables",
-                    self.distinct_tables(node, inner.get_distinct_dedup_tables()),
-                ));
-            }
-            stream_node::NodeBody::HashAgg(inner) => {
-                fields.push((
-                    "intermediate state table",
-                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
-                ));
-                fields.push(("state tables", self.call_states(&inner.agg_call_states)));
-                fields.push((
-                    "distinct tables",
-                    self.distinct_tables(node, inner.get_distinct_dedup_tables()),
-                ));
-            }
-            stream_node::NodeBody::HashJoin(node) => {
-                fields.push((
-                    "left table",
-                    self.pretty_add_table(node.get_left_table().unwrap()),
-                ));
-                fields.push((
-                    "right table",
-                    self.pretty_add_table(node.get_right_table().unwrap()),
-                ));
-                if let Some(tb) = &node.left_degree_table {
-                    fields.push(("left degree table", self.pretty_add_table(tb)));
-                }
-                if let Some(tb) = &node.right_degree_table {
-                    fields.push(("right degree table", self.pretty_add_table(tb)));
-                }
-            }
-            stream_node::NodeBody::TopN(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::AppendOnlyTopN(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::Arrange(node) => {
-                fields.push((
-                    "arrange table",
-                    self.pretty_add_table(node.get_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::DynamicFilter(node) => {
-                fields.push((
-                    "left table",
-                    self.pretty_add_table(node.get_left_table().unwrap()),
-                ));
-                fields.push((
-                    "right table",
-                    self.pretty_add_table(node.get_right_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::GroupTopN(node) => {
-                let table = self.pretty_add_table(node.get_table().unwrap());
-                fields.push(("state table", table));
-            }
-            stream_node::NodeBody::AppendOnlyGroupTopN(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::Now(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::AppendOnlyDedup(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::StreamScan(node) => fields.push((
-                "state table",
-                self.pretty_add_table(node.get_state_table().unwrap()),
-            )),
-            stream_node::NodeBody::StreamCdcScan(node) => fields.push((
-                "state table",
-                self.pretty_add_table(node.get_state_table().unwrap()),
-            )),
-            stream_node::NodeBody::Sort(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::WatermarkFilter(node) => {
-                let vec = node
-                    .tables
-                    .iter()
-                    .map(|tb| self.pretty_add_table(tb))
-                    .collect_vec();
-                fields.push(("state tables", Pretty::Array(vec)));
-            }
-            stream_node::NodeBody::EowcOverWindow(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::OverWindow(node) => {
-                fields.push((
-                    "state table",
-                    self.pretty_add_table(node.get_state_table().unwrap()),
-                ));
-            }
-            stream_node::NodeBody::Project(_)
-            | stream_node::NodeBody::Filter(_)
-            | stream_node::NodeBody::CdcFilter(_)
-            | stream_node::NodeBody::StatelessSimpleAgg(_)
-            | stream_node::NodeBody::HopWindow(_)
-            | stream_node::NodeBody::Merge(_)
-            | stream_node::NodeBody::Exchange(_)
-            | stream_node::NodeBody::BatchPlan(_)
-            | stream_node::NodeBody::Lookup(_)
-            | stream_node::NodeBody::LookupUnion(_)
-            | stream_node::NodeBody::Union(_)
-            | stream_node::NodeBody::DeltaIndexJoin(_)
-            | stream_node::NodeBody::Sink(_)
-            | stream_node::NodeBody::Expand(_)
-            | stream_node::NodeBody::ProjectSet(_)
-            | stream_node::NodeBody::Dml(_)
-            | stream_node::NodeBody::RowIdGen(_)
-            | stream_node::NodeBody::TemporalJoin(_)
-            | stream_node::NodeBody::BarrierRecv(_)
-            | stream_node::NodeBody::Values(_)
-            | stream_node::NodeBody::Source(_)
-            | stream_node::NodeBody::StreamFsFetch(_)
-            | stream_node::NodeBody::NoOp(_) => {}
-        };
+        let mut tables: Vec<(String, u32)> = Vec::with_capacity(7);
+        let mut node_copy = node.clone();
 
+        stream_graph_visitor::visit_stream_node_tables_inner(
+            &mut node_copy,
+            false,
+            false,
+            |table, table_name| {
+                tables.push((table_name.to_string(), self.add_table(table)));
+            },
+        );
+
+        let mut fields = Vec::with_capacity(3);
+        if !tables.is_empty() {
+            fields.push((
+                "tables",
+                Pretty::Array(
+                    tables
+                        .into_iter()
+                        .map(|(name, id)| Pretty::Text(format!("{}: {}", name, id).into()))
+                        .collect(),
+                ),
+            ));
+        }
         if self.verbose {
             fields.push((
                 "output",
@@ -346,44 +199,5 @@ impl StreamGraphFormatter {
             .map(|input| self.explain_node(input))
             .collect();
         Pretty::simple_record(one_line_explain, fields, children)
-    }
-
-    fn call_states<'a>(
-        &mut self,
-        agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
-    ) -> Pretty<'a> {
-        let vec = agg_call_states
-            .iter()
-            .filter_map(|state| match state.get_inner().unwrap() {
-                agg_call_state::Inner::ValueState(_) => None,
-                agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
-                    table,
-                    ..
-                }) => Some(self.pretty_add_table(table.as_ref().unwrap())),
-            })
-            .collect();
-        Pretty::Array(vec)
-    }
-
-    fn distinct_tables<'a>(
-        &mut self,
-        node: &StreamNode,
-        inner: &HashMap<u32, Table>,
-    ) -> Pretty<'a> {
-        let in_fields = &node.get_input()[0].fields;
-        Pretty::Array(
-            inner
-                .iter()
-                .sorted_by_key(|(i, _)| *i)
-                .map(|(i, table)| {
-                    let fmt = format!(
-                        "(distinct key: {}, table id: {})",
-                        in_fields[*i as usize].name,
-                        self.add_table(table)
-                    );
-                    Pretty::Text(fmt.into())
-                })
-                .collect(),
-        )
     }
 }
