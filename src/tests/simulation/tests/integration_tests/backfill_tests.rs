@@ -190,4 +190,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     Ok(())
 }
 
+// TODO(kwannoel): Test case where upstream distribution is Single, then downstream
+// distribution MUST also be single, and arrangement backfill should just use Simple.
+
 // TODO(kwannoel): Test arrangement backfill background recovery.
