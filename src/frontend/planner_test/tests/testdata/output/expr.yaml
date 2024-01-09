@@ -17,8 +17,7 @@
     Failed to bind expression: must_be_unimplemented_func(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function must_be_unimplemented_func(integer) does not exist
 - sql: |
     values(cast(1 as bigint));
   batch_plan: 'BatchValues { rows: [[1:Int64]] }'
@@ -573,8 +572,7 @@
     Failed to bind expression: pg_teminate_backend(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function pg_teminate_backend(integer) does not exist, do you mean pg_terminate_backend
 - name: regression (#7571) - literal debug display for array with NULL values
   sql: |
     select ARRAY[1, null] t;

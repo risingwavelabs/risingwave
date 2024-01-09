@@ -22,9 +22,11 @@ GcsProperties:
     required: true
   - name: gcs.credential
     field_type: String
+    comments: The base64 encoded credential key. If not set, ADC will be used.
     required: false
   - name: gcs.service_account
     field_type: String
+    comments: If credential/ADC is not set. The service account can be used to provide the credential info.
     required: false
     default: Default::default
   - name: match_pattern
@@ -453,15 +455,18 @@ OpendalS3Properties:
     required: false
   - name: s3.assume_role
     field_type: String
+    comments: The following are only supported by s3_v2 (opendal) source.
     required: false
     default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
     field_type: String
+    comments: The root directly of the files to search. The files will be searched recursively.
     required: true
   - name: match_pattern
     field_type: String
+    comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
 PubsubProperties:

@@ -2555,7 +2555,7 @@ impl HummockManager {
             }
         }
 
-        tracing::debug!(
+        tracing::trace!(
             "group_to_table_vnode_partition {:?}",
             group_to_table_vnode_partition
         );
