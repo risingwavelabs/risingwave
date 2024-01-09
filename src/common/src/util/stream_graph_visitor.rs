@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -145,7 +146,11 @@ pub fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(
                         dedup_table,
                         &format!("SimpleAggDedupForCol{}", distinct_col),
