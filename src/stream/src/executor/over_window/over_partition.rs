@@ -796,7 +796,11 @@ fn find_affected_ranges<'cache>(
     // tell the caller that there exists at least one affected range that touches the sentinel.
 
     let delta = part_with_delta.delta();
-    debug_assert!(!delta.is_empty(), "if delta is empty, we won't be here");
+    if delta.is_empty() {
+        // no change means no ranges affected
+        return vec![];
+    }
+
     let delta_first_key = delta.first_key_value().unwrap().0;
     let delta_last_key = delta.last_key_value().unwrap().0;
 
