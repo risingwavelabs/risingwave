@@ -160,7 +160,6 @@ impl ByteStreamSourceParser for PlainParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<ParseResult> {
-        tracing::info!("parse_one_with_txn");
         self.parse_inner(key, payload, writer).await
     }
 }
