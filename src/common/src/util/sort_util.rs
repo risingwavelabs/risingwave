@@ -38,7 +38,7 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(direction: &PbDirection) -> Self {
+    fn from_protobuf(direction: &PbDirection) -> Self {
         match direction {
             PbDirection::Ascending => Self::Ascending,
             PbDirection::Descending => Self::Descending,
@@ -46,7 +46,7 @@ impl Direction {
         }
     }
 
-    pub fn to_protobuf(self) -> PbDirection {
+    fn to_protobuf(self) -> PbDirection {
         match self {
             Self::Ascending => PbDirection::Ascending,
             Self::Descending => PbDirection::Descending,
@@ -74,7 +74,7 @@ enum NullsAre {
 }
 
 impl NullsAre {
-    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+    fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
         match nulls_are {
             PbNullsAre::Largest => Self::Largest,
             PbNullsAre::Smallest => Self::Smallest,
@@ -82,7 +82,7 @@ impl NullsAre {
         }
     }
 
-    pub fn to_protobuf(self) -> PbNullsAre {
+    fn to_protobuf(self) -> PbNullsAre {
         match self {
             Self::Largest => PbNullsAre::Largest,
             Self::Smallest => PbNullsAre::Smallest,
