@@ -90,6 +90,7 @@ impl JavaVmWrapper {
             )
         };
 
+        // FIXME: passing custom arguments to the embedded jvm when compute node start
         // Build the VM properties
         let args_builder = InitArgsBuilder::new()
             // Pass the JNI API version (default is 8)
@@ -104,7 +105,8 @@ impl JavaVmWrapper {
             // In RisingWave we assume the upstream changelog may contain duplicate events and
             // handle conflicts in the mview operator, thus we don't need to obey the above
             // instructions. So we decrease the wait time here to reclaim jvm thread faster.
-            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1")
+            .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
 
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder.build().context("invalid jvm args")?;
