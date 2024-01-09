@@ -478,13 +478,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        context.session_ctx(),
-        &source_schema,
-        &with_properties,
-        false,
-    )
-    .await?;
+    let (columns_from_resolve_source, source_info) =
+        bind_columns_from_source(context.session_ctx(), &source_schema, &with_properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(

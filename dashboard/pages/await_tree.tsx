@@ -67,7 +67,7 @@ export default function AwaitTreeDump() {
 
     try {
       const response: StackTraceResponse = StackTraceResponse.fromJSON(
-        await api.get(`/api/monitor/await_tree/${computeNodeId}`)
+        await api.get(`/monitor/await_tree/${computeNodeId}`)
       )
 
       const actorTraces = _(response.actorTraces)
@@ -81,7 +81,7 @@ export default function AwaitTreeDump() {
 
       result = `${title}\n\n${actorTraces}\n${rpcTraces}`
     } catch (e: any) {
-      result = `${title}\n\nError: ${e.message}`
+      result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }
 
     setDump(result)

@@ -240,7 +240,11 @@ static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Push down filter with now into a left semijoin",
-        vec![SplitNowOrRule::create(), FilterWithNowToJoinRule::create()],
+        vec![
+            SplitNowAndRule::create(),
+            SplitNowOrRule::create(),
+            FilterWithNowToJoinRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
