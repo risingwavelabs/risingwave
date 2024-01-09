@@ -665,7 +665,7 @@ impl CompleteStreamFragmentGraph {
                                     .iter()
                                     .map(|c| c.column_desc.as_ref().unwrap().column_id)
                                     .collect_vec();
-                                let dist_key_indices = mview_node
+                                let dist_key_indices: Vec<_> = mview_node
                                     .table
                                     .as_ref()
                                     .unwrap()
@@ -689,10 +689,18 @@ impl CompleteStreamFragmentGraph {
                                 (dist_key_indices, output_indices)
                             };
                             let dispatch_strategy = if uses_arrangement_backfill {
-                                DispatchStrategy {
-                                    r#type: DispatcherType::Hash as _,
-                                    dist_key_indices,
-                                    output_indices,
+                                if !dist_key_indices.is_empty() {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Hash as _,
+                                        dist_key_indices,
+                                        output_indices,
+                                    }
+                                } else {
+                                    DispatchStrategy {
+                                        r#type: DispatcherType::Simple as _,
+                                        dist_key_indices: vec![], // empty for Simple
+                                        output_indices,
+                                    }
                                 }
                             } else {
                                 DispatchStrategy {

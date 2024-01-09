@@ -175,8 +175,6 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
-                // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 let is_arrangement_backfill =
                     stream_scan.stream_scan_type == StreamScanType::ArrangementBackfill as i32;
@@ -185,6 +183,8 @@ impl ActorBuilder {
                 }
 
                 let upstream_dispatcher_type = if is_arrangement_backfill {
+                    // FIXME(kwannoel): Should the upstream dispatcher type depends on the upstream distribution?
+                    // If singleton, use `Simple` dispatcher, otherwise use `Hash` dispatcher.
                     DispatcherType::Hash as _
                 } else {
                     DispatcherType::NoShuffle as _
@@ -674,7 +674,6 @@ impl ActorGraphBuilder {
             default_parallelism,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
-        tracing::debug!("distributions: {:#?}", distributions);
 
         Ok(Self {
             distributions,
