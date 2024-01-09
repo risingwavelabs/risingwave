@@ -20,6 +20,7 @@ pub mod coordinate;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
+pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;

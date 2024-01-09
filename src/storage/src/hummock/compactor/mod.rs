@@ -65,7 +65,9 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
+pub use self::compaction_utils::{
+    check_compaction_result, CompactionStatistics, RemoteBuilderFactory, TaskConfig,
+};
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
@@ -265,7 +267,6 @@ impl Compactor {
             builder_factory,
             self.context.compactor_metrics.clone(),
             task_progress.clone(),
-            self.task_config.is_target_l0_or_lbase,
             self.task_config.table_vnode_partition.clone(),
         );
         let compaction_statistics = compact_and_build_sst(

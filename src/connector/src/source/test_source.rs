@@ -115,7 +115,7 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug, WithOptions)]
+#[derive(Clone, Debug, Default, WithOptions)]
 pub struct TestSourceProperties {
     properties: HashMap<String, String>,
 }
