@@ -491,7 +491,7 @@ steps:
 
   - label: "S3 source on OpenDAL fs engine"
     key: "s3-source-test-for-opendal-fs-engine"
-    command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run.csv"
+    command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run.py"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-s3-source-tests"
@@ -514,7 +514,7 @@ steps:
   # TODO(Kexiang): Enable this test after we have a GCS_SOURCE_TEST_CONF.
   # - label: "GCS source on OpenDAL fs engine"
   #   key: "s3-source-test-for-opendal-fs-engine"
-  #   command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s gcs.csv"
+  #   command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s gcs_source.py"
   #   if: |
   #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
   #     || build.pull_request.labels includes "ci/run-s3-source-tests"
