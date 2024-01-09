@@ -6,7 +6,7 @@
     select v2 from t1 group by v2, v1;
   stream_error: |-
     Not supported: Column t1.v1 should not be in the aggregation group key because it has data type Jsonb
-    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`
+    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`
 - name: jsonb in union
   sql: |
     create table t1 (v1 jsonb, v2 int);
@@ -14,14 +14,14 @@
     select v1, v2 from t1 union select v3, v4 from t2;
   stream_error: |-
     Not supported: Column t1.v1 should not be in the union because it has data type Jsonb
-    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`
+    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`
 - name: jsonb in distinct
   sql: |
     create table t1 (v1 jsonb, v2 int);
     select distinct v1 from t1;
   stream_error: |-
     Not supported: Column t1.v1 should not be in the aggregation group key because it has data type Jsonb
-    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`
+    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`
 - name: jsonb in TopN by group
   sql: |
     create table t1 (v1 jsonb, v2 int);
@@ -31,4 +31,4 @@
     WHERE rank <= 2;
   stream_error: |-
     Not supported: Column t1.v1 should not be in the over window partition key because it has data type Jsonb
-    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`
+    HINT: Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`
