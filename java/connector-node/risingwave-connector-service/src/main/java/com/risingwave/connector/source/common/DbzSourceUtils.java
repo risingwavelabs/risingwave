@@ -117,15 +117,22 @@ public class DbzSourceUtils {
     }
 
     private static boolean waitForStreamingRunningInner(String connector, String dbServerName) {
-        int maxPollCount = 31; // max poll 30 seconds
+        int timeoutSecs =
+                Integer.parseInt(
+                        System.getProperty(
+                                DbzConnectorConfig.WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS));
+        int pollCount = 0;
         while (!isStreamingRunning(connector, dbServerName, "streaming")) {
-            maxPollCount--;
-            if (maxPollCount == 0) {
-                LOG.error("Debezium streaming source of {} failed to start", dbServerName);
+            if (pollCount > timeoutSecs) {
+                LOG.error(
+                        "Debezium streaming source of {} failed to start in timeout {}",
+                        dbServerName,
+                        timeoutSecs);
                 return false;
             }
             try {
                 TimeUnit.SECONDS.sleep(1); // poll interval
+                pollCount++;
             } catch (InterruptedException e) {
                 LOG.warn("Interrupted while waiting for streaming source to start", e);
             }

@@ -34,6 +34,9 @@ public class DbzConnectorConfig {
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
+    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
+            "cdc.source.wait.streaming.before.exit.seconds";
+
     /* Common configs */
     public static final String HOST = "hostname";
     public static final String PORT = "port";
