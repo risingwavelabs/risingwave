@@ -291,6 +291,7 @@ export default function FragmentGraph({
         const applyStreamNode = (g: StreamNodeSelection) => {
           g.attr("transform", (d) => `translate(${d.x},${d.y})`)
 
+          // Node circle
           let circle = g.select<SVGCircleElement>("circle")
           if (circle.empty()) {
             circle = g.append("circle")
@@ -302,6 +303,7 @@ export default function FragmentGraph({
             .style("cursor", "pointer")
             .on("click", (_d, i) => openPlanNodeDetail(i.data))
 
+          // Node name under the circle
           let text = g.select<SVGTextElement>("text")
           if (text.empty()) {
             text = g.append("text")
@@ -333,13 +335,8 @@ export default function FragmentGraph({
         streamNodeSelection.call(applyStreamNode)
       }
 
-      const createFragment = (sel: Enter<FragmentSelection>) => {
-        const gSel = sel
-          .append("g")
-          .attr("class", "fragment")
-          .call(applyFragment)
-        return gSel
-      }
+      const createFragment = (sel: Enter<FragmentSelection>) =>
+        sel.append("g").attr("class", "fragment").call(applyFragment)
 
       const fragmentSelection = svgSelection
         .select<SVGGElement>(".fragments")
@@ -354,7 +351,7 @@ export default function FragmentGraph({
       // Fragment Edges
       const edgeSelection = svgSelection
         .select<SVGGElement>(".fragment-edges")
-        .selectAll<SVGPathElement, null>(".fragment-edge")
+        .selectAll<SVGGElement, null>(".fragment-edge")
         .data(fragmentEdgeLayout)
       type EdgeSelection = typeof edgeSelection
 
@@ -366,7 +363,13 @@ export default function FragmentGraph({
         .x(({ x }) => x)
         .y(({ y }) => y)
 
-      const applyEdge = (sel: EdgeSelection) => {
+      const applyEdge = (gSel: EdgeSelection) => {
+        // Edge line
+        let path = gSel.select<SVGPathElement>("path")
+        if (path.empty()) {
+          path = gSel.append("path")
+        }
+
         const isEdgeSelected = (d: Edge) =>
           isSelected(d.source) || isSelected(d.target)
 
@@ -394,14 +397,35 @@ export default function FragmentGraph({
           return isEdgeSelected(d) ? 4 : 2
         }
 
-        return sel
+        path
           .attr("d", ({ points }) => line(points))
           .attr("fill", "none")
           .attr("stroke-width", width)
           .attr("stroke", color)
+
+        // Tooltip for back pressure rate
+        let title = gSel.select<SVGTitleElement>("title")
+        if (title.empty()) {
+          title = gSel.append<SVGTitleElement>("title")
+        }
+
+        const text = (d: Edge) => {
+          if (backPressures) {
+            let value = backPressures.get(`${d.target}_${d.source}`)
+            if (value) {
+              return `${value.toFixed(2)}%`
+            }
+          }
+
+          return ""
+        }
+
+        title.text(text)
+
+        return gSel
       }
       const createEdge = (sel: Enter<EdgeSelection>) =>
-        sel.append("path").attr("class", "fragment-edge").call(applyEdge)
+        sel.append("g").attr("class", "fragment-edge").call(applyEdge)
 
       edgeSelection.enter().call(createEdge)
       edgeSelection.call(applyEdge)
@@ -492,8 +516,5 @@ function backPressureWidth(value: number) {
   value = Math.max(value, 0)
   value = Math.min(value, 100)
 
-  let width = 30 * (value / 100)
-  width = Math.max(width, 2)
-
-  return width
+  return 30 * (value / 100) + 2
 }
