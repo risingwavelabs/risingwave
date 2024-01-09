@@ -20,6 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
+use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 
 use super::WindowFuncKind;
 use crate::aggregate::AggArgs;
@@ -176,7 +177,6 @@ pub enum FrameBound<T> {
 
 impl<T> FrameBound<T> {
     fn validate_bounds(start: &Self, end: &Self) -> Result<()> {
-        use FrameBound::*;
         match (start, end) {
             (_, UnboundedPreceding) => bail!("frame end cannot be UNBOUNDED PRECEDING"),
             (UnboundedFollowing, _) => bail!("frame start cannot be UNBOUNDED FOLLOWING"),
@@ -234,10 +234,10 @@ impl FrameBound<usize> {
     /// Convert the bound to sized offset from current row. `None` if the bound is unbounded.
     pub fn to_offset(&self) -> Option<isize> {
         match self {
-            FrameBound::UnboundedPreceding | FrameBound::UnboundedFollowing => None,
-            FrameBound::CurrentRow => Some(0),
-            FrameBound::Preceding(n) => Some(-(*n as isize)),
-            FrameBound::Following(n) => Some(*n as isize),
+            UnboundedPreceding | UnboundedFollowing => None,
+            CurrentRow => Some(0),
+            Preceding(n) => Some(-(*n as isize)),
+            Following(n) => Some(*n as isize),
         }
     }
 
