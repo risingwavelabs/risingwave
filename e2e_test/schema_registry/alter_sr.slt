@@ -57,10 +57,4 @@ statement ok
 DROP MATERIALIZED VIEW mv_more_fields;
 
 statement ok
-DROP SINK sink_more_fields;
-
-statement ok
-DROP TABLE t_more_fields;
-
-statement ok
 DROP SOURCE src_user;
