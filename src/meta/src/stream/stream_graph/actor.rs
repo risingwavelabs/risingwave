@@ -674,6 +674,7 @@ impl ActorGraphBuilder {
             default_parallelism,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
+        tracing::debug!("distributions: {:#?}", distributions);
 
         Ok(Self {
             distributions,
