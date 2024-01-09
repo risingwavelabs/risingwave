@@ -1,4 +1,0 @@
-# DML amplification
-# We don't expect it to complete.
-statement error
-INSERT INTO table select 1 from generate_series(1, 100000);

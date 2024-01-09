@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::time::Duration;
+
 use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, Configuration};
 use madsim::time::sleep;
+use risingwave_simulation::cluster::{Cluster, Configuration};
 
 fn init_logger() {
     let _ = tracing_subscriber::fmt()
@@ -35,7 +36,9 @@ async fn test_dml_rate_limit() -> Result<()> {
     {
         let mut session = cluster.start_session();
         tokio::spawn(async move {
-            let _ = session.run("INSERT INTO t SELECT * FROM generate_series(1, 1000)").await;
+            let _ = session
+                .run("INSERT INTO t SELECT * FROM generate_series(1, 1000)")
+                .await;
         });
     }
     sleep(Duration::from_secs(100)).await;
@@ -43,7 +46,11 @@ async fn test_dml_rate_limit() -> Result<()> {
     let result = result.parse::<usize>().unwrap();
 
     // 3 CN * 1 = 3 records / s
-    assert!(result > 90 && result < 110, "result: {}, expected result > 2000 && result < 4000", result);
+    assert!(
+        result > 90 && result < 110,
+        "result: {}, expected result > 2000 && result < 4000",
+        result
+    );
 
     // TODO(kwannoel): Use alter table instead.
     session.run("DROP TABLE t").await?;
@@ -53,14 +60,20 @@ async fn test_dml_rate_limit() -> Result<()> {
     {
         let mut session = cluster.start_session();
         tokio::spawn(async move {
-            let _ = session.run("INSERT INTO t SELECT * FROM generate_series(1, 10000)").await;
+            let _ = session
+                .run("INSERT INTO t SELECT * FROM generate_series(1, 10000)")
+                .await;
         });
     }
     sleep(Duration::from_secs(100)).await;
     let result = session.run("SELECT count(*) FROM t").await?;
     let result = result.parse::<usize>().unwrap();
     // 3 CN * 1 = 3 records / s
-    assert!(result > 900 && result < 1100, "result: {}, expected result > 2000 && result < 4000", result);
+    assert!(
+        result > 900 && result < 1100,
+        "result: {}, expected result > 2000 && result < 4000",
+        result
+    );
     sleep(Duration::from_secs(3)).await;
     Ok(())
 }
