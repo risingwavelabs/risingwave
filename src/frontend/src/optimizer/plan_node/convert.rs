@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use paste::paste;
 use risingwave_common::catalog::FieldDisplay;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::*;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -124,14 +125,27 @@ impl RewriteStreamContext {
 pub struct ToStreamContext {
     share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
     emit_on_window_close: bool,
+    stream_scan_type: StreamScanType,
 }
 
 impl ToStreamContext {
     pub fn new(emit_on_window_close: bool) -> Self {
+        Self::new_with_stream_scan_type(emit_on_window_close, StreamScanType::Backfill)
+    }
+
+    pub fn new_with_stream_scan_type(
+        emit_on_window_close: bool,
+        stream_scan_type: StreamScanType,
+    ) -> Self {
         Self {
             share_to_stream_map: HashMap::new(),
             emit_on_window_close,
+            stream_scan_type,
         }
+    }
+
+    pub fn stream_scan_type(&self) -> StreamScanType {
+        self.stream_scan_type
     }
 
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
