@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,7 +201,7 @@ async fn main() {
                     .await
                     .unwrap();
                 if let Some(outdir) = args.generate_sqlsmith_queries {
-                    risingwave_sqlsmith::runner::generate(
+                    risingwave_sqlsmith::test_runners::generate(
                         rw.pg_client(),
                         &args.files,
                         count,
@@ -212,7 +212,7 @@ async fn main() {
                     return;
                 }
                 if args.run_differential_tests {
-                    risingwave_sqlsmith::runner::run_differential_testing(
+                    risingwave_sqlsmith::test_runners::run_differential_testing(
                         rw.pg_client(),
                         &args.files,
                         count,
@@ -223,8 +223,13 @@ async fn main() {
                     return;
                 }
 
-                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count, Some(seed))
-                    .await;
+                risingwave_sqlsmith::test_runners::run(
+                    rw.pg_client(),
+                    &args.files,
+                    count,
+                    Some(seed),
+                )
+                .await;
             })
             .await;
         return;
@@ -237,7 +242,7 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
+                risingwave_sqlsmith::test_runners::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;

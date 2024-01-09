@@ -165,6 +165,8 @@ impl MigrationTrait for Migration {
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
+                    .col(ColumnDef::new(Object::InitializedAtClusterVersion).string())
+                    .col(ColumnDef::new(Object::CreatedAtClusterVersion).string())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_object_owner_id")
@@ -706,6 +708,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Language).string().not_null())
                     .col(ColumnDef::new(Function::Link).string().not_null())
                     .col(ColumnDef::new(Function::Identifier).string().not_null())
+                    .col(ColumnDef::new(Function::Body).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -1097,6 +1100,7 @@ enum Function {
     Language,
     Link,
     Identifier,
+    Body,
     Kind,
 }
 
@@ -1110,6 +1114,8 @@ enum Object {
     DatabaseId,
     InitializedAt,
     CreatedAt,
+    InitializedAtClusterVersion,
+    CreatedAtClusterVersion,
 }
 
 #[derive(DeriveIden)]

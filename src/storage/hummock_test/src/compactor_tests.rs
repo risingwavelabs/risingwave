@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -188,6 +188,12 @@ pub(crate) mod tests {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
+        let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+        let max_task_parallelism = Arc::new(AtomicU32::new(
+            (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+                .ceil() as u32,
+        ));
+
         CompactorContext {
             storage_opts,
             sstable_store,
@@ -197,7 +203,8 @@ pub(crate) mod tests {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_count: Arc::new(AtomicU32::new(0)),
+            running_task_parallelism: Arc::new(AtomicU32::new(0)),
+            max_task_parallelism,
         }
     }
 
@@ -244,8 +251,8 @@ pub(crate) mod tests {
                 .clone()
                 .sstable_id_remote_fetch_number,
         ));
-        let worker_node2 = hummock_manager_ref
-            .cluster_manager
+        let worker_node_id2 = hummock_manager_ref
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::ComputeNode,
                 HostAddress::default(),
@@ -255,7 +262,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let _snapshot = hummock_manager_ref
-            .pin_snapshot(worker_node2.id)
+            .pin_snapshot(worker_node_id2)
             .await
             .unwrap();
         let key = key.freeze();

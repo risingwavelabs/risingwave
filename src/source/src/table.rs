@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ impl TableDmlHandle {
         TableStreamReader { rx }
     }
 
-    pub fn write_handle(&self, txn_id: TxnId) -> Result<WriteHandle> {
+    pub fn write_handle(&self, session_id: u32, txn_id: TxnId) -> Result<WriteHandle> {
         // The `changes_txs` should not be empty normally, since we ensured that the channels
         // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
         // table catalog visible to the users. However, when we're recovering, it's possible
@@ -94,9 +94,11 @@ impl TableDmlHandle {
                 )));
             }
             let len = guard.changes_txs.len();
+            // Use session id instead of txn_id to choose channel so that we can preserve transaction order in the same session.
+            // PS: only hold if there's no scaling on the table.
             let sender = guard
                 .changes_txs
-                .get((txn_id % len as u64) as usize)
+                .get((session_id % len as u32) as usize)
                 .context("no available table reader in streaming source executors")?
                 .clone();
 
@@ -298,6 +300,7 @@ mod tests {
     use super::*;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_SESSION_ID: u32 = 0;
 
     fn new_table_dml_handle() -> TableDmlHandle {
         TableDmlHandle::new(
@@ -310,7 +313,9 @@ mod tests {
     async fn test_table_dml_handle() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
         let mut reader = table_dml_handle.stream_reader().into_stream();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
@@ -354,7 +359,9 @@ mod tests {
     async fn test_write_handle_rollback_on_drop() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
         let mut reader = table_dml_handle.stream_reader().into_stream();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
         write_handle.begin().unwrap();
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 pub mod gcs_source;
+pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
@@ -31,15 +32,21 @@ use crate::source::{SourceProperties, UnknownFields};
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
+pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
+
+    /// The base64 encoded credential key. If not set, ADC will be used.
     #[serde(rename = "gcs.credential")]
     pub credential: Option<String>,
+
+    /// If credential/ADC is not set. The service account can be used to provide the credential info.
     #[serde(rename = "gcs.service_account", default)]
     pub service_account: Option<String>,
+
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 
@@ -89,12 +96,23 @@ impl OpendalSource for OpendalGcs {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalPosixFs;
+
+impl OpendalSource for OpendalPosixFs {
+    type Properties = PosixFsProperties;
+
+    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_posix_fs_source(properties)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
 
-    // The following are only supported by s3_v2 (opendal) source.
+    /// The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 
@@ -114,4 +132,32 @@ impl SourceProperties for OpendalS3Properties {
     type SplitReader = OpendalReader<OpendalS3>;
 
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct PosixFsProperties {
+    /// The root directly of the files to search. The files will be searched recursively.
+    #[serde(rename = "posix_fs.root")]
+    pub root: String,
+
+    /// The regex pattern to match files under root directory.
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for PosixFsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for PosixFsProperties {
+    type Split = OpendalFsSplit<OpendalPosixFs>;
+    type SplitEnumerator = OpendalEnumerator<OpendalPosixFs>;
+    type SplitReader = OpendalReader<OpendalPosixFs>;
+
+    const SOURCE_NAME: &'static str = POSIX_FS_CONNECTOR;
 }

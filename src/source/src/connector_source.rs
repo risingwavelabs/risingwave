@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalS3, OpendalSource,
+    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{
@@ -101,6 +101,11 @@ impl ConnectorSource {
             ConnectorProperties::OpendalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                Ok(build_opendal_fs_list_stream(lister))
+            }
+            ConnectorProperties::PosixFs(prop) => {
+                let lister: OpendalEnumerator<OpendalPosixFs> =
+                    OpendalEnumerator::new_posix_fs_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
             other => bail!("Unsupported source: {:?}", other),

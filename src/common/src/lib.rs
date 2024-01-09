@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,6 +70,8 @@ pub mod log;
 pub mod memory;
 pub mod metrics;
 pub mod monitor;
+pub mod opts;
+pub mod range;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
@@ -78,8 +80,6 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
-
-pub mod range;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
@@ -105,3 +105,7 @@ macro_rules! git_sha {
 // `const_option_ext` was broken by https://github.com/rust-lang/rust/pull/110393
 // Tracking issue: https://github.com/rust-lang/rust/issues/91930
 pub const GIT_SHA: &str = git_sha!("GIT_SHA");
+
+pub fn current_cluster_version() -> String {
+    format!("PostgreSQL 9.5-RisingWave-{} ({})", RW_VERSION, GIT_SHA)
+}

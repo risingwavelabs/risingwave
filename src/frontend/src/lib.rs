@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,6 +55,7 @@ mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -101,7 +102,7 @@ pub struct FrontendOpts {
 
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_addr: String,
+    pub meta_addr: MetaAddressStrategy,
 
     #[clap(
         long,
@@ -136,6 +137,16 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
+}
+
+impl risingwave_common::opts::Opts for FrontendOpts {
+    fn name() -> &'static str {
+        "frontend"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_addr.clone()
+    }
 }
 
 impl Default for FrontendOpts {

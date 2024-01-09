@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
@@ -364,6 +365,7 @@ pub struct QueryStage {
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
     pub dml_table_id: Option<TableId>,
+    pub session_id: SessionId,
 
     /// Used to generate exchange information when complete source scan information.
     children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
@@ -395,6 +397,7 @@ impl QueryStage {
                 source_info: self.source_info.clone(),
                 has_lookup_join: self.has_lookup_join,
                 dml_table_id: self.dml_table_id,
+                session_id: self.session_id,
                 children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
@@ -423,6 +426,7 @@ impl QueryStage {
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
+            session_id: self.session_id,
             children_exchange_distribution: None,
         }
     }
@@ -467,6 +471,7 @@ struct QueryStageBuilder {
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
     dml_table_id: Option<TableId>,
+    session_id: SessionId,
 
     children_exchange_distribution: HashMap<StageId, Distribution>,
 }
@@ -482,6 +487,7 @@ impl QueryStageBuilder {
         source_info: Option<SourceScanInfo>,
         has_lookup_join: bool,
         dml_table_id: Option<TableId>,
+        session_id: SessionId,
     ) -> Self {
         Self {
             query_id,
@@ -494,6 +500,7 @@ impl QueryStageBuilder {
             source_info,
             has_lookup_join,
             dml_table_id,
+            session_id,
             children_exchange_distribution: HashMap::new(),
         }
     }
@@ -514,6 +521,7 @@ impl QueryStageBuilder {
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
+            session_id: self.session_id,
             children_exchange_distribution,
         });
 
@@ -809,6 +817,7 @@ impl BatchPlanFragmenter {
             source_info,
             has_lookup_join,
             dml_table_id,
+            root.ctx().session_ctx().session_id(),
         );
 
         self.visit_node(root, &mut builder, None)?;

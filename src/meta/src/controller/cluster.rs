@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -883,6 +883,9 @@ impl ClusterControllerInner {
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;
+        if worker.is_none() {
+            return Ok(None);
+        }
         let extra_info = self.get_extra_info_checked(worker_id)?;
         Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,6 +146,7 @@ impl SourceExecutor {
             self.metrics,
             self.source_ctrl_opts.clone(),
             None,
+            ConnectorProperties::default(),
         ));
         let stream = self
             .connector_source

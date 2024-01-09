@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ConnectorSplits, ExprContext,
-    FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, StreamNode, TableId,
-    VnodeBitmap, WorkerId,
+    FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId, StreamNode,
+    TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
@@ -40,7 +40,8 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
+    PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
+    StreamSource,
 };
 use sea_orm::sea_query::{Expr, Value};
 use sea_orm::ActiveValue::Set;
@@ -879,7 +880,7 @@ impl CatalogController {
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
             .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
-            .filter(actor::Column::ParallelUnitId.is_in(plan.values().cloned().collect::<Vec<_>>()))
+            .filter(actor::Column::ParallelUnitId.is_in(plan.keys().cloned().collect::<Vec<_>>()))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -1004,7 +1005,7 @@ impl CatalogController {
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
-    pub async fn get_running_actors_by_fragment(
+    pub async fn get_running_actors_of_fragment(
         &self,
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {
@@ -1118,6 +1119,93 @@ impl CatalogController {
         }
 
         Ok(chain_fragments)
+    }
+
+    /// Find the external stream source info inside the stream node, if any.
+    fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
+        if let Some(NodeBody::Source(source)) = &stream_node.node_body {
+            if let Some(inner) = &source.source_inner {
+                return Some(inner);
+            }
+        }
+
+        for child in &stream_node.input {
+            if let Some(source) = Self::find_stream_source(child) {
+                return Some(source);
+            }
+        }
+
+        None
+    }
+
+    pub async fn load_source_fragment_ids(
+        &self,
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
+        let inner = self.inner.read().await;
+        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+
+        let mut source_fragment_ids = HashMap::new();
+        for (fragment_id, _, stream_node) in fragments {
+            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+                source_fragment_ids
+                    .entry(source.source_id as SourceId)
+                    .or_insert_with(BTreeSet::new)
+                    .insert(fragment_id);
+            }
+        }
+        Ok(source_fragment_ids)
+    }
+
+    pub async fn get_stream_source_fragment_ids(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
+        let inner = self.inner.read().await;
+        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+
+        let mut source_fragment_ids = HashMap::new();
+        for (fragment_id, _, stream_node) in fragments {
+            if let Some(source) = Self::find_stream_source(stream_node.inner_ref()) {
+                source_fragment_ids
+                    .entry(source.source_id as SourceId)
+                    .or_insert_with(BTreeSet::new)
+                    .insert(fragment_id);
+            }
+        }
+        Ok(source_fragment_ids)
+    }
+
+    pub async fn load_actor_splits(&self) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
+        let inner = self.inner.read().await;
+        let splits: Vec<(ActorId, ConnectorSplits)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::Splits])
+            .filter(actor::Column::Splits.is_not_null())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(splits.into_iter().collect())
     }
 
     /// Get the `Materialize` fragment of the specified table.

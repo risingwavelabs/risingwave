@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,8 @@
 
 package com.risingwave.connector.source.core;
 
-import static io.debezium.schema.AbstractTopicNamingStrategy.TOPIC_HEARTBEAT_PREFIX;
+import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
+import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
 import com.risingwave.connector.api.source.CdcEngine;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -36,11 +37,14 @@ public class DbzCdcEngine implements CdcEngine {
             long sourceId,
             Properties config,
             DebeziumEngine.CompletionCallback completionCallback) {
-        var dbzHeartbeatPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+        var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+        var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
+        var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
                 new DbzCdcEventConsumer(
                         sourceId,
-                        dbzHeartbeatPrefix,
+                        heartbeatTopicPrefix,
+                        transactionTopic,
                         new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it

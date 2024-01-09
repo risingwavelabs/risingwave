@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ mod env;
 pub mod event_log;
 mod id;
 mod idle;
+mod metadata;
 mod notification;
 pub mod sink_coordination;
 mod streaming_job;
@@ -29,6 +30,7 @@ pub use cluster::{WorkerKey, *};
 pub use env::{MetaSrvEnv, *};
 pub use id::*;
 pub use idle::*;
+pub use metadata::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
 pub use risingwave_meta_model_v2::prelude;
 pub use streaming_job::*;
