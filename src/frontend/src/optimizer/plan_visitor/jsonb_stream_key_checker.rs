@@ -83,12 +83,14 @@ impl PlanVisitor for StreamKeyChecker {
     }
 
     fn visit_logical_union(&mut self, plan: &LogicalUnion) -> Self::Result {
-        for field in &plan.inputs()[0].schema().fields {
-            if field.data_type() == DataType::Jsonb {
-                return Some(format!(
-                    "Column {} should not be in the union because it has data type Jsonb",
-                    FieldDisplay(field)
-                ));
+        if !plan.all() {
+            for field in &plan.inputs()[0].schema().fields {
+                if field.data_type() == DataType::Jsonb {
+                    return Some(format!(
+                        "Column {} should not be in the union because it has data type Jsonb",
+                        FieldDisplay(field)
+                    ));
+                }
             }
         }
         self.visit_inputs(plan)

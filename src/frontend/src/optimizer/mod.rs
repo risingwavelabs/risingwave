@@ -376,10 +376,15 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
-                if let Some(err) = StreamKeyChecker.visit(self.plan.clone()) {
+                if !ctx
+                    .session_ctx()
+                    .config()
+                    .streaming_allow_jsonb_in_stream_key()
+                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                {
                     return Err(ErrorCode::NotSupported(
                         err,
-                        "Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`".to_string(),
+                        "Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`".to_string(),
                     ).into());
                 }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
