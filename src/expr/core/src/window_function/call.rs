@@ -15,6 +15,7 @@
 use std::fmt::Display;
 
 use enum_as_inner::EnumAsInner;
+use parse_display::Display;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
@@ -148,17 +149,11 @@ pub enum FrameBounds {
     // Range(RangeFrameBounds),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash)]
+#[display("ROWS BETWEEN {start} AND {end}")]
 pub struct RowsFrameBounds {
     pub start: FrameBound<usize>,
     pub end: FrameBound<usize>,
-}
-
-impl Display for RowsFrameBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ROWS BETWEEN {} AND {}", self.start, self.end)?;
-        Ok(())
-    }
 }
 
 impl RowsFrameBounds {
@@ -167,11 +162,14 @@ impl RowsFrameBounds {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
+#[derive(Display, Debug, Clone, Eq, PartialEq, Hash, EnumAsInner)]
+#[display(style = "TITLE CASE")]
 pub enum FrameBound<T> {
     UnboundedPreceding,
+    #[display("{0} PRECEDING")]
     Preceding(T),
     CurrentRow,
+    #[display("{0} FOLLOWING")]
     Following(T),
     UnboundedFollowing,
 }
@@ -229,19 +227,6 @@ impl FrameBound<usize> {
             r#type: r#type as _,
             offset: Some(offset),
         }
-    }
-}
-
-impl Display for FrameBound<usize> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameBound::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING")?,
-            FrameBound::Preceding(n) => write!(f, "{} PRECEDING", n)?,
-            FrameBound::CurrentRow => write!(f, "CURRENT ROW")?,
-            FrameBound::Following(n) => write!(f, "{} FOLLOWING", n)?,
-            FrameBound::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING")?,
-        }
-        Ok(())
     }
 }
 
