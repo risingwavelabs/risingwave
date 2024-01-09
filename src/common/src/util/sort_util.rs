@@ -29,7 +29,7 @@ use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-enum Direction {
+pub enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -183,6 +183,10 @@ impl OrderType {
     /// Create a `DESC NULLS LAST` order type.
     pub fn descending_nulls_last() -> Self {
         Self::nulls_last(Direction::Descending)
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     pub fn is_ascending(&self) -> bool {
