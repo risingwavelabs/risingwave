@@ -68,6 +68,7 @@ where
 pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
     internal_tables_only: bool,
+    visit_child_recursively: bool,
     mut f: F,
 ) where
     F: FnMut(&mut Table, &str),
@@ -97,7 +98,7 @@ pub fn visit_stream_node_tables_inner<F>(
         };
     }
 
-    visit_stream_node(stream_node, |body| {
+    let mut visit_body = |body: &mut NodeBody| {
         match body {
             // Join
             NodeBody::HashJoin(node) => {
@@ -235,14 +236,19 @@ pub fn visit_stream_node_tables_inner<F>(
             }
             _ => {}
         }
-    })
+    };
+    if visit_child_recursively {
+        visit_stream_node(stream_node, visit_body)
+    } else {
+        visit_body(stream_node.node_body.as_mut().unwrap())
+    }
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, true, f)
+    visit_stream_node_tables_inner(stream_node, true, true, f)
 }
 
 #[allow(dead_code)]
@@ -250,7 +256,7 @@ pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, false, f)
+    visit_stream_node_tables_inner(stream_node, false, true, f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].

@@ -58,10 +58,6 @@ impl StreamGraphFormatter {
         }
     }
 
-    fn pretty_add_table<'a>(&mut self, tb: &Table) -> Pretty<'a> {
-        Pretty::debug(&self.add_table(tb))
-    }
-
     /// collect the table catalog and return the table id
     fn add_table(&mut self, tb: &Table) -> u32 {
         self.tables.insert(tb.id, tb.clone());
@@ -157,19 +153,33 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut fields: Vec<(Cow<'_, str>, Pretty<'_>)> = Vec::with_capacity(7);
+        let mut tables: Vec<(String, u32)> = Vec::with_capacity(7);
         let mut node_copy = node.clone();
+
         stream_graph_visitor::visit_stream_node_tables_inner(
             &mut node_copy,
             false,
+            false,
             |table, table_name| {
-                fields.push((table_name.to_string().into(), self.pretty_add_table(table)));
+                tables.push((table_name.to_string(), self.add_table(table)));
             },
         );
 
+        let mut fields = Vec::with_capacity(3);
+        if !tables.is_empty() {
+            fields.push((
+                "tables",
+                Pretty::Array(
+                    tables
+                        .into_iter()
+                        .map(|(name, id)| Pretty::Text(format!("{}: {}", name, id).into()))
+                        .collect(),
+                ),
+            ));
+        }
         if self.verbose {
             fields.push((
-                "output".into(),
+                "output",
                 Pretty::Array(
                     node.fields
                         .iter()
@@ -178,7 +188,7 @@ impl StreamGraphFormatter {
                 ),
             ));
             fields.push((
-                "stream key".into(),
+                "stream key",
                 Pretty::Array(
                     node.stream_key
                         .iter()
@@ -192,45 +202,6 @@ impl StreamGraphFormatter {
             .iter()
             .map(|input| self.explain_node(input))
             .collect();
-        Pretty::Record(XmlNode::new(one_line_explain.into(), fields, children))
-    }
-
-    fn call_states<'a>(
-        &mut self,
-        agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
-    ) -> Pretty<'a> {
-        let vec = agg_call_states
-            .iter()
-            .filter_map(|state| match state.get_inner().unwrap() {
-                agg_call_state::Inner::ValueState(_) => None,
-                agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
-                    table,
-                    ..
-                }) => Some(self.pretty_add_table(table.as_ref().unwrap())),
-            })
-            .collect();
-        Pretty::Array(vec)
-    }
-
-    fn distinct_tables<'a>(
-        &mut self,
-        node: &StreamNode,
-        inner: &HashMap<u32, Table>,
-    ) -> Pretty<'a> {
-        let in_fields = &node.get_input()[0].fields;
-        Pretty::Array(
-            inner
-                .iter()
-                .sorted_by_key(|(i, _)| *i)
-                .map(|(i, table)| {
-                    let fmt = format!(
-                        "(distinct key: {}, table id: {})",
-                        in_fields[*i as usize].name,
-                        self.add_table(table)
-                    );
-                    Pretty::Text(fmt.into())
-                })
-                .collect(),
-        )
+        Pretty::simple_record(one_line_explain, fields, children)
     }
 }
