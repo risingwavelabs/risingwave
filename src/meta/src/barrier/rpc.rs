@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use futures::stream::FuturesOrdered;
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use risingwave_common::util::pending_on_none;
 
@@ -25,26 +25,25 @@ pub(super) struct BarrierRpcManager {
     context: GlobalBarrierManagerContext,
 
     /// Futures that await on the completion of barrier.
-    // TODO: may use a util that is eagerly aware of error.
-    injected_in_progress_barrier: FuturesOrdered<BarrierCompletionFuture>,
+    injected_in_progress_barrier: FuturesUnordered<BarrierCompletionFuture>,
 }
 
 impl BarrierRpcManager {
     pub(super) fn new(context: GlobalBarrierManagerContext) -> Self {
         Self {
             context,
-            injected_in_progress_barrier: FuturesOrdered::new(),
+            injected_in_progress_barrier: FuturesUnordered::new(),
         }
     }
 
     pub(super) fn clear(&mut self) {
-        self.injected_in_progress_barrier = FuturesOrdered::new();
+        self.injected_in_progress_barrier = FuturesUnordered::new();
     }
 
     pub(super) async fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
         let await_complete_future = self.context.inject_barrier(command_context).await;
         self.injected_in_progress_barrier
-            .push_back(await_complete_future);
+            .push(await_complete_future);
     }
 
     pub(super) async fn next_complete_barrier(&mut self) -> BarrierCompletion {
