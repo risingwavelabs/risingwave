@@ -87,6 +87,7 @@ pub struct NotImplemented {
 #[derive(Error, Debug, Macro)]
 #[thiserror_ext(macro(path = "crate::error"))]
 pub struct NoFunction {
+    #[message]
     pub sig: String,
     pub candidates: Option<String>,
 }

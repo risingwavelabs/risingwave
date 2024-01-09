@@ -21,10 +21,10 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, NoFunction, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
@@ -1377,16 +1377,12 @@ impl Binder {
                     .map(|(_idx, c)| c)
                     .join(" or ");
 
-                let function_sig = format!(
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
                     "{}({})",
                     function_name,
                     inputs.iter().map(|e| e.return_type()).join(", ")
-                );
-
-                Err(NoFunction {
-                    sig: function_sig,
-                    candidates: (!candidates.is_empty()).then(|| candidates),
-                }
+                )
                 .into())
             }
         }
