@@ -107,7 +107,7 @@ pub async fn handle_create_as(
             append_only,
             Some(col_id_gen.into_version()),
         )?;
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()

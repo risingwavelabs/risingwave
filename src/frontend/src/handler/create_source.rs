@@ -1240,7 +1240,7 @@ pub async fn handle_create_source(
 
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_plan);
+            let mut graph = build_graph(stream_plan)?;
             graph.parallelism =
                 session
                     .config()
