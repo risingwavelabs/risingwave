@@ -14,7 +14,7 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, NoFunction, Result};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
@@ -643,12 +643,20 @@ pub fn infer_type_name<'a>(
 
     let mut candidates = top_matches(&candidates, inputs);
 
-    if candidates.is_empty() {
-        return Err(ErrorCode::NoFunction(format!(
+    // show function in error message
+    let sig = || {
+        format!(
             "{}({})",
             func_name,
             inputs.iter().map(TypeDisplay).format(", ")
-        ))
+        )
+    };
+
+    if candidates.is_empty() {
+        return Err(NoFunction {
+            sig: sig(),
+            candidates: None,
+        }
         .into());
     }
 
@@ -663,9 +671,8 @@ pub fn infer_type_name<'a>(
         [] => unreachable!(),
         [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
-            "function {}({}) is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
-            func_name,
-            inputs.iter().map(TypeDisplay).format(", "),
+            "function {} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
+            sig(),
         ))
         .into()),
     }
