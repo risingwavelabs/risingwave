@@ -125,7 +125,7 @@ impl DdlController {
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
         let (ctx, table_fragments) = self
-            .build_stream_job(ctx, &streaming_job, fragment_graph, None)
+            .build_stream_job(ctx, streaming_job, fragment_graph, None)
             .await?;
 
         match streaming_job {
