@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::cmp::max;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
-use pretty_xmlish::{Pretty, PrettyConfig, XmlNode};
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::agg_call_state::MaterializedInputState;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragmentEdge;
-use risingwave_pb::stream_plan::{
-    agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
-};
+use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
 
 use crate::TableCatalog;
 
