@@ -796,6 +796,9 @@ fn find_affected_ranges<'cache>(
     // tell the caller that there exists at least one affected range that touches the sentinel.
 
     let delta = part_with_delta.delta();
+    debug_assert!(!delta.is_empty(), "if delta is empty, we won't be here");
+    let delta_first_key = delta.first_key_value().unwrap().0;
+    let delta_last_key = delta.last_key_value().unwrap().0;
 
     if part_with_delta.first_key().is_none() {
         // all keys are deleted in the delta
@@ -805,10 +808,10 @@ fn find_affected_ranges<'cache>(
     if part_with_delta.snapshot().is_empty() {
         // all existing keys are inserted in the delta
         return vec![(
-            delta.first_key_value().unwrap().0,
-            delta.first_key_value().unwrap().0,
-            delta.last_key_value().unwrap().0,
-            delta.last_key_value().unwrap().0,
+            delta_first_key,
+            delta_first_key,
+            delta_last_key,
+            delta_last_key,
         )];
     }
 
@@ -827,9 +830,9 @@ fn find_affected_ranges<'cache>(
     // `first_curr_key` which is the MINIMUM of all `first_curr_key`s of all frames of all window
     // function calls.
 
-    let first_curr_key = if end_is_unbounded {
-        // If the frame end is unbounded, the frame corresponding to the first key is always
-        // affected.
+    let first_curr_key = if end_is_unbounded || delta_first_key == first_key {
+        // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
+        // to the first key is always affected.
         first_key
     } else {
         let mut min_first_curr_key = &Sentinelled::Largest;
@@ -837,8 +840,7 @@ fn find_affected_ranges<'cache>(
         for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta
-                        .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
+                    let mut cursor = part_with_delta.lower_bound(Bound::Included(delta_first_key));
                     for _ in 0..bounds.end.n_following_rows().unwrap() {
                         // Note that we have to move before check, to handle situation where the
                         // cursor is at ghost position at first.
@@ -860,9 +862,9 @@ fn find_affected_ranges<'cache>(
         min_first_curr_key
     };
 
-    let first_frame_start = if start_is_unbounded {
-        // If the frame start is unbounded, the first key always need to be included in the affected
-        // range.
+    let first_frame_start = if start_is_unbounded || first_curr_key == first_key {
+        // If the frame start is unbounded, or, the first curr key is the first key, then the first key
+        // always need to be included in the affected range.
         first_key
     } else {
         let mut min_frame_start = &Sentinelled::Largest;
@@ -890,7 +892,7 @@ fn find_affected_ranges<'cache>(
         min_frame_start
     };
 
-    let last_curr_key = if start_is_unbounded {
+    let last_curr_key = if start_is_unbounded || delta_last_key == last_key {
         last_key
     } else {
         let mut max_last_curr_key = &Sentinelled::Smallest;
@@ -898,8 +900,7 @@ fn find_affected_ranges<'cache>(
         for call in calls {
             let key = match &call.frame.bounds {
                 FrameBounds::Rows(bounds) => {
-                    let mut cursor = part_with_delta
-                        .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
+                    let mut cursor = part_with_delta.upper_bound(Bound::Included(delta_last_key));
                     for _ in 0..bounds.start.n_preceding_rows().unwrap() {
                         cursor.move_next();
                         if cursor.position().is_ghost() {
@@ -919,7 +920,7 @@ fn find_affected_ranges<'cache>(
         max_last_curr_key
     };
 
-    let last_frame_end = if end_is_unbounded {
+    let last_frame_end = if end_is_unbounded || last_curr_key == last_key {
         last_key
     } else {
         let mut max_frame_end = &Sentinelled::Smallest;
