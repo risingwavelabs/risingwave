@@ -222,6 +222,7 @@ test_dml_amplification() {
   echo "--- Kill cluster"
   cargo make kill
   cargo make wait-processes-exit
+  wait
 }
 
 main() {
