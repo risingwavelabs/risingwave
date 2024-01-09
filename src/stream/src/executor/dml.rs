@@ -86,6 +86,11 @@ impl DmlExecutor {
         chunk_size: usize,
         rate_limit: Option<NonZeroU64>,
     ) -> Self {
+        // If chunk_size > rate_limit, we should decrease its size, so rate limit can take effect.
+        let chunk_size = rate_limit
+            .map(|rate_limit| std::cmp::min(chunk_size, rate_limit.get() as usize))
+            .unwrap_or(chunk_size);
+        tracing::debug!("chunk_size: {}", chunk_size);
         Self {
             info,
             upstream,
