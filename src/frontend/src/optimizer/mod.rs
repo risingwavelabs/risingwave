@@ -63,7 +63,7 @@ use self::plan_node::{
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -376,6 +376,12 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
+                if let Some(err) = StreamKeyChecker.visit(self.plan.clone()) {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set XXX true`".to_string(),
+                    ).into());
+                }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) = {
