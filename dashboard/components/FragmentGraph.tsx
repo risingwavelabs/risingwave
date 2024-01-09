@@ -89,8 +89,8 @@ const nodeMarginX = nodeRadius * 6
 const nodeMarginY = nodeRadius * 4
 const fragmentMarginX = nodeRadius * 2
 const fragmentMarginY = nodeRadius * 2
-const fragmentDistanceX = nodeRadius * 4
-const fragmentDistanceY = nodeRadius * 4
+const fragmentDistanceX = nodeRadius * 2
+const fragmentDistanceY = nodeRadius * 2
 
 export default function FragmentGraph({
   planNodeDependencies,
@@ -383,10 +383,21 @@ export default function FragmentGraph({
             : theme.colors.gray["300"]
         }
 
+        const width = (d: Edge) => {
+          if (backPressures) {
+            let value = backPressures.get(`${d.target}_${d.source}`)
+            if (value) {
+              return backPressureWidth(value)
+            }
+          }
+
+          return isEdgeSelected(d) ? 4 : 2
+        }
+
         return sel
           .attr("d", ({ points }) => line(points))
           .attr("fill", "none")
-          .attr("stroke-width", (d) => (isEdgeSelected(d) ? 4 : 2))
+          .attr("stroke-width", width)
           .attr("stroke", color)
       }
       const createEdge = (sel: Enter<EdgeSelection>) =>
@@ -444,7 +455,7 @@ export default function FragmentGraph({
 }
 
 /**
- * The color for the given back pressure value.
+ * The color for the edge with given back pressure value.
  *
  * @param value The back pressure rate, between 0 and 100.
  */
@@ -470,4 +481,19 @@ function backPressureColor(value: number) {
     .toHexString()
 
   return color
+}
+
+/**
+ * The width for the edge with given back pressure value.
+ *
+ * @param value The back pressure rate, between 0 and 100.
+ */
+function backPressureWidth(value: number) {
+  value = Math.max(value, 0)
+  value = Math.min(value, 100)
+
+  let width = 30 * (value / 100)
+  width = Math.max(width, 2)
+
+  return width
 }
