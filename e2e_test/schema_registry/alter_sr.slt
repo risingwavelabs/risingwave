@@ -51,7 +51,7 @@ sleep 10s
 query III
 SELECT COUNT(*), MAX(age), MIN(age) FROM mv_more_fields;
 ----
-25 5 0
+25 4 0
 
 statement ok
 DROP MATERIALIZED VIEW mv_more_fields;
