@@ -41,14 +41,15 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
+use crate::barrier::schedule::ScheduledBarriers;
+use crate::barrier::{CheckpointControl, Command, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{MetadataManager, WorkerId};
 use crate::model::{BarrierManagerState, MetadataModel, MigrationPlan, TableFragments};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
 
-impl GlobalBarrierManager {
+impl GlobalBarrierManagerContext {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.
@@ -63,10 +64,10 @@ impl GlobalBarrierManager {
     }
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
-        self.resolve_actor_info(
-            &mut CheckpointControl::new(self.metrics.clone()),
-            &Command::barrier(),
-        )
+        let default_checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        self.resolve_actor_info(|s, table_id, actor_id| {
+            default_checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
+        })
         .await
     }
 
@@ -323,9 +324,10 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
+        scheduled_barriers: &ScheduledBarriers,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers
+        scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
             .await;
 
@@ -355,8 +357,7 @@ impl GlobalBarrierManager {
                     // some table fragments might have been cleaned as dirty, but it's fine since the drop
                     // interface is idempotent.
                     if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                        let to_drop_tables =
-                            self.scheduled_barriers.pre_apply_drop_scheduled().await;
+                        let to_drop_tables = scheduled_barriers.pre_apply_drop_scheduled().await;
                         mgr.fragment_manager
                             .drop_table_fragments_vec(&to_drop_tables)
                             .await?;
@@ -409,17 +410,13 @@ impl GlobalBarrierManager {
 
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
-                        self.metadata_manager.clone(),
-                        self.hummock_manager.clone(),
-                        self.env.stream_client_pool_ref(),
                         info,
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         paused_reason,
                         command,
                         BarrierKind::Initial,
-                        self.source_manager.clone(),
-                        self.scale_controller.clone(),
+                        self.clone(),
                         tracing::Span::current(), // recovery span
                     ));
 
@@ -467,7 +464,7 @@ impl GlobalBarrierManager {
         .expect("Retry until recovery success.");
 
         recovery_timer.observe_duration();
-        self.scheduled_barriers.mark_ready().await;
+        scheduled_barriers.mark_ready().await;
 
         tracing::info!(
             epoch = state.in_flight_prev_epoch().value().0,
