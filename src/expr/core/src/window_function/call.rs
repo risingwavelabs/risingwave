@@ -245,23 +245,14 @@ impl FrameBound<usize> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
+#[derive(Display, Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
+#[display("EXCLUDE {}", style = "TITLE CASE")]
 pub enum FrameExclusion {
     CurrentRow,
     // Group,
     // Ties,
     #[default]
     NoOthers,
-}
-
-impl Display for FrameExclusion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameExclusion::CurrentRow => write!(f, "EXCLUDE CURRENT ROW")?,
-            FrameExclusion::NoOthers => write!(f, "EXCLUDE NO OTHERS")?,
-        }
-        Ok(())
-    }
 }
 
 impl FrameExclusion {
