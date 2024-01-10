@@ -90,7 +90,6 @@ impl DmlExecutor {
         let chunk_size = rate_limit
             .map(|rate_limit| std::cmp::min(chunk_size, rate_limit.get() as usize))
             .unwrap_or(chunk_size);
-        tracing::debug!("chunk_size: {}", chunk_size);
         Self {
             info,
             upstream,
@@ -175,13 +174,11 @@ impl DmlExecutor {
                             for chunk in vec {
                                 for (op, row) in chunk.rows() {
                                     if let Some(chunk) = builder.append_row(op, row) {
-                                        tracing::trace!("flush batch_group on barrier");
                                         yield Message::Chunk(chunk);
                                     }
                                 }
                             }
                             if let Some(chunk) = builder.take() {
-                                tracing::trace!("flush batch_group on barrier");
                                 yield Message::Chunk(chunk);
                             }
                         }
@@ -217,20 +214,17 @@ impl DmlExecutor {
                                     for chunk in vec {
                                         for (op, row) in chunk.rows() {
                                             if let Some(chunk) = builder.append_row(op, row) {
-                                                tracing::trace!("yielding, txn buffer large");
                                                 yield Message::Chunk(chunk);
                                             }
                                         }
                                     }
                                     if let Some(chunk) = builder.take() {
-                                        tracing::trace!("yielding, txn buffer large");
                                         yield Message::Chunk(chunk);
                                     }
                                 }
 
                                 // txn buffer isn't small, so yield.
                                 for chunk in txn_buffer.vec {
-                                    tracing::trace!("yielding, txn buffer large");
                                     yield Message::Chunk(chunk);
                                 }
                             } else if txn_buffer_cardinality + batch_group_cardinality
@@ -238,7 +232,6 @@ impl DmlExecutor {
                             {
                                 // txn buffer is small and batch group has space.
                                 batch_group.extend(txn_buffer.vec);
-                                tracing::trace!("storing {} records, txn buffer small", txn_buffer_cardinality);
                             } else {
                                 // txn buffer is small and batch group has no space, so yield the batch group first to preserve the transaction order in the same session.
                                 if !batch_group.is_empty() {
@@ -246,13 +239,11 @@ impl DmlExecutor {
                                     for chunk in vec {
                                         for (op, row) in chunk.rows() {
                                             if let Some(chunk) = builder.append_row(op, row) {
-                                                tracing::trace!("yielding, batch group no space");
                                                 yield Message::Chunk(chunk);
                                             }
                                         }
                                     }
                                     if let Some(chunk) = builder.take() {
-                                        tracing::trace!("yielding, chunk overflow, batch group no space");
                                         yield Message::Chunk(chunk);
                                     }
                                 }
@@ -274,7 +265,6 @@ impl DmlExecutor {
                                     // This transaction is too large, we can't provide atomicity,
                                     // so yield chunk ASAP.
                                     if txn_buffer.overflow {
-                                        tracing::trace!("yielding, chunk overflow");
                                         yield Message::Chunk(chunk);
                                         continue;
                                     }
@@ -283,7 +273,6 @@ impl DmlExecutor {
                                         // Too many chunks for atomicity. Drain and yield them.
                                         tracing::warn!("txn_id={} Too many chunks for atomicity. Sent them to the downstream anyway.", txn_id);
                                         for chunk in txn_buffer.vec.drain(..) {
-                                            tracing::trace!("yielding, chunk too large");
                                             yield Message::Chunk(chunk);
                                         }
                                         txn_buffer.overflow = true;
