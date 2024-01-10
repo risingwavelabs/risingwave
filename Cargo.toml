@@ -63,7 +63,7 @@ exclude = ["lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.5.0-alpha"
+version = "1.6.0"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
