@@ -20,7 +20,9 @@ import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback } from "react"
-import RelationDependencyGraph from "../components/RelationDependencyGraph"
+import RelationDependencyGraph, {
+  nodeRadius,
+} from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
 import { RelationPoint } from "../lib/layout"
 import useFetch from "./api/fetch"
@@ -41,6 +43,9 @@ function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
             .map((r) => r.toString())
         : [],
       order: r.id,
+      width: nodeRadius * 2,
+      height: nodeRadius * 2,
+      relation: r,
     })
   }
   return edges

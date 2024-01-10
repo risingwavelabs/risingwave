@@ -22,7 +22,7 @@ import {
   FragmentBoxPosition,
   Position,
   generateFragmentEdges,
-  layoutFragment,
+  layoutItem,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
 import { StreamNode } from "../proto/gen/stream_plan"
@@ -142,7 +142,7 @@ export default function FragmentGraph({
       includedFragmentIds.add(fragmentId)
     }
 
-    const fragmentLayout = layoutFragment(
+    const fragmentLayout = layoutItem(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
         const { width, height } = layoutFragmentResult.get(id)!
         return { width, height, id, ...data }
