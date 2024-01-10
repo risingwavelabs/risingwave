@@ -258,7 +258,7 @@ impl CompactorManagerInner {
             num_progress_key,
             num_pending_read_io,
             num_pending_write_io,
-            update_at, // TODO
+            update_at,
         } in task_heartbeats.values()
         {
             if *update_at < heartbeat_expiry_ts {
