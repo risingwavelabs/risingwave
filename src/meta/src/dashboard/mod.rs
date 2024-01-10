@@ -66,6 +66,7 @@ pub(super) mod handlers {
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
     };
     use serde_json::json;
+    use thiserror_ext::AsReport;
 
     use super::*;
     use crate::manager::WorkerId;
@@ -87,8 +88,7 @@ pub(super) mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-                "error": format!("{}", self.0),
-                "info":  format!("{:?}", self.0),
+                "error": self.0.to_report_string(),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
