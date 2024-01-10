@@ -384,7 +384,8 @@ impl PlanRoot {
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
-                        "Use a large Jsonb as part of the stream key is unexpected. If you are sure your Jsonb is small, use `set streaming_allow_jsonb_in_stream_key true`".to_string(),
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
                     ).into());
                 }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;

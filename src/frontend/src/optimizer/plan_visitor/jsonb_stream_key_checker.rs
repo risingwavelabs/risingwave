@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::FieldDisplay;
+use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
 
 use super::{DefaultBehavior, Merge};
@@ -27,6 +27,14 @@ impl StreamKeyChecker {
     fn visit_inputs(&mut self, plan: &impl PlanNode) -> Option<String> {
         let results = plan.inputs().into_iter().map(|input| self.visit(input));
         Self::default_behavior().apply(results)
+    }
+
+    fn err_msg(target: &str, field: &Field) -> String {
+        format!(
+            "JSONB column \"{}\" should not be in the {}.",
+            target,
+            FieldDisplay(field)
+        )
     }
 }
 
@@ -45,10 +53,7 @@ impl PlanVisitor for StreamKeyChecker {
         let data_types = schema.data_types();
         for idx in plan.dedup_cols() {
             if data_types[*idx] == DataType::Jsonb {
-                return Some(format!(
-                    "Column {} should not be in the distinct key because it has data type Jsonb",
-                    FieldDisplay(&schema[*idx])
-                ));
+                return Some(StreamKeyChecker::err_msg("distinct key", &schema[*idx]));
             }
         }
         self.visit_inputs(plan)
@@ -60,10 +65,7 @@ impl PlanVisitor for StreamKeyChecker {
         let data_types = schema.data_types();
         for idx in plan.group_key() {
             if data_types[*idx] == DataType::Jsonb {
-                return Some(format!(
-                    "Column {} should not be in the TopN group key because it has data type Jsonb",
-                    FieldDisplay(&schema[*idx])
-                ));
+                return Some(StreamKeyChecker::err_msg("TopN group key", &schema[*idx]));
             }
         }
         for idx in plan
@@ -73,10 +75,7 @@ impl PlanVisitor for StreamKeyChecker {
             .map(|c| c.column_index)
         {
             if data_types[idx] == DataType::Jsonb {
-                return Some(format!(
-                    "Column {} should not be in the TopN order key because it has data type Jsonb",
-                    FieldDisplay(&schema[idx])
-                ));
+                return Some(StreamKeyChecker::err_msg("TopN order key", &schema[idx]));
             }
         }
         self.visit_inputs(plan)
@@ -86,10 +85,7 @@ impl PlanVisitor for StreamKeyChecker {
         if !plan.all() {
             for field in &plan.inputs()[0].schema().fields {
                 if field.data_type() == DataType::Jsonb {
-                    return Some(format!(
-                        "Column {} should not be in the union because it has data type Jsonb",
-                        FieldDisplay(field)
-                    ));
+                    return Some(StreamKeyChecker::err_msg("field", field));
                 }
             }
         }
@@ -102,7 +98,10 @@ impl PlanVisitor for StreamKeyChecker {
         let data_types = schema.data_types();
         for idx in plan.group_key().indices() {
             if data_types[idx] == DataType::Jsonb {
-                return Some(format!("Column {} should not be in the aggregation group key because it has data type Jsonb", FieldDisplay(&schema[idx])));
+                return Some(StreamKeyChecker::err_msg(
+                    "aggregation group key",
+                    &schema[idx],
+                ));
             }
         }
         self.visit_inputs(plan)
@@ -116,13 +115,19 @@ impl PlanVisitor for StreamKeyChecker {
         for func in plan.window_functions() {
             for idx in func.partition_by.iter().map(|e| e.index()) {
                 if data_types[idx] == DataType::Jsonb {
-                    return Some(format!("Column {} should not be in the over window partition key because it has data type Jsonb", FieldDisplay(&schema[idx])));
+                    return Some(StreamKeyChecker::err_msg(
+                        "over window partition key",
+                        &schema[idx],
+                    ));
                 }
             }
 
             for idx in func.order_by.iter().map(|c| c.column_index) {
                 if data_types[idx] == DataType::Jsonb {
-                    return Some(format!("Column {} should not be in the over window order by key because it has data type Jsonb", FieldDisplay(&schema[idx])));
+                    return Some(StreamKeyChecker::err_msg(
+                        "over window order by key",
+                        &schema[idx],
+                    ));
                 }
             }
         }
