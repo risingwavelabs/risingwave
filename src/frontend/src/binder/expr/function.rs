@@ -55,11 +55,11 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_timestamp",
 ];
 
-/// The max calling depth for every sql udf
+/// The global max calling depth for the global counter in `udf_context`
 /// To reduce the chance that the current running rw thread
 /// be killed by os, the current allowance depth of calling
 /// stack is set to `16`.
-const SQL_UDF_MAX_RECURSIVE_DEPTH: u32 = 16;
+const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -286,7 +286,7 @@ impl Binder {
                 }
 
                 // Check for potential recursive calling
-                if self.udf_context.global_count() >= SQL_UDF_MAX_RECURSIVE_DEPTH {
+                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
                     return Err(ErrorCode::BindError(format!(
                         "function {} calling stack depth limit exceeded",
                         &function_name
