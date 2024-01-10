@@ -174,9 +174,11 @@ pub fn trigger_sst_stat(
     {
         // sub level stat
         let overlapping_level_label =
-            build_compact_task_l0_stat_metrics_label(compaction_group_id, true);
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, false);
         let non_overlap_level_label =
-            build_compact_task_l0_stat_metrics_label(compaction_group_id, false);
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, false, false);
+        let partition_level_label =
+            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, true);
 
         let overlapping_sst_num = current_version
             .levels
@@ -204,6 +206,21 @@ pub fn trigger_sst_stat(
             })
             .unwrap_or(0);
 
+        let partition_level_num = current_version
+            .levels
+            .get(&compaction_group_id)
+            .and_then(|level| {
+                level.l0.as_ref().map(|l0| {
+                    l0.sub_levels
+                        .iter()
+                        .filter(|sub_level| {
+                            sub_level.level_type() == LevelType::Nonoverlapping
+                                && sub_level.vnode_partition_count > 0
+                        })
+                        .count()
+                })
+            })
+            .unwrap_or(0);
         metrics
             .level_sst_num
             .with_label_values(&[&overlapping_level_label])
@@ -213,6 +230,11 @@ pub fn trigger_sst_stat(
             .level_sst_num
             .with_label_values(&[&non_overlap_level_label])
             .set(non_overlap_sst_num as i64);
+
+        metrics
+            .level_sst_num
+            .with_label_values(&[&partition_level_label])
+            .set(partition_level_num as i64);
     }
 
     let previous_time = metrics.time_after_last_observation.load(Ordering::Relaxed);
@@ -531,8 +553,11 @@ pub fn build_compact_task_stat_metrics_label(
 pub fn build_compact_task_l0_stat_metrics_label(
     compaction_group_id: u64,
     overlapping: bool,
+    partition: bool,
 ) -> String {
-    if overlapping {
+    if partition {
+        format!("cg{}_l0_sub_partition", compaction_group_id)
+    } else if overlapping {
         format!("cg{}_l0_sub_overlapping", compaction_group_id)
     } else {
         format!("cg{}_l0_sub_non_overlap", compaction_group_id)

@@ -118,7 +118,6 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
             stats.skip_by_count_limit += 1;
             return false;
         }
-
         true
     }
 }
