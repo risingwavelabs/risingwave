@@ -61,7 +61,7 @@ export const dependentsColumn: Column<Relation> = {
   name: "Depends",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_graph/?id=${r.id}`}>
+    <Link href={`/dependency_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view dependents"
@@ -78,7 +78,7 @@ export const fragmentsColumn: Column<StreamingJob> = {
   name: "Fragments",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_plan/?id=${r.id}`}>
+    <Link href={`/fragment_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view fragments"
