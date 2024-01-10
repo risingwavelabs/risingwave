@@ -102,15 +102,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
-        while self.iterator.is_valid() {
+        assert!(self.iterator.is_valid());
+        loop {
             self.iterator.next().await?;
             if self.update_iter_state().await? {
                 return Ok(());
             }
         }
-
-        // EOF
-        Ok(())
     }
 
     /// Update internal state of the iterator
@@ -121,6 +119,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// - Ok(true): Successfully update the state and the inner iterator key-value should be exposed.
     ///             Caller should stop to call `next()`.
     async fn update_iter_state(&mut self) -> HummockResult<bool> {
+        if !self.iterator.is_valid() {
+            // Caller should stop call `next()`.
+            return Ok(true);
+        }
         let full_key = self.iterator.key();
         let epoch = full_key.epoch_with_gap.pure_epoch();
 
