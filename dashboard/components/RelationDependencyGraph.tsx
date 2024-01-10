@@ -19,15 +19,15 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
-  FragmentPoint,
-  FragmentPointPosition,
   Position,
-  flipLayoutPoint,
-  generatePointEdges,
+  RelationPoint,
+  RelationPointPosition,
+  flipLayoutRelation,
+  generateRelationEdges,
 } from "../lib/layout"
 
 function boundBox(
-  fragmentPosition: FragmentPointPosition[],
+  relationPosition: RelationPointPosition[],
   nodeRadius: number
 ): {
   width: number
@@ -35,7 +35,7 @@ function boundBox(
 } {
   let width = 0
   let height = 0
-  for (const { x, y } of fragmentPosition) {
+  for (const { x, y } of relationPosition) {
     width = Math.max(width, x + nodeRadius)
     height = Math.max(height, y + nodeRadius)
   }
@@ -51,13 +51,13 @@ export default function RelationDependencyGraph({
   nodes,
   selectedId,
 }: {
-  nodes: FragmentPoint[]
+  nodes: RelationPoint[]
   selectedId?: string
 }) {
   const svgRef = useRef<any>()
 
   const layoutMapCallback = useCallback(() => {
-    const layoutMap = flipLayoutPoint(
+    const layoutMap = flipLayoutRelation(
       nodes,
       layerMargin,
       rowMargin,
@@ -68,9 +68,9 @@ export default function RelationDependencyGraph({
           x: x + layoutMargin,
           y: y + layoutMargin,
           ...data,
-        } as FragmentPointPosition)
+        } as RelationPointPosition)
     )
-    const links = generatePointEdges(layoutMap)
+    const links = generateRelationEdges(layoutMap)
     const { width, height } = boundBox(layoutMap, nodeRadius)
     return {
       layoutMap,

@@ -21,8 +21,8 @@ import {
   FragmentBox,
   FragmentBoxPosition,
   Position,
-  generateBoxEdges,
-  layout,
+  generateFragmentEdges,
+  layoutFragment,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
 import { StreamNode } from "../proto/gen/stream_plan"
@@ -142,7 +142,7 @@ export default function FragmentGraph({
       includedFragmentIds.add(fragmentId)
     }
 
-    const fragmentLayout = layout(
+    const fragmentLayout = layoutFragment(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
         const { width, height } = layoutFragmentResult.get(id)!
         return { width, height, id, ...data }
@@ -167,7 +167,7 @@ export default function FragmentGraph({
       svgHeight = Math.max(svgHeight, y + height + 50)
       svgWidth = Math.max(svgWidth, x + width)
     })
-    const edges = generateBoxEdges(fragmentLayout)
+    const edges = generateFragmentEdges(fragmentLayout)
 
     return {
       layoutResult,

@@ -15,7 +15,7 @@
  *
  */
 
-import { cloneDeep, max } from "lodash"
+import { max } from "lodash"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 
@@ -288,10 +288,10 @@ export interface FragmentBox {
   fragment?: TableFragments_Fragment
 }
 
-export interface FragmentPoint {
+export interface RelationPoint {
   id: string
   name: string
-  order: number // preference order, fragment box with larger order will be placed at right
+  order: number // preference order, relation point with larger order will be placed at down??
   parentIds: string[]
 }
 
@@ -301,7 +301,7 @@ export interface Position {
 }
 
 export type FragmentBoxPosition = FragmentBox & Position
-export type FragmentPointPosition = FragmentPoint & Position
+export type RelationPointPosition = RelationPoint & Position
 
 export interface Edge {
   points: Array<Position>
@@ -313,7 +313,7 @@ export interface Edge {
  * @param fragments
  * @returns the coordination of the top-left corner of the fragment box
  */
-export function layout(
+export function layoutFragment(
   fragments: Array<FragmentBox>,
   layerMargin: number,
   rowMargin: number
@@ -400,39 +400,23 @@ export function layout(
   return rtn
 }
 
-export function flipLayout(
-  fragments: Array<FragmentBox>,
-  layerMargin: number,
-  rowMargin: number
-): FragmentBoxPosition[] {
-  const fragments_ = cloneDeep(fragments)
-  for (let fragment of fragments_) {
-    ;[fragment.width, fragment.height] = [fragment.height, fragment.width]
-  }
-  const fragmentPosition = layout(fragments_, rowMargin, layerMargin)
-  return fragmentPosition.map(({ x, y, ...data }) => ({
-    x: y,
-    y: x,
-    ...data,
-  }))
-}
-
-export function layoutPoint(
-  fragments: Array<FragmentPoint>,
+function layoutRelation(
+  relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
   nodeRadius: number
-): FragmentPointPosition[] {
+): RelationPointPosition[] {
   const fragmentBoxes: Array<FragmentBox> = []
-  for (let { ...others } of fragments) {
+  for (let { ...others } of relations) {
     fragmentBoxes.push({
       width: nodeRadius * 2,
       height: nodeRadius * 2,
-      externalParentIds: [], // we don't care about external parent for point layout
+      externalParentIds: [], // mock
       ...others,
     })
   }
-  const result = layout(fragmentBoxes, layerMargin, rowMargin)
+  // Reuse the `layoutFragment` function
+  const result = layoutFragment(fragmentBoxes, layerMargin, rowMargin)
   return result.map(({ x, y, ...data }) => ({
     x: x + nodeRadius,
     y: y + nodeRadius,
@@ -440,14 +424,14 @@ export function layoutPoint(
   }))
 }
 
-export function flipLayoutPoint(
-  fragments: Array<FragmentPoint>,
+export function flipLayoutRelation(
+  relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
   nodeRadius: number
-): FragmentPointPosition[] {
-  const fragmentPosition = layoutPoint(
-    fragments,
+): RelationPointPosition[] {
+  const fragmentPosition = layoutRelation(
+    relations,
     rowMargin,
     layerMargin,
     nodeRadius
@@ -459,9 +443,11 @@ export function flipLayoutPoint(
   }))
 }
 
-export function generatePointEdges(layoutMap: FragmentPointPosition[]): Edge[] {
+export function generateRelationEdges(
+  layoutMap: RelationPointPosition[]
+): Edge[] {
   const links = []
-  const fragmentMap = new Map<string, FragmentPointPosition>()
+  const fragmentMap = new Map<string, RelationPointPosition>()
   for (const x of layoutMap) {
     fragmentMap.set(x.id, x)
   }
@@ -481,7 +467,9 @@ export function generatePointEdges(layoutMap: FragmentPointPosition[]): Edge[] {
   return links
 }
 
-export function generateBoxEdges(layoutMap: FragmentBoxPosition[]): Edge[] {
+export function generateFragmentEdges(
+  layoutMap: FragmentBoxPosition[]
+): Edge[] {
   const links = []
   const fragmentMap = new Map<string, FragmentBoxPosition>()
   for (const x of layoutMap) {
